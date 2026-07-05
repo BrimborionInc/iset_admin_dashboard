@@ -1,6 +1,6 @@
 # Secure Messaging Integration
 
-Updated: 2026-04-27
+Updated: 2026-07-05
 
 ## Overview
 Secure messaging is shared between the public intake portal and the admin dashboard. Messages live in the shared MySQL database (`iset_intake.messages`) so both applications can render the same case thread.
@@ -31,11 +31,20 @@ As of migration `20260426_0007_harden_secure_message_scope_constraints.sql` in D
 ## Message Flow
 1. Admin dashboard sends through `POST /api/cases/:id/messages`.
    - The handler validates case access, resolves the case applicant user, derives the application from the case, and writes a `staff_profile -> applicant_user` message when the staff profile is known.
+   - Staff compose now treats the `To` display as read-only and requires recipient/case confirmation before send; routing remains derived from the case's linked applicant account, not from editable display text.
 2. Public portal sends through `/api/messages/reply` or `/api/messages/reply-with-attachments`.
    - The backend derives the allowed case/application and staff recipient from the applicant messaging context or typed reply counterpart.
    - The portal no longer supplies legacy recipient authority when replying to an existing message.
 3. Attachments are adopted into `iset_document` when the admin widget calls `/api/admin/messages/:id/attachments?case_id=...`.
    - Adoption validates message/case access and rejects attachment case/application/client mismatches before inserting or repairing document rows.
+
+## Withdrawal And Deleted Items
+
+- `message_item.folder='deleted'` / `purged_at` is mailbox state for one owner only. It must not be described as recalling or deleting the message for other actors.
+- Staff can explicitly withdraw a plain staff-to-applicant message through `POST /api/admin/messages/:id/withdraw` when they are the original sender or a System/NWAC Administrator with case access.
+- Withdrawal is audit-preserving: it replaces `messages.subject` / `messages.body` with a neutral withdrawal notice, marks the master message deleted/archived, moves the sender and applicant mailbox rows to Deleted, redacts the original `staff_secure_message_sent` event subject, and emits a `message_deleted` event with withdrawal metadata and hashes only.
+- Withdrawal currently fails closed for messages with `message_attachment` rows or linked `message_signing_request` rows. Those cases need a reviewed support repair because forms, generated documents, and signing state may have downstream effects.
+- Admin `GET /api/cases/:id/messages` classifies master-deleted messages as Deleted even when the staff viewer is not a message participant, so withdrawn messages do not reappear in the ordinary case-thread tabs for case-access viewers.
 
 ## API Response Contract
 - Admin `GET /api/cases/:id/messages` returns a case/application `thread` object at the response root and on each item.
@@ -49,6 +58,7 @@ As of migration `20260426_0007_harden_secure_message_scope_constraints.sql` in D
 - When a shared `user.id` must be associated with a `staff_profiles.id`, resolve by Cognito subject only. Do not reintroduce email fallback for routing, display-name, or event payload helpers.
 - Do not infer applicant visibility from assigned staff. Applicant visibility is derived from the case/application/client and typed applicant actor.
 - Data purges should consider `message_item`, `message_attachment`, `messages`, and any `iset_document` rows with `source='secure_message_attachment'`; avoid broad hard deletes without an audit-preserving runbook.
+- If content exposure has already happened, first contain the live message body, preserve audit evidence, and record the repair in the PROD feedback/repair logs before closing the staff report.
 
 ## Remaining Work
 - Rehearse physical legacy sender/recipient column retirement in TEST/PROD with the audit and aggregate retirement table before promoting outside DEV.

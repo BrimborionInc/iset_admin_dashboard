@@ -21,8 +21,8 @@ const SecureMessagesHelpPanelContent = () => (
         followed by an applicant reply.
       </li>
       <li>
-        <strong>Deleted:</strong> Items you have archived. Empty this tab to permanently remove sensitive
-        content once it is no longer needed.
+        <strong>Deleted:</strong> Items removed from your view. Emptying this tab clears your Deleted list only;
+        it does not recall messages for the applicant or other staff.
       </li>
     </ul>
 
@@ -42,6 +42,10 @@ const SecureMessagesHelpPanelContent = () => (
         Use search and filters to locate messages by subject, sender, or status.
       </li>
       <li>
+        Use <em>Withdraw sent message</em> when a plain sent message must be removed from the applicant's
+        live inbox. Messages with linked forms or attachments need support review before withdrawal.
+      </li>
+      <li>
         Refresh the inbox after expecting new information or when another team member has replied.
       </li>
     </ul>
@@ -50,7 +54,8 @@ const SecureMessagesHelpPanelContent = () => (
     <ul>
       <li>Keep messaging professional - conversations are part of the auditable case history.</li>
       <li>If the message leads to an important decision or missed deadline, capture that outcome in Notes as well.</li>
-      <li>Use Deleted &gt; Empty Items to permanently clear sensitive information once downstream tasks are done (type <strong>delete</strong> to confirm).</li>
+      <li>Confirm the recipient and case before sending. PATH delivers staff messages to the applicant account linked to the current case.</li>
+      <li>Use Deleted &gt; Empty Items only to clear your Deleted list (type <strong>delete</strong> to confirm).</li>
       <li>If attachments fail to open, ask the applicant to resend or notify support for recovery.</li>
     </ul>
   </div>
@@ -58,7 +63,7 @@ const SecureMessagesHelpPanelContent = () => (
 
 SecureMessagesHelpPanelContent.aiContext = `
 You are assisting an ISET staff member using the Secure Messaging widget. Explain the purpose of each tab, how to
-compose and manage messages, search/filter the inbox, and what happens to attachments. Clarify that attachments are adopted into Supporting Documents (labels can be edited there). Explain that Sent status shows applicant state (Sent, Read by applicant, Applicant replied), while Inbox unread/read reflects the current staff viewer's mailbox state. Highlight best practices for urgency flags and for emptying deleted items (type "delete" to confirm).
+compose and manage messages, search/filter the inbox, withdrawal of plain sent messages, and what happens to attachments. Clarify that attachments are adopted into Supporting Documents (labels can be edited there). Explain that Sent status shows applicant state (Sent, Read by applicant, Applicant replied), while Inbox unread/read reflects the current staff viewer's mailbox state. Explain that Deleted/Empty Items clears only the current staff viewer's mailbox list and is not the same as withdrawing a sent message. Highlight recipient/case confirmation before send.
 
 When relevant, frame messaging as part of staff workflow: acknowledge applications, request missing information, follow up with applicants, and keep important outcomes reflected in the case notes as well.
 `;

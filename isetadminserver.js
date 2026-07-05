@@ -19276,6 +19276,10 @@ function getRequesterIdentity(req) {
 }
 
 const STAFF_SECURE_MESSAGE_SENT_EVENT_TYPE = 'staff_secure_message_sent';
+const STAFF_SECURE_MESSAGE_WITHDRAWN_EVENT_TYPE = 'message_deleted';
+const WITHDRAWN_SECURE_MESSAGE_SUBJECT = 'Message withdrawn';
+const WITHDRAWN_SECURE_MESSAGE_BODY = 'This secure message has been withdrawn. Please disregard it. No action is required.';
+const WITHDRAWN_SECURE_MESSAGE_EVENT_SUBJECT = '[withdrawn] Message withdrawn';
 
 async function dispatchStaffSecureMessageSentEmail({ pool, event, logger = console }) {
   try {
@@ -60603,6 +60607,143 @@ app.put('/api/admin/messages/:id/delete', async (req, res) => {
   }
 });
 
+// Withdraw a staff-to-applicant message from the live case/applicant thread.
+app.post('/api/admin/messages/:id/withdraw', async (req, res) => {
+  const messageId = Number.parseInt(req.params.id, 10);
+  let connection;
+  try {
+    if (!Number.isFinite(messageId) || messageId <= 0) {
+      return res.status(400).json({ error: 'invalid_message_id' });
+    }
+    const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
+    if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
+    await ensureCaseMessageItemTable();
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const messageRow = await fetchCaseSecureMessageRow(messageId, connection, { forUpdate: true });
+    const accessResult = await resolveCaseSecureMessageAccess(req, messageRow, { ownerUserId, connection });
+    if (accessResult.error) {
+      await connection.rollback();
+      return res.status(accessResult.error.status).json(accessResult.error.body);
+    }
+    if (!canWithdrawCaseSecureMessage(req, messageRow, ownerUserId)) {
+      await connection.rollback();
+      return res.status(403).json({ error: 'message_withdrawal_forbidden' });
+    }
+
+    const [[linkedArtifactCounts]] = await connection.query(
+      `SELECT
+          (SELECT COUNT(*) FROM message_attachment WHERE message_id = ?) AS attachment_count,
+          (SELECT COUNT(*) FROM message_signing_request WHERE message_id = ?) AS signing_request_count`,
+      [messageId, messageId]
+    );
+    const attachmentCount = Number(linkedArtifactCounts?.attachment_count || 0);
+    const signingRequestCount = Number(linkedArtifactCounts?.signing_request_count || 0);
+    if (attachmentCount > 0 || signingRequestCount > 0) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'message_withdrawal_linked_artifacts',
+        message: 'Messages with linked attachments or forms need a reviewed support repair before withdrawal.',
+        attachmentCount,
+        signingRequestCount
+      });
+    }
+
+    const senderUserId = normalisePositiveInteger(messageRow.sender_user_id);
+    const recipientUserId = normalisePositiveInteger(messageRow.recipient_user_id);
+    await seedCaseMessageItemForOwner({ runner: connection, messageId, ownerUserId: senderUserId });
+    await seedCaseMessageItemForOwner({ runner: connection, messageId, ownerUserId: recipientUserId });
+
+    await connection.query(
+      `UPDATE messages
+          SET subject = ?,
+              body = ?,
+              status = 'archived',
+              deleted = 1
+        WHERE id = ?`,
+      [WITHDRAWN_SECURE_MESSAGE_SUBJECT, WITHDRAWN_SECURE_MESSAGE_BODY, messageId]
+    );
+    await connection.query(
+      `UPDATE message_item
+          SET folder_before_deleted = CASE
+                WHEN folder IN ('inbox','sent') THEN folder
+                ELSE folder_before_deleted
+              END,
+              folder = 'deleted',
+              deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP),
+              purged_at = NULL,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE message_id = ?
+          AND owner_user_id IN (?, ?)`,
+      [messageId, senderUserId, recipientUserId]
+    );
+    const [eventUpdateResult] = await connection.query(
+      `UPDATE iset_event_entry
+          SET payload_json = JSON_SET(payload_json, '$.message_subject', ?)
+        WHERE event_type = ?
+          AND (
+            JSON_EXTRACT(payload_json, '$.message_id') = ?
+            OR JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.message_id')) = CAST(? AS CHAR)
+          )`,
+      [WITHDRAWN_SECURE_MESSAGE_EVENT_SUBJECT, STAFF_SECURE_MESSAGE_SENT_EVENT_TYPE, messageId, messageId]
+    );
+
+    await connection.commit();
+
+    const { actorId: requestActorId, actorName } = resolveRequestActor(req);
+    const originalSubjectHash = crypto
+      .createHash('sha256')
+      .update(String(messageRow.subject || ''), 'utf8')
+      .digest('hex');
+    const originalBodyHash = crypto
+      .createHash('sha256')
+      .update(String(messageRow.body || ''), 'utf8')
+      .digest('hex');
+    await captureCaseEvent({
+      type: STAFF_SECURE_MESSAGE_WITHDRAWN_EVENT_TYPE,
+      caseId: messageRow.case_id,
+      payload: {
+        message: 'Secure message withdrawn',
+        message_id: messageId,
+        message_subject: WITHDRAWN_SECURE_MESSAGE_EVENT_SUBJECT,
+        original_subject_sha256: originalSubjectHash,
+        original_body_sha256: originalBodyHash,
+        sender_actor_type: messageRow.sender_actor_type || null,
+        sender_user_id: senderUserId || null,
+        sender_staff_profile_id: normalisePositiveInteger(messageRow.sender_staff_profile_id) || null,
+        recipient_actor_type: messageRow.recipient_actor_type || null,
+        recipient_user_id: recipientUserId || null,
+        recipient_applicant_user_id: recipientUserId || null,
+        redacted: true
+      },
+      actorId: requestActorId || null,
+      actorName,
+      actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+    });
+
+    return res.status(200).json({
+      message: 'Message withdrawn',
+      messageId,
+      withdrawn: true,
+      eventRowsRedacted: eventUpdateResult?.affectedRows || 0
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {
+        // ignore rollback failure
+      }
+    }
+    console.error('Error withdrawing message:', error);
+    return res.status(500).json({ error: 'failed_to_withdraw_message' });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 // Update message status (PUT /api/admin/messages/:id/status)
 app.put('/api/admin/messages/:id/status', async (req, res) => {
   const messageId = Number.parseInt(req.params.id, 10);
@@ -60778,9 +60919,10 @@ async function seedCaseMessageItemForOwner({ runner = pool, messageId, ownerUser
   return Boolean(result?.affectedRows);
 }
 
-async function fetchCaseSecureMessageRow(messageId, connection = pool) {
+async function fetchCaseSecureMessageRow(messageId, connection = pool, options = {}) {
   const numericMessageId = normalisePositiveInteger(messageId);
   if (!numericMessageId) return null;
+  const lockClause = options?.forUpdate ? ' FOR UPDATE' : '';
   const [[row]] = await connection.query(
     `SELECT id,
             case_id,
@@ -60790,10 +60932,15 @@ async function fetchCaseSecureMessageRow(messageId, connection = pool) {
             sender_staff_profile_id,
             recipient_actor_type,
             recipient_user_id,
-            recipient_staff_profile_id
+            recipient_staff_profile_id,
+            subject,
+            body,
+            status,
+            deleted,
+            created_at
        FROM messages
       WHERE id = ?
-      LIMIT 1`,
+      LIMIT 1${lockClause}`,
     [numericMessageId]
   );
   return row || null;
@@ -60806,6 +60953,26 @@ function messageParticipantMatchesUser(messageRow, userId) {
     Number(messageRow.sender_user_id) === Number(numericUserId) ||
     Number(messageRow.recipient_user_id) === Number(numericUserId)
   );
+}
+
+function isStaffToApplicantSecureMessage(messageRow) {
+  if (!messageRow) return false;
+  const senderActorType = normaliseString(messageRow.sender_actor_type);
+  const recipientActorType = normaliseString(messageRow.recipient_actor_type);
+  return (
+    recipientActorType === 'applicant_user' &&
+    senderActorType !== 'applicant_user' &&
+    normalisePositiveInteger(messageRow.sender_user_id) &&
+    normalisePositiveInteger(messageRow.recipient_user_id)
+  );
+}
+
+function canWithdrawCaseSecureMessage(req, messageRow, ownerUserId) {
+  if (!isStaffToApplicantSecureMessage(messageRow)) return false;
+  const numericOwnerUserId = normalisePositiveInteger(ownerUserId);
+  const senderUserId = normalisePositiveInteger(messageRow.sender_user_id);
+  if (numericOwnerUserId && senderUserId && numericOwnerUserId === senderUserId) return true;
+  return hasSystemOrNwacAdminAccess(req);
 }
 
 function messageActorMatchesUser(messageRow, prefix, actorType, userId) {
@@ -62736,6 +62903,7 @@ app.get('/api/cases/:id/messages', async (req, res) => {
           m.recipient_staff_profile_id,
           m.subject,
           m.body,
+          m.deleted AS message_deleted,
           m.status AS recipient_status,
           CASE
             WHEN mi.folder = 'inbox' AND mi.read_at IS NULL THEN 'unread'
@@ -62747,10 +62915,17 @@ app.get('/api/cases/:id/messages', async (req, res) => {
             WHEN mi.id IS NULL AND m.recipient_user_id = ? AND LOWER(COALESCE(m.status, '')) = 'unread' THEN 'unread'
             ELSE 'read'
           END AS status,
-          CASE WHEN mi.folder = 'deleted' THEN 1 ELSE 0 END AS deleted,
+          CASE WHEN COALESCE(m.deleted, 0) = 1 OR mi.folder = 'deleted' THEN 1 ELSE 0 END AS deleted,
           m.urgent,
           m.created_at,
-          COALESCE(mi.folder, CASE WHEN m.sender_user_id = ? THEN 'sent' ELSE 'inbox' END) AS folder,
+          COALESCE(
+            mi.folder,
+            CASE
+              WHEN COALESCE(m.deleted, 0) = 1 THEN 'deleted'
+              WHEN m.sender_user_id = ? THEN 'sent'
+              ELSE 'inbox'
+            END
+          ) AS folder,
           mi.folder_before_deleted,
           mi.read_at,
           mi.deleted_at,
@@ -62781,6 +62956,7 @@ app.get('/api/cases/:id/messages', async (req, res) => {
 
     const messageIds = rows.map(r => r.id);
     let attachmentsByMsg = new Map();
+    let fileAttachmentCountsByMsg = new Map();
     if (messageIds.length) {
       const placeholders = messageIds.map(() => '?').join(',');
       const [attRows] = await pool.query(
@@ -62801,15 +62977,39 @@ app.get('/api/cases/:id/messages', async (req, res) => {
         });
         return map;
       }, new Map());
+      const [fileAttachmentCountRows] = await pool.query(
+        `SELECT message_id, COUNT(*) AS attachment_count
+           FROM message_attachment
+          WHERE message_id IN (${placeholders})
+          GROUP BY message_id`,
+        messageIds
+      );
+      fileAttachmentCountsByMsg = fileAttachmentCountRows.reduce((map, row) => {
+        map.set(Number(row.message_id), Number(row.attachment_count || 0));
+        return map;
+      }, new Map());
     }
 
-    const withAttachments = rows.map(r => mapCaseSecureMessageResponse(
-      {
-        ...r,
-        attachments: attachmentsByMsg.get(r.id) || []
-      },
-      { applicantUserId: applicantId }
-    ));
+    const withAttachments = rows.map(r => {
+      const signingAttachments = attachmentsByMsg.get(r.id) || [];
+      const fileAttachmentCount = fileAttachmentCountsByMsg.get(Number(r.id)) || 0;
+      const baseCanWithdraw =
+        isStaffRequester &&
+        canWithdrawCaseSecureMessage(req, r, ownerUserId) &&
+        Number(r.message_deleted || 0) !== 1 &&
+        signingAttachments.length === 0 &&
+        fileAttachmentCount === 0;
+      return mapCaseSecureMessageResponse(
+        {
+          ...r,
+          attachments: signingAttachments,
+          file_attachment_count: fileAttachmentCount,
+          can_withdraw: baseCanWithdraw ? 1 : 0,
+          canWithdraw: Boolean(baseCanWithdraw),
+        },
+        { applicantUserId: applicantId }
+      );
+    });
 
     res.json({
       applicant_user_id: applicantId,

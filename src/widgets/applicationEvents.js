@@ -226,6 +226,10 @@ const formatEventMessage = (event, actorDisplay) => {
       const base = trimValue(payload.message) || 'Assessment submission recalled before decision';
       return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
     }
+    case 'message_deleted': {
+      const base = trimValue(payload.message) || 'Secure message withdrawn';
+      return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
+    }
     case 'nwac_review_submitted': {
       const reviewer = actorDisplay;
       const outcomeRaw = trimValue(payload.outcome);

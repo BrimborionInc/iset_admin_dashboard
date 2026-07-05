@@ -1,5 +1,5 @@
 import React from "react";
-import SecureMessagingWidget from "../../../../widgets/caseWorkspace/SecureMessagingWidget";
+import SecureMessagingWidget from "../../../../widgets/SecureMessagingWidget";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 
 const CaseSecureMessagingWidget = ({ actions, metadata, toggleHelpPanel }) => {

@@ -8,7 +8,7 @@ Use this log for repairs that may be externally invisible to staff but should be
 
 ## 2026-07-05 - Feedback #154 wrong-recipient secure-message containment
 
-Status: PROD containment applied; privacy/business follow-up and product fix pending.
+Status: PROD containment applied; privacy/business follow-up pending; product fix prepared in DEV and awaiting release.
 
 Reason: feedback report `#154` (`Deleted secure message`) described a Regional Manager sending a secure message to the wrong participant and deleting it immediately from her own view. Live triage confirmed the delete action only removed the sender mailbox copy; the recipient copy remained in the participant inbox and had been read. The current code can also expose master `messages.subject` / `messages.body` in staff case-thread views, so mailbox-only hiding was not sufficient.
 
@@ -29,6 +29,7 @@ Repair applied:
 - Moved both sender and recipient `message_item` rows to `folder='deleted'` while preserving the rows and timestamps for audit evidence.
 - Redacted the central `staff_secure_message_sent` event subject to `[withdrawn] Message withdrawn`.
 - Added a PROD feedback note to report `#154`; the report remains `in_progress` pending privacy/business follow-up and a product fix for true recall/delete-for-everyone plus stronger recipient confirmation.
+- Follow-up code now prepared in DEV: staff compose locks the case-derived recipient display and requires recipient/case confirmation, local Deleted Items wording no longer implies recall, and plain staff-to-applicant messages can be explicitly withdrawn with audit-preserving redaction. Messages with linked files or forms still fail closed pending a reviewed artifact-aware repair path.
 
 Evidence:
 

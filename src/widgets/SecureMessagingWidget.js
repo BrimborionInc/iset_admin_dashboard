@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
+  Alert,
   Header,
   SpaceBetween,
   Box,
@@ -108,6 +109,11 @@ const formatStatusLabel = statusKey => {
 
 const isUnread = message => {
   return getMailboxStatusKey(message) === 'unread';
+};
+
+const canWithdrawMessage = message => {
+  if (!message || isMessageDeleted(message)) return false;
+  return message.can_withdraw === 1 || message.can_withdraw === true || message.canWithdraw === true;
 };
 
 const resolveList = data => (Array.isArray(data) ? data : []);
@@ -309,6 +315,10 @@ const SecureMessagingWidget = ({
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentsError, setAttachmentsError] = useState(null);
   const [showHardDeleteModal, setShowHardDeleteModal] = useState(false);
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [withdrawConfirmText, setWithdrawConfirmText] = useState('');
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState(null);
   const [showEmptyDeletedModal, setShowEmptyDeletedModal] = useState(false);
   const [emptyConfirmText, setEmptyConfirmText] = useState('');
   const [emptyDeleting, setEmptyDeleting] = useState(false);
@@ -763,6 +773,9 @@ const SecureMessagingWidget = ({
   const handleCloseModal = () => {
     setViewModalOpen(false);
     setSelectedMessage(null);
+    setShowWithdrawModal(false);
+    setWithdrawConfirmText('');
+    setWithdrawError(null);
   };
 
   const handleNewMessage = () => {
@@ -830,12 +843,44 @@ const SecureMessagingWidget = ({
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' }
       });
-      if (!response.ok) throw new Error('Failed to permanently delete message');
+      if (!response.ok) throw new Error('Failed to remove message from Deleted');
       setViewModalOpen(false);
       setSelectedMessage(null);
       await loadMessages({ silent: true });
     } catch (err) {
-      setLoadError(err?.message || 'Failed to permanently delete message');
+      setLoadError(err?.message || 'Failed to remove message from Deleted');
+    }
+  };
+
+  const handleWithdrawMessage = () => {
+    if (!selectedMessage || !canWithdrawMessage(selectedMessage)) return;
+    setWithdrawConfirmText('');
+    setWithdrawError(null);
+    setShowWithdrawModal(true);
+  };
+
+  const handleConfirmWithdraw = async () => {
+    if (!selectedMessage || withdrawing) return;
+    setWithdrawing(true);
+    setWithdrawError(null);
+    try {
+      const response = await apiFetch(`/api/admin/messages/${selectedMessage.id}/withdraw`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null);
+        throw new Error(detail?.message || detail?.error || 'Failed to withdraw message');
+      }
+      setShowWithdrawModal(false);
+      setWithdrawConfirmText('');
+      setViewModalOpen(false);
+      setSelectedMessage(null);
+      await loadMessages({ silent: true });
+    } catch (err) {
+      setWithdrawError(err?.message || 'Failed to withdraw message');
+    } finally {
+      setWithdrawing(false);
     }
   };
 
@@ -857,12 +902,12 @@ const SecureMessagingWidget = ({
         )
       );
       const failed = responses.find(res => !res.ok);
-      if (failed) throw new Error('Failed to empty deleted messages');
+      if (failed) throw new Error('Failed to remove deleted messages');
       setShowEmptyDeletedModal(false);
       setEmptyConfirmText('');
       await loadMessages({ silent: true });
     } catch (err) {
-      setLoadError(err?.message || 'Failed to empty deleted messages');
+      setLoadError(err?.message || 'Failed to remove deleted messages');
     } finally {
       setEmptyDeleting(false);
     }
@@ -1124,8 +1169,13 @@ const SecureMessagingWidget = ({
             <Button variant="primary" onClick={handleReply} disabled={!selectedMessage}>
               Reply
             </Button>
+            {selectedMessage && canWithdrawMessage(selectedMessage) ? (
+              <Button variant="normal" onClick={handleWithdrawMessage} disabled={withdrawing}>
+                Withdraw sent message
+              </Button>
+            ) : null}
             <Button variant="normal" onClick={handleDeleteMessage} disabled={!selectedMessage}>
-              {selectedMessage && isMessageDeleted(selectedMessage) ? 'Permanently Delete' : 'Delete'}
+              {selectedMessage && isMessageDeleted(selectedMessage) ? 'Remove from Deleted' : 'Move to Deleted'}
             </Button>
             <Button variant="normal" onClick={handleCloseModal}>
               Close
@@ -1136,13 +1186,62 @@ const SecureMessagingWidget = ({
         {renderMessageDetails()}
       </Modal>
       <Modal
+        visible={showWithdrawModal}
+        onDismiss={() => {
+          if (withdrawing) return;
+          setShowWithdrawModal(false);
+          setWithdrawConfirmText('');
+          setWithdrawError(null);
+        }}
+        header="Withdraw sent message?"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button
+              variant="primary"
+              onClick={handleConfirmWithdraw}
+              disabled={withdrawConfirmText.trim().toLowerCase() !== 'withdraw' || withdrawing}
+              loading={withdrawing}
+            >
+              Withdraw message
+            </Button>
+            <Button
+              variant="normal"
+              onClick={() => {
+                setShowWithdrawModal(false);
+                setWithdrawConfirmText('');
+                setWithdrawError(null);
+              }}
+              disabled={withdrawing}
+            >
+              Cancel
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          <Alert type="warning">
+            Withdrawing replaces the subject and body with a neutral withdrawal notice and moves the
+            sender and applicant mailbox copies to Deleted. It preserves the audit record.
+          </Alert>
+          <Input
+            value={withdrawConfirmText}
+            onChange={({ detail }) => setWithdrawConfirmText(detail.value)}
+            placeholder="Type 'withdraw' to confirm"
+            autoFocus
+            spellcheck={false}
+            disabled={withdrawing}
+          />
+          {withdrawError ? <Box color="text-status-critical">{withdrawError}</Box> : null}
+        </SpaceBetween>
+      </Modal>
+      <Modal
         visible={showHardDeleteModal}
         onDismiss={() => setShowHardDeleteModal(false)}
-        header="Permanently Delete Message?"
+        header="Remove from Deleted items?"
         footer={
           <SpaceBetween direction="horizontal" size="xs">
             <Button variant="primary" onClick={handleHardDelete}>
-              Delete Permanently
+              Remove from Deleted
             </Button>
             <Button variant="normal" onClick={() => setShowHardDeleteModal(false)}>
               Cancel
@@ -1151,8 +1250,8 @@ const SecureMessagingWidget = ({
         }
       >
         <Box color="text-status-critical">
-          This permanently removes the message and any attachments. Attachments already promoted into
-          supporting documents will remain available there.
+          This removes the message from your Deleted tab only. It does not withdraw the message for
+          the applicant or other staff.
         </Box>
       </Modal>
       <Modal
@@ -1167,7 +1266,7 @@ const SecureMessagingWidget = ({
               disabled={emptyConfirmText.trim().toLowerCase() !== 'delete' || emptyDeleting}
               loading={emptyDeleting}
             >
-              Delete All Permanently
+              Remove All
             </Button>
             <Button
               variant="normal"
@@ -1181,8 +1280,8 @@ const SecureMessagingWidget = ({
       >
         <SpaceBetween size="s">
           <Box color="text-status-critical">
-            This irreversibly deletes every message in Deleted Items. Attachments already copied into
-            supporting documents are unaffected. Type <b>delete</b> to confirm.
+            This removes every message from your Deleted tab only. It does not withdraw messages for
+            applicants or other staff. Type <b>delete</b> to confirm.
           </Box>
           <Input
             value={emptyConfirmText}
