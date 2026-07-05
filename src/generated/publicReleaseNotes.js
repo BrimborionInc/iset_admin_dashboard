@@ -1,17 +1,26 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-06-25T13:22:02.945Z",
+  "generatedAt": "2026-07-05T11:26:17.883Z",
   "releaseId": "",
   "releaseLabel": "Current build",
-  "releaseDateEn": "25th June 2026",
-  "releaseDateFr": "25 juin 2026",
+  "releaseDateEn": "5th July 2026",
+  "releaseDateFr": "5 juillet 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",
     "featuresHeading": "What changed",
     "features": [
-      "Regional Managers can again edit application assessments while the application is still In Review and has not been submitted into the two-step review workflow."
+      "Regional Managers who submit their own draft assessments, intervention proposals, or intervention amendments now enter the same Regional Manager review workflow as ISET Coordinator submissions."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260626-rm-two-step-role-matrix-prod",
+        "items": [
+          "Regional Managers who are acting as submitters can submit application assessments, new intervention proposals, and intervention amendments into Regional Manager review.",
+          "ISET Coordinators and Regional Managers are the only roles that can start the two-step review workflow; NWAC Administrators and System Administrators remain final-decision actors only.",
+          "The workflow now rejects invalid starters before saving submitted intervention rows, preventing submitted items from being left without review workflow audit rows.",
+          "The release was tested with the four actual PATH roles and with browser workflow smokes for application assessments, new intervention proposals, and intervention amendments."
+        ]
+      },
       {
         "title": "Release 20260624-rm-draft-edit-hotfix",
         "items": [
@@ -27,18 +36,6 @@ const publicReleaseNotes = {
           "Closed cases and completed applications no longer keep active document-request/reminder work alive after the file has reached a terminal state.",
           "Completed approved applications now retain the approved decision outcome when the assessment recommendation and final review agree."
         ]
-      },
-      {
-        "title": "Release 20260620-rm-two-step-review-rollout",
-        "items": [
-          "Application assessments, new intervention proposals, and intervention amendments now move through Regional Manager review before the final Decision Maker step, with Regional Manager sign-off included in approved assessment PDFs.",
-          "Regional Managers get `Pending Review` queue items and bell alerts when work arrives for review; Decision Makers receive final-decision alerts only after Regional Manager sign-off.",
-          "Regional Manager and Decision Maker notes are recorded in Notes and Tasks, included in event data, and shown in the Events Timeline for the related review action.",
-          "Staff document-upload notifications now name the staff uploader instead of saying the applicant uploaded the document.",
-          "Coordinator and Regional Manager `My Applications` queues keep assigned files visible until completion and open post-decision files at the right follow-up step; the `Pending Review` table now shows review-focused columns.",
-          "High-value funding decisions still require Shelley Stacey for approvals of `$20,000` or above, while other Decision Makers can still deny or request changes.",
-          "The notification sort switch now appears only when the notification stack is expanded, reducing page-top clutter."
-        ]
       }
     ],
     "knownIssuesHeading": "Known Bugs",
@@ -51,9 +48,18 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
-      "Les gestionnaires regionaux peuvent de nouveau modifier une evaluation de demande tant que la demande est encore In Review et n'a pas ete soumise dans le processus de revision en deux etapes."
+      "Les gestionnaires regionaux qui soumettent leurs propres brouillons d'evaluation, de proposition d'intervention ou d'amendement passent maintenant par le meme processus de revision du gestionnaire regional que les soumissions des coordonnateurs ISET."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260626-rm-two-step-role-matrix-prod",
+        "items": [
+          "Les gestionnaires regionaux qui agissent comme soumissionnaires peuvent soumettre des evaluations de demande, de nouvelles propositions d'intervention et des amendements d'intervention a la revision du gestionnaire regional.",
+          "Les coordonnateurs ISET et les gestionnaires regionaux sont les seuls roles qui peuvent demarrer le processus de revision en deux etapes; les administrateurs NWAC et les administrateurs systeme restent limites a l'etape de decision finale.",
+          "Le processus rejette maintenant les soumissionnaires non autorises avant d'enregistrer des interventions comme soumises, ce qui evite de laisser des elements soumis sans ligne d'audit de revision.",
+          "La version a ete testee avec les quatre vrais roles PATH et avec des tests navigateur pour les evaluations de demande, les nouvelles propositions d'intervention et les amendements d'intervention."
+        ]
+      },
       {
         "title": "Release 20260624-rm-draft-edit-hotfix",
         "items": [
@@ -68,18 +74,6 @@ const publicReleaseNotes = {
           "Soumettre de nouveau un Financial Overview deja signe ne cree plus un autre PDF signe actif et ne remplace plus l'instantane de version signe.",
           "Les dossiers fermes et les demandes terminees ne gardent plus de demandes de documents ou rappels actifs apres leur etat final.",
           "Les demandes approuvees et terminees conservent maintenant le resultat de decision approuve lorsque la recommandation d'evaluation et la revision finale concordent."
-        ]
-      },
-      {
-        "title": "Release 20260620-rm-two-step-review-rollout",
-        "items": [
-          "Les evaluations de demande, nouvelles propositions d'intervention et amendements d'intervention passent maintenant par une revision du gestionnaire regional avant l'etape finale du Decision Maker, avec la signature du gestionnaire regional dans les PDF d'evaluation approuves.",
-          "Les gestionnaires regionaux recoivent les elements `Pending Review` et les alertes lorsque du travail arrive pour revision; les Decision Makers recoivent les alertes de decision finale seulement apres la signature du gestionnaire regional.",
-          "Les notes du gestionnaire regional et du Decision Maker sont enregistrees dans Notes and Tasks, incluses dans les donnees d'evenement et visibles dans Events Timeline pour l'action de revision.",
-          "Les notifications de televersement de documents par le personnel nomment maintenant le membre du personnel qui a televerse le document, au lieu d'indiquer que le participant l'a fait.",
-          "Les files `My Applications` des coordonnateurs et gestionnaires regionaux gardent les demandes assignees visibles jusqu'a la fin du dossier et ouvrent les dossiers apres decision a la bonne etape de suivi; le tableau `Pending Review` montre maintenant les colonnes utiles a la revision.",
-          "Les approbations de financement de `$20,000` ou plus restent reservees a Shelley Stacey, tandis que les autres Decision Makers peuvent quand meme refuser ou demander des changements.",
-          "Le controle de tri des notifications apparait maintenant seulement quand la pile de notifications est ouverte, ce qui reduit l'encombrement en haut de page."
         ]
       }
     ],

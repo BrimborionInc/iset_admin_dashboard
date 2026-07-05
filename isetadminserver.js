@@ -116,6 +116,7 @@ const {
 
 // Increase default listener cap to avoid noisy warnings when wiring shared buses.
 events.EventEmitter.defaultMaxListeners = 20;
+const PATH_REPAIR_EXPORT_MODE = process.env.PATH_REPAIR_EXPORTS === '1';
 
 const resolveServerFetch = async () => {
   if (typeof global !== 'undefined' && typeof global.fetch === 'function') {
@@ -2663,6 +2664,7 @@ async function storeAssessmentPdfDocument({
   clientId,
   applicantUserId,
   actorUserId,
+  interventionIds = [],
   trackingId,
   pdfBuffer,
   documentType = 'case_assessment',
@@ -2690,6 +2692,11 @@ async function storeAssessmentPdfDocument({
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
   const normalizedActorUserId = normalisePositiveInteger(actorUserId);
   const normalizedClientId = normalisePositiveInteger(clientId);
+  const normalizedInterventionIds = Array.from(new Set(
+    (Array.isArray(interventionIds) ? interventionIds : [interventionIds])
+      .map(id => normalisePositiveInteger(id))
+      .filter(Boolean)
+  ));
   let relativePath = null;
   const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
   if (DRIVER !== 's3') {
@@ -2778,7 +2785,15 @@ async function storeAssessmentPdfDocument({
      VALUES (?,?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
     insertPayload
   );
-  return result?.insertId || null;
+  const insertedDocumentId = result?.insertId || null;
+  if (insertedDocumentId && normalizedInterventionIds.length) {
+    await updateDocumentInterventionLinks({
+      documentId: insertedDocumentId,
+      interventionIds: normalizedInterventionIds,
+      connection: runner,
+    });
+  }
+  return insertedDocumentId;
 }
 
 async function storeApplicationFormPdfDocument({
@@ -16317,6 +16332,7 @@ async function generateAndStoreInterventionAssessmentPdf({
     clientId: context.clientId,
     applicantUserId: context.applicantUserId,
     actorUserId,
+    interventionIds: [interventionRow.id],
     trackingId: context.referenceNumber,
     pdfBuffer,
     documentType,
@@ -16352,6 +16368,7 @@ async function generateAndStoreInterventionAssessmentPdf({
       clientId: context.clientId,
       applicantUserId: context.applicantUserId,
       actorUserId,
+      interventionIds: [interventionRow.id],
       trackingId: context.referenceNumber,
       pdfBuffer: redlineBuffer,
       documentType: 'case_assessment_redline',
@@ -21883,7 +21900,14 @@ async function syncInterventionProposalCompatibility(interventionRow, connection
         metadata_json = VALUES(metadata_json),
         submitted_by_staff_profile_id = VALUES(submitted_by_staff_profile_id),
         reviewed_by_staff_profile_id = VALUES(reviewed_by_staff_profile_id),
-        submitted_at = VALUES(submitted_at),
+        submitted_at = CASE
+          WHEN VALUES(review_status) = 'draft' THEN NULL
+          WHEN VALUES(review_status) = 'submitted'
+            AND COALESCE(iset_intervention_proposal.review_status, '') <> 'submitted'
+            THEN VALUES(submitted_at)
+          WHEN iset_intervention_proposal.submitted_at IS NULL THEN VALUES(submitted_at)
+          ELSE iset_intervention_proposal.submitted_at
+        END,
         reviewed_at = VALUES(reviewed_at),
         archived_at = NULL`,
       [
@@ -39953,23 +39977,25 @@ const dbConfig = {
 pool = mysql.createPool(dbConfig);
 app.locals.pool = pool;
 configureSesMailer({ pool });
-hydrateAuthConfigFromDatabase().catch(err => {
-  console.warn('[auth-config] Initial hydration failed:', err.message);
-});
-
-// Start reminder poller using stored runtime config (falls back to default on failure)
-readBackendJobsConfig()
-  .then(cfg => {
-    applyReminderPollInterval(cfg?.reminderPollMinutes);
-    applyAllocationPollInterval(cfg?.allocationPollMinutes);
-    allocationApplyHourConfig = cfg?.allocationApplyHour ?? DEFAULT_BACKEND_JOBS_CONFIG.allocationApplyHour;
-  })
-  .catch(err => {
-    console.warn('[backend-jobs] bootstrap poller using default interval:', err?.message || err);
-    applyReminderPollInterval(DEFAULT_BACKEND_JOBS_CONFIG.reminderPollMinutes);
-    applyAllocationPollInterval(DEFAULT_BACKEND_JOBS_CONFIG.allocationPollMinutes);
-    allocationApplyHourConfig = DEFAULT_BACKEND_JOBS_CONFIG.allocationApplyHour;
+if (!PATH_REPAIR_EXPORT_MODE) {
+  hydrateAuthConfigFromDatabase().catch(err => {
+    console.warn('[auth-config] Initial hydration failed:', err.message);
   });
+
+  // Start reminder poller using stored runtime config (falls back to default on failure)
+  readBackendJobsConfig()
+    .then(cfg => {
+      applyReminderPollInterval(cfg?.reminderPollMinutes);
+      applyAllocationPollInterval(cfg?.allocationPollMinutes);
+      allocationApplyHourConfig = cfg?.allocationApplyHour ?? DEFAULT_BACKEND_JOBS_CONFIG.allocationApplyHour;
+    })
+    .catch(err => {
+      console.warn('[backend-jobs] bootstrap poller using default interval:', err?.message || err);
+      applyReminderPollInterval(DEFAULT_BACKEND_JOBS_CONFIG.reminderPollMinutes);
+      applyAllocationPollInterval(DEFAULT_BACKEND_JOBS_CONFIG.allocationPollMinutes);
+      allocationApplyHourConfig = DEFAULT_BACKEND_JOBS_CONFIG.allocationApplyHour;
+    });
+}
 
 app.get('/api/config/sla-targets', async (req, res) => {
   try {
@@ -44741,37 +44767,41 @@ const cancelReminderForCaseNote = async (connection, reminderId, staffProfileId)
 // Canonical shared-schema migrations now live in ./sql/migrations and are
 // tracked in iset_migration by filename + checksum. One-off operational SQL
 // belongs under ./sql/ops and is not auto-executed by the server.
-(async () => {
-  try {
-    await runStartupSharedSchemaMigrations(pool, { logger: console });
-  } catch (err) {
-    console.error('[migrations] Runner unexpected error:', err.message);
-  }
-})();
+if (!PATH_REPAIR_EXPORT_MODE) {
+  (async () => {
+    try {
+      await runStartupSharedSchemaMigrations(pool, { logger: console });
+    } catch (err) {
+      console.error('[migrations] Runner unexpected error:', err.message);
+    }
+  })();
+}
 
 // --- Startup DB diagnostic (enable/disable via ENABLE_DB_DIAG env var; defaults to true) ---------
 // Logs which physical MySQL instance we're connected to plus a quick summary of the step table.
 // This helps detect situations where manual SQL sessions and the Node process point at different instances.
 // Safe / read-only. To silence, set ENABLE_DB_DIAG=false in the environment.
-(async () => {
-  if (String(process.env.ENABLE_DB_DIAG || 'true').toLowerCase() === 'true') {
-    try {
-      const [[meta]] = await pool.query('SELECT @@hostname AS host, @@port AS port, DATABASE() AS db');
-      const [[counts]] = await pool.query('SELECT COUNT(*) AS stepCount, COALESCE(MAX(id),0) AS maxStepId FROM iset_intake.step');
-      const [recent] = await pool.query('SELECT id, name, status FROM iset_intake.step ORDER BY id DESC LIMIT 5');
-      console.log('[DB-DIAG]', JSON.stringify({
-        host: meta.host,
-        port: meta.port,
-        database: meta.db,
-        stepCount: counts.stepCount,
-        maxStepId: counts.maxStepId,
-        recentSteps: recent.map(r => ({ id: r.id, name: r.name, status: r.status }))
-      }));
-    } catch (e) {
-      console.warn('[DB-DIAG] failed:', e && e.message ? e.message : e);
+if (!PATH_REPAIR_EXPORT_MODE) {
+  (async () => {
+    if (String(process.env.ENABLE_DB_DIAG || 'true').toLowerCase() === 'true') {
+      try {
+        const [[meta]] = await pool.query('SELECT @@hostname AS host, @@port AS port, DATABASE() AS db');
+        const [[counts]] = await pool.query('SELECT COUNT(*) AS stepCount, COALESCE(MAX(id),0) AS maxStepId FROM iset_intake.step');
+        const [recent] = await pool.query('SELECT id, name, status FROM iset_intake.step ORDER BY id DESC LIMIT 5');
+        console.log('[DB-DIAG]', JSON.stringify({
+          host: meta.host,
+          port: meta.port,
+          database: meta.db,
+          stepCount: counts.stepCount,
+          maxStepId: counts.maxStepId,
+          recentSteps: recent.map(r => ({ id: r.id, name: r.name, status: r.status }))
+        }));
+      } catch (e) {
+        console.warn('[DB-DIAG] failed:', e && e.message ? e.message : e);
+      }
     }
-  }
-})();
+  })();
+}
 
 // ---------------- Component Template Validation (initial: radio) -----------------
 // We load JSON Schemas from src/component-lib/schemas. For now we focus on radio.
@@ -44866,7 +44896,9 @@ async function syncRadioTemplateFromFile() {
 }
 
 // Fire and forget sync on startup (non-blocking)
-syncRadioTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) {
+  syncRadioTemplateFromFile();
+}
 
 // Generic helper to sync a template by key (initial reuse for input)
 async function syncTemplateFromFile(templateKey) {
@@ -44921,59 +44953,59 @@ async function syncTemplateFromFile(templateKey) {
 
 // Input template sync (reuse generic helper)
 async function syncInputTemplateFromFile() { return syncTemplateFromFile('input'); }
-syncInputTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncInputTemplateFromFile();
 
 // Checkbox template sync (reuse generic helper)
 async function syncCheckboxTemplateFromFile() { return syncTemplateFromFile('checkbox'); }
-syncCheckboxTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncCheckboxTemplateFromFile();
 
 // Date-input template sync (reuse generic helper)
 async function syncDateInputTemplateFromFile() { return syncTemplateFromFile('date-input'); }
-syncDateInputTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncDateInputTemplateFromFile();
 
 // File-upload template sync (reuse generic helper)
 async function syncFileUploadTemplateFromFile() { return syncTemplateFromFile('file-upload'); }
-syncFileUploadTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncFileUploadTemplateFromFile();
 
 // Summary-list template sync (reuse generic helper)
 async function syncSummaryListTemplateFromFile() { return syncTemplateFromFile('summary-list'); }
-syncSummaryListTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncSummaryListTemplateFromFile();
 
 // Textarea template sync (reuse generic helper)
 async function syncTextareaTemplateFromFile() { return syncTemplateFromFile('textarea'); }
-syncTextareaTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncTextareaTemplateFromFile();
 
 // Character-count template sync (reuse generic helper)
 async function syncCharacterCountTemplateFromFile() { return syncTemplateFromFile('character-count'); }
-syncCharacterCountTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncCharacterCountTemplateFromFile();
 
 // Inset-text template sync (reuse generic helper)
 async function syncInsetTextTemplateFromFile() { return syncTemplateFromFile('inset-text'); }
-syncInsetTextTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncInsetTextTemplateFromFile();
 
 // Panel template sync (reuse generic helper)
 async function syncPanelTemplateFromFile() { return syncTemplateFromFile('panel'); }
-syncPanelTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncPanelTemplateFromFile();
 
 // Details template sync (reuse generic helper)
 async function syncDetailsTemplateFromFile() { return syncTemplateFromFile('details'); }
-syncDetailsTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncDetailsTemplateFromFile();
 
 // Text-block template sync (reuse generic helper)
 async function syncTextBlockTemplateFromFile() { return syncTemplateFromFile('text-block'); }
-syncTextBlockTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncTextBlockTemplateFromFile();
 
 // Select template sync (reuse generic helper)
 async function syncSelectTemplateFromFile() { return syncTemplateFromFile('select'); }
-syncSelectTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncSelectTemplateFromFile();
 
 // Warning-text template sync (reuse generic helper)
 async function syncWarningTextTemplateFromFile() { return syncTemplateFromFile('warning-text'); }
-syncWarningTextTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncWarningTextTemplateFromFile();
 
 // Signature-ack template sync (reuse generic helper)
 async function syncSignatureAckTemplateFromFile() { return syncTemplateFromFile('signature-ack'); }
-syncSignatureAckTemplateFromFile();
+if (!PATH_REPAIR_EXPORT_MODE) syncSignatureAckTemplateFromFile();
 
 app.use('/api/dev', requireUnsafeAdminDebugAccess);
 
@@ -55285,7 +55317,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     ) {
       return res.status(403).json({
         error: 'intervention_decision_forbidden',
-        message: 'Only System Administrators and NWAC Administrators can record proposal decisions.',
+        message: 'Only Decision Makers can record proposal decisions.',
       });
     }
     const planMetadata = safeJsonParse(planRow.metadata_json, null) || {};
@@ -55484,6 +55516,25 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     }
 
     const metadataClean = stripInterventionRecurringMetadata(metadata);
+    if (!isBackloadMode && createInterventionState.reviewStatus === 'submitted') {
+      const workflowTypeForSubmission = resolveInterventionReviewWorkflowType({
+        metadata_json: Object.keys(metadataClean).length ? JSON.stringify(metadataClean) : null,
+      });
+      const reviewWorkflowEnabled = await isReviewWorkflowEnabledForType(workflowTypeForSubmission, pool);
+      if (reviewWorkflowEnabled) {
+        const transition = getReviewTransition({
+          action: REVIEW_ACTIONS.SubmitForRmReview,
+          workflowType: workflowTypeForSubmission,
+          role: inferUserRole(req) || resolveStaffRole(req) || null,
+        });
+        if (!transition.allowed) {
+          return res.status(403).json({
+            error: 'review_workflow_transition_forbidden',
+            message: 'This role cannot submit this intervention into Regional Manager review.',
+          });
+        }
+      }
+    }
     if (!isBackloadMode && createInterventionState.reviewStatus === 'approved') {
       const approvalAmount = resolveInterventionFundingApprovalAmount({
         intervention_cost: plannedCostAmount,
@@ -56571,7 +56622,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
     if (isRecordingProposalDecision && !canRecordInterventionProposalDecision(req)) {
       return res.status(403).json({
         error: 'intervention_decision_forbidden',
-        message: 'Only System Administrators and NWAC Administrators can record proposal decisions.',
+        message: 'Only Decision Makers can record proposal decisions.',
       });
     }
     let interventionReviewWorkflowEnabled = false;
@@ -57254,6 +57305,32 @@ app.patch('/api/interventions/:id', async (req, res) => {
     });
     if (metadataCopy.compliance && typeof metadataCopy.compliance !== 'object') {
       delete metadataCopy.compliance;
+    }
+
+    const shouldStartInterventionReviewWorkflow =
+      statusChangeRequested &&
+      nextStatusPersistence?.reviewStatus === 'submitted' &&
+      previousInterventionState.reviewStatus !== 'submitted';
+    if (shouldStartInterventionReviewWorkflow) {
+      const workflowTypeForSubmission = resolveInterventionReviewWorkflowType({
+        ...interventionRow,
+        action_plan_id: isReassigning ? planId : interventionRow.action_plan_id,
+        metadata_json: Object.keys(metadataCopy).length ? JSON.stringify(metadataCopy) : null,
+      });
+      const reviewWorkflowEnabled = await isReviewWorkflowEnabledForType(workflowTypeForSubmission, pool);
+      if (reviewWorkflowEnabled) {
+        const transition = getReviewTransition({
+          action: REVIEW_ACTIONS.SubmitForRmReview,
+          workflowType: workflowTypeForSubmission,
+          role: inferUserRole(req) || resolveStaffRole(req) || null,
+        });
+        if (!transition.allowed) {
+          return res.status(403).json({
+            error: 'review_workflow_transition_forbidden',
+            message: 'This role cannot submit this intervention into Regional Manager review.',
+          });
+        }
+      }
     }
 
     const esdcExisting = safeJsonParse(interventionRow.esdc_intervention_json, {}) || {};
@@ -85844,10 +85921,23 @@ if (fs.existsSync(buildDir)) {
   });
 }
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Server running on port ${port}`);
-  console.log(`CORS allowed origin: ${corsOptions.origin}`);
-});
+if (process.env.PATH_REPAIR_EXPORTS === '1') {
+  module.exports = {
+    pool,
+    startInterventionReviewWorkflow,
+    storeAssessmentPdfDocument,
+    syncInterventionProposalCompatibility,
+    generateAndStoreInterventionAssessmentPdf,
+    generateAndStoreRevisionAssessmentPdf,
+    fetchInterventionWithCase,
+    REVIEW_WORKFLOW_TYPES,
+  };
+} else {
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`Server running on port ${port}`);
+    console.log(`CORS allowed origin: ${corsOptions.origin}`);
+  });
+}
 
 // Get all events for a specific case (with user name, event type label, and alert variant)
 app.get('/api/cases/:case_id/events', async (req, res) => {
@@ -88617,7 +88707,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       return res.status(403).json({
         success: false,
         error: 'application_decision_forbidden',
-        message: 'Only System Administrators and NWAC Administrators can record application decisions.',
+        message: 'Only Decision Makers can record application decisions.',
         lock: lockCheck.lock || null
       });
     }
@@ -89603,7 +89693,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       conn = null;
     }
     console.error('Error updating assessment:', error);
-    return res.status(500).json({ success: false, error: error.message, lock: lockCheck.lock || null });
+    const status = Number(error?.status || error?.statusCode) || 500;
+    return res.status(status).json({ success: false, error: error.message, lock: lockCheck.lock || null });
   } finally {
     if (conn) conn.release();
   }

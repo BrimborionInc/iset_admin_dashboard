@@ -553,7 +553,7 @@ function applyCaseMutation(state, body) {
         return {
           success: false,
           error: 'review_workflow_transition_forbidden',
-          _status: 500,
+          _status: 403,
         };
       }
       const workflow = buildReviewWorkflow(REVIEW_STAGES.rmReview);
@@ -1263,6 +1263,36 @@ function buildScenarios() {
           throw new Error('Coordinator submit did not include the proposed intervention payload.');
         }
         await waitForText(page, 'Assessment submitted successfully');
+      },
+    },
+    {
+      name: 'coordinator-submit-two-step-assessment',
+      role: 'ISET Coordinator',
+      path: FRONTEND_CASE_PATH,
+      forceCoordinatorOnlyLayout: true,
+      casePayload: buildCasePayload({
+        status: 'in_review',
+        applicationStatus: 'in_review',
+        completeAssessment: true,
+        conflictSigned: true,
+        twoStepReviewEnabled: true,
+        reviewWorkflow: null,
+      }),
+      run: async ({ page, state }) => {
+        await waitForWorkspaceReady(page, 'Assess Eligibility');
+        await advanceCoordinatorWizardToReview(page, 'Submit for review');
+        await clickButtonByText(page, 'Submit for review');
+        const submitPut = await waitUntil(
+          () => state.mutations.casePuts.find(entry => entry.body.applicationStatus === 'pending_approval'),
+          'Coordinator two-step assessment submit PUT'
+        );
+        if (submitPut.body.status !== 'intake') {
+          throw new Error(`Coordinator two-step submit sent wrong case status: ${submitPut.body.status}`);
+        }
+        if (state.casePayload.reviewWorkflow?.currentStage !== REVIEW_STAGES.rmReview) {
+          throw new Error(`Coordinator two-step submit did not create an RM review workflow: ${state.casePayload.reviewWorkflow?.currentStage}`);
+        }
+        await waitForText(page, 'Assessment submitted to Regional Manager review.');
       },
     },
     {

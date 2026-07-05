@@ -5239,7 +5239,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       setSuccessMessage("");
       setAttemptedSteps(prev => ({ ...prev, decision: true }));
       if (!canDecideSubmittedProposal) {
-        setError("Only Decision Makers and System Administrators can record a decision on a proposal in review.");
+        setError("Only Decision Makers can record a decision on a proposal in review.");
         return { ok: false };
       }
       if (!isEditable) {

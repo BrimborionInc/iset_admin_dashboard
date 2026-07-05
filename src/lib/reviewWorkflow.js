@@ -59,8 +59,7 @@ function isNwacDecisionRole(role) {
 }
 
 function isSubmitterRole(role) {
-  const key = normalizeRoleKey(role);
-  return SUBMITTER_ROLE_KEYS.has(key) || key === 'casemanager';
+  return SUBMITTER_ROLE_KEYS.has(normalizeRoleKey(role));
 }
 
 function isTwoStepReviewEnabled(config, workflowType) {
@@ -112,10 +111,9 @@ function getReviewTransition({ action, currentStage, role, workflowType } = {}) 
   if (actionKey === REVIEW_ACTIONS.SubmitForRmReview) {
     return {
       allowed:
-        isSubmitterRole(role) ||
-        isNwacDecisionRole(role) ||
+        Boolean(normalizedWorkflowType) &&
         (
-          normalizedWorkflowType === REVIEW_WORKFLOW_TYPES.ApplicationAssessment &&
+          isSubmitterRole(role) ||
           isRegionalManagerRole(role)
         ),
       nextStage: REVIEW_STAGES.RmReview,

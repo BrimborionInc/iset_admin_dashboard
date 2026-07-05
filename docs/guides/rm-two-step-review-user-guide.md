@@ -1,7 +1,7 @@
 # Regional Manager Review Job Aid
 
 Status: Draft for DEV/UAT. Application assessments, new intervention proposals, and intervention amendments now use the same two-step operating model in local DEV. Application assessments passed a live DEV UI walkthrough on 2026-06-19; intervention proposal and amendment walkthroughs are the next validation step.
-Last Updated: 2026-06-24
+Last Updated: 2026-06-26
 
 ## What Is Changing
 
@@ -9,7 +9,7 @@ PATH is adding a Regional Manager review/sign-off step before the Decision Maker
 
 The basic flow is:
 
-1. Coordinator or Case Manager submits the assessment or proposal.
+1. ISET Coordinator submits the assessment or proposal, or a Regional Manager submits their own draft item.
 2. Regional Manager reviews the submitted packet.
 3. Regional Manager either returns it to the submitter with notes or submits it to the Decision Maker for final approval.
 4. The Decision Maker approves, denies, or requests changes.
@@ -22,7 +22,7 @@ Regional Managers do not edit submitted assessment/proposal details directly and
 
 For application assessments, Regional Managers may still complete the EI verification step by setting the EI status and uploading the EI verification report. That does not unlock the submitted assessment details for editing.
 
-## Coordinator Or Case Manager
+## ISET Coordinator
 
 After submitting, the assessment/proposal becomes read-only while it is with the Regional Manager or the Decision Maker.
 
@@ -38,7 +38,7 @@ On the homepage, use `Pending Review` for submitted application assessments, new
 
 At Regional Manager review, read the submitted packet and choose one action:
 
-- `Return to Coordinator` / `Return to Case Manager`: use when changes are needed before the Decision Maker sees the item. Notes are required.
+- `Return to Coordinator`: use when changes are needed before the Decision Maker sees the item. Notes are required.
 - `Submit for final decision`: use when the packet is ready for the Decision Maker's final decision.
 
 If the Decision Maker requests changes, PATH sends the item back to Regional Manager review first. Review the note, then forward the requested changes to the submitter with notes.

@@ -11,6 +11,10 @@
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
+const {
+  REVIEW_ACTIONS: REVIEW_WORKFLOW_ACTIONS,
+  getReviewTransition,
+} = require('../src/lib/reviewWorkflow');
 
 const DEFAULT_FRONTEND_BASE = 'http://localhost:3001';
 const DEFAULT_SCREENSHOT_DIR = path.join(process.cwd(), 'tmp', 'intervention-assessment-workflow-smoke');
@@ -247,6 +251,7 @@ function buildIntervention({
   stage = REVIEW_STAGES.rmReview,
   amount = 150,
   isRevision = false,
+  withReviewWorkflow = true,
   rmReviewNote = '',
   nwacDecisionNote = '',
   approvalFollowUp = false,
@@ -270,16 +275,20 @@ function buildIntervention({
         appliedAt: revisionFollowUp ? '2026-06-19T20:20:31.796Z' : null,
       }
     : null;
-  const reviewWorkflow = approved
-    ? buildReviewWorkflow(REVIEW_STAGES.finalDecisionRecorded, {
-        workflowType: isRevision || revisionFollowUp ? 'intervention_revision' : 'intervention_proposal',
-        rmReviewNote: rmReviewNote || 'RM reviewed and supports this request.',
-      })
-    : buildReviewWorkflow(stage, {
-        workflowType: isRevision ? 'intervention_revision' : 'intervention_proposal',
-        rmReviewNote,
-        nwacDecisionNote,
-      });
+  const reviewWorkflow = withReviewWorkflow
+    ? (
+        approved
+          ? buildReviewWorkflow(REVIEW_STAGES.finalDecisionRecorded, {
+              workflowType: isRevision || revisionFollowUp ? 'intervention_revision' : 'intervention_proposal',
+              rmReviewNote: rmReviewNote || 'RM reviewed and supports this request.',
+            })
+          : buildReviewWorkflow(stage, {
+              workflowType: isRevision ? 'intervention_revision' : 'intervention_proposal',
+              rmReviewNote,
+              nwacDecisionNote,
+            })
+      )
+    : null;
   const metadata = buildMetadata({
     amount,
     isRevision,
@@ -536,8 +545,56 @@ async function installApiStubs(page, state) {
     if (pathname === `/api/interventions/${state.intervention.id}/review-workflow/action` && method === 'POST') {
       const body = request.postData() ? JSON.parse(request.postData()) : {};
       state.mutations.reviewActions.push({ body });
+      const workflowType = state.isRevision ? 'intervention_revision' : 'intervention_proposal';
+      const transition = getReviewTransition({
+        action: body.action,
+        currentStage: state.intervention.reviewWorkflow?.currentStage || state.intervention.review_workflow?.current_stage || null,
+        workflowType,
+        role: state.role,
+      });
+      if (!transition.allowed) {
+        request.respond(jsonResponse({
+          error: 'review_workflow_transition_forbidden',
+          message: 'Review workflow transition forbidden.',
+        }, 403));
+        return;
+      }
       const updated = mutateReviewAction(state, body.action, body.note || '');
       request.respond(jsonResponse({ success: true, intervention: updated }));
+      return;
+    }
+    if (pathname === `/api/interventions/${state.intervention.id}` && method === 'PATCH') {
+      const body = request.postData() ? JSON.parse(request.postData()) : {};
+      state.mutations.interventionUpdates.push({ body });
+      const workflowType = state.isRevision ? 'intervention_revision' : 'intervention_proposal';
+      const transition = getReviewTransition({
+        action: REVIEW_WORKFLOW_ACTIONS.SubmitForRmReview,
+        workflowType,
+        role: state.role,
+      });
+      if (!transition.allowed) {
+        request.respond(jsonResponse({
+          error: 'review_workflow_transition_forbidden',
+          message: 'Review workflow transition forbidden.',
+        }, 403));
+        return;
+      }
+      const reviewWorkflow = buildReviewWorkflow(transition.nextStage, {
+        workflowType,
+      });
+      state.intervention = {
+        ...state.intervention,
+        ...body,
+        status: 'submitted',
+        reviewStatus: 'submitted',
+        review_status: 'submitted',
+        reviewWorkflow,
+        review_workflow: reviewWorkflow,
+        twoStepReviewEnabled: true,
+        two_step_review_enabled: true,
+      };
+      state.casePayload = buildCasePayload(state.intervention);
+      request.respond(jsonResponse(state.intervention));
       return;
     }
     if (pathname === `/api/applications/${APPLICATION_ID}`) {
@@ -797,6 +854,7 @@ function buildScenarioState(scenario) {
     casePayload: buildCasePayload(intervention),
     apiCalls: [],
     mutations: {
+      interventionUpdates: [],
       reviewActions: [],
     },
     consoleLines: [],
@@ -866,6 +924,7 @@ async function runScenario(browser, args, scenario) {
     pass: state.failures.length === 0,
     screenshot: screenshotPath,
     apiCalls: state.apiCalls.map(call => `${call.method} ${call.path}${call.search}`),
+    interventionUpdates: state.mutations.interventionUpdates.map(entry => entry.body),
     reviewActions: state.mutations.reviewActions.map(entry => entry.body),
     failures: state.failures,
     consoleWarnings: state.consoleLines.filter(line => line.type === 'warning' || line.type === 'error').slice(-10),
@@ -873,6 +932,78 @@ async function runScenario(browser, args, scenario) {
 }
 
 const scenarios = [
+  {
+    name: 'rm-submit-draft-new-proposal',
+    role: 'Regional Manager',
+    step: 'review',
+    intervention: {
+      id: PROPOSAL_ID,
+      status: 'draft',
+      amount: 150,
+      isRevision: false,
+      withReviewWorkflow: false,
+    },
+    assert: async (page, state) => {
+      await waitForText(page, 'Propose new intervention');
+      for (let index = 0; index < 8; index += 1) {
+        const readyToSubmit = await page.evaluate(() => (
+          Boolean(document.body && document.body.innerText.includes('Submit for review'))
+        ));
+        if (readyToSubmit) break;
+        await clickButtonByText(page, 'Next');
+        await delay(250);
+      }
+      await waitForText(page, 'Submit for review');
+      await clickButtonByText(page, 'Submit for review');
+      const update = await waitUntil(() => state.mutations.interventionUpdates[0], 'RM draft proposal submit');
+      if (update.body.status !== 'submitted') {
+        throw new Error(`Expected submitted status, got ${update.body.status}`);
+      }
+      if (state.intervention.reviewWorkflow?.workflowType !== 'intervention_proposal') {
+        throw new Error(`Expected intervention_proposal workflow, got ${state.intervention.reviewWorkflow?.workflowType}`);
+      }
+      if (state.intervention.reviewWorkflow?.currentStage !== REVIEW_STAGES.rmReview) {
+        throw new Error(`Expected RM review stage, got ${state.intervention.reviewWorkflow?.currentStage}`);
+      }
+      await waitForText(page, 'Intervention proposal submitted to Regional Manager review.');
+    },
+  },
+  {
+    name: 'rm-submit-draft-revision',
+    role: 'Regional Manager',
+    step: 'review',
+    intervention: {
+      id: REVISION_ID,
+      status: 'draft',
+      amount: 150,
+      isRevision: true,
+      withReviewWorkflow: false,
+    },
+    assert: async (page, state) => {
+      await waitForText(page, 'Draft a proposed change to');
+      for (let index = 0; index < 8; index += 1) {
+        const readyToSubmit = await page.evaluate(() => (
+          Boolean(document.body && document.body.innerText.includes('Submit for review'))
+        ));
+        if (readyToSubmit) break;
+        await clickButtonByText(page, 'Next');
+        await delay(250);
+      }
+      await waitForText(page, 'Submit for review');
+      await clickButtonByText(page, 'Submit for review');
+      const update = await waitUntil(() => state.mutations.interventionUpdates[0], 'RM draft revision submit');
+      if (update.body.status !== 'submitted') {
+        throw new Error(`Expected submitted status, got ${update.body.status}`);
+      }
+      if (state.intervention.reviewWorkflow?.workflowType !== 'intervention_revision') {
+        throw new Error(`Expected intervention_revision workflow, got ${state.intervention.reviewWorkflow?.workflowType}`);
+      }
+      if (state.intervention.reviewWorkflow?.currentStage !== REVIEW_STAGES.rmReview) {
+        throw new Error(`Expected RM review stage, got ${state.intervention.reviewWorkflow?.currentStage}`);
+      }
+      await waitForText(page, 'Intervention change submitted to Regional Manager review.');
+    },
+  },
   {
     name: 'rm-new-proposal-return',
     role: 'Regional Manager',

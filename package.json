@@ -105,6 +105,7 @@
     "smoke:application-assessment:workflow:browser": "node scripts/application-assessment-workflow-browser-smoke.js",
     "smoke:intervention-assessment:recall:browser": "node scripts/intervention-assessment-recall-browser-smoke.js",
     "smoke:intervention-assessment:workflow:browser": "node scripts/intervention-assessment-workflow-browser-smoke.js",
+    "smoke:two-step-review:prevention": "node scripts/two-step-review-prevention-regression.js",
     "workflow:apply-upload-camera-chooser": "node scripts/apply-intake-upload-camera-chooser.js",
     "workflow:set-file-upload-max-size-floor": "node scripts/set-file-upload-max-size-floor.js",
     "fixtures:workflows": "node scripts/generate-workflow-fixtures.js",

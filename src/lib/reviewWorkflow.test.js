@@ -10,6 +10,19 @@ const {
 } = require('./reviewWorkflow');
 
 describe('reviewWorkflow', () => {
+  const supportedWorkflowTypes = Object.values(REVIEW_WORKFLOW_TYPES);
+  const businessRoles = [
+    'ISET Coordinator',
+    'Regional Manager',
+    'NWAC Administrator',
+    '',
+  ];
+  const technicalSupportRoles = ['System Administrator'];
+  const reviewRoles = [...businessRoles, ...technicalSupportRoles];
+  const submitStartRoles = new Set(['ISET Coordinator', 'Regional Manager']);
+  const businessFinalDecisionRoles = new Set(['NWAC Administrator']);
+  const technicalFinalDecisionRoles = new Set(['System Administrator']);
+
   test('reads the two-step review feature flag with per-workflow overrides', () => {
     expect(isTwoStepReviewEnabled(true, REVIEW_WORKFLOW_TYPES.ApplicationAssessment)).toBe(true);
     expect(isTwoStepReviewEnabled(false, REVIEW_WORKFLOW_TYPES.ApplicationAssessment)).toBe(false);
@@ -70,64 +83,183 @@ describe('reviewWorkflow', () => {
     expect(getInitialReviewStage({ workflowType: 'unknown' })).toBeNull();
   });
 
-  test('allows submitter to start RM review but not make final decisions', () => {
-    const start = getReviewTransition({
-      action: REVIEW_ACTIONS.SubmitForRmReview,
-      role: 'ISET Coordinator',
+  test('enforces submit-start roles across every supported workflow type', () => {
+    supportedWorkflowTypes.forEach(workflowType => {
+      reviewRoles.forEach(role => {
+        const start = getReviewTransition({
+          action: REVIEW_ACTIONS.SubmitForRmReview,
+          workflowType,
+          role,
+        });
+        expect(start.allowed).toBe(submitStartRoles.has(role));
+        expect(start.nextStage).toBe(REVIEW_STAGES.RmReview);
+        expect(start.nextOwnerRole).toBe('Regional Manager');
+      });
     });
-    expect(start.allowed).toBe(true);
-    expect(start.nextStage).toBe(REVIEW_STAGES.RmReview);
-
-    const finalDecision = getReviewTransition({
-      action: REVIEW_ACTIONS.NwacApprove,
-      currentStage: REVIEW_STAGES.NwacReview,
-      role: 'ISET Coordinator',
-    });
-    expect(finalDecision.allowed).toBe(false);
   });
 
-  test('allows Regional Manager to start application assessment review only', () => {
-    const applicationAssessmentStart = getReviewTransition({
-      action: REVIEW_ACTIONS.SubmitForRmReview,
-      workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
-      role: 'Regional Manager',
+  test('blocks every role from starting an unknown workflow type', () => {
+    [undefined, null, '', 'unknown'].forEach(workflowType => {
+      reviewRoles.forEach(role => {
+        const start = getReviewTransition({
+          action: REVIEW_ACTIONS.SubmitForRmReview,
+          workflowType,
+          role,
+        });
+        expect(start.allowed).toBe(false);
+      });
     });
-    expect(applicationAssessmentStart.allowed).toBe(true);
-    expect(applicationAssessmentStart.nextStage).toBe(REVIEW_STAGES.RmReview);
-
-    const interventionStart = getReviewTransition({
-      action: REVIEW_ACTIONS.SubmitForRmReview,
-      workflowType: REVIEW_WORKFLOW_TYPES.InterventionProposal,
-      role: 'Regional Manager',
-    });
-    expect(interventionStart.allowed).toBe(false);
   });
 
-  test('allows RM return and upward submission but not final approval', () => {
-    const returnToSubmitter = getReviewTransition({
-      action: REVIEW_ACTIONS.RmReturnToSubmitter,
-      currentStage: REVIEW_STAGES.RmReview,
-      role: 'Regional Manager',
-    });
-    expect(returnToSubmitter.allowed).toBe(true);
-    expect(returnToSubmitter.requiresNote).toBe(true);
-    expect(returnToSubmitter.nextStage).toBe(REVIEW_STAGES.ReturnedToSubmitter);
+  test('enforces the business review-action role and stage matrix', () => {
+    const mismatches = [];
+    const stages = [
+      undefined,
+      REVIEW_STAGES.RmReview,
+      REVIEW_STAGES.NwacReview,
+      REVIEW_STAGES.ReturnedToRm,
+      REVIEW_STAGES.ReturnedToSubmitter,
+      REVIEW_STAGES.FinalDecisionRecorded,
+      REVIEW_STAGES.Withdrawn,
+    ];
+    const cases = [
+      {
+        action: REVIEW_ACTIONS.RmReturnToSubmitter,
+        isAllowed: ({ stage, role }) => stage === REVIEW_STAGES.RmReview && role === 'Regional Manager',
+        nextStage: REVIEW_STAGES.ReturnedToSubmitter,
+        requiresNote: true,
+      },
+      {
+        action: REVIEW_ACTIONS.RmSubmitToNwac,
+        isAllowed: ({ stage, role }) => stage === REVIEW_STAGES.RmReview && role === 'Regional Manager',
+        nextStage: REVIEW_STAGES.NwacReview,
+        recordsRmSignoff: true,
+      },
+      {
+        action: REVIEW_ACTIONS.NwacRequestChanges,
+        isAllowed: ({ stage, role }) => stage === REVIEW_STAGES.NwacReview && businessFinalDecisionRoles.has(role),
+        nextStage: REVIEW_STAGES.ReturnedToRm,
+        requiresNote: true,
+      },
+      {
+        action: REVIEW_ACTIONS.RmForwardChangesToSubmitter,
+        isAllowed: ({ stage, role }) => stage === REVIEW_STAGES.ReturnedToRm && role === 'Regional Manager',
+        nextStage: REVIEW_STAGES.ReturnedToSubmitter,
+        requiresNote: true,
+      },
+      {
+        action: REVIEW_ACTIONS.NwacApprove,
+        isAllowed: ({ stage, role }) => stage === REVIEW_STAGES.NwacReview && businessFinalDecisionRoles.has(role),
+        nextStage: REVIEW_STAGES.FinalDecisionRecorded,
+        recordsFinalDecision: true,
+      },
+      {
+        action: REVIEW_ACTIONS.NwacDeny,
+        isAllowed: ({ stage, role }) => stage === REVIEW_STAGES.NwacReview && businessFinalDecisionRoles.has(role),
+        nextStage: REVIEW_STAGES.FinalDecisionRecorded,
+        recordsFinalDecision: true,
+      },
+    ];
 
-    const submitToNwac = getReviewTransition({
-      action: REVIEW_ACTIONS.RmSubmitToNwac,
-      currentStage: REVIEW_STAGES.RmReview,
-      role: 'Regional Manager',
+    supportedWorkflowTypes.forEach(workflowType => {
+      cases.forEach(testCase => {
+        stages.forEach(stage => {
+          businessRoles.forEach(role => {
+            const transition = getReviewTransition({
+              action: testCase.action,
+              currentStage: stage,
+              workflowType,
+              role,
+            });
+            const expectedAllowed = testCase.isAllowed({ stage, role });
+            if (transition.allowed !== expectedAllowed) {
+              mismatches.push({
+                workflowType,
+                action: testCase.action,
+                stage,
+                role,
+                expectedAllowed,
+                actualAllowed: transition.allowed,
+              });
+            }
+            if (expectedAllowed) {
+              [
+                ['nextStage', transition.nextStage, testCase.nextStage],
+                ['requiresNote', Boolean(transition.requiresNote), Boolean(testCase.requiresNote)],
+                ['recordsRmSignoff', Boolean(transition.recordsRmSignoff), Boolean(testCase.recordsRmSignoff)],
+                ['recordsFinalDecision', Boolean(transition.recordsFinalDecision), Boolean(testCase.recordsFinalDecision)],
+              ].forEach(([field, actual, expected]) => {
+                if (actual !== expected) {
+                  mismatches.push({
+                    workflowType,
+                    action: testCase.action,
+                    stage,
+                    role,
+                    field,
+                    expected,
+                    actual,
+                  });
+                }
+              });
+            }
+          });
+        });
+      });
     });
-    expect(submitToNwac.allowed).toBe(true);
-    expect(submitToNwac.recordsRmSignoff).toBe(true);
-    expect(submitToNwac.nextStage).toBe(REVIEW_STAGES.NwacReview);
+    expect(mismatches).toEqual([]);
+  });
 
-    const approve = getReviewTransition({
-      action: REVIEW_ACTIONS.NwacApprove,
-      currentStage: REVIEW_STAGES.NwacReview,
-      role: 'Regional Manager',
+  test('keeps System Administrator outside the business submit and RM review path', () => {
+    supportedWorkflowTypes.forEach(workflowType => {
+      technicalSupportRoles.forEach(role => {
+        expect(
+          getReviewTransition({
+            action: REVIEW_ACTIONS.SubmitForRmReview,
+            workflowType,
+            role,
+          }).allowed
+        ).toBe(false);
+        expect(
+          getReviewTransition({
+            action: REVIEW_ACTIONS.RmReturnToSubmitter,
+            currentStage: REVIEW_STAGES.RmReview,
+            workflowType,
+            role,
+          }).allowed
+        ).toBe(false);
+        expect(
+          getReviewTransition({
+            action: REVIEW_ACTIONS.RmSubmitToNwac,
+            currentStage: REVIEW_STAGES.RmReview,
+            workflowType,
+            role,
+          }).allowed
+        ).toBe(false);
+      });
     });
-    expect(approve.allowed).toBe(false);
+  });
+
+  test('preserves System Administrator final-decision behavior as technical support only', () => {
+    supportedWorkflowTypes.forEach(workflowType => {
+      technicalFinalDecisionRoles.forEach(role => {
+        expect(
+          getReviewTransition({
+            action: REVIEW_ACTIONS.NwacApprove,
+            currentStage: REVIEW_STAGES.NwacReview,
+            workflowType,
+            role,
+          }).allowed
+        ).toBe(true);
+        expect(
+          getReviewTransition({
+            action: REVIEW_ACTIONS.NwacRequestChanges,
+            currentStage: REVIEW_STAGES.NwacReview,
+            workflowType,
+            role,
+          }).allowed
+        ).toBe(true);
+      });
+    });
   });
 
   test('routes NWAC request changes back to RM before submitter', () => {

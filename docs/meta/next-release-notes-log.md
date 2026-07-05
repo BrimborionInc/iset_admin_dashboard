@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-06-26
+Last Updated: 2026-07-05
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,7 +22,12 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
-- 2026-06-26 | Release 20260626-rm-draft-submit-hotfix | Fix/Assessment | Regional Manager draft submission | Regional Managers who are completing an in-review draft application assessment can submit it into the two-step review workflow. | This follows the draft-edit hotfix and is limited to application assessments; intervention review starts and final decisions keep the existing role guards.
+- 2026-07-05 | Release TBD | Ops/Release Safety | PROD deployment guard | PROD app deploys now stop before mutation when the packaged admin, portal, or shared source tree is dirty. | Emergency dirty-source deploys require an explicit `--allow-dirty --dirty-reason` override and the reason is recorded in the deploy manifest.
+- 2026-07-05 | Release TBD | QA/Approvals | Two-step review release gate | Two-step review tests now use the business role/status matrix for ISET Coordinators, Regional Managers, and NWAC Administrators across application assessments, new intervention proposals, and intervention amendments. | System Administrator behavior is treated as technical support only and staff-facing decision wording now says Decision Maker.
+- 2026-07-05 | Release TBD | Fix/Documents | Intervention review packets | Generated intervention assessment PDFs will create the normalized intervention-document link used by intervention-scoped supporting-document views after the next app release. | PROD audit found two existing intervention proposal workflows whose packet PDFs existed but lacked the join-table links; Bill approved and Codex applied guarded repair SQL for the five affected links.
+- 2026-07-05 | Release TBD | Fix/Approvals | Intervention proposal timestamps | Final decision updates will no longer overwrite the original submitted-for-review timestamp on intervention proposal compatibility rows after the next app release. | The review workflow timestamp remains authoritative; Bill approved and Codex applied guarded PROD repair SQL for the one affected proposal timestamp.
+- 2026-07-05 | Release TBD | QA/Approvals | Two-step review verification | The current two-step review prevention release passed full Jest, production build, focused prevention smoke, and both application/intervention workflow browser smokes locally. | Browser smokes ran against the production bundle before PROD deploy approval.
+- 2026-06-26 | Release TBD | Fix/Approvals | Regional Manager submit-to-review | Regional Managers who are acting as submitters can submit application assessments, new intervention proposals, and intervention amendments into the two-step review workflow. | This covers RM-owned draft/no-workflow states and keeps the agreed audit trail even when the same RM submits and signs off. Admin roles cannot start workflows; final Decision Maker approval, denial, and request-changes decisions remain restricted to Decision Maker users.
 - 2026-06-24 | Release TBD | Fix/Assessment | Regional Manager draft edits | Regional Managers can again edit application assessments while the application is still In Review and has not been submitted into the two-step review workflow. | Submitted assessments remain read-only for Regional Managers and must move through RM review actions.
 - 2026-06-22 | Release TBD | Fix/Home | Overdue queue | Overdue application rows now keep the saved EI eligibility result when PATH builds the Home work queue. | This prevents rows that are actually overdue for assessment or follow-up timing from being labelled `Awaiting EI Validation`; rows with no saved EI result still show the pending EI status.
 - 2026-06-22 | Release TBD | Fix/Casework | Financial Overview signing | Re-submitting an already signed Financial Overview no longer creates another active signed PDF or overwrites the signed version snapshot. | The signing APIs now return the existing signed result when the same request is posted again.
@@ -434,9 +439,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Regional Managers can again edit application assessments while the application is still In Review and has not been submitted into the two-step review workflow.
+- Regional Managers who submit their own draft assessments, intervention proposals, or intervention amendments now enter the same Regional Manager review workflow as ISET Coordinator submissions.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260626-rm-two-step-role-matrix-prod
+
+- Regional Managers who are acting as submitters can submit application assessments, new intervention proposals, and intervention amendments into Regional Manager review.
+- ISET Coordinators and Regional Managers are the only roles that can start the two-step review workflow; NWAC Administrators and System Administrators remain final-decision actors only.
+- The workflow now rejects invalid starters before saving submitted intervention rows, preventing submitted items from being left without review workflow audit rows.
+- The release was tested with the four actual PATH roles and with browser workflow smokes for application assessments, new intervention proposals, and intervention amendments.
 
 #### Release 20260624-rm-draft-edit-hotfix
 
@@ -450,25 +462,22 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Closed cases and completed applications no longer keep active document-request/reminder work alive after the file has reached a terminal state.
 - Completed approved applications now retain the approved decision outcome when the assessment recommendation and final review agree.
 
-#### Release 20260620-rm-two-step-review-rollout
-
-- Application assessments, new intervention proposals, and intervention amendments now move through Regional Manager review before the final Decision Maker step, with Regional Manager sign-off included in approved assessment PDFs.
-- Regional Managers get `Pending Review` queue items and bell alerts when work arrives for review; Decision Makers receive final-decision alerts only after Regional Manager sign-off.
-- Regional Manager and Decision Maker notes are recorded in Notes and Tasks, included in event data, and shown in the Events Timeline for the related review action.
-- Staff document-upload notifications now name the staff uploader instead of saying the applicant uploaded the document.
-- Coordinator and Regional Manager `My Applications` queues keep assigned files visible until completion and open post-decision files at the right follow-up step; the `Pending Review` table now shows review-focused columns.
-- High-value funding decisions still require Shelley Stacey for approvals of `$20,000` or above, while other Decision Makers can still deny or request changes.
-- The notification sort switch now appears only when the notification stack is expanded, reducing page-top clutter.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Les gestionnaires regionaux peuvent de nouveau modifier une evaluation de demande tant que la demande est encore In Review et n'a pas ete soumise dans le processus de revision en deux etapes.
+- Les gestionnaires regionaux qui soumettent leurs propres brouillons d'evaluation, de proposition d'intervention ou d'amendement passent maintenant par le meme processus de revision du gestionnaire regional que les soumissions des coordonnateurs ISET.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260626-rm-two-step-role-matrix-prod
+
+- Les gestionnaires regionaux qui agissent comme soumissionnaires peuvent soumettre des evaluations de demande, de nouvelles propositions d'intervention et des amendements d'intervention a la revision du gestionnaire regional.
+- Les coordonnateurs ISET et les gestionnaires regionaux sont les seuls roles qui peuvent demarrer le processus de revision en deux etapes; les administrateurs NWAC et les administrateurs systeme restent limites a l'etape de decision finale.
+- Le processus rejette maintenant les soumissionnaires non autorises avant d'enregistrer des interventions comme soumises, ce qui evite de laisser des elements soumis sans ligne d'audit de revision.
+- La version a ete testee avec les quatre vrais roles PATH et avec des tests navigateur pour les evaluations de demande, les nouvelles propositions d'intervention et les amendements d'intervention.
 
 #### Release 20260624-rm-draft-edit-hotfix
 
@@ -481,16 +490,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Soumettre de nouveau un Financial Overview deja signe ne cree plus un autre PDF signe actif et ne remplace plus l'instantane de version signe.
 - Les dossiers fermes et les demandes terminees ne gardent plus de demandes de documents ou rappels actifs apres leur etat final.
 - Les demandes approuvees et terminees conservent maintenant le resultat de decision approuve lorsque la recommandation d'evaluation et la revision finale concordent.
-
-#### Release 20260620-rm-two-step-review-rollout
-
-- Les evaluations de demande, nouvelles propositions d'intervention et amendements d'intervention passent maintenant par une revision du gestionnaire regional avant l'etape finale du Decision Maker, avec la signature du gestionnaire regional dans les PDF d'evaluation approuves.
-- Les gestionnaires regionaux recoivent les elements `Pending Review` et les alertes lorsque du travail arrive pour revision; les Decision Makers recoivent les alertes de decision finale seulement apres la signature du gestionnaire regional.
-- Les notes du gestionnaire regional et du Decision Maker sont enregistrees dans Notes and Tasks, incluses dans les donnees d'evenement et visibles dans Events Timeline pour l'action de revision.
-- Les notifications de televersement de documents par le personnel nomment maintenant le membre du personnel qui a televerse le document, au lieu d'indiquer que le participant l'a fait.
-- Les files `My Applications` des coordonnateurs et gestionnaires regionaux gardent les demandes assignees visibles jusqu'a la fin du dossier et ouvrent les dossiers apres decision a la bonne etape de suivi; le tableau `Pending Review` montre maintenant les colonnes utiles a la revision.
-- Les approbations de financement de `$20,000` ou plus restent reservees a Shelley Stacey, tandis que les autres Decision Makers peuvent quand meme refuser ou demander des changements.
-- Le controle de tri des notifications apparait maintenant seulement quand la pile de notifications est ouverte, ce qui reduit l'encombrement en haut de page.
 
 ### Problemes connus (brouillon - FR)
 

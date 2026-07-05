@@ -8602,7 +8602,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       setValidationAlert([
         isReviewWithRegionalManager
           ? 'The Regional Manager must submit this assessment for final decision before a decision can be recorded.'
-          : 'Only Decision Makers and System Administrators can record the application decision for this case.'
+          : 'Only Decision Makers can record the application decision for this case.'
       ]);
       return;
     }

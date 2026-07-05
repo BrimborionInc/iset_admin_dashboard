@@ -76,6 +76,8 @@ function usage() {
     '  --skip-shared          Do not upload shared for prod',
     '  --skip-build           Pass through to the app deploy scripts',
     '  --skip-smoke           Skip post-deploy health checks',
+    '  --allow-dirty          Permit a dirty PROD app source tree when paired with --dirty-reason',
+    '  --dirty-reason TEXT    Required explanation when overriding the PROD dirty-source guard',
     '  --yes                  Required for prod run',
     '  --json                 Emit machine-readable JSON',
     '  --help                 Show this help',
@@ -108,6 +110,8 @@ function parseArgs(argv) {
     skipShared: false,
     skipBuild: false,
     skipSmoke: false,
+    allowDirty: false,
+    dirtyReason: null,
     yes: false,
     json: false,
   };
@@ -147,6 +151,10 @@ function parseArgs(argv) {
       args.skipBuild = true;
     } else if (token === '--skip-smoke') {
       args.skipSmoke = true;
+    } else if (token === '--allow-dirty') {
+      args.allowDirty = true;
+    } else if (token === '--dirty-reason') {
+      args.dirtyReason = argv[++index];
     } else if (token === '--yes') {
       args.yes = true;
     } else if (token === '--json') {
@@ -381,6 +389,35 @@ function getGitHead(repoPath) {
   } catch (_) {
     return null;
   }
+}
+
+function getGitStatusLines(repoPath) {
+  if (!fs.existsSync(repoPath)) {
+    return [];
+  }
+  try {
+    const result = runCommand('git', ['-C', repoPath, 'status', '--porcelain'], {
+      capture: true,
+      cwd: REPO_ROOT,
+    });
+    return String(result.stdout || '')
+      .split(/\r?\n/)
+      .map(line => line.trimEnd())
+      .filter(Boolean);
+  } catch (_) {
+    return [];
+  }
+}
+
+function buildGitRepoState(repoPath) {
+  const statusLines = getGitStatusLines(repoPath);
+  return {
+    path: repoPath,
+    gitHead: getGitHead(repoPath),
+    gitDirty: statusLines.length > 0,
+    gitStatusCount: statusLines.length,
+    gitStatus: statusLines.slice(0, 200),
+  };
 }
 
 function slugify(value) {
@@ -1663,19 +1700,83 @@ async function runSmokeChecksForEnvironment(envConfig, targets) {
 
 function buildRepoState() {
   return {
-    adminDashboard: {
-      path: REPO_ROOT,
-      gitHead: getGitHead(REPO_ROOT),
-    },
-    portal: {
-      path: PORTAL_ROOT,
-      gitHead: getGitHead(PORTAL_ROOT),
-    },
-    shared: {
-      path: SHARED_ROOT,
-      gitHead: getGitHead(SHARED_ROOT),
-    },
+    adminDashboard: buildGitRepoState(REPO_ROOT),
+    portal: buildGitRepoState(PORTAL_ROOT),
+    shared: buildGitRepoState(SHARED_ROOT),
   };
+}
+
+function buildProdAppSourceRepoKeys(appPlan) {
+  const keys = new Set();
+  if (appPlan.deployAdmin) {
+    keys.add('adminDashboard');
+    keys.add('shared');
+  }
+  if (appPlan.deployPortal) {
+    keys.add('portal');
+    keys.add('shared');
+  }
+  if (appPlan.deployShared) {
+    keys.add('shared');
+  }
+  return Array.from(keys);
+}
+
+function assertProdDeploySourceState(args, envConfig, appPlan, repoState) {
+  if (envConfig.name !== 'prod') {
+    return { skipped: true, reason: 'non-prod' };
+  }
+  if (!appPlan.deployAdmin && !appPlan.deployPortal && !appPlan.deployShared) {
+    return { skipped: true, reason: 'no-prod-app-artifact' };
+  }
+
+  const sourceRepoKeys = buildProdAppSourceRepoKeys(appPlan);
+  const dirtyRepos = sourceRepoKeys
+    .map(key => ({ key, state: repoState[key] }))
+    .filter(entry => entry.state && entry.state.gitDirty);
+
+  if (!dirtyRepos.length) {
+    return {
+      skipped: false,
+      clean: true,
+      sourceRepoKeys,
+    };
+  }
+
+  const reason = String(args.dirtyReason || '').trim();
+  if (args.allowDirty && reason.length >= 12) {
+    return {
+      skipped: false,
+      clean: false,
+      override: true,
+      overrideReason: reason,
+      sourceRepoKeys,
+      dirtyRepos: dirtyRepos.map(({ key, state }) => ({
+        key,
+        path: state.path,
+        gitHead: state.gitHead,
+        gitStatusCount: state.gitStatusCount,
+        gitStatus: state.gitStatus,
+      })),
+    };
+  }
+
+  const details = dirtyRepos.map(({ key, state }) => {
+    const statusLines = (state.gitStatus || []).slice(0, 40).map(line => `  ${line}`);
+    const omitted = Number(state.gitStatusCount || 0) > statusLines.length
+      ? [`  ... ${Number(state.gitStatusCount) - statusLines.length} more entries omitted`]
+      : [];
+    return [`${key} (${state.path})`, ...statusLines, ...omitted].join('\n');
+  }).join('\n\n');
+  const overrideHint = args.allowDirty
+    ? 'The --allow-dirty override also requires --dirty-reason with a specific explanation.'
+    : 'Commit, stash, or isolate the deploy source before retrying. Emergency override requires --allow-dirty --dirty-reason "<specific approved reason>".';
+  throw new Error([
+    'Refusing PROD app deploy from a dirty source tree.',
+    'The app artifact packages the current WSL working tree, not only committed files.',
+    overrideHint,
+    details,
+  ].filter(Boolean).join('\n'));
 }
 
 async function handlePlan(args, envConfig, identity) {
@@ -1715,6 +1816,11 @@ async function handlePlan(args, envConfig, identity) {
     console.log('Data dataset: none');
   }
   console.log(`App deploy: shared=${plan.app.deployShared} admin=${plan.app.deployAdmin} portal=${plan.app.deployPortal}`);
+  if (envConfig.name === 'prod' && (plan.app.deployShared || plan.app.deployAdmin || plan.app.deployPortal)) {
+    const dirtySourceKeys = buildProdAppSourceRepoKeys(plan.app)
+      .filter(key => manifest.repos[key] && manifest.repos[key].gitDirty);
+    console.log(`Source tree: ${dirtySourceKeys.length ? `dirty (${dirtySourceKeys.join(', ')})` : 'clean'}`);
+  }
   console.log(`Smoke targets: ${plan.smoke.targets.length}`);
   console.log(`Manifest: ${manifestPath}`);
 }
@@ -1739,6 +1845,9 @@ async function handleRun(args, envConfig, identity) {
   writeManifest(manifestPath, manifest);
 
   try {
+    manifest.sourceControl = assertProdDeploySourceState(args, envConfig, plan.app, manifest.repos);
+    writeManifest(manifestPath, manifest);
+
     if (plan.restorePoint && !plan.restorePoint.skipped) {
       const restorePointResult = await runStep(
         manifest,
