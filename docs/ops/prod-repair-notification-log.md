@@ -8,7 +8,7 @@ Use this log for repairs that may be externally invisible to staff but should be
 
 ## 2026-07-05 - Feedback #154 wrong-recipient secure-message containment
 
-Status: PROD containment applied; privacy/business follow-up pending; product fix prepared in DEV and awaiting release.
+Status: PROD containment applied; product fix deployed; reporter follow-up sent; privacy/business follow-up pending.
 
 Reason: feedback report `#154` (`Deleted secure message`) described a Regional Manager sending a secure message to the wrong participant and deleting it immediately from her own view. Live triage confirmed the delete action only removed the sender mailbox copy; the recipient copy remained in the participant inbox and had been read. The current code can also expose master `messages.subject` / `messages.body` in staff case-thread views, so mailbox-only hiding was not sufficient.
 
@@ -41,10 +41,11 @@ Evidence:
 Notification note:
 
 - Suggested reporter message: PATH removed the mistakenly sent secure message content from the live application, replaced it with a neutral withdrawal notice, and confirmed there were no attachments or signing requests linked to it. The system record has been preserved for audit purposes. Because the message had already reached the recipient's inbox and was marked read before containment, PATH cannot say it was unseen; this should be handled as a privacy/business follow-up separately from the technical containment.
+- Bill sent Emilie Marion a concise follow-up on 2026-07-05 confirming the secure-message fixes are live in Production, the original message remains contained, PATH now has clearer send confirmation and a proper withdrawal option, and staff should confirm the next genuine applicant secure-message email subject shows the applicant name rather than portal email address.
 
 ## 2026-07-05 - Two-step review intervention packet repair
 
-Status: PROD data repair and prevention deploy applied; owner notification pending.
+Status: PROD data repair and prevention deploy applied; owner notification sent.
 
 Reason: workflow-first two-step review audit found two intervention proposal workflows with generated packet PDFs that were not linked through `iset_document_intervention`, plus one proposal compatibility row whose `submitted_at` had drifted to the final approval time.
 
@@ -79,3 +80,4 @@ Prevention status:
 Notification note:
 
 - Suggested owner message later: PATH found and repaired two intervention review packet records where the generated PDFs existed but were not attached to the intervention-specific document view; one related submitted timestamp was also corrected to the original submit-for-review time. Madison's report `#149` has been marked resolved because Kitson is correctly at Decision Maker review, Wallace is final-approved, and the prevention release is live. No staff action is expected unless they still see a missing packet/document or a current Decision Maker action blocked on the affected case.
+- Bill sent Madison Coppola a concise owner update on 2026-07-05 confirming the Pending Decision issue was fixed, affected records were repaired, the prevention fix is live, and the post-deploy Production audit found no remaining two-step review mismatches.
