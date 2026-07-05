@@ -35,7 +35,7 @@ Evidence:
 
 Prevention status:
 
-- Local prevention code has been prepared but is not deployed to PROD yet. Generated intervention assessment PDFs now pass intervention ids into the document-store helper, and proposal compatibility syncing preserves original submitted timestamps across final-decision updates. Ship this code before assuming future submissions are protected.
+- Prevention code has been prepared and deployed to TEST release `20260705-two-step-review-prevention-test`, but is not deployed to PROD yet. Generated intervention assessment PDFs now pass intervention ids into the document-store helper, and proposal compatibility syncing preserves original submitted timestamps across final-decision updates. Ship this code to PROD before assuming future PROD submissions are protected.
 
 Notification note:
 
