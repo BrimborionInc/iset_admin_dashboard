@@ -20,9 +20,9 @@ This tracker exists because Bill asked Codex to own the repair stream rather tha
 | `#149` Pending Decision - Kitson/Wallace | Bug | `resolved` | PROD data repaired and prevention release deployed | Madison Coppola / two-step review intervention packet symptoms | Owner notification can use `docs/ops/prod-repair-notification-log.md`; no more code work expected unless staff report a new symptom. |
 | `#154` Deleted secure message | Bug | `in_progress` | PROD message `1128` contained; admin product fix committed locally, not deployed | Emilie Marion sent a staff-to-applicant secure message to the wrong participant and local delete did not recall it | Keep in batch unless privacy leadership requires faster release. Deploy admin withdrawal/recipient-confirmation fix, then live recheck and update feedback log. |
 | `#155` New secure message email notification | Change request | `triaging` | Portal product fix prepared locally, not deployed | Emilie Marion requested staff Outlook subject show applicant name rather than applicant email | Include portal name-resolution fix in the same secure-message batch. After PROD deploy, send/observe a real applicant-origin secure-message notification and update feedback log. |
-| `#96` New supporting docs for non-school/employment applications | Bug | `in_progress` | Not yet re-triaged in this batch | Open PROD queue item | Recheck after secure-message pair unless evidence shows it belongs in the same release. |
-| `#97` Change "Letters of Reference" | Change request | `in_progress` | Not yet re-triaged in this batch | Open PROD queue item | Recheck after secure-message pair unless it is a low-risk copy/config change suitable for the same batch. |
-| `#123` Appeals Workflow | Change request | `triaging` | Not yet specified | Open PROD queue item | Treat as workflow/product design, not a quick bugfix, unless Bill provides an agreed appeals spec. |
+| `#96` New supporting docs for non-school/employment applications | Bug | `in_progress` | Rechecked read-only; still blocked on NWAC/Bill document-type and upload-rule decisions | Bill/NWAC document checklist input | Do not include in the secure-message release unless the missing business input arrives and the resulting config/code change is prepared/tested. |
+| `#97` Change "Letters of Reference" | Change request | `in_progress` | Rechecked read-only; still blocked on wording/document-type decision for First Nations/Inuit identity evidence | Bill/NWAC document checklist input | Do not implement by guesswork. Needs the intended wording/type split before a change can be prepared. |
+| `#123` Appeals Workflow | Change request | `triaging` | Rechecked read-only; still policy/spec design, not a release-ready fix | Bill/NWAC appeals policy | Keep out of this bugfix batch. Requires appeal eligibility, statuses, permissions, notifications, artifacts, audit trail, and reporting decisions before implementation. |
 
 ## Prepared Secure-Message Batch
 
@@ -38,6 +38,7 @@ This tracker exists because Bill asked Codex to own the repair stream rather tha
   - `node --check server.js`
   - `node --test notifications/__tests__/secureMessageApplicantName.test.js notifications/__tests__/templateRenderer.test.js notifications/__tests__/applicantEmailNotifications.test.js`
   - `git diff --check`
+- Remaining queue read-only recheck used SQL-over-SSM command `f25cc6eb-d3f5-4087-8324-5c68cba179fa` after feedback-table schema proof command `22f04099-feaf-4fd5-8fec-71bae448de01`. It confirmed #96/#97/#123 still have the same blockers recorded in their live notes.
 
 ## Release-Gate Notes
 
