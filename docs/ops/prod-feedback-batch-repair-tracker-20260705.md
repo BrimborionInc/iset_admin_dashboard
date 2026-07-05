@@ -43,5 +43,20 @@ This tracker exists because Bill asked Codex to own the repair stream rather tha
 ## Release-Gate Notes
 
 - TEST/PROD deploys are disruptive; do not deploy after each individual fix.
-- The release package should explicitly include admin and portal changes. Shared should stay unchanged unless a later item requires it.
+- Approved release scope: secure messaging only, release id `20260705-secure-message-batch`.
+- Planned app scope: admin + portal; skip schema, skip data/runtime config, skip shared.
 - Before PROD approval, present the exact release scope, maintenance sequence, smoke checks, and feedback reports to update after live recheck.
+
+## Release Prep Evidence
+
+- Admin focused preflight on 2026-07-05:
+  - `node --check isetadminserver.js`
+  - `CI=true npm test -- --watchAll=false --runTestsByPath src/lib/__tests__/secureMessageWithdrawalGuards.test.js src/lib/__tests__/applicationStatusRawWorkflowGuards.test.js`
+  - `npm run lint` passed with the known three pre-existing warnings in `src/lib/__tests__/pathPatchBugGuards.test.js`.
+  - `PATH_RELEASE_ID=20260705-secure-message-batch CI=true npm run build` passed with the known empty-source-map warning and bundle-size warning.
+- Portal focused preflight on 2026-07-05:
+  - `node --check server.js`
+  - `node --test notifications/__tests__/secureMessageApplicantName.test.js notifications/__tests__/templateRenderer.test.js notifications/__tests__/applicantEmailNotifications.test.js`
+  - `PATH_RELEASE_ID=20260705-secure-message-batch CI=true npm run build`
+- Release-note preflight generated `src/generated/publicReleaseNotes.js` with `Release 20260705-secure-message-batch` as the first English and French package group and exactly three package groups.
+- Non-mutating TEST deploy plan: `npm run path:deploy:plan -- --env test --skip-schema --skip-data --skip-shared --release-id 20260705-secure-message-batch`; manifest `/home/bill/ISET/admin-dashboard/tmp/path-deploy/test/20260705-secure-message-batch--2026-07-05T13-06-28-807Z.json`; AWS identity `arn:aws:iam::124355655255:user/CODEX_CLI_Admin`; app deploy `shared=false admin=true portal=true`; smoke targets `2`.
