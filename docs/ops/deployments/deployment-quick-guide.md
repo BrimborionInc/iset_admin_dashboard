@@ -1,7 +1,7 @@
 # PATH Deployment Quick Guide
 
 Status: current primary operator guide for normal TEST/PROD PATH deploys.
-Last reviewed: 2026-06-16 after the intake runtime incident; command names checked against current `package.json`.
+Last reviewed: 2026-07-05 after the two-step review release-management retrospective; command names checked against current `package.json`.
 
 This is the shortest operator guide for normal PATH deployments.
 
@@ -35,6 +35,7 @@ When Bill starts a new Codex thread for deploy work, the agent must first:
 - Before every TEST or PROD app deploy, choose or confirm the release ID, then update `docs/meta/next-release-notes-log.md` for user-visible changes. The public landing-page panel must keep the standard sections `What changed`, `Known Bugs`, and `What's Coming`; do not publish `Earlier changes`.
 - For any PROD deploy that includes in-app feedback bug/CR fixes, report reconciliation is part of the deploy. Before the deploy, identify the affected `admin_feedback_report` IDs and make sure each report has a current note/status reflecting the planned release. After normal-routing smoke and the targeted workflow recheck pass, update `admin_feedback_report.status`, `admin_feedback_status_history`, and `admin_feedback_note` in PROD before calling the deployment complete. Only mark a report `resolved` after the deployed behavior and relevant client-facing/generated artifacts have been verified; otherwise leave it open with the remaining verification work noted.
 - Do not turn every prepared bug/CR fix into its own PROD deploy. Batch suitable fixes into the next planned PROD maintenance release unless Bill explicitly approves an emergency hotfix.
+- For major workflow changes, apply `docs/ops/deployments/major-workflow-release-management.md` before TEST/PROD release. The release must be driven by the business-state contract, not by isolated bug symptoms: roles, states, queues, editability, generated artifacts, notifications, data repair, feedback reconciliation, and owner communication must all be accounted for.
 - Under `What changed`, maintain three expandable release-package groups for the three most recent release packages. Add the new release as the first `#### Release ...` group in `What Changed Packages (draft - EN)` and `Lots de changements (brouillon - FR)`, keep only the two next-most-recent groups below it, and remove the oldest fourth group.
 - Keep the flat `What's New (draft bullets - EN)` and `Nouveautes (brouillon - FR)` fallback sections focused on the newest release package. `Known Bugs` and `What's Coming` can be empty only when there is nothing accurate to publish.
 - Release-note preflight is not satisfied by raw dated entries near the top of `next-release-notes-log.md`. The visible landing-page content comes from the draft sections at the bottom. Before deploy, the first English and French package groups must represent the release being deployed, preferably with the exact heading `#### Release <release-id>`, the flat `What's New` / `Nouveautes` fallback bullets must describe that same newest package, and every user-visible `Release TBD` or otherwise unreleased item intended for the deploy must be either represented in that package or deliberately deferred.
