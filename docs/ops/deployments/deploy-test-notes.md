@@ -1,7 +1,7 @@
 # Test Environment Deployment Notes
 
 Status: current TEST deployment notes. Prefer `deployment-quick-guide.md` for the shortest operator commands.
-Last reviewed: 2026-06-08 after TEST cost-pruning; command names checked against current admin and portal `package.json` files.
+Last reviewed: 2026-07-05 after the two-step review TEST smoke and one-instance ASG replacement recovery.
 
 For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
 
@@ -22,7 +22,7 @@ Current TEST topology: TEST is cost-pruned to one steady-state `nwac-test-asg` a
 
 Important: the deploy scripts package the current WSL working tree, not just the Git index. If you only want to release a subset of local edits, isolate unrelated local changes before running `path:deploy`.
 
-Important coupling rule: do not assume `admin-only` just because the user-facing behavior is in the admin console. The admin backend stages sibling `../shared` during the TEST admin deploy, and some admin runtime paths also import sibling `../ISET-intake` modules from the deployed portal tree. If the changed code path touches either of those sibling locations, deploy the coupled surface as well instead of using `--skip-portal`.
+Important coupling rule: do not assume `admin-only` just because the user-facing behavior is in the admin console. The admin backend stages sibling `../shared` during the TEST admin deploy, and some admin runtime paths also import sibling `../ISET-intake` modules from the deployed portal tree. If the changed code path touches either of those sibling locations, deploy the coupled surface as well instead of using `--skip-portal`. Fresh ASG replacement makes this coupling sharper: a new TEST app instance may not yet have `/opt/nwac/portal` dependencies, and admin notification startup can fail through `../shared/events/notificationDispatcher.js -> /opt/nwac/portal/sesMailer.js` with a missing `@aws-sdk/client-ses` unless the portal runtime has also been installed.
 
 Important maintenance rule: TEST should rehearse PROD maintenance behavior. If a TEST deploy can restart the admin or portal app, make either surface unavailable, or expose transient `502 Bad Gateway` responses, set a scoped maintenance warning before the deploy or put the affected surface behind the ALB fixed-response maintenance page. TEST can remain less strict than PROD about approval flags, but it should not intentionally show raw gateway errors while down. TEST maintenance messages must use the user-facing name `Test and Training environment` and explicitly state that Production is not affected.
 
@@ -35,7 +35,7 @@ What it does:
 - Runs WSL-native admin and portal TEST app deploy steps from `scripts/path-deploy.js`
 - Verifies TEST health through the ALB target groups (`nwac-test-admin-tg`, `nwac-test-portal-tg`)
 - Writes a release manifest under `tmp/path-deploy/test/`
-- Current dependency-install safeguard: the TEST admin and portal deploy steps clear the deployed `node_modules` tree before running remote `npm ci/install`, mirroring the existing PROD bootstrap behavior and avoiding stale-filesystem `ENOTEMPTY` failures on rerun.
+- Current dependency-install safeguard: the TEST admin and portal deploy steps clear the deployed `node_modules` tree before running remote `npm ci/install`, use isolated `/tmp/npm-cache-*-deploy` caches, and start the PM2 process when it is missing instead of assuming an already-bootstrapped instance. This mirrors the existing PROD bootstrap posture and avoids stale-filesystem/cache and fresh-ASG-instance failures on rerun.
 
 Current SES safety guard:
 - Before the PROD-data migration rehearsal, TEST SES was checked in `ca-central-1` and was still sandboxed (`ProductionAccessEnabled=false`), but the TEST account has several verified recipient identities.
@@ -51,6 +51,8 @@ npm run path:deploy:plan -- --env test --skip-data
 ```
 
 ## Recent deploy evidence
+
+- 2026-07-05: Admin + portal TEST recovery/release `20260705-two-step-review-test-notification-fix` fixed two-step review notification routing and hardened the TEST deploy path. Scope: app-only, no schema, data, runtime-config promotion, Terraform, PROD change, or feedback-log mutation. Initial admin redeploy under fallback stalled on old host `i-0a8be782ed8604211` (`c073d95e-919f-4127-bbbe-0ff95cb0d1ce`) and left the admin target unhealthy; Codex kept ALB fallback active, terminated the old ASG instance with desired capacity preserved (`13067ccb-49e8-641c-165c-9793ac41cab2`), and recovered on replacement host `i-052566d75e0214d00`. Fresh-host evidence showed admin needed the coupled portal runtime because shared notification code imports the portal SES mailer. Portal artifact `s3://nwac-test-artifacts/portal/portal-20260705-111455.zip` installed the portal runtime; final admin artifact `s3://nwac-test-artifacts/admin-dashboard/admin-dashboard-20260705-112410.zip` installed through SSM command `46b9775b-08a7-4b25-9fae-2a38a7f6c9f3`. Normal-routing target smoke reported admin `:5001` and portal `:5000` healthy on `i-052566d75e0214d00`; deployed-source command `548c6282-f419-45a7-85c8-70efabc34e11` confirmed the final intervention decision-status marker and release marker; full live TEST two-step smoke `8428df04-2235-46e6-9533-7187a7260ac3` passed with synthetic cleanup counts at zero. Fallback status returned to normal forwarding and SQL-over-SSM command `da868131-5108-46e0-8e79-20855faf821f` confirmed `service_announcement_rows = 0`. Manifests include `/home/bill/ISET/admin-dashboard/tmp/path-deploy/test/20260705-two-step-review-test-notification-fix--2026-07-05T15-24-09-990Z.json`.
 
 - 2026-07-05: Full admin + portal TEST release `20260705-secure-message-batch` deployed the secure-message withdrawal and applicant-name notification fixes with `--skip-schema --skip-data --skip-shared --skip-smoke`; no schema, data, runtime-config, shared, Terraform, or PROD change was run. Sequence used a Test and Training all-surface warning, wait, admin+portal ALB fallback, deploy, fallback clear, normal-routing smoke, warning clear, deployed-source check, and maintenance-state checks. TEST AWS identity was `arn:aws:iam::124355655255:user/CODEX_CLI_Admin`. Admin artifact `s3://nwac-test-artifacts/admin-dashboard/admin-dashboard-20260705-091238.zip` and portal artifact `s3://nwac-test-artifacts/portal/portal-20260705-091716.zip` installed on single TEST host `i-0a8be782ed8604211` through SSM commands `5aad611d-a69e-41b0-b965-5b5522cfd85d` and `f736a730-a903-4842-82d4-001750bb2433`; final normal-routing smoke reported `nwac-test-admin-tg` healthy on `:5001` and `nwac-test-portal-tg` healthy on `:5000`. Deployed-source SSM command `ce4cbac4-f71b-46ac-b7d7-db16774efdb0` confirmed release id and the admin withdrawal/recipient-confirmation plus portal applicant-name markers. Fallback status returned to normal forwarding and SQL-over-SSM command `0a6e957f-3248-4f28-8ecb-33810bf6afc9` confirmed `service_announcement_rows = 0`. Manifest: `/home/bill/ISET/admin-dashboard/tmp/path-deploy/test/20260705-secure-message-batch--2026-07-05T13-12-38-829Z.json`.
 

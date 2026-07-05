@@ -21974,6 +21974,17 @@ function resolveInterventionDecisionEventType({ proposalKind = 'new', reviewStat
   return INTERVENTION_DECISION_EVENT_TYPE_BY_STATUS[kind]?.[reviewStatus] || null;
 }
 
+function resolveInterventionDecisionNotificationEventType({ proposalKind = 'new', reviewStatus, workflowType } = {}) {
+  const normalizedWorkflowType = normaliseString(workflowType)?.toLowerCase().replace(/[\s-]+/g, '_') || '';
+  const isTwoStepInterventionWorkflow =
+    normalizedWorkflowType === REVIEW_WORKFLOW_TYPES.InterventionProposal ||
+    normalizedWorkflowType === REVIEW_WORKFLOW_TYPES.InterventionRevision;
+  if (reviewStatus === 'changes_requested' && isTwoStepInterventionWorkflow) {
+    return 'nwac_review_changes_requested';
+  }
+  return resolveInterventionDecisionEventType({ proposalKind, reviewStatus });
+}
+
 function resolveInterventionDecisionOutcome(reviewStatus) {
   if (reviewStatus === 'approved') return 'approve';
   if (reviewStatus === 'rejected') return 'reject';
@@ -55665,6 +55676,44 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
             reviewStatus: createInterventionState.reviewStatus,
           },
         });
+        if (
+          interventionReviewWorkflowUpdated?.current_stage === REVIEW_STAGES.RmReview &&
+          interventionRow?.case_id
+        ) {
+          try {
+            const { actorId, actorName } = resolveRequestActor(req);
+            const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
+            await captureCaseEvent({
+              type: 'rm_review_requested',
+              caseId: interventionRow.case_id,
+              payload: {
+                case_id: interventionRow.case_id,
+                action_plan_id: planId,
+                intervention_id: interventionId,
+                proposal_id:
+                  interventionReviewWorkflowUpdated?.proposal_id ||
+                  reviewWorkflowSubject?.proposalId ||
+                  null,
+                source_intervention_id: null,
+                proposal_kind: 'new',
+                approval_request_type: 'new_intervention',
+                workflow_type: reviewWorkflowSubject.workflowType,
+                review_stage: interventionReviewWorkflowUpdated.current_stage,
+                submitted_by_staff_profile_id: resolveActiveStaffProfileId(req) || createdBy || null,
+                assigned_staff_profile_id:
+                  normalisePositiveInteger(planRow.assigned_staff_profile_id) ||
+                  normalisePositiveInteger(planRow.assigned_to_user_id) ||
+                  null,
+                message: 'Intervention proposal submitted for Regional Manager review.',
+              },
+              actorId,
+              actorName: actorDisplayName || actorName,
+              actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+            });
+          } catch (eventErr) {
+            console.warn('[events] RM review requested event failed', eventErr?.message || eventErr);
+          }
+        }
       }
       try {
         const { actorName } = resolveRequestActor(req);
@@ -57510,24 +57559,33 @@ app.patch('/api/interventions/:id', async (req, res) => {
     );
     const nextReviewStatus = nextInterventionState.reviewStatus || null;
     const previousReviewStatus = previousInterventionState.reviewStatus || null;
+    const interventionDecisionReviewStatus = isApplyingApprovedRevision
+      ? 'approved'
+      : (isRecordingProposalDecision ? nextReviewStatusForDecision : nextReviewStatus);
     const proposalKindForDecision =
       isApplyingApprovedRevision || revisionSourceInterventionId
         ? 'revision'
         : 'new';
     const transitionedToDecisionStatus =
       statusChangeRequested &&
-      INTERVENTION_DECISION_REVIEW_STATUSES.has(nextReviewStatus) &&
-      previousReviewStatus !== nextReviewStatus &&
+      INTERVENTION_DECISION_REVIEW_STATUSES.has(interventionDecisionReviewStatus) &&
+      previousReviewStatus !== interventionDecisionReviewStatus &&
       INTERVENTION_REVIEW_DECISION_SOURCE_STATUSES.has(previousReviewStatus);
     const shouldEmitInterventionDecisionEvent =
-      (isApplyingApprovedRevision && nextReviewStatus === 'approved') ||
+      (isApplyingApprovedRevision && interventionDecisionReviewStatus === 'approved') ||
       transitionedToDecisionStatus;
-	    const interventionDecisionEventType = shouldEmitInterventionDecisionEvent
-	      ? resolveInterventionDecisionEventType({
-	          proposalKind: proposalKindForDecision,
-	          reviewStatus: nextReviewStatus,
-	        })
-	      : null;
+    const interventionDecisionWorkflowType =
+      interventionReviewWorkflowUpdated?.workflow_type ||
+      interventionReviewWorkflow?.workflow_type ||
+      interventionReviewWorkflowSubject?.workflowType ||
+      null;
+    const interventionDecisionEventType = shouldEmitInterventionDecisionEvent
+      ? resolveInterventionDecisionNotificationEventType({
+          proposalKind: proposalKindForDecision,
+          reviewStatus: interventionDecisionReviewStatus,
+          workflowType: interventionDecisionWorkflowType,
+        })
+      : null;
     if (
       interventionReviewWorkflowUpdated?.current_stage === REVIEW_STAGES.RmReview &&
       statusChangeRequested &&
@@ -57624,22 +57682,18 @@ app.patch('/api/interventions/:id', async (req, res) => {
 	            approval_request_type: proposalKindForDecision === 'revision'
 	              ? 'revised_intervention'
 	              : 'new_intervention',
-	            workflow_type:
-	              interventionReviewWorkflowUpdated?.workflow_type ||
-	              interventionReviewWorkflow?.workflow_type ||
-	              interventionReviewWorkflowSubject?.workflowType ||
-	              null,
+	            workflow_type: interventionDecisionWorkflowType,
 	            review_stage: interventionReviewWorkflowUpdated?.current_stage || null,
-	            recipient_staff_profile_id: nextReviewStatus === 'changes_requested'
+	            recipient_staff_profile_id: interventionDecisionReviewStatus === 'changes_requested'
 	              ? (
 	                  normalisePositiveInteger(interventionReviewWorkflowUpdated?.rm_reviewed_by_staff_profile_id) ||
 	                  normalisePositiveInteger(interventionReviewWorkflow?.rm_reviewed_by_staff_profile_id) ||
 	                  null
 	                )
 	              : null,
-	            outcome: resolveInterventionDecisionOutcome(nextReviewStatus),
-            outcome_label: resolveInterventionDecisionOutcomeLabel(nextReviewStatus),
-            status: nextReviewStatus,
+	            outcome: resolveInterventionDecisionOutcome(interventionDecisionReviewStatus),
+            outcome_label: resolveInterventionDecisionOutcomeLabel(interventionDecisionReviewStatus),
+            status: interventionDecisionReviewStatus,
             reason: decisionReason,
             decision_notes: decisionReason,
             intervention_title: interventionTitle,
@@ -57656,8 +57710,8 @@ app.patch('/api/interventions/:id', async (req, res) => {
             actor_name: actorDisplayName || actorName || null,
             message:
               proposalKindForDecision === 'revision'
-                ? `Intervention revision ${resolveInterventionDecisionOutcomeLabel(nextReviewStatus)}.`
-                : `Intervention proposal ${resolveInterventionDecisionOutcomeLabel(nextReviewStatus)}.`,
+                ? `Intervention revision ${resolveInterventionDecisionOutcomeLabel(interventionDecisionReviewStatus)}.`
+                : `Intervention proposal ${resolveInterventionDecisionOutcomeLabel(interventionDecisionReviewStatus)}.`,
           }, decisionReason, interventionDecisionCaseNote),
           actorId,
           actorName: actorDisplayName || actorName,

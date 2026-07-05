@@ -1,7 +1,7 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-07-05T11:26:17.883Z",
-  "releaseId": "",
-  "releaseLabel": "Current build",
+  "generatedAt": "2026-07-05T15:44:15.490Z",
+  "releaseId": "20260705-two-step-review-test-notification-fix",
+  "releaseLabel": "Release 20260705-two-step-review-test-notification-fix",
   "releaseDateEn": "5th July 2026",
   "releaseDateFr": "5 juillet 2026",
   "en": {
@@ -9,9 +9,27 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "What changed",
     "features": [
-      "Regional Managers who submit their own draft assessments, intervention proposals, or intervention amendments now enter the same Regional Manager review workflow as ISET Coordinator submissions."
+      "Staff secure messages now distinguish moving a message out of your own mailbox from withdrawing a sent message for everyone.",
+      "Secure-message email alerts for staff now use the applicant name from the file record when the portal account name is an email address.",
+      "Two-step review alerts now cover intervention proposals entering Regional Manager review and intervention proposals returned by the Decision Maker for changes."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260705-two-step-review-test-notification-fix",
+        "items": [
+          "New intervention proposals submitted for review now send the Regional Manager `Pending Review` bell alert.",
+          "Decision Maker change requests on intervention proposals now use the two-step review change-request alert routed back to the Regional Manager.",
+          "The TEST smoke now covers application assessments, new intervention proposals, intervention revisions, role guards, edit locks, generated documents, browser routes, notification routing, and cleanup."
+        ]
+      },
+      {
+        "title": "Release 20260705-secure-message-batch",
+        "items": [
+          "Staff compose now asks staff to confirm the case participant before sending a secure message.",
+          "Plain staff-to-applicant messages can be withdrawn with audit-preserving redaction; messages with linked files or forms stay blocked from withdrawal until that artifact-aware workflow is reviewed.",
+          "Applicant-origin secure-message email alerts now use the applicant name from the file record when the portal account name is an email address."
+        ]
+      },
       {
         "title": "Release 20260626-rm-two-step-role-matrix-prod",
         "items": [
@@ -19,22 +37,6 @@ const publicReleaseNotes = {
           "ISET Coordinators and Regional Managers are the only roles that can start the two-step review workflow; NWAC Administrators and System Administrators remain final-decision actors only.",
           "The workflow now rejects invalid starters before saving submitted intervention rows, preventing submitted items from being left without review workflow audit rows.",
           "The release was tested with the four actual PATH roles and with browser workflow smokes for application assessments, new intervention proposals, and intervention amendments."
-        ]
-      },
-      {
-        "title": "Release 20260624-rm-draft-edit-hotfix",
-        "items": [
-          "Regional Managers can again edit application assessments while the application is still In Review and has not been submitted into the two-step review workflow.",
-          "Submitted assessments remain read-only for Regional Managers and continue to move through the Regional Manager review actions."
-        ]
-      },
-      {
-        "title": "Release 20260622-path-bugfix-patch",
-        "items": [
-          "Overdue application rows now keep the saved EI eligibility result, so files that are overdue for assessment or follow-up timing are no longer labelled `Awaiting EI Validation` unless EI is actually still missing.",
-          "Re-submitting an already signed Financial Overview no longer creates another active signed PDF or overwrites the signed version snapshot.",
-          "Closed cases and completed applications no longer keep active document-request/reminder work alive after the file has reached a terminal state.",
-          "Completed approved applications now retain the approved decision outcome when the assessment recommendation and final review agree."
         ]
       }
     ],
@@ -48,9 +50,27 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
-      "Les gestionnaires regionaux qui soumettent leurs propres brouillons d'evaluation, de proposition d'intervention ou d'amendement passent maintenant par le meme processus de revision du gestionnaire regional que les soumissions des coordonnateurs ISET."
+      "Les messages securises du personnel distinguent maintenant le nettoyage de sa propre boite aux lettres du retrait d'un message envoye pour tout le monde.",
+      "Les alertes courriel de messages securises pour le personnel utilisent maintenant le nom du participant dans le dossier lorsque le nom du compte portail est une adresse courriel.",
+      "Les alertes de revision en deux etapes couvrent maintenant les propositions d'intervention envoyees au gestionnaire regional et celles retournees par le decideur pour changements."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260705-two-step-review-test-notification-fix",
+        "items": [
+          "Les nouvelles propositions d'intervention soumises pour revision envoient maintenant l'alerte `Pending Review` au gestionnaire regional.",
+          "Les demandes de changements du decideur sur les propositions d'intervention utilisent maintenant l'alerte de revision en deux etapes retournee au gestionnaire regional.",
+          "Le test TEST couvre maintenant les evaluations de demande, les nouvelles propositions d'intervention, les revisions d'intervention, les roles, les verrous de modification, les documents generes, les routes navigateur, les alertes et le nettoyage."
+        ]
+      },
+      {
+        "title": "Release 20260705-secure-message-batch",
+        "items": [
+          "La redaction d'un message securise demande maintenant au personnel de confirmer le participant du dossier avant l'envoi.",
+          "Les messages simples envoyes par le personnel aux participants peuvent etre retires avec une redaction qui preserve l'audit; les messages avec fichiers ou formulaires lies restent bloques jusqu'a la revision de ce processus.",
+          "Les alertes courriel pour les messages securises envoyes par un participant utilisent maintenant le nom du participant dans le dossier lorsque le nom du compte portail est une adresse courriel."
+        ]
+      },
       {
         "title": "Release 20260626-rm-two-step-role-matrix-prod",
         "items": [
@@ -58,22 +78,6 @@ const publicReleaseNotes = {
           "Les coordonnateurs ISET et les gestionnaires regionaux sont les seuls roles qui peuvent demarrer le processus de revision en deux etapes; les administrateurs NWAC et les administrateurs systeme restent limites a l'etape de decision finale.",
           "Le processus rejette maintenant les soumissionnaires non autorises avant d'enregistrer des interventions comme soumises, ce qui evite de laisser des elements soumis sans ligne d'audit de revision.",
           "La version a ete testee avec les quatre vrais roles PATH et avec des tests navigateur pour les evaluations de demande, les nouvelles propositions d'intervention et les amendements d'intervention."
-        ]
-      },
-      {
-        "title": "Release 20260624-rm-draft-edit-hotfix",
-        "items": [
-          "Les gestionnaires regionaux peuvent de nouveau modifier une evaluation de demande tant que la demande est encore In Review et n'a pas ete soumise dans le processus de revision en deux etapes.",
-          "Les evaluations soumises restent en lecture seule pour les gestionnaires regionaux et continuent de passer par les actions de revision du gestionnaire regional."
-        ]
-      },
-      {
-        "title": "Release 20260622-path-bugfix-patch",
-        "items": [
-          "Les lignes en retard conservent maintenant le resultat EI enregistre; les dossiers en retard pour l'evaluation ou le suivi ne sont plus marques `Awaiting EI Validation` sauf si le statut EI manque vraiment.",
-          "Soumettre de nouveau un Financial Overview deja signe ne cree plus un autre PDF signe actif et ne remplace plus l'instantane de version signe.",
-          "Les dossiers fermes et les demandes terminees ne gardent plus de demandes de documents ou rappels actifs apres leur etat final.",
-          "Les demandes approuvees et terminees conservent maintenant le resultat de decision approuve lorsque la recommandation d'evaluation et la revision finale concordent."
         ]
       }
     ],

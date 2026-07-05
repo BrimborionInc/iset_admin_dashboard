@@ -23,6 +23,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
 - 2026-07-05 | Release TBD | Ops/Release Safety | PROD deployment guard | PROD app deploys now stop before mutation when the packaged admin, portal, or shared source tree is dirty. | Emergency dirty-source deploys require an explicit `--allow-dirty --dirty-reason` override and the reason is recorded in the deploy manifest.
+- 2026-07-05 | Release 20260705-two-step-review-test-notification-fix | Fix/Notifications | Two-step review alerts | TEST two-step review notification handling now covers new intervention proposal submission into Regional Manager review and Decision Maker change requests on intervention proposals. | The full TEST two-step workflow smoke checks application assessments, new intervention proposals, intervention revisions, role guards, edit locks, generated documents, browser routes, notification routing, and cleanup.
 - 2026-07-05 | Release TBD | UX/Secure Messaging | Staff message withdrawal | Staff secure messages now distinguish local mailbox cleanup from withdrawing a sent message. | Plain staff-to-applicant messages can be explicitly withdrawn with audit-preserving redaction, while messages with linked files or signing requests fail closed until an artifact-aware path is reviewed. Staff compose also requires recipient/case confirmation before send.
 - 2026-07-05 | Release TBD | Fix/Notifications | Applicant secure-message staff emails | Applicant-origin secure-message alerts now resolve the applicant name from the owned client/application/case record before falling back to account display name or email. | This prevents staff email subjects such as `New secure message from ...` from showing the applicant's email address when the portal account name is email-shaped.
 - 2026-07-05 | Release TBD | QA/Approvals | Two-step review release gate | Two-step review tests now use the business role/status matrix for ISET Coordinators, Regional Managers, and NWAC Administrators across application assessments, new intervention proposals, and intervention amendments. | System Administrator behavior is treated as technical support only and staff-facing decision wording now says Decision Maker.
@@ -443,8 +444,15 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Staff secure messages now distinguish moving a message out of your own mailbox from withdrawing a sent message for everyone.
 - Secure-message email alerts for staff now use the applicant name from the file record when the portal account name is an email address.
+- Two-step review alerts now cover intervention proposals entering Regional Manager review and intervention proposals returned by the Decision Maker for changes.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260705-two-step-review-test-notification-fix
+
+- New intervention proposals submitted for review now send the Regional Manager `Pending Review` bell alert.
+- Decision Maker change requests on intervention proposals now use the two-step review change-request alert routed back to the Regional Manager.
+- The TEST smoke now covers application assessments, new intervention proposals, intervention revisions, role guards, edit locks, generated documents, browser routes, notification routing, and cleanup.
 
 #### Release 20260705-secure-message-batch
 
@@ -459,11 +467,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - The workflow now rejects invalid starters before saving submitted intervention rows, preventing submitted items from being left without review workflow audit rows.
 - The release was tested with the four actual PATH roles and with browser workflow smokes for application assessments, new intervention proposals, and intervention amendments.
 
-#### Release 20260624-rm-draft-edit-hotfix
-
-- Regional Managers can again edit application assessments while the application is still In Review and has not been submitted into the two-step review workflow.
-- Submitted assessments remain read-only for Regional Managers and continue to move through the Regional Manager review actions.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
@@ -472,8 +475,15 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Les messages securises du personnel distinguent maintenant le nettoyage de sa propre boite aux lettres du retrait d'un message envoye pour tout le monde.
 - Les alertes courriel de messages securises pour le personnel utilisent maintenant le nom du participant dans le dossier lorsque le nom du compte portail est une adresse courriel.
+- Les alertes de revision en deux etapes couvrent maintenant les propositions d'intervention envoyees au gestionnaire regional et celles retournees par le decideur pour changements.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260705-two-step-review-test-notification-fix
+
+- Les nouvelles propositions d'intervention soumises pour revision envoient maintenant l'alerte `Pending Review` au gestionnaire regional.
+- Les demandes de changements du decideur sur les propositions d'intervention utilisent maintenant l'alerte de revision en deux etapes retournee au gestionnaire regional.
+- Le test TEST couvre maintenant les evaluations de demande, les nouvelles propositions d'intervention, les revisions d'intervention, les roles, les verrous de modification, les documents generes, les routes navigateur, les alertes et le nettoyage.
 
 #### Release 20260705-secure-message-batch
 
@@ -487,11 +497,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les coordonnateurs ISET et les gestionnaires regionaux sont les seuls roles qui peuvent demarrer le processus de revision en deux etapes; les administrateurs NWAC et les administrateurs systeme restent limites a l'etape de decision finale.
 - Le processus rejette maintenant les soumissionnaires non autorises avant d'enregistrer des interventions comme soumises, ce qui evite de laisser des elements soumis sans ligne d'audit de revision.
 - La version a ete testee avec les quatre vrais roles PATH et avec des tests navigateur pour les evaluations de demande, les nouvelles propositions d'intervention et les amendements d'intervention.
-
-#### Release 20260624-rm-draft-edit-hotfix
-
-- Les gestionnaires regionaux peuvent de nouveau modifier une evaluation de demande tant que la demande est encore In Review et n'a pas ete soumise dans le processus de revision en deux etapes.
-- Les evaluations soumises restent en lecture seule pour les gestionnaires regionaux et continuent de passer par les actions de revision du gestionnaire regional.
 
 ### Problemes connus (brouillon - FR)
 

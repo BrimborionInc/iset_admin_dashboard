@@ -1,10 +1,10 @@
 # Browser Workflow Smoke Automation
 
-Status: current guidance from the 2026-05-08/09 application-assessment containment release, updated with the 2026-06-11 manual-intake and app-shell browser-smoke coverage.
+Status: current guidance from the 2026-05-08/09 application-assessment containment release, updated with the 2026-07-05 live TEST two-step review workflow smoke.
 
 Audience: Codex threads and developers building or rehearsing browser-level workflow smokes for PATH.
 
-Last Updated: 2026-06-11
+Last Updated: 2026-07-05
 
 ## Purpose
 
@@ -46,6 +46,19 @@ The core lesson from the repeat-application assessment release is that browser t
 - If the public TEST ALB blocks the Codex host, a deployed-browser smoke can still be useful by loading the deployed frontend origin and routing/intercepting API calls to the instance-local backend through SSM or localhost on the target instance. Record this explicitly, because it proves the deployed bundle plus deployed backend, but not public internet routing from Codex.
 - TEST deliberately disables SES email. Browser smokes for approval-letter workflows should not click real send actions unless the environment and recipient are intentionally approved.
 - PROD browser smokes must avoid sending real applicant email unless Bill explicitly approves that exact send. Prefer read-only or draft/save-safe assertions in PROD.
+
+## Live TEST Two-Step Review Reference
+
+The Regional Manager two-step review workflow has a live TEST smoke:
+
+- Script: `scripts/two-step-review-test-smoke.js`
+- Typical command: `node scripts/two-step-review-test-smoke.js --profile nwac-test --region ca-central-1 --json`
+
+This smoke creates disposable TEST Cognito staff users for ISET Coordinator, Regional Manager, and NWAC Administrator, seeds synthetic DB fixtures on the deployed TEST host through SSM, authenticates with real Cognito tokens, drives the deployed backend and deployed browser bundle through localhost on the app instance, and then removes Cognito users, DB rows, generated documents, notifications, and S3 objects. The harness discovers the current online `nwac-test-app` instance instead of hard-coding an instance ID; this matters because TEST is a one-instance ASG and replacement can change the host ID.
+
+Coverage as of 2026-07-05 includes runtime flag/config checks, real role hydration, application assessment workflow, new intervention proposal workflow, intervention revision workflow, RM-as-submitter proposal start, NWAC start/final-decision guards, edit locks, browser route text, generated assessment PDFs, normalized intervention-document links, notification routing for RM review/final-decision/change-request handoffs, invalid-stage checks, and browser console/API error capture. The passing TEST run used SSM command `8428df04-2235-46e6-9533-7187a7260ac3` on replacement host `i-052566d75e0214d00`; cleanup reported zero synthetic cases, applications, interventions, documents, notifications, staff profiles, and users.
+
+Implementation notes: the TEST EC2 host returned `403 Forbidden` for Hosted UI login from instance-local browser automation, so the smoke uses Cognito password auth tokens directly. Final-decision `rm_review_submitted_to_nwac` bell alerts are role-audience notifications for `NWAC Administrator`, not staff-specific rows, so smoke assertions should verify role audience for that event.
 
 ## Option B Reference Implementation
 

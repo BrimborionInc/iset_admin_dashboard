@@ -1,15 +1,15 @@
 const buildInfo = {
   "packageVersion": "0.1.0",
-  "releaseId": "",
+  "releaseId": "20260705-two-step-review-test-notification-fix",
   "buildTarget": "production",
-  "builtAt": "2026-07-05T11:26:17.883Z",
-  "gitCommit": "bdd0f9b9612392ba0faf90b5c87d22919ead4bc7",
-  "gitShort": "bdd0f9b9",
+  "builtAt": "2026-07-05T15:44:15.490Z",
+  "gitCommit": "4bcc22a7afeeda21e760e2749f4ff480d89f9426",
+  "gitShort": "4bcc22a7",
   "gitDirty": true,
-  "publicReleaseLabel": "Current build",
+  "publicReleaseLabel": "Release 20260705-two-step-review-test-notification-fix",
   "publicReleaseDateEn": "5th July 2026",
   "publicReleaseDateFr": "5 juillet 2026",
-  "displayLabel": "build production | bdd0f9b9-dirty | production"
+  "displayLabel": "release 20260705-two-step-review-test-notification-fix | 4bcc22a7-dirty"
 };
 
 export default buildInfo;
