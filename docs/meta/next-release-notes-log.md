@@ -23,6 +23,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
 - 2026-07-05 | Release TBD | Ops/Release Safety | PROD deployment guard | PROD app deploys now stop before mutation when the packaged admin, portal, or shared source tree is dirty. | Emergency dirty-source deploys require an explicit `--allow-dirty --dirty-reason` override and the reason is recorded in the deploy manifest.
+- 2026-07-05 | Release TBD | UX/Secure Messaging | Staff message withdrawal | Staff secure messages now distinguish local mailbox cleanup from withdrawing a sent message. | Plain staff-to-applicant messages can be explicitly withdrawn with audit-preserving redaction, while messages with linked files or signing requests fail closed until an artifact-aware path is reviewed. Staff compose also requires recipient/case confirmation before send.
+- 2026-07-05 | Release TBD | Fix/Notifications | Applicant secure-message staff emails | Applicant-origin secure-message alerts now resolve the applicant name from the owned client/application/case record before falling back to account display name or email. | This prevents staff email subjects such as `New secure message from ...` from showing the applicant's email address when the portal account name is email-shaped.
 - 2026-07-05 | Release TBD | QA/Approvals | Two-step review release gate | Two-step review tests now use the business role/status matrix for ISET Coordinators, Regional Managers, and NWAC Administrators across application assessments, new intervention proposals, and intervention amendments. | System Administrator behavior is treated as technical support only and staff-facing decision wording now says Decision Maker.
 - 2026-07-05 | Release 20260705-two-step-review-prevention | Fix/Documents | Intervention review packets | Generated intervention assessment PDFs now create the normalized intervention-document link used by intervention-scoped supporting-document views. | PROD audit found two existing intervention proposal workflows whose packet PDFs existed but lacked the join-table links; Bill approved and Codex applied guarded repair SQL for the five affected links.
 - 2026-07-05 | Release 20260705-two-step-review-prevention | Fix/Approvals | Intervention proposal timestamps | Final decision updates no longer overwrite the original submitted-for-review timestamp on intervention proposal compatibility rows. | The review workflow timestamp remains authoritative; Bill approved and Codex applied guarded PROD repair SQL for the one affected proposal timestamp.
@@ -439,9 +441,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Staff secure messages now distinguish moving a message out of your own mailbox from withdrawing a sent message for everyone.
 - Regional Managers who submit their own draft assessments, intervention proposals, or intervention amendments now enter the same Regional Manager review workflow as ISET Coordinator submissions.
 
 ### What Changed Packages (draft - EN)
+
+#### Release TBD secure-message batch
+
+- Staff compose now asks staff to confirm the case participant before sending a secure message.
+- Plain staff-to-applicant messages can be withdrawn with audit-preserving redaction; messages with linked files or forms stay blocked from withdrawal until that artifact-aware workflow is reviewed.
+- Applicant-origin secure-message email alerts now use the applicant name from the file record when the portal account name is an email address.
 
 #### Release 20260626-rm-two-step-role-matrix-prod
 
@@ -468,9 +477,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
+- Les messages securises du personnel distinguent maintenant le nettoyage de sa propre boite aux lettres du retrait d'un message envoye pour tout le monde.
 - Les gestionnaires regionaux qui soumettent leurs propres brouillons d'evaluation, de proposition d'intervention ou d'amendement passent maintenant par le meme processus de revision du gestionnaire regional que les soumissions des coordonnateurs ISET.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release TBD secure-message batch
+
+- La redaction d'un message securise demande maintenant au personnel de confirmer le participant du dossier avant l'envoi.
+- Les messages simples envoyes par le personnel aux participants peuvent etre retires avec une redaction qui preserve l'audit; les messages avec fichiers ou formulaires lies restent bloques jusqu'a la revision de ce processus.
+- Les alertes courriel pour les messages securises envoyes par un participant utilisent maintenant le nom du participant dans le dossier lorsque le nom du compte portail est une adresse courriel.
 
 #### Release 20260626-rm-two-step-role-matrix-prod
 

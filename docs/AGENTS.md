@@ -217,6 +217,7 @@ Treat this file as the current project context for this repo. If the user refere
 - Query Editor dashboard reference: `docs/dashboards/query-editor-dashboard.md`
 - Environment DB access from Codex/WSL: `docs/ops/agent-operational-access.md`
 - PROD repair owner-notification log: `docs/ops/prod-repair-notification-log.md`
+- Current PROD feedback batch repair tracker: `docs/ops/prod-feedback-batch-repair-tracker-20260705.md`
 - PROD Aurora provisioned downsize runbook: `docs/ops/runbooks/prod-aurora-provisioned-downsize.md`
 - PROD app instance right-size runbook: `docs/ops/runbooks/prod-app-instance-rightsize.md`
 - PROD NAT gateway consolidation runbook: `docs/ops/runbooks/prod-nat-gateway-consolidation.md`
