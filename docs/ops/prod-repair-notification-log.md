@@ -34,6 +34,7 @@ Evidence:
 - Post-repair systemic audit SSM command `c6ee10df-3f48-4c5e-b226-0707d4b65180`: no workflow/status, missing packet document, or proposal timestamp mismatch rows returned.
 - Prevention release `20260705-two-step-review-prevention` deployed to PROD on 2026-07-05 as admin-only with no DB mutation. ASG refresh `56e2371d-7fce-4f78-8d7c-257272bfa177` replaced the admin host with `i-0307e0c730b98a7bc`; deployed-source SSM command `a1129867-9c9e-42cd-89ef-4635fdf12824` confirmed release id and both prevention markers.
 - Post-deploy systemic audit SSM command `7405d66e-0bf6-4076-808d-114b562715e7`: returned only runtime flag and workflow stage-count sections, with no known mismatch rows.
+- Feedback reconciliation SQL `sql/ops/prod-feedback-149-resolved-two-step-prevention-20260705.sql` ran through SSM command `84b08c90-55c2-499e-8691-a1692fb1e674` and moved report `#149` (`Pending Decision - Kitson/Wallace`) from `triaging` to `resolved` with an internal note tying Madison's report to the repaired Kitson/Wallace records and the deployed prevention release.
 
 Prevention status:
 
@@ -41,4 +42,4 @@ Prevention status:
 
 Notification note:
 
-- Suggested owner message later: PATH found and repaired two intervention review packet records where the generated PDFs existed but were not attached to the intervention-specific document view; one related submitted timestamp was also corrected to the original submit-for-review time. No staff action is expected unless they still see a missing packet/document on the affected case.
+- Suggested owner message later: PATH found and repaired two intervention review packet records where the generated PDFs existed but were not attached to the intervention-specific document view; one related submitted timestamp was also corrected to the original submit-for-review time. Madison's report `#149` has been marked resolved because Kitson is correctly at Decision Maker review, Wallace is final-approved, and the prevention release is live. No staff action is expected unless they still see a missing packet/document or a current Decision Maker action blocked on the affected case.
