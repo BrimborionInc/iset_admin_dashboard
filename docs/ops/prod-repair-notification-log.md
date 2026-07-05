@@ -6,6 +6,41 @@ Last Updated: 2026-07-05
 
 Use this log for repairs that may be externally invisible to staff but should be available for later owner communication. Keep entries concise, evidence-based, and linked to the exact scripts or reports where possible. Do not use this file as approval to mutate PROD; follow the PROD repair rules in `docs/ops/agent-operational-access.md`.
 
+## 2026-07-05 - Feedback #154 wrong-recipient secure-message containment
+
+Status: PROD containment applied; privacy/business follow-up and product fix pending.
+
+Reason: feedback report `#154` (`Deleted secure message`) described a Regional Manager sending a secure message to the wrong participant and deleting it immediately from her own view. Live triage confirmed the delete action only removed the sender mailbox copy; the recipient copy remained in the participant inbox and had been read. The current code can also expose master `messages.subject` / `messages.body` in staff case-thread views, so mailbox-only hiding was not sufficient.
+
+Affected records and owners:
+
+| Item | Value |
+| --- | --- |
+| Feedback report | `#154` |
+| Message | `1128` |
+| Case | `129` / `ISET-20260429-AF259F` |
+| Sender | Emilie Marion (`emarion@nwac.ca`), Regional Manager |
+| Wrong recipient | Molly Hink (`molly.hink@hotmail.com`) |
+| Event | `7ec162a2-5624-4cc3-b942-248c5177e518` |
+
+Repair applied:
+
+- Replaced the live message subject/body with a neutral withdrawal notice and marked the master message `deleted=1`, `status='archived'`.
+- Moved both sender and recipient `message_item` rows to `folder='deleted'` while preserving the rows and timestamps for audit evidence.
+- Redacted the central `staff_secure_message_sent` event subject to `[withdrawn] Message withdrawn`.
+- Added a PROD feedback note to report `#154`; the report remains `in_progress` pending privacy/business follow-up and a product fix for true recall/delete-for-everyone plus stronger recipient confirmation.
+
+Evidence:
+
+- Preview script: `sql/ops/prod-feedback-154-secure-message-containment-preview-20260705.sql`.
+- Apply script: `sql/ops/prod-feedback-154-secure-message-containment-apply-20260705.sql`.
+- Preview SSM command `76528c5b-b886-4735-8c5a-5f829c1f2ad9`: message, mailbox, related-count, and event guards all returned `ready`; related attachment, signing-request, and internal-notification counts were all `0`.
+- Apply SSM command `d290da6c-2078-4e92-96d3-9163f05e9b68`: all guards returned ready; live message `1128` now has subject `Message withdrawn` and neutral body text; sender and recipient mailbox rows are deleted; event subject is redacted; feedback note was inserted.
+
+Notification note:
+
+- Suggested reporter message: PATH removed the mistakenly sent secure message content from the live application, replaced it with a neutral withdrawal notice, and confirmed there were no attachments or signing requests linked to it. The system record has been preserved for audit purposes. Because the message had already reached the recipient's inbox and was marked read before containment, PATH cannot say it was unseen; this should be handled as a privacy/business follow-up separately from the technical containment.
+
 ## 2026-07-05 - Two-step review intervention packet repair
 
 Status: PROD data repair and prevention deploy applied; owner notification pending.
