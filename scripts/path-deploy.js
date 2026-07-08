@@ -686,7 +686,11 @@ function copyDirectoryIfExists(source, destination) {
   }
   fs.rmSync(destination, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(destination), { recursive: true });
-  fs.cpSync(source, destination, { recursive: true, force: true });
+  fs.cpSync(source, destination, {
+    recursive: true,
+    force: true,
+    filter: src => path.basename(src) !== '.git',
+  });
   return true;
 }
 

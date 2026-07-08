@@ -2,19 +2,22 @@
 
 Purpose: durable local-development handoff for the Linux filesystem checkout used by Codex/VS Code.
 
-Last updated: 2026-06-15
+Last updated: 2026-07-08
 
 ## Current Local Checkout
 
 - Active WSL2 Ubuntu coding checkout: `/home/bill/ISET/admin-dashboard`
 - Active WSL2 Ubuntu public portal checkout: `/home/bill/ISET/ISET-intake`
+- Active WSL2 Ubuntu shared runtime checkout: `/home/bill/ISET/shared`
 - Active WSL2 Ubuntu Sage Intacct mock checkout: `/home/bill/ISET/intacct-mock-service`
 - Older Windows-mounted checkout: stale/archive only if present; do not use for deploy decisions
 - DEV MySQL host from WSL: `172.26.176.1`
 
 Use the `/home/bill/ISET/*` copies for normal local coding, Git-heavy work, VS Code/Codex sessions, and TEST deployments. Do not reopen a Windows-mounted `/mnt/x/ISET/admin-dashboard` copy for day-to-day development or deployment unless the task explicitly asks to inspect a stale archive.
 
-TEST `path:deploy` is now WSL-native: run it from `/home/bill/ISET/admin-dashboard`, and it packages the WSL admin, portal, and shared trees. The legacy PowerShell component deploy scripts remain as lower-level historical references, but Windows `npm.cmd` is not reliable from a `\\wsl.localhost\...` working directory. PROD app deploy from WSL still needs a dedicated port/revalidation before the next PROD app rollout; do not resurrect old `X:\ISET` instructions as a shortcut.
+TEST and PROD `path:deploy` are WSL-native: run them from `/home/bill/ISET/admin-dashboard`, and the orchestrator packages the WSL admin, portal, and shared trees. The legacy PowerShell component deploy scripts remain as lower-level historical references, but Windows `npm.cmd` is not reliable from a `\\wsl.localhost\...` working directory; do not resurrect old `X:\ISET` instructions as a shortcut.
+
+`/home/bill/ISET/shared` is now its own local Git repo for shared runtime code consumed by both apps. It should be clean before deploys. At creation time it did not yet have a GitHub remote, so it has local dirty-state/history protection but still needs a remote for off-machine backup/recovery.
 
 ## Opening VS Code
 
