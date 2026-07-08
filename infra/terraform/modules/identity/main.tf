@@ -32,6 +32,15 @@ resource "aws_cognito_user_pool" "admin" {
     }
   }
 
+  admin_create_user_config {
+    allow_admin_create_user_only = true
+
+    invite_message_template {
+      email_subject = var.admin_invite_email_subject
+      email_message = var.admin_invite_email_message
+    }
+  }
+
   email_configuration {
     email_sending_account  = var.use_cognito_managed_emails ? "COGNITO_DEFAULT" : "DEVELOPER"
     reply_to_email_address = length(var.ses_sender_email) > 0 ? var.ses_sender_email : null

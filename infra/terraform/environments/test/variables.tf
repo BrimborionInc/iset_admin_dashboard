@@ -114,6 +114,35 @@ variable "use_cognito_managed_emails" {
   default     = true
 }
 
+variable "admin_invite_email_subject" {
+  description = "Subject for Cognito admin-created staff invitations."
+  type        = string
+  default     = "NWAC PATH admin dashboard access"
+}
+
+variable "admin_invite_email_message" {
+  description = "Plain-text Cognito admin-created staff invitation body. Must include {username} and {####}."
+  type        = string
+  default     = <<EOT
+You have been invited to access the NWAC PATH admin dashboard.
+
+Environment: Test and Training
+
+Dashboard
+https://nwac-console-test.awentech.ca/
+
+Username
+{username}
+
+Temporary password
+{####}
+
+When you first sign in, you will be asked to choose a new password. This temporary password expires in 7 days.
+
+If you were not expecting this account, contact your PATH administrator.
+EOT
+}
+
 variable "admin_mfa_configuration" {
   description = "Admin pool MFA configuration."
   type        = string

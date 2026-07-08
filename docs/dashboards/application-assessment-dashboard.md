@@ -40,6 +40,7 @@ Operational dashboard for reviewing and adjudicating individual ISET application
 - The `Manage ISET Applications` table `Overdue` column and the `Application Overview` widget use the same shared frontend helper: `src/utils/applicationSla.js`.
 - Current milestone model remains submission-based. The stage changes with status/eligibility, but due dates are still measured from the original application submission/creation timestamp until a dedicated stage-timestamp model exists.
 - `Awaiting EI Validation` is not a standalone stored application status. It is a derived qualifier driven by an assigned file with no recorded `assessment_esdc_eligibility`.
+- The EI status dropdown remains the correction surface for authorized users. Regional Managers, NWAC Administrators, and System Administrators may correct EI status after submission while the application is not final/locked; `/api/cases/:id` blocks the change once action-plan or intervention dependencies exist.
 
 ## Local Browser Smokes
 

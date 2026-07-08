@@ -125,6 +125,8 @@ module "identity" {
   portal_logout_urls         = var.portal_logout_urls
   ses_sender_email           = var.ses_sender_email
   use_cognito_managed_emails = var.use_cognito_managed_emails
+  admin_invite_email_subject = var.admin_invite_email_subject
+  admin_invite_email_message = var.admin_invite_email_message
   admin_mfa_configuration    = var.admin_mfa_configuration
   portal_mfa_configuration   = var.portal_mfa_configuration
   tags                       = local.tags

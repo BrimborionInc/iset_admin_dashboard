@@ -66,6 +66,32 @@ variable "use_cognito_managed_emails" {
   default     = true
 }
 
+variable "admin_invite_email_subject" {
+  type        = string
+  description = "Subject for Cognito admin-created staff invitations."
+  default     = "NWAC PATH admin dashboard access"
+}
+
+variable "admin_invite_email_message" {
+  type        = string
+  description = "Plain-text Cognito admin-created staff invitation body. Must include {username} and {####}."
+  default     = <<EOT
+You have been invited to access the NWAC PATH admin dashboard.
+
+Environment: Development
+
+Username
+{username}
+
+Temporary password
+{####}
+
+When you first sign in, you will be asked to choose a new password. This temporary password expires in 7 days.
+
+If you were not expecting this account, contact your PATH administrator.
+EOT
+}
+
 variable "log_retention_days" {
   type        = number
   description = "CloudWatch logs retention for Lambda"

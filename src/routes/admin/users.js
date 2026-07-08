@@ -14,6 +14,7 @@ const {
   AdminDisableUserCommand,
   AdminEnableUserCommand,
   AdminGetUserCommand,
+  AdminDeleteUserCommand,
   AdminResetUserPasswordCommand
 } = require('@aws-sdk/client-cognito-identity-provider');
 
@@ -52,6 +53,16 @@ function hasMfaEnabled(user) {
   if (preferred && String(preferred).toLowerCase() !== 'nomfa') return true;
   const legacyOptions = Array.isArray(user.MFAOptions) ? user.MFAOptions : [];
   return legacyOptions.length > 0;
+}
+
+function buildCreateUserAttributes(email, name) {
+  const attributes = [
+    { Name: 'email', Value: email },
+    { Name: 'email_verified', Value: 'true' },
+  ];
+  const safeName = typeof name === 'string' ? name.trim() : '';
+  if (safeName) attributes.push({ Name: 'name', Value: safeName });
+  return attributes;
 }
 
 // Guard matrix
@@ -187,6 +198,44 @@ async function syncAdminUserRegionAssignments(pool, { cognitoSub, email, roleKey
   };
 }
 
+async function syncAdminUserRegionAssignmentsForCreate(pool, args) {
+  if (!pool || typeof pool.getConnection !== 'function') {
+    return syncAdminUserRegionAssignments(pool, args);
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const result = await syncAdminUserRegionAssignments(connection, args);
+    await connection.commit();
+    return result;
+  } catch (err) {
+    try {
+      await connection.rollback();
+    } catch (rollbackErr) {
+      console.error('[admin-users] staff profile transaction rollback failed:', rollbackErr?.message || rollbackErr);
+    }
+    throw err;
+  } finally {
+    connection.release();
+  }
+}
+
+async function cleanupCreatedStaffProfile(pool, cognitoSub) {
+  if (!pool || !cognitoSub || typeof pool.query !== 'function') return;
+  try {
+    const result = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub = ? LIMIT 1', [cognitoSub]);
+    const rows = Array.isArray(result?.[0]) ? result[0] : [];
+    const row = rows[0] || null;
+    const staffProfileId = row?.id || null;
+    if (!staffProfileId) return;
+    await pool.query('DELETE FROM staff_region WHERE staff_profile_id = ?', [staffProfileId]);
+    await pool.query('DELETE FROM staff_profiles WHERE id = ?', [staffProfileId]);
+  } catch (err) {
+    console.error('[admin-users] staff profile cleanup failed after create error:', err?.message || err);
+  }
+}
+
 function canCreateRole(actorKey, targetKey) {
   const set = CAN_CREATE[actorKey];
   return !!set && set.has(targetKey);
@@ -295,6 +344,19 @@ async function syncStaffProfilePrimaryRole(pool, cognitoSub, roleKey) {
     );
   } catch (err) {
     console.warn('[admin-users] staff primary role sync failed (non-fatal):', err?.message || err);
+  }
+}
+
+async function rollbackCreatedAdminUser(client, username, cause) {
+  if (!client || !username) return;
+  try {
+    await client.send(new AdminDeleteUserCommand({ UserPoolId: POOL_ID, Username: username }));
+  } catch (rollbackErr) {
+    console.error('[admin-users] rollback delete failed after create error:', {
+      username,
+      cause: cause?.message || cause,
+      rollbackError: rollbackErr?.message || rollbackErr,
+    });
   }
 }
 
@@ -651,24 +713,32 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
       }
 
       const client = getClient();
+      const primaryRole = mapAdminRoleKeyToStaffPrimaryRole(targetKey);
+      const pool = getDbPoolFromRequest(req);
+      if (primaryRole && !pool) {
+        throw buildHttpError(503, 'db_unavailable', 'Database connection is required to create staff users');
+      }
+      let createdUsername = null;
       const createCmd = new AdminCreateUserCommand({
         UserPoolId: POOL_ID,
         Username: email,
-        UserAttributes: [
-          { Name: 'email', Value: email },
-          { Name: 'email_verified', Value: 'true' },
-        ],
-        // If suppressInvite is true we keep legacy behavior (no Cognito email). Otherwise allow
-        // Cognito to send its standard invitation email with a temporary password.
+        UserAttributes: buildCreateUserAttributes(email, name),
+        // Create silently first. We only send the Cognito invitation after DB-backed
+        // staff profile and region access are successfully persisted.
         DesiredDeliveryMediums: ['EMAIL'],
-        ...(suppressInvite ? { MessageAction: 'SUPPRESS' } : {}),
+        MessageAction: 'SUPPRESS',
       });
       const createResp = await client.send(createCmd);
-      await client.send(new AdminAddUserToGroupCommand({ UserPoolId: POOL_ID, Username: email, GroupName: targetKey }));
+      createdUsername = createResp?.User?.Username || email;
+      let createdCognitoSub = null;
+      try {
+        await client.send(new AdminAddUserToGroupCommand({ UserPoolId: POOL_ID, Username: email, GroupName: targetKey }));
+      } catch (groupErr) {
+        await rollbackCreatedAdminUser(client, createdUsername, groupErr);
+        throw groupErr;
+      }
 
-      const primaryRole = mapAdminRoleKeyToStaffPrimaryRole(targetKey);
-      const pool = getDbPoolFromRequest(req);
-      if (pool && primaryRole) {
+      if (primaryRole) {
         const createdAttributes = createResp?.User?.Attributes;
         const attr = Array.isArray(createdAttributes)
           ? Object.fromEntries(createdAttributes.map(a => [a.Name, a.Value]))
@@ -684,10 +754,11 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
             console.warn('[admin-users] staff_profiles upsert skipped (AdminGetUser failed):', e?.message || e);
           }
         }
+        createdCognitoSub = cognitoSub || null;
 
         if (cognitoSub) {
           try {
-            await syncAdminUserRegionAssignments(pool, {
+            await syncAdminUserRegionAssignmentsForCreate(pool, {
               cognitoSub,
               email,
               roleKey: targetKey,
@@ -696,10 +767,30 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
               displayName: display_name,
             });
           } catch (e) {
-            console.warn('[admin-users] staff_profiles upsert failed (non-fatal):', e?.message || e);
+            await cleanupCreatedStaffProfile(pool, createdCognitoSub);
+            await rollbackCreatedAdminUser(client, createdUsername, e);
+            throw e;
           }
         } else {
-          console.warn('[admin-users] staff_profiles upsert skipped (missing cognito sub for new user)');
+          const syncErr = buildHttpError(409, 'staff_profile_sync_failed', 'Cannot map this Cognito user to a staff profile');
+          await rollbackCreatedAdminUser(client, createdUsername, syncErr);
+          throw syncErr;
+        }
+      }
+
+      if (!suppressInvite) {
+        try {
+          await client.send(new AdminCreateUserCommand({
+            UserPoolId: POOL_ID,
+            Username: email,
+            MessageAction: 'RESEND',
+            DesiredDeliveryMediums: ['EMAIL'],
+            UserAttributes: buildCreateUserAttributes(email, name),
+          }));
+        } catch (inviteErr) {
+          await cleanupCreatedStaffProfile(pool, createdCognitoSub);
+          await rollbackCreatedAdminUser(client, createdUsername, inviteErr);
+          throw inviteErr;
         }
       }
 

@@ -4636,9 +4636,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const canManageEligibilityDuringAssessment =
     canManageEiEligibility &&
     !baseAssessmentLocked &&
-    !isDeclarationGateActive &&
-    !isPendingApprovalStatus &&
-    !hasReviewWorkflow;
+    !isDeclarationGateActive;
   const isAssessmentDisabled =
     baseAssessmentLocked ||
     !canEditAssessmentBody ||
@@ -6632,7 +6630,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         body: JSON.stringify(payload)
       });
       const result = await res.json().catch(() => ({}));
-      if (res.status === 409) {
+      if (res.status === 409 && result?.error === 'row_version_conflict') {
         const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
         if (latestVersion) updateRowVersion(latestVersion);
         if (typeof actions?.refreshCaseData === 'function') {

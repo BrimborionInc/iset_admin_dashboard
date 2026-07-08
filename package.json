@@ -102,6 +102,7 @@
     "smoke:modify-component:browser": "node scripts/modify-component-editor-browser-smoke.js",
     "smoke:application-overview:browser": "node scripts/application-overview-docs-requested-browser-smoke.js",
     "smoke:application-workspace:browser": "node scripts/application-workspace-dashboard-browser-smoke.js",
+    "smoke:application-assessment:ei-correction:dev": "node scripts/application-assessment-ei-correction-dev-smoke.js",
     "smoke:application-assessment:workflow:browser": "node scripts/application-assessment-workflow-browser-smoke.js",
     "smoke:intervention-assessment:recall:browser": "node scripts/intervention-assessment-recall-browser-smoke.js",
     "smoke:intervention-assessment:workflow:browser": "node scripts/intervention-assessment-workflow-browser-smoke.js",

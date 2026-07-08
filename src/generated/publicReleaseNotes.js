@@ -1,19 +1,27 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-07-05T15:44:15.490Z",
-  "releaseId": "20260705-two-step-review-test-notification-fix",
-  "releaseLabel": "Release 20260705-two-step-review-test-notification-fix",
-  "releaseDateEn": "5th July 2026",
-  "releaseDateFr": "5 juillet 2026",
+  "generatedAt": "2026-07-08T09:44:26.391Z",
+  "releaseId": "20260708-admin-user-ei-notification-fix",
+  "releaseLabel": "Release 20260708-admin-user-ei-notification-fix",
+  "releaseDateEn": "8th July 2026",
+  "releaseDateFr": "8 juillet 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",
     "featuresHeading": "What changed",
     "features": [
-      "Staff secure messages now distinguish moving a message out of your own mailbox from withdrawing a sent message for everyone.",
-      "Secure-message email alerts for staff now use the applicant name from the file record when the portal account name is an email address.",
-      "Two-step review alerts now cover intervention proposals entering Regional Manager review and intervention proposals returned by the Decision Maker for changes."
+      "Staff setup emails are sent only after PATH saves the Cognito group and staff access.",
+      "Authorized managers and admins can correct EI status from Application Assessment after submission when it is safe to do so.",
+      "Applicant-related staff alerts now show applicant names when available instead of email-shaped account display names."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260708-admin-user-ei-notification-fix",
+        "items": [
+          "User Management now completes the PATH-side staff access setup before sending the Cognito temporary-password email, so new regional managers are not invited before their access exists.",
+          "Application Assessment now allows authorized managers and admins to correct EI status after submission when no dependent action plan or intervention work would be invalidated.",
+          "Staff notifications about applicant files now prefer the applicant's first and last name when PATH has it, with the registered email kept as the fallback."
+        ]
+      },
       {
         "title": "Release 20260705-two-step-review-test-notification-fix",
         "items": [
@@ -29,15 +37,6 @@ const publicReleaseNotes = {
           "Plain staff-to-applicant messages can be withdrawn with audit-preserving redaction; messages with linked files or forms stay blocked from withdrawal until that artifact-aware workflow is reviewed.",
           "Applicant-origin secure-message email alerts now use the applicant name from the file record when the portal account name is an email address."
         ]
-      },
-      {
-        "title": "Release 20260626-rm-two-step-role-matrix-prod",
-        "items": [
-          "Regional Managers who are acting as submitters can submit application assessments, new intervention proposals, and intervention amendments into Regional Manager review.",
-          "ISET Coordinators and Regional Managers are the only roles that can start the two-step review workflow; NWAC Administrators and System Administrators remain final-decision actors only.",
-          "The workflow now rejects invalid starters before saving submitted intervention rows, preventing submitted items from being left without review workflow audit rows.",
-          "The release was tested with the four actual PATH roles and with browser workflow smokes for application assessments, new intervention proposals, and intervention amendments."
-        ]
       }
     ],
     "knownIssuesHeading": "Known Bugs",
@@ -50,11 +49,19 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
-      "Les messages securises du personnel distinguent maintenant le nettoyage de sa propre boite aux lettres du retrait d'un message envoye pour tout le monde.",
-      "Les alertes courriel de messages securises pour le personnel utilisent maintenant le nom du participant dans le dossier lorsque le nom du compte portail est une adresse courriel.",
-      "Les alertes de revision en deux etapes couvrent maintenant les propositions d'intervention envoyees au gestionnaire regional et celles retournees par le decideur pour changements."
+      "Les courriels de creation de compte du personnel sont envoyes seulement apres l'enregistrement du groupe Cognito et de l'acces PATH.",
+      "Les gestionnaires et administrateurs autorises peuvent corriger le statut AE dans Application Assessment apres soumission lorsque c'est securitaire.",
+      "Les alertes du personnel qui concernent un participant affichent maintenant le nom du participant lorsque PATH le connait, avec l'adresse courriel comme solution de repli."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260708-admin-user-ei-notification-fix",
+        "items": [
+          "Gestion des utilisateurs termine maintenant la configuration d'acces PATH avant d'envoyer le courriel Cognito de mot de passe temporaire, pour eviter d'inviter un gestionnaire regional avant que son acces existe.",
+          "Application Assessment permet maintenant aux gestionnaires et administrateurs autorises de corriger le statut AE apres soumission lorsqu'aucun plan d'action ou travail d'intervention dependant ne serait invalide.",
+          "Les alertes du personnel a propos des dossiers participants preferent maintenant le prenom et le nom du participant lorsque PATH les connait, avec l'adresse courriel inscrite comme solution de repli."
+        ]
+      },
       {
         "title": "Release 20260705-two-step-review-test-notification-fix",
         "items": [
@@ -69,15 +76,6 @@ const publicReleaseNotes = {
           "La redaction d'un message securise demande maintenant au personnel de confirmer le participant du dossier avant l'envoi.",
           "Les messages simples envoyes par le personnel aux participants peuvent etre retires avec une redaction qui preserve l'audit; les messages avec fichiers ou formulaires lies restent bloques jusqu'a la revision de ce processus.",
           "Les alertes courriel pour les messages securises envoyes par un participant utilisent maintenant le nom du participant dans le dossier lorsque le nom du compte portail est une adresse courriel."
-        ]
-      },
-      {
-        "title": "Release 20260626-rm-two-step-role-matrix-prod",
-        "items": [
-          "Les gestionnaires regionaux qui agissent comme soumissionnaires peuvent soumettre des evaluations de demande, de nouvelles propositions d'intervention et des amendements d'intervention a la revision du gestionnaire regional.",
-          "Les coordonnateurs ISET et les gestionnaires regionaux sont les seuls roles qui peuvent demarrer le processus de revision en deux etapes; les administrateurs NWAC et les administrateurs systeme restent limites a l'etape de decision finale.",
-          "Le processus rejette maintenant les soumissionnaires non autorises avant d'enregistrer des interventions comme soumises, ce qui evite de laisser des elements soumis sans ligne d'audit de revision.",
-          "La version a ete testee avec les quatre vrais roles PATH et avec des tests navigateur pour les evaluations de demande, les nouvelles propositions d'intervention et les amendements d'intervention."
         ]
       }
     ],

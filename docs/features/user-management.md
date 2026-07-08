@@ -1,6 +1,6 @@
 # User Management Overview
 
-_Last updated: 10 June 2026_
+_Last updated: 7 July 2026_
 
 ## High-level flow
 
@@ -24,13 +24,15 @@ _Last updated: 10 June 2026_
 ### Actions available from the page
 * **Create user** - opens a modal requiring email + name + role (display name optional), optional region (for regional roles). On submit:
   - POST `/api/admin/users`
-  - Creates the Cognito user with `email_verified=true`, adds the user to the requested group, and persists staff-region access in the database-backed staff profile model.
+  - Creates the Cognito user silently with `email_verified=true` and the submitted `name`, adds the user to the requested group, persists staff-region access in the database-backed staff profile model, then sends the Cognito invitation.
   - Seeds `staff_profiles` with `name`/`display_name` at creation time (keyed by Cognito `sub`) to avoid NULL identity fields before first sign-in.
+  - If group assignment, DB-backed staff profile/region sync, or final invite resend fails, the backend attempts to delete the newly created Cognito user and returns an error instead of showing a false success.
   - The grid is optimistically updated, and an audit entry is appended.
 * **Disable / Enable** - calls `PATCH /api/admin/users/:username/disable|enable`. The toolbar enables these buttons only for rows in a matching state (`Enable` for disabled accounts, `Disable` for active/pending ones).
 * **Remove role** - `DELETE /api/admin/users/:username/role`. The backend removes all admin-role groups currently attached to the user so stray multi-group states are cleaned up.
 * **Force password reset** - `PATCH /api/admin/users/:username/force-reset`. This is intended for active accounts; users already in `FORCE_CHANGE_PASSWORD` should use `Resend invite` instead.
 * **Resend invite** - `POST /api/admin/users/:username/resend-invite`. This performs a real Cognito resend for users still in `FORCE_CHANGE_PASSWORD`, using Cognito `AdminCreateUser` with `MessageAction: RESEND`.
+* Staff setup emails use a PATH-specific Cognito admin-created-user invite template rather than the Cognito default "Your temporary password" copy. The template identifies NWAC PATH, includes a simple `Environment: ...` line, and puts the username and temporary password values on separate copyable lines. While staff pools remain on Cognito-managed email (`COGNITO_DEFAULT`), the visible sender can still be Amazon Cognito's default `verificationemail.com` sender; a branded From address requires switching Cognito email delivery to SES with a verified sender/domain.
 * **Change role** - opens a modal calling `PATCH /api/admin/users/:username/role`, removing all current admin-role groups and adding the selected new one.
 * **Edit profile name** - when one Staff access row is selected, the Profile tab lets staff edit the DB-backed `staff_profiles.name` and `staff_profiles.display_name` values through `PATCH /api/admin/users/:username/profile`. If the display name was still mirroring the old name, changing the Name field now updates Display name in the form as well; intentional separate display names are preserved after staff edit the Display name field directly.
 * Role change and creation forms show only the roles the current actor is allowed to manage, and enforce entering a region for regional roles.
@@ -71,7 +73,7 @@ ISET Coordinator     → cannot manage administrative users
 ### Endpoints
 * **GET /users** – lists Cognito users, enriched with role, status, MFA flag, last sign-in, and region access from `staff_profiles` / `staff_region`. The response is scoped to roles the current actor is allowed to manage. If Cognito admin configuration is missing, the endpoint fails explicitly instead of returning mock users.
   * Disabled-state note: Cognito models disabled accounts with `Enabled=false` while `UserStatus` may still read `CONFIRMED` or `FORCE_CHANGE_PASSWORD`. The admin API now normalizes those rows to `status = DISABLED` so the dashboard filters/actions stay correct.
-* **POST /users** – uses `AdminCreateUser`, adds the user to the requested admin group, and persists the user's region access in `staff_profiles` / `staff_region`. Region is mandatory for regional roles.
+* **POST /users** – uses a suppressed `AdminCreateUser`, adds the user to the requested admin group, persists the user's region access in `staff_profiles` / `staff_region`, and only then sends the Cognito invite with `MessageAction: RESEND`. The submitted staff name is carried into Cognito's standard `name` attribute as well as the DB-backed staff profile. Region is mandatory for regional roles. Create-time DB sync uses a transaction when the MySQL pool supports it, and failures roll back the newly created Cognito user where possible.
 * **PATCH /users/:username/attributes** – updates DB-backed region access for Regional Managers and ISET Coordinators, with target-role authorization resolved server-side.
 * **PATCH /users/:username/profile** – updates DB-backed staff profile identity labels (`name`, `display_name`) after resolving the target user's actual Cognito admin group and applying the same manage-target guard as role and region edits.
 * **PATCH /users/:username/role** – removes all existing admin-role groups from the user and adds the target group (normalised keys).
@@ -118,6 +120,8 @@ ISET Coordinator     → cannot manage administrative users
 4. If assignments look wrong, verify there are no stale duplicate `staff_profiles` rows keyed by email instead of Cognito `sub`, then have each user sign in again.
 
 ## Open considerations
-* New-user invitations and invite resends still rely on Cognito's default email delivery. If PATH later moves to branded SES/Lambda invite mail, this route should be revisited.
+* PROD staff invites currently use Cognito default email (`COGNITO_DEFAULT`) with no custom message Lambda or PATH/SES delivery audit for the Cognito setup email. For invite issues, verify Cognito status, `email_verified`, group membership, and DB-backed `staff_profiles` / `staff_region`; if a user is already `CONFIRMED`, `Resend invite` is no longer applicable and recovery should use the normal password-reset path or an approved temporary-password reset.
+* Staff session auditing is not reliable evidence of admin login. A live `/api/auth/me` check with the user's browser session is the direct way to prove the app hydrated role, staff profile, and regions after Cognito sign-in.
+* New-user invitations and invite resends still rely on Cognito-managed email delivery. The subject/body are PATH-specific, but a branded From address requires Cognito `DEVELOPER` email mode backed by SES and should be treated as a separate infrastructure/email-deliverability change.
 * The current account-management model remains single-role. The backend now cleans up stray multi-group state, but deliberate multi-role admin support would still require a new UX and policy model.
 * Region-backed staff roles must have database-backed region access. Regional Managers can have multiple `staff_region` assignments; ISET Coordinators keep a single primary `staff_profiles.region_id` and may also be mirrored into `staff_region` for consistent reads.

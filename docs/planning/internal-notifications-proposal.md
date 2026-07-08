@@ -1,6 +1,6 @@
 # Internal Notifications Overview
 
-Last updated: 2026-04-27
+Last updated: 2026-07-07
 
 ## Goal
 Provide staff with in-app notifications that mirror the Notification Settings matrix, using Cloudscape UI components for surfaced alerts and allowing per-role control via `notification_setting`.
@@ -29,6 +29,7 @@ Provide staff with in-app notifications that mirror the Notification Settings ma
 - Unresolved audiences (e.g. a role entry without an assigned user) are skipped gracefully.
 - Severity is mapped to Flashbar variants (`info`, `success`, `warning`, `error`).
 - Expiry filtering happens in SQL; expired rows are not returned to clients.
+- Applicant names in bell and staff email notification content should resolve from owned case/application/client/submission context before account display fields. Prefer first/middle/last or legal/full name when present; use the registered applicant email only when no name is available or when a template explicitly asks for `{applicant_email}`.
 
 ## Remaining Enhancements
 - Expose a lightweight summary endpoint (nav badge counts) when the UI is ready.

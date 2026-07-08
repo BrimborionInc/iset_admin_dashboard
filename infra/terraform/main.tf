@@ -100,6 +100,15 @@ resource "aws_cognito_user_pool" "admin" {
     enabled = true
   }
 
+  admin_create_user_config {
+    allow_admin_create_user_only = true
+
+    invite_message_template {
+      email_subject = var.admin_invite_email_subject
+      email_message = var.admin_invite_email_message
+    }
+  }
+
   dynamic "email_configuration" {
     for_each = var.use_cognito_managed_emails ? [] : [1]
     content {

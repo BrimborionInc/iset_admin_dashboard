@@ -2,9 +2,34 @@
 
 Purpose: track live PROD data repairs whose affected staff or business owners may need to be informed later.
 Audience: operations, product, support, and future AI-assisted maintenance threads.
-Last Updated: 2026-07-05
+Last Updated: 2026-07-06
 
 Use this log for repairs that may be externally invisible to staff but should be available for later owner communication. Keep entries concise, evidence-based, and linked to the exact scripts or reports where possible. Do not use this file as approval to mutate PROD; follow the PROD repair rules in `docs/ops/agent-operational-access.md`.
+
+## 2026-07-06 - Application 11 assessment decision-context repair
+
+Status: PROD targeted data repair applied; no owner notification sent yet.
+
+Reason: application `11` / case `93` / `ISET-20260410-EC36E2` had stale scoped decision-letter context showing `assessment_nwac_review_status='approve'` even though the authoritative application and assessment records resolve to a denial. The application was already `completed` / `closed` / `denied`, the assessment was `no_recommend` with `nwac_review='agree'`, and the denial letter had already been sent.
+
+Repair applied:
+
+- Updated only `iset_case.case_context_json` for case `93`, path `$.applicationDecisionLetters."11".assessment_nwac_review_status`, from `approve` to `reject`.
+- Left the application row, assessment row, document records, signing request context, and sent denial-letter evidence untouched.
+- Guarded the update against the expected case/application/assessment state and against any active `application_assessment` workflow.
+
+Evidence:
+
+- Preview script: `sql/ops/prod-application-11-assessment-context-repair-preview-20260706.sql`.
+- Apply script: `sql/ops/prod-application-11-assessment-context-repair-apply-20260706.sql`.
+- Preview SSM command `d2ba4182-36c2-4bd5-80f4-0487049da940`: candidate row showed stale status `approve`, no blockers, and projected post-repair status `reject`.
+- Apply SSM command `44075235-a61f-49ed-95f4-a7d3b23a4882`: updated one case context row and verified post-repair status `reject`.
+- Target verification SSM command `e72e71a0-55ce-413e-9900-a55ea320d0c1`: application `11` remained completed/closed/denied and assessment `no_recommend` / `agree`; scoped status is now `reject`.
+- Broader mismatch audit SSM command `beba8099-304a-4838-b7f4-3f34da74ea6f`: zero remaining decision/context mismatches.
+
+Notification note:
+
+- No staff-facing action is expected from this repair unless a report owner asks why application `11` showed an inconsistent historic decision-letter status. Suggested explanation: PATH corrected a stale internal decision-letter context value so it now matches the already-sent denial outcome; no application decision, sent document, or applicant-facing record was changed.
 
 ## 2026-07-05 - Feedback #154 wrong-recipient secure-message containment
 

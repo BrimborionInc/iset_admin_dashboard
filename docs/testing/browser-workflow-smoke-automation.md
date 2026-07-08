@@ -212,6 +212,13 @@ Live DEV role-based walkthrough evidence for the Regional Manager two-step appli
 
 Live TEST route evidence for release `20260626-rm-two-step-role-matrix-test` was captured on 2026-06-26 using real TEST Cognito/staff users for all four active PATH staff roles. It verified the deployed application-assessment route with RM lock acquisition and RM submit to `application_assessment/rm_review`, the deployed intervention proposal route with NWAC/System Administrator start attempts blocked and RM start allowed, and the deployed intervention revision route with NWAC/System Administrator submit attempts blocked and RM submit allowed. The revision route generated the submitted v2 and redline v2 assessment PDFs. All disposable live TEST cases, locks, generated document rows, and S3 objects were cleaned up. This live route evidence should be repeated for future workflow hotfixes that alter role/start/final-decision behavior.
 
+The submitted-assessment EI correction fix has a focused DEV end-to-end smoke:
+
+- Script: `scripts/application-assessment-ei-correction-dev-smoke.js`
+- NPM alias: `npm run smoke:application-assessment:ei-correction:dev`
+
+This smoke creates disposable DEV Cognito staff users for a Regional Manager and ISET Coordinator, seeds a synthetic Nunavut application assessment with an active EI verification document and active two-step review row, authenticates with real Cognito bearer tokens, checks the local backend route through `/api/locks/application/:id` and `PUT /api/cases/:id`, drives the local React Application Assessment widget with Puppeteer, and then removes Cognito users plus DB fixture rows. Coverage includes RM post-submission EI correction before dependencies, the browser dropdown remaining enabled for the RM, the browser sending a real EI correction PUT, ISET Coordinator denial, and RM dependency blocking once an action plan exists. Direct Cognito password auth is not currently usable with the DEV client/IAM shape, so the smoke falls back to the Hosted UI login path used by staff browsers.
+
 The Case Workspace Intervention Assessment recall path has a focused local browser smoke:
 
 - Script: `scripts/intervention-assessment-recall-browser-smoke.js`

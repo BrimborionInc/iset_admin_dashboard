@@ -38,7 +38,8 @@ Widget references:
 5. Validate documents and communicate with applicant as needed.
 6. Save/submit assessment and progress to NWAC decision where applicable.
 7. While pending decision, the submitted assessment is read-only. The submitter can use `Recall submission` before a decision is recorded to return it to editable review, archive the active generated submission PDFs, and resubmit corrections.
-8. Use timeline and notes for operational traceability.
+8. Regional Managers, NWAC Administrators, and System Administrators can correct the EI status from the existing eligibility dropdown after submission while no action-plan or intervention dependency exists.
+9. Use timeline and notes for operational traceability.
 
 ## Data & Integration Touchpoints
 

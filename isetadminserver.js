@@ -88432,6 +88432,8 @@ app.put('/api/cases/:id', async (req, res) => {
   let conflictDeclarationDetails = null;
   let reviewTransitionCaseNote = null;
   let requiredAssessmentDocsGenerated = false;
+  let eligibilityCorrectionEvent = null;
+  let eligibilityOnlyAssessmentPayload = false;
   const applicationJoinSql = requestedApplicationId
     ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
     : buildCasePrimaryApplicationJoinSql('c', 'a');
@@ -88580,13 +88582,14 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       ]);
       const roleKeyRaw = normaliseString(identity.role);
       const roleKey = roleKeyRaw ? roleKeyRaw.toLowerCase().replace(/[\s_-]+/g, '') : '';
+      const assessmentRow = await fetchApplicationAssessmentRow(conn, { caseId, applicationId });
+      const existingEligibility = normaliseString(assessmentRow?.esdc_eligibility) || null;
+      const incomingEligibility = normaliseString(body.assessment_esdc_eligibility) || null;
+      const existingKey = (existingEligibility || '').toLowerCase();
+      const incomingKey = (incomingEligibility || '').toLowerCase();
+      const eligibilityChanged = existingKey !== incomingKey;
       if (!eligibilityRoleAllowlist.has(roleKey)) {
-        const assessmentRow = await fetchApplicationAssessmentRow(conn, { caseId, applicationId });
-        const existingEligibility = normaliseString(assessmentRow?.esdc_eligibility) || null;
-        const incomingEligibility = normaliseString(body.assessment_esdc_eligibility) || null;
-        const existingKey = (existingEligibility || '').toLowerCase();
-        const incomingKey = (incomingEligibility || '').toLowerCase();
-        if (existingKey !== incomingKey) {
+        if (eligibilityChanged) {
           await conn.rollback();
           return res.status(403).json({
             success: false,
@@ -88594,6 +88597,35 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
             message: 'You do not have permission to update EI eligibility.',
             lock: lockCheck.lock || null
           });
+        }
+      } else if (eligibilityChanged) {
+        const [[dependencyRow]] = await conn.query(
+          `SELECT
+              (SELECT COUNT(*)
+                 FROM iset_case_action_plan
+                WHERE case_id = ?
+                  AND archived_at IS NULL) AS action_plan_count,
+              (SELECT COUNT(*)
+                 FROM iset_case_intervention
+                WHERE case_id = ?) AS intervention_count`,
+          [caseId, caseId]
+        );
+        const actionPlanCount = Number(dependencyRow?.action_plan_count || 0);
+        const interventionCount = Number(dependencyRow?.intervention_count || 0);
+        if (actionPlanCount > 0 || interventionCount > 0) {
+          await conn.rollback();
+          return res.status(409).json({
+            success: false,
+            error: 'ei_eligibility_dependency_blocked',
+            message: 'EI status cannot be changed here because an action plan or intervention already exists. Contact an administrator for review.',
+            lock: lockCheck.lock || null
+          });
+        }
+        if (existingEligibility) {
+          eligibilityCorrectionEvent = {
+            previousEligibility: existingEligibility,
+            nextEligibility: incomingEligibility,
+          };
         }
       }
     }
@@ -88858,7 +88890,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     ];
 
   const conflictSignatureRequested = Object.prototype.hasOwnProperty.call(body, 'assessment_conflict_declaration_signed');
-  hasAssessmentPayload = assessmentKeys.some(key => Object.prototype.hasOwnProperty.call(body, key));
+  const assessmentPayloadKeysPresent = assessmentKeys.filter(key => Object.prototype.hasOwnProperty.call(body, key));
+  hasAssessmentPayload = assessmentPayloadKeysPresent.length > 0;
+  eligibilityOnlyAssessmentPayload =
+    assessmentPayloadKeysPresent.length === 1 &&
+    assessmentPayloadKeysPresent[0] === 'assessment_esdc_eligibility';
   if (hasAssessmentPayload && applicationId && !requestedApplicationId) {
     const [[applicationCountRow]] = await conn.query(
       'SELECT COUNT(*) AS application_count FROM iset_application WHERE case_id = ?',
@@ -88990,7 +89026,12 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     const beforeApplicationPendingDecision =
       beforeApplicationStatus === 'pending_approval' ||
       beforeApplicationLifecycleStatus === 'pending_decision';
-    if (hasAssessmentPayload && beforeApplicationPendingDecision && !assessmentReviewStatusProvided) {
+    if (
+      hasAssessmentPayload &&
+      beforeApplicationPendingDecision &&
+      !assessmentReviewStatusProvided &&
+      !eligibilityOnlyAssessmentPayload
+    ) {
       await conn.rollback();
       return res.status(409).json({
         success: false,
@@ -89455,6 +89496,25 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 
     if (shouldMarkSubmissionNeedsReview) {
       await markEsdcParticipantSubmissionNeedsReview(conn, caseId, { resetSnapshot: true, resetSubmissionStatus: true });
+    }
+
+    if (eligibilityCorrectionEvent) {
+      await conn.query(
+        `INSERT INTO iset_case_event
+           (case_id, event_type, summary, payload_json, occurred_at, actor_staff_profile_id, actor_user_id, source_system)
+         VALUES (?, 'data_repair', ?, ?, NOW(3), ?, NULL, 'admin_dashboard')`,
+        [
+          caseId,
+          'Corrected EI eligibility.',
+          JSON.stringify({
+            field: 'iset_application_assessment.esdc_eligibility',
+            previousValue: eligibilityCorrectionEvent.previousEligibility || null,
+            newValue: eligibilityCorrectionEvent.nextEligibility || null,
+            reason: 'Authorized EI eligibility correction before action-plan/intervention dependencies existed.',
+          }),
+          resolveActiveStaffProfileId(req) || null,
+        ]
+      );
     }
 
     if (applicationStatusToPersist && applicationId) {
