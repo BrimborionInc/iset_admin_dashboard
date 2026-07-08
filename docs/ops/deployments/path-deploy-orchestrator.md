@@ -24,7 +24,7 @@ The orchestrator packages the WSL working tree for TEST and PROD app deploys. If
 
 For PROD app deploys, the orchestrator refuses dirty packaged source trees before any restore point, artifact upload, ASG refresh, schema/data step, or smoke step runs. The guard checks the admin repo when deploying the admin artifact, the portal repo when deploying the portal artifact, and the sibling `shared` repo whenever admin, portal, or shared artifacts package it. A dirty-source exception requires `--allow-dirty --dirty-reason "<specific approved reason>"` and must have Bill's explicit approval in the current thread.
 
-The sibling `/home/bill/ISET/shared` tree is now a local Git repo. The deployment copy helper excludes `.git` directories from staged artifacts, so source control metadata is not shipped to EC2. At creation time this local repo did not yet have a GitHub remote; until one exists, the guard can prove local cleanliness but cannot provide off-machine recovery.
+The sibling `/home/bill/ISET/shared` tree is now a Git repo with private GitHub remote `https://github.com/BrimborionInc/iset_shared.git`. The deployment copy helper excludes `.git` directories from staged artifacts, so source control metadata is not shipped to EC2. Treat shared cleanliness and push status as part of normal deploy preflight, like admin and portal.
 
 The admin artifact also stages selected operational support scripts used by deployed-runtime checks/backfills, currently the application-assessment backfill, context-backfill, and Option B smoke scripts referenced by package aliases.
 

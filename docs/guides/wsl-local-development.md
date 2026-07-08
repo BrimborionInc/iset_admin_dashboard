@@ -17,7 +17,7 @@ Use the `/home/bill/ISET/*` copies for normal local coding, Git-heavy work, VS C
 
 TEST and PROD `path:deploy` are WSL-native: run them from `/home/bill/ISET/admin-dashboard`, and the orchestrator packages the WSL admin, portal, and shared trees. The legacy PowerShell component deploy scripts remain as lower-level historical references, but Windows `npm.cmd` is not reliable from a `\\wsl.localhost\...` working directory; do not resurrect old `X:\ISET` instructions as a shortcut.
 
-`/home/bill/ISET/shared` is now its own local Git repo for shared runtime code consumed by both apps. It should be clean before deploys. At creation time it did not yet have a GitHub remote, so it has local dirty-state/history protection but still needs a remote for off-machine backup/recovery.
+`/home/bill/ISET/shared` is now its own local Git repo for shared runtime code consumed by both apps. It tracks private GitHub remote `https://github.com/BrimborionInc/iset_shared.git` and should be clean and pushed before deploys.
 
 ## Opening VS Code
 
