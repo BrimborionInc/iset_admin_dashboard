@@ -48,7 +48,7 @@ describe("regionalSnapshotExport", () => {
     }));
 
     const summary = workbook.getWorksheet("Summary");
-    expect(summary.getCell("F4").value).toBe("Approved/Funded Applications");
+    expect(summary.getCell("F4").value).toBe("Approved Applications");
     expect(summary.getCell("I4").value).toBe("Funded Clients");
     expect(summary.getCell("F5").value).toBe(4);
     expect(summary.getCell("I5").value).toBe(7);
@@ -57,7 +57,7 @@ describe("regionalSnapshotExport", () => {
     expect(summary.getCell("R6").value).toEqual({ formula: 'IF(L6=0,"",O6/L6)' });
 
     const regionalSheet = workbook.getWorksheet("Test Region");
-    expect(regionalSheet.getCell("D6").value).toBe("Approved/Funded Applications");
+    expect(regionalSheet.getCell("D6").value).toBe("Approved Applications");
     expect(regionalSheet.getCell("E6").value).toBe("4");
     expect(regionalSheet.getCell("D8").value).toBe("Pending / No Decision");
     expect(regionalSheet.getCell("A11").value).toBe("Funded Clients");

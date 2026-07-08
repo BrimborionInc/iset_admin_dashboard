@@ -60,6 +60,7 @@ This means the database does not require a fake intake history just to preserve 
 - Backloaded intervention finance handling is now explicitly historical-only:
   - `actual amount` on a `manual_backload` intervention writes a posted historical `finance_transaction` so budget burn and finance reporting can reflect legacy spend
   - that historical record is read-only finance history, not a live payment request
+  - new `manual_backload` interventions stamp `reviewed_at` from the entered intervention start date, so approval-date financial reporting places them in the inferred historical fiscal year while preserving the PATH entry date in `created_at`
   - `manual_backload` interventions are blocked from payment-packet creation in Program Payments
   - if there is unpaid work that must now be managed in PATH, staff should create a new live intervention for the remaining amount instead of sending the backloaded intervention through the live payments workflow
 - Backloaded action plans now carry the entered historical dates into the lifecycle timestamps the workspace reads:

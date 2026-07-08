@@ -2,7 +2,7 @@
 
 Purpose: capture the current live behavior of `Budgets and Finance > Financial Reports` so future threads can extend the finance-reporting surface without reverse-engineering the page and endpoints from code.
 Audience: admin dashboard engineers, finance/reporting reviewers, and product owners.
-Last Updated: 2026-05-28
+Last Updated: 2026-07-08
 
 ## Scope
 
@@ -42,6 +42,7 @@ Last Updated: 2026-05-28
 - The report grain is one row per intervention.
 - The default visible row set excludes interventions whose approved total is zero; the API still returns the full approved row set for the selected fiscal year/region and the frontend applies the row-scope selector.
 - Approved-date basis is `COALESCE(ci.reviewed_at, ci.created_at)`.
+- Manual historic/backloaded interventions should carry their inferred historic approval date in `iset_case_intervention.reviewed_at`; for those records, PATH entry time remains in `created_at` for audit and must not drive fiscal-year reporting.
 - Approved totals use approved intervention expense, with fallback to budget/intervention cost when needed.
 - Funding source resolution prefers the action-plan budget pot funding source and then falls back to plan/intervention funding-stream fields.
 - Only `CRF` and `EI` rows are included.

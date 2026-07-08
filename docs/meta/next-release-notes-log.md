@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-07-07
+Last Updated: 2026-07-08
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-07-08 | Release TBD | Fix/Casework | Add existing intervention | Manually entered existing interventions now use the entered intervention start date as the inferred historical approval date for approval-date financial reporting. | The PATH entry timestamp remains in `created_at`; this prevents future historical backload entries from appearing in the fiscal year when staff keyed them into PATH.
+- 2026-07-08 | Release TBD | UX/Reporting | Regional Snapshot | Regional Snapshot now labels the application-status count as `Approved Applications` instead of `Approved / Funded Applications`. | Funding totals and funded-client counts are unchanged; the wording clarifies that Client Activity is an application workflow breakdown while Funded Clients belongs to the approved-funding metrics.
+- 2026-07-08 | Release TBD | Fix/Notifications | Bugs and Change Requests | System Administrators are emailed when a bug report or change request is saved as Critical, including when an existing report is upgraded to Critical from the review panel. | The alert uses the Manage Notifications template/settings system and includes report details, reporter, captured page, attachment count, and description.
 - 2026-07-07 | Release TBD | Fix/User Management | Staff user invitations | Staff setup emails are now sent only after PATH successfully saves the user's Cognito group and DB-backed staff profile/region access. | If the DB-backed access sync or final invite send fails, PATH attempts to remove the new Cognito user and shows an error instead of displaying a successful invite. The submitted staff name is also carried into Cognito profile attributes.
 - 2026-07-07 | Release TBD | UX/User Management | Staff setup emails | Staff setup emails now use PATH-specific invitation copy instead of Cognito's generic temporary-password message. | The message identifies NWAC PATH, includes a simple Environment line, and puts username/password values on separate copyable lines. Branded sender address remains a separate SES-backed Cognito email-delivery change.
 - 2026-07-07 | Release TBD | Fix/Notifications | Applicant names in staff alerts | Applicant-related bell and staff email notifications now prefer the applicant's resolved first/last or legal/full name instead of account display fields that may contain an email address. | If PATH cannot resolve a name from case/application/client/submission context, notifications fall back to the registered applicant email. Templates can still use `{applicant_email}` when the email address is intentionally needed.
@@ -449,6 +452,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Staff setup emails are sent only after PATH saves the Cognito group and staff access.
 - Authorized managers and admins can correct EI status from Application Assessment after submission when it is safe to do so.
 - Applicant-related staff alerts now show applicant names when available instead of email-shaped account display names.
+- System Administrators now receive email alerts when bug reports or change requests are saved as Critical.
 
 ### What Changed Packages (draft - EN)
 
@@ -457,6 +461,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - User Management now completes the PATH-side staff access setup before sending the Cognito temporary-password email, so new regional managers are not invited before their access exists.
 - Application Assessment now allows authorized managers and admins to correct EI status after submission when no dependent action plan or intervention work would be invalidated.
 - Staff notifications about applicant files now prefer the applicant's first and last name when PATH has it, with the registered email kept as the fallback.
+- Bugs and Change Requests now emails System Administrators when a report is saved as Critical, including when an existing report is upgraded to Critical.
 
 #### Release 20260705-two-step-review-test-notification-fix
 
@@ -479,6 +484,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les courriels de creation de compte du personnel sont envoyes seulement apres l'enregistrement du groupe Cognito et de l'acces PATH.
 - Les gestionnaires et administrateurs autorises peuvent corriger le statut AE dans Application Assessment apres soumission lorsque c'est securitaire.
 - Les alertes du personnel qui concernent un participant affichent maintenant le nom du participant lorsque PATH le connait, avec l'adresse courriel comme solution de repli.
+- Les administrateurs systeme recoivent maintenant un courriel lorsqu'un bogue ou une demande de changement est enregistre comme critique.
 
 ### Lots de changements (brouillon - FR)
 
@@ -487,6 +493,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Gestion des utilisateurs termine maintenant la configuration d'acces PATH avant d'envoyer le courriel Cognito de mot de passe temporaire, pour eviter d'inviter un gestionnaire regional avant que son acces existe.
 - Application Assessment permet maintenant aux gestionnaires et administrateurs autorises de corriger le statut AE apres soumission lorsqu'aucun plan d'action ou travail d'intervention dependant ne serait invalide.
 - Les alertes du personnel a propos des dossiers participants preferent maintenant le prenom et le nom du participant lorsque PATH les connait, avec l'adresse courriel inscrite comme solution de repli.
+- Bugs and Change Requests envoie maintenant un courriel aux administrateurs systeme lorsqu'un rapport est enregistre comme critique, y compris lorsqu'un rapport existant est augmente a critique.
 
 #### Release 20260705-two-step-review-test-notification-fix
 

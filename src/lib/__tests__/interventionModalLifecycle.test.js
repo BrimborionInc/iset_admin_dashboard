@@ -37,6 +37,20 @@ describe("intervention and action plan modal lifecycle persistence", () => {
     expect(updateRoute).toContain("esdcPayload.interventionOutcome = trimmedOutcomeUpdate || null;");
   });
 
+  test("manual backloaded interventions use start date as inferred approval date", () => {
+    const createRoute = extractBetween(
+      serverSource,
+      "app.post('/api/action-plans/:id/interventions'",
+      "app.get('/api/interventions/:id/payment-lines'"
+    );
+
+    expect(createRoute).toContain("const manualBackloadReviewedAtValue =");
+    expect(createRoute).toContain("isBackloadMode && startDateValue ? `${startDateValue} 00:00:00` : null");
+    expect(createRoute).toContain("const reviewedAtInsertExpression = shouldStampReviewDecision");
+    expect(createRoute).toContain("manualBackloadReviewedAtValue");
+    expect(createRoute).toContain("...reviewedAtInsertParams");
+  });
+
   test("close endpoint blocks open interventions on closed or archived plans", () => {
     const closeRoute = extractBetween(
       serverSource,

@@ -11,7 +11,7 @@ const RegionalSnapshotDashboardHelp = () => (
     <h3>What You Can Review</h3>
     <ul>
       <li>Region information and reporting period for the selected snapshot.</li>
-      <li>Application activity for applications submitted during the selected period, including approved or funded applications, denied or withdrawn applications, and applications still pending a decision.</li>
+      <li>Application activity for applications submitted during the selected period, including approved applications, denied or withdrawn applications, and applications still pending a decision.</li>
       <li>Approved CRF/EI funding and funded-client totals use the same approved-funding basis as Financial Reports.</li>
       <li>Funded clients are shown with the funding metrics because they are a unique participant count, not an application-status bucket.</li>
       <li>Coordinator salary is pulled from the Salaries dashboard, with saved operating values shown beside it.</li>

@@ -884,7 +884,7 @@ const RegionalSnapshotDashboard = () => {
   const clientRows = report
     ? [
         { label: "Applications Received", value: formatInteger(report.liveMetrics?.applicationsReceived) },
-        { label: "Approved / Funded Applications", value: formatInteger(report.liveMetrics?.fundedApplications ?? report.liveMetrics?.funded) },
+        { label: "Approved Applications", value: formatInteger(report.liveMetrics?.fundedApplications ?? report.liveMetrics?.funded) },
         { label: "Denied / Ineligible / Withdrawn / NC", value: formatInteger(report.liveMetrics?.deniedIneligibleWithdrawn) },
         { label: "Pending / No Decision", value: formatInteger(report.liveMetrics?.pendingDecision) },
       ]

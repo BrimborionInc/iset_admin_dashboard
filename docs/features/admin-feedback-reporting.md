@@ -33,13 +33,23 @@ Provide an in-app way for signed-in PATH staff to report admin-console bugs and 
 - The review panel is backed by:
   - `GET /api/admin/feedback-reports/:id`
   - `PATCH /api/admin/feedback-reports/:id/status`
+  - `PATCH /api/admin/feedback-reports/:id/severity`
   - `POST /api/admin/feedback-reports/:id/notes`
 - The review panel exposes:
   - report details
   - captured page context
   - supporting-file links
+  - severity updates
   - status history
   - internal admin notes
+
+## Critical severity notifications
+
+- Saving a new bug report or change request with `Critical` severity emits `admin_feedback_critical`.
+- Updating an existing report from any non-critical severity to `Critical` and saving the severity emits the same event.
+- The default migration `20260708_0001_seed_admin_feedback_critical_notification.sql` seeds a released email template and an enabled `System Administrator` notification-setting row with `email_alert=1`.
+- Delivery uses the shared Manage Notifications/template pipeline, so System Administrator recipients come from active `staff_profiles` rows for that role and sender/reply-to settings come from the standard notification email settings.
+- Re-saving a report that is already `Critical` does not emit another critical alert unless it is first changed away from Critical and later upgraded again.
 
 ## Operational triage expectations
 
@@ -108,6 +118,7 @@ Canonical migrations:
 
 - `sql/migrations/20260405_0001_create_admin_feedback_reporting.sql`
 - `sql/migrations/20260405_0002_create_admin_feedback_management_tables.sql`
+- `sql/migrations/20260708_0001_seed_admin_feedback_critical_notification.sql`
 
 Tables:
 

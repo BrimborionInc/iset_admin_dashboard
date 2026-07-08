@@ -18,6 +18,7 @@ import { apiFetch } from '../../auth/apiClient';
 import { useMessaging } from '../../pages/messages/MessagingContext.js';
 import {
   MAX_INTERNAL_NOTE_CHARS,
+  SEVERITY_OPTIONS,
   STATUS_OPTIONS,
   formatFeedbackFileSize,
   formatFeedbackRelativeTime,
@@ -26,6 +27,7 @@ import {
   getSeverityLabel,
   getStatusIndicatorType,
   getStatusLabel,
+  normalizeSeverity,
   normalizeFeedbackStatus,
 } from './constants.js';
 
@@ -105,6 +107,8 @@ export default function FloatingFeedbackReviewPanel({
   const [error, setError] = useState('');
   const [statusValue, setStatusValue] = useState('submitted');
   const [statusSaving, setStatusSaving] = useState(false);
+  const [severityValue, setSeverityValue] = useState('medium');
+  const [severitySaving, setSeveritySaving] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [noteSaving, setNoteSaving] = useState(false);
 
@@ -129,6 +133,7 @@ export default function FloatingFeedbackReviewPanel({
       const report = payload?.report || null;
       setDetail(report);
       setStatusValue(normalizeFeedbackStatus(report?.status, 'submitted'));
+      setSeverityValue(normalizeSeverity(report?.severity));
     } catch (loadError) {
       setDetail(null);
       setError(loadError?.message || 'Failed to load the feedback report.');
@@ -155,6 +160,7 @@ export default function FloatingFeedbackReviewPanel({
   }, [onClose, visible]);
 
   const selectedStatus = STATUS_OPTIONS.find(option => option.value === statusValue) || STATUS_OPTIONS[0];
+  const selectedSeverity = SEVERITY_OPTIONS.find(option => option.value === severityValue) || SEVERITY_OPTIONS[2];
   const contextLabel = buildContextLabel(detail?.contextSnapshot, detail?.pageTitle, detail?.pagePath);
 
   const handleSaveStatus = async () => {
@@ -182,6 +188,34 @@ export default function FloatingFeedbackReviewPanel({
       setError(saveError?.message || 'Failed to update the feedback report status.');
     } finally {
       setStatusSaving(false);
+    }
+  };
+
+  const handleSaveSeverity = async () => {
+    if (!reportId) return;
+    setSeveritySaving(true);
+    setError('');
+    try {
+      const response = await apiFetch(`/api/admin/feedback-reports/${reportId}/severity`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ severity: normalizeSeverity(severityValue) }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseErrorResponse(response));
+      }
+      try {
+        window.dispatchEvent(
+          new CustomEvent('admin-feedback:changed', {
+            detail: { action: 'severity-updated', reportId },
+          })
+        );
+      } catch (_) {}
+      await loadDetail();
+    } catch (saveError) {
+      setError(saveError?.message || 'Failed to update the feedback report severity.');
+    } finally {
+      setSeveritySaving(false);
     }
   };
 
@@ -328,6 +362,26 @@ export default function FloatingFeedbackReviewPanel({
                           onClick={handleSaveStatus}
                         >
                           Save status
+                        </Button>
+                      </SpaceBetween>
+                    </FormField>
+
+                    <FormField label="Update severity">
+                      <SpaceBetween size="xs" direction="horizontal">
+                        <Select
+                          selectedOption={selectedSeverity}
+                          options={SEVERITY_OPTIONS}
+                          onChange={({ detail: selectDetail }) => {
+                            setSeverityValue(normalizeSeverity(selectDetail.selectedOption?.value));
+                          }}
+                        />
+                        <Button
+                          variant="primary"
+                          loading={severitySaving}
+                          disabled={severitySaving || selectedSeverity.value === detail.severity}
+                          onClick={handleSaveSeverity}
+                        >
+                          Save severity
                         </Button>
                       </SpaceBetween>
                     </FormField>

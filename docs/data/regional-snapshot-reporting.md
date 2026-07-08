@@ -28,7 +28,7 @@ Current saved fields:
 ## Current live metric basis
 
 - Region filtering uses participant home province / territory, matching Financial Reports rather than case portfolio assignment.
-- Client Activity is an application workflow breakdown for applications submitted during the selected period: applications received, approved/funded applications, denied / ineligible / withdrawn / NC, and pending / no decision share the same submitted-in-period denominator.
+- Client Activity is an application workflow breakdown for applications submitted during the selected period: applications received, approved applications, denied / ineligible / withdrawn / NC, and pending / no decision share the same submitted-in-period denominator.
 - CRF/EI funding and funded-client count reuse the Financial Reports approved-funding basis: approved CRF/EI intervention rows in the selected period, excluding zero-dollar rows for funded-client totals.
 - Funded Clients appears with the funding metrics rather than in Client Activity because it is a unique participant count from the approved-funding basis, not an application-status bucket.
 

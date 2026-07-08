@@ -6,6 +6,32 @@ Last Updated: 2026-07-08
 
 Use this log for repairs that may be externally invisible to staff but should be available for later owner communication. Keep entries concise, evidence-based, and linked to the exact scripts or reports where possible. Do not use this file as approval to mutate PROD; follow the PROD repair rules in `docs/ops/agent-operational-access.md`.
 
+## 2026-07-08 - BC historic backload finance-reporting date repair
+
+Status: PROD targeted data repair applied; followed by global sweep; business-owner explanation may be needed for Shelley/reporting reviewers.
+
+Reason: BC Regional Snapshot / Financial Reports showed 13 historic/manual-backloaded interventions in FY 2026/27 because the report fell back to PATH entry date (`created_at`) when `reviewed_at` was blank. Bill confirmed the reporting rule: Financial Reports are approval-date based, and for historic/manual backloaded interventions PATH should infer the historic approval date from `iset_case_intervention.start_date`.
+
+Repair applied:
+
+- Updated `reviewed_at` on 13 BC manual-backloaded funded interventions to the intervention `start_date` at midnight.
+- Left `created_at` unchanged as the PATH entry/audit date.
+- Inserted 13 `data_repair` case events with repair id `prod-bc-backload-intervention-reporting-date-repair-20260708`.
+
+Evidence:
+
+- SQL artifact: `sql/ops/prod-bc-backload-intervention-reporting-date-repair-20260708.sql`.
+- Apply SSM command `0768b005-11a4-479e-bcc3-eaf5bbc4297d`: expected rows `13`, updated rows `13`, audit events inserted `13`.
+- Post-repair FY 2026/27 BC verification: funded interventions `4`, funded clients `4`, CRF `$8,116.00`, EI `$15,936.38`, total `$24,052.38`.
+- Remaining FY 2026/27 BC funded rows after repair: Cellicia Wallace intervention `220` `$1,046.10`, Kaitlyn Kitson intervention `219` `$4,885.00`, Katrina Woodgate intervention `21` `$10,005.28`, Sarah Froese intervention `11` `$8,116.00`.
+- Global follow-up sweep SQL artifact: `sql/ops/prod-global-backload-intervention-reporting-date-repair-20260708.sql`.
+- Global sweep SSM command `3ea4e437-696c-4e37-b2b5-d09a1dc6c48f`: updated all 31 remaining manual-backloaded interventions with `start_date` present and blank `reviewed_at`, and inserted 31 additional audit events. Region summary: AB `4` / `$18,879.70`, BC `2` / `$0.00`, NB `3` / `$8,900.00`, NS `2` / `$26,747.00`, PE `1` / `$13,949.00`, SK `17` / `$89,102.35`, Unknown `2` / `$0.00`.
+- Global verification SSM command `9ac4a122-7112-4878-88ef-ca705655e326`: zero remaining manual-backload interventions with `start_date` and blank `reviewed_at`; BC FY 2026/27 remained at funded interventions `4`, funded clients `4`, total `$24,052.38`.
+
+Notification note:
+
+- Suggested explanation: PATH corrected the reporting dates on historical backloaded BC interventions so the FY 2026/27 approved-funding report no longer treats the April 2026 PATH data-entry date as the approval date. The entry/audit dates were preserved.
+
 ## 2026-07-07/08 - Feedback #157 EI status correction and product fix
 
 Status: PROD targeted data repair applied; product fix deployed; feedback report resolved.

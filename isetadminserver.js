@@ -1975,6 +1975,13 @@ function sanitizeAdminFeedbackStatus(rawValue, fallback = null) {
   return ADMIN_FEEDBACK_STATUSES.has(normalized) ? normalized : fallback;
 }
 
+function sanitizeAdminFeedbackSeverity(rawValue, fallback = null) {
+  if (rawValue === null || typeof rawValue === 'undefined') return fallback;
+  const normalized = String(rawValue).trim().toLowerCase();
+  if (!normalized) return fallback;
+  return ADMIN_FEEDBACK_SEVERITIES.has(normalized) ? normalized : fallback;
+}
+
 function sanitizeAdminFeedbackNote(rawValue) {
   const trimmed = typeof rawValue === 'string' ? rawValue.trim() : '';
   if (!trimmed) return '';
@@ -2027,6 +2034,142 @@ function buildAdminFeedbackActorSnapshot(req) {
     name: name ? String(name).trim().slice(0, 255) : null,
     email: email ? String(email).trim().slice(0, 320) : null,
   };
+}
+
+function formatAdminFeedbackReportTypeLabel(reportType) {
+  if (reportType === 'bug') return 'Bug report';
+  if (reportType === 'change_request') return 'Change request';
+  return 'Feedback report';
+}
+
+function formatAdminFeedbackSeverityLabel(severity) {
+  if (severity === 'critical') return 'Critical';
+  if (severity === 'high') return 'High';
+  if (severity === 'medium') return 'Medium';
+  if (severity === 'low') return 'Low';
+  return severity ? String(severity) : '';
+}
+
+function normalizeHttpUrl(rawValue) {
+  const raw = typeof rawValue === 'string' ? rawValue.trim() : '';
+  if (!raw) return '';
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(withProtocol);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    parsed.hash = '';
+    return parsed.toString();
+  } catch (_) {
+    return '';
+  }
+}
+
+function resolveAdminFeedbackReviewUrl() {
+  const allowedOrigins = String(process.env.ALLOWED_ORIGIN || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+  const candidates = [
+    process.env.ADMIN_PORTAL_URL,
+    process.env.REACT_APP_ADMIN_URL,
+    process.env.ADMIN_APP_URL,
+    process.env.COGNITO_REDIRECT_URI,
+    process.env.REACT_APP_COGNITO_REDIRECT_URI,
+    allowedOrigins.find(origin => /:3001(?:\/|$)/.test(origin)),
+    ...allowedOrigins,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeHttpUrl(candidate);
+    if (!normalized) continue;
+    try {
+      const parsed = new URL(normalized);
+      parsed.pathname = '/support/bugs-change-requests';
+      parsed.search = '';
+      parsed.hash = '';
+      return parsed.toString();
+    } catch (_) {}
+  }
+  return '/support/bugs-change-requests';
+}
+
+function buildAdminFeedbackEventActor(actor) {
+  if (!actor || typeof actor !== 'object') {
+    return { type: 'system', id: null, displayName: 'PATH' };
+  }
+  return {
+    type: actor.staffProfileId ? 'staff' : 'system',
+    id: actor.staffProfileId || actor.email || null,
+    staffProfileId: actor.staffProfileId || null,
+    displayName: actor.name || actor.email || 'PATH',
+  };
+}
+
+function toAdminFeedbackNotificationTimestamp(value) {
+  if (!value) return '';
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+}
+
+function buildAdminFeedbackCriticalNotificationPayload(report, {
+  trigger = 'created_critical',
+  previousSeverity = null,
+} = {}) {
+  const attachmentCount = Number(report?.attachmentCount || 0);
+  const reportTypeLabel = formatAdminFeedbackReportTypeLabel(report?.reportType);
+  const severityLabel = formatAdminFeedbackSeverityLabel(report?.severity);
+  const previousSeverityLabel = formatAdminFeedbackSeverityLabel(previousSeverity);
+  const message = `${severityLabel || 'Critical'} ${reportTypeLabel.toLowerCase()} #${report?.id || ''}: ${report?.summary || 'Untitled report'}`.trim();
+  return {
+    admin_feedback_report_id: report?.id ? String(report.id) : '',
+    admin_feedback_report_type: report?.reportType || '',
+    admin_feedback_report_type_label: reportTypeLabel,
+    admin_feedback_severity: report?.severity || '',
+    admin_feedback_severity_label: severityLabel,
+    admin_feedback_previous_severity: previousSeverity || '',
+    admin_feedback_previous_severity_label: previousSeverityLabel,
+    admin_feedback_summary: report?.summary || '',
+    admin_feedback_description: report?.description || '',
+    admin_feedback_reporter_name: report?.submittedByName || '',
+    admin_feedback_reporter_email: report?.submittedByEmail || '',
+    admin_feedback_reporter_role: report?.submittedByRole || '',
+    admin_feedback_page_title: report?.pageTitle || '',
+    admin_feedback_page_path: report?.pagePath || '',
+    admin_feedback_page_url: report?.pageUrl || '',
+    admin_feedback_attachment_count: String(attachmentCount),
+    admin_feedback_submitted_at: toAdminFeedbackNotificationTimestamp(report?.submittedAt),
+    admin_feedback_updated_at: toAdminFeedbackNotificationTimestamp(report?.updatedAt),
+    admin_feedback_trigger: trigger,
+    admin_feedback_review_url: resolveAdminFeedbackReviewUrl(),
+    message,
+  };
+}
+
+async function emitAdminFeedbackCriticalNotification(reportId, {
+  trigger = 'created_critical',
+  previousSeverity = null,
+  actor = null,
+} = {}) {
+  try {
+    const detail = await loadAdminFeedbackReportDetail(reportId);
+    const report = detail?.report;
+    if (!report || report.severity !== 'critical') return null;
+    return await emitEvent({
+      type: 'admin_feedback_critical',
+      category: 'system',
+      subject: { type: 'admin_feedback_report', id: report.id },
+      actor: buildAdminFeedbackEventActor(actor),
+      payload: buildAdminFeedbackCriticalNotificationPayload(report, {
+        trigger,
+        previousSeverity,
+      }),
+      trackingId: `admin-feedback-${report.id}`,
+      correlationId: `admin-feedback-critical-${report.id}-${trigger}`,
+    });
+  } catch (err) {
+    console.warn('[admin:feedback] critical notification failed for report %s: %s', reportId, err?.message || err);
+    return null;
+  }
 }
 
 async function presignObjectStoreDownloadUrl(key, expiresIn = ADMIN_FEEDBACK_ATTACHMENT_DOWNLOAD_EXPIRES_SECONDS) {
@@ -34208,6 +34351,86 @@ app.patch('/api/admin/feedback-reports/:id/status', async (req, res) => {
   }
 });
 
+app.patch('/api/admin/feedback-reports/:id/severity', async (req, res) => {
+  if (!canReviewAdminFeedback(req)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  const reportId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(reportId) || reportId <= 0) {
+    return res.status(400).json({ error: 'invalid_id' });
+  }
+
+  const nextSeverity = sanitizeAdminFeedbackSeverity(req.body?.severity, null);
+  if (!nextSeverity) {
+    return res.status(400).json({ error: 'invalid_severity' });
+  }
+
+  const actor = buildAdminFeedbackActorSnapshot(req);
+  let previousSeverity = null;
+  let upgradedToCritical = false;
+  let connection;
+
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [[current]] = await connection.query(
+      'SELECT severity FROM admin_feedback_report WHERE id = ? LIMIT 1 FOR UPDATE',
+      [reportId]
+    );
+    if (!current) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'not_found' });
+    }
+
+    previousSeverity = current.severity;
+    upgradedToCritical = current.severity !== 'critical' && nextSeverity === 'critical';
+
+    if (current.severity !== nextSeverity) {
+      await connection.query(
+        `UPDATE admin_feedback_report
+            SET severity = ?, updated_at = NOW()
+          WHERE id = ?`,
+        [nextSeverity, reportId]
+      );
+    }
+
+    await connection.commit();
+
+    if (upgradedToCritical) {
+      await emitAdminFeedbackCriticalNotification(reportId, {
+        trigger: 'severity_upgraded',
+        previousSeverity,
+        actor,
+      });
+    }
+
+    return res.json({
+      success: true,
+      severity: nextSeverity,
+      previousSeverity,
+    });
+  } catch (err) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(503).json({
+        error: 'feedback_storage_unavailable',
+        message: 'Admin feedback storage is not available in this environment.',
+      });
+    }
+    console.error('[admin:feedback] severity update failed', err);
+    return res.status(500).json({
+      error: 'feedback_report_severity_update_failed',
+      message: err?.message || 'Unable to update the feedback report severity.',
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 app.post('/api/admin/feedback-reports/:id/notes', async (req, res) => {
   if (!canReviewAdminFeedback(req)) {
     return res.status(403).json({ error: 'forbidden' });
@@ -34420,6 +34643,17 @@ app.post('/api/admin/feedback-reports', (req, res) => {
 
       await connection.commit();
       cleanupTempFiles();
+
+      if (severity === 'critical') {
+        await emitAdminFeedbackCriticalNotification(reportId, {
+          trigger: 'created_critical',
+          actor: {
+            staffProfileId: reporterStaffProfileId,
+            name: reporterName ? String(reporterName).trim().slice(0, 255) : null,
+            email: reporterEmail ? String(reporterEmail).trim().slice(0, 320) : null,
+          },
+        });
+      }
 
       return res.status(201).json({
         report: {
@@ -55579,6 +55813,16 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       !isBackloadMode &&
       ['approved', 'changes_requested', 'rejected'].includes(interventionStatusPersistence.reviewStatus);
     const reviewedByStaffProfileId = shouldStampReviewDecision ? (resolveActiveStaffProfileId(req) || null) : null;
+    const manualBackloadReviewedAtValue =
+      isBackloadMode && startDateValue ? `${startDateValue} 00:00:00` : null;
+    const reviewedAtInsertExpression = shouldStampReviewDecision
+      ? 'NOW()'
+      : manualBackloadReviewedAtValue
+        ? '?'
+        : 'NULL';
+    const reviewedAtInsertParams = manualBackloadReviewedAtValue && !shouldStampReviewDecision
+      ? [manualBackloadReviewedAtValue]
+      : [];
     const closedAtValue = isClosedStatusCreate && endDateValue ? `${endDateValue} 00:00:00` : null;
 
     const [result] = await pool.query(
@@ -55605,9 +55849,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
           created_by_staff_profile_id,
           reviewed_by_staff_profile_id,
           reviewed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${
-         shouldStampReviewDecision ? 'NOW()' : 'NULL'
-       })`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${reviewedAtInsertExpression})`,
       [
         planRow.case_id,
         planId,
@@ -55630,6 +55872,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         closedAtValue,
         createdBy,
         reviewedByStaffProfileId,
+        ...reviewedAtInsertParams,
       ]
     );
 
