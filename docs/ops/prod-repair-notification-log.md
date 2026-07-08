@@ -2,9 +2,47 @@
 
 Purpose: track live PROD data repairs whose affected staff or business owners may need to be informed later.
 Audience: operations, product, support, and future AI-assisted maintenance threads.
-Last Updated: 2026-07-06
+Last Updated: 2026-07-08
 
 Use this log for repairs that may be externally invisible to staff but should be available for later owner communication. Keep entries concise, evidence-based, and linked to the exact scripts or reports where possible. Do not use this file as approval to mutate PROD; follow the PROD repair rules in `docs/ops/agent-operational-access.md`.
+
+## 2026-07-07/08 - Feedback #157 EI status correction and product fix
+
+Status: PROD targeted data repair applied; product fix deployed; feedback report resolved.
+
+Reason: feedback report `#157` from Emilie Marion (`emarion@nwac.ca`) reported that an already-submitted Application Assessment had the wrong EI status and could not be corrected safely through the UI.
+
+Affected records:
+
+| Item | Value |
+| --- | --- |
+| Feedback report | `#157` |
+| Case | `109` / `ISET-20260418-D6CEEE` |
+| Application | `27` |
+| Assessment row | `30` |
+| Original EI status | `EI Active Claim` |
+| Correct EI status | `EI Reach Back` |
+
+Repair and release:
+
+- Guarded PROD repair changed only the assessment EI eligibility value from `EI Active Claim` to `EI Reach Back` after confirming the case had zero action-plan/intervention dependencies.
+- The repair bumped application row version to `32` and added case event `199` for audit.
+- Release `20260708-admin-user-ei-notification-fix` then deployed the product fix that keeps the existing EI dropdown editable for Regional Manager, NWAC Administrator, and System Administrator users after submission while the application is not final/locked, and blocks the correction once dependent action-plan/intervention work exists.
+- Feedback report `#157` moved to `resolved` after DEV Cognito/browser smoke, TEST deploy/source/smoke, PROD deploy/source/smoke, and deployed marker checks passed.
+
+Evidence:
+
+- Data correction SQL: `sql/ops/prod-feedback-157-ei-status-correction-20260707.sql`.
+- Data correction SSM command `ac4549e1-f9c9-43d2-a552-27b2b61d025a`.
+- DEV smoke: `npm run smoke:application-assessment:ei-correction:dev` passed with disposable DEV Cognito/DB fixture cleanup counts at zero.
+- TEST deployed-source command `87e733cd-c2cc-44c6-9883-94326353c8a4` confirmed release id, suppressed Cognito create marker, EI dependency guard, and shared applicant-name resolver.
+- PROD ASG refresh `c5c6503c-1fef-4301-a6cf-89710b6e52b5` completed on replacement instance `i-02150848df7b6aca7`; final smoke returned `200` for all three public health endpoints.
+- PROD deployed-source command `71540db2-8328-4071-ab6f-13c8263ad243` confirmed release ids in admin/portal, `MessageAction: 'SUPPRESS'`, `ei_eligibility_dependency_blocked`, and shared `GENERIC_APPLICANT_NAME_VALUES`.
+- Feedback closeout SQL: `sql/ops/prod-feedback-157-resolved-after-release-20260708.sql`; SQL-over-SSM command `a4372be3-1a30-474f-b083-474d098950c8`.
+
+Notification note:
+
+- Suggested reporter message: PATH corrected the EI status on the affected file and has now released the dashboard fix that allows authorized managers/admins to correct EI status after submission when doing so will not invalidate dependent casework. The report is resolved.
 
 ## 2026-07-06 - Application 11 assessment decision-context repair
 

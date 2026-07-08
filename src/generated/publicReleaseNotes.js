@@ -1,5 +1,5 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-07-08T09:55:31.904Z",
+  "generatedAt": "2026-07-08T10:08:55.051Z",
   "releaseId": "20260708-admin-user-ei-notification-fix",
   "releaseLabel": "Release 20260708-admin-user-ei-notification-fix",
   "releaseDateEn": "8th July 2026",
