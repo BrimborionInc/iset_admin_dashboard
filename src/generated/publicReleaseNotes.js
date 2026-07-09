@@ -1,5 +1,5 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-07-09T00:46:19.129Z",
+  "generatedAt": "2026-07-09T00:57:57.715Z",
   "releaseId": "20260708-critical-feedback-reporting-prod",
   "releaseLabel": "Release 20260708-critical-feedback-reporting-prod",
   "releaseDateEn": "9th July 2026",
