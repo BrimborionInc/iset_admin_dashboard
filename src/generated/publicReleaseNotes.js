@@ -1,7 +1,7 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-07-10T10:14:43.190Z",
-  "releaseId": "20260710-conflict-disposition-notes-test",
-  "releaseLabel": "Release 20260710-conflict-disposition-notes-test",
+  "generatedAt": "2026-07-10T10:33:11.614Z",
+  "releaseId": "20260710-conflict-disposition-notes-prod",
+  "releaseLabel": "Release 20260710-conflict-disposition-notes-prod",
   "releaseDateEn": "10th July 2026",
   "releaseDateFr": "10 juillet 2026",
   "en": {
@@ -13,7 +13,7 @@ const publicReleaseNotes = {
     ],
     "featurePackages": [
       {
-        "title": "Release 20260710-conflict-disposition-notes-test",
+        "title": "Release 20260710-conflict-disposition-notes-prod",
         "items": [
           "Resolving a declared conflict now requires notes and records a `cleared` disposition without rewriting the original declaration.",
           "Conflict-related reassignment now records a separate `reassigned` disposition and supports optional reviewer notes.",
@@ -51,7 +51,7 @@ const publicReleaseNotes = {
     ],
     "featurePackages": [
       {
-        "title": "Release 20260710-conflict-disposition-notes-test",
+        "title": "Release 20260710-conflict-disposition-notes-prod",
         "items": [
           "La resolution d'un conflit declare exige maintenant des notes et consigne une decision `cleared` sans modifier la declaration originale.",
           "La reaffectation liee a un conflit consigne maintenant une decision distincte `reassigned` et accepte des notes de revision facultatives.",

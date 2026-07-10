@@ -22,7 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
-- 2026-07-09 | Release 20260710-conflict-disposition-notes-test | Fix/Casework | Conflict-of-interest review | Resolving a declared conflict now requires reviewer notes, keeps the original conflict declaration in the audit trail, and notifies the staff member who declared it using the applicant's name. | Conflict-driven reassignment now records its own reassignment disposition/event and supports optional reviewer notes, which are saved to the audit trail and sent to the declaring staff member with the applicant name and new assignee.
+- 2026-07-09 | Release 20260710-conflict-disposition-notes-prod | Fix/Casework | Conflict-of-interest review | Resolving a declared conflict now requires reviewer notes, keeps the original conflict declaration in the audit trail, and notifies the staff member who declared it using the applicant's name. | Conflict-driven reassignment now records its own reassignment disposition/event and supports optional reviewer notes, which are saved to the audit trail and sent to the declaring staff member with the applicant name and new assignee.
 - 2026-07-09 | Release 20260709-portal-application-start-gate-prod | Fix/Public portal | Applicant dashboard and intake start | Applicants are blocked from starting, resuming, or submitting a new application while an existing submitted non-terminal application is still in process. | Terminal applications and active supports still allow a new application; the gate also covers admin/manual-intake, account-activation, and future console-created application-only cases by checking the applicant's linked client record, not only the original submission owner.
 - 2026-07-08 | Release 20260708-critical-feedback-reporting-prod | Fix/Casework | Add existing intervention | Manually entered existing interventions now use the entered intervention start date as the inferred historical approval date for approval-date financial reporting. | The PATH entry timestamp remains in `created_at`; this prevents future historical backload entries from appearing in the fiscal year when staff keyed them into PATH.
 - 2026-07-08 | Release 20260708-critical-feedback-reporting-prod | UX/Reporting | Regional Snapshot | Regional Snapshot now labels the application-status count as `Approved Applications` instead of `Approved / Funded Applications`. | Funding totals and funded-client counts are unchanged; the wording clarifies that Client Activity is an application workflow breakdown while Funded Clients belongs to the approved-funding metrics.
@@ -455,7 +455,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What Changed Packages (draft - EN)
 
-#### Release 20260710-conflict-disposition-notes-test
+#### Release 20260710-conflict-disposition-notes-prod
 
 - Resolving a declared conflict now requires notes and records a `cleared` disposition without rewriting the original declaration.
 - Conflict-related reassignment now records a separate `reassigned` disposition and supports optional reviewer notes.
@@ -483,7 +483,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Lots de changements (brouillon - FR)
 
-#### Release 20260710-conflict-disposition-notes-test
+#### Release 20260710-conflict-disposition-notes-prod
 
 - La resolution d'un conflit declare exige maintenant des notes et consigne une decision `cleared` sans modifier la declaration originale.
 - La reaffectation liee a un conflit consigne maintenant une decision distincte `reassigned` et accepte des notes de revision facultatives.
