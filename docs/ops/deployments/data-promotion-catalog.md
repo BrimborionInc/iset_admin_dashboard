@@ -9,9 +9,10 @@ Last updated: 2026-06-16
 
 ## Core rules
 
-- `DEV` is the authoring/source-of-truth environment for configuration and workflow promotion.
+- `DEV` is an authoring/source environment, but it also hosts other nForm application experiments, including legal aid. Never assume its current published runtime/config belongs to NWAC ISET.
 - `TEST` / training is disposable. It may be reset from a scrubbed snapshot or overwritten by explicit sync jobs.
 - `PROD` is persistent. Do not restore full dumps from DEV or TEST into prod.
+- `TEST` and `PROD` are dedicated to NWAC's ISET support process. Any promoted workflow/runtime/config payload must be positively identified as the intended ISET workflow; mismatch, missing identity, or unexplained content is a hard stop. This guard exists because a prior experimental legal-aid intake was accidentally published to PROD, causing a significant SLA and reputational breach.
 - `PROD` receives:
   - schema changes through canonical migrations in `sql/migrations/`
   - allowlisted config/reference promotions only
