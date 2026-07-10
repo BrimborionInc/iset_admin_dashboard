@@ -63,6 +63,8 @@ The admin server can execute canonical migrations automatically at startup when 
 
 - Errors are logged as `[migrations] FAILED <file>: <message>` and stop subsequent migrations.
 - The runner still records the failure row in `iset_migration` (with `success=0` and error snippet) so you have an audit trail.
+- After recording the failed attempt, the shared runner throws `SchemaMigrationApplyError` with code `schema_migration_apply_failed`. `path-schema-migrate` therefore exits nonzero rather than serializing a false-success apply result.
+- `path:deploy` and `test:db:refresh` also validate the parsed schema child result defensively. A zero-exit child payload containing `haltedOnFailure=true` or any failed attempt still fails the parent step, stops later mutation, and prevents a successful manifest.
 - Fix the SQL, edit/re-save the file, and restart. The checksum change triggers a new attempt.
 - Retrying the exact same `filename+checksum` now updates the existing tracking row instead of failing on the unique key, so local/dev recovery from a failed migration does not require manual tracker cleanup.
 

@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-07-09
+Last Updated: 2026-07-10
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-07-10 | Release 20260710-r1-intake-completion-prod | Fix/Public portal | Intake completion | Applicants are prevented from completing an application when a required answer or signature on their applicable intake path is missing, and transient persistence failures no longer leave a partial submission. | Deployed to PROD after authenticated TEST rehearsal. No published workflow/runtime or historical data change was included.
 - 2026-07-09 | Release 20260710-conflict-disposition-notes-prod | Fix/Casework | Conflict-of-interest review | Resolving a declared conflict now requires reviewer notes, keeps the original conflict declaration in the audit trail, and notifies the staff member who declared it using the applicant's name. | Conflict-driven reassignment now records its own reassignment disposition/event and supports optional reviewer notes, which are saved to the audit trail and sent to the declaring staff member with the applicant name and new assignee.
 - 2026-07-09 | Release 20260709-portal-application-start-gate-prod | Fix/Public portal | Applicant dashboard and intake start | Applicants are blocked from starting, resuming, or submitting a new application while an existing submitted non-terminal application is still in process. | Terminal applications and active supports still allow a new application; the gate also covers admin/manual-intake, account-activation, and future console-created application-only cases by checking the applicant's linked client record, not only the original submission owner.
 - 2026-07-08 | Release 20260708-critical-feedback-reporting-prod | Fix/Casework | Add existing intervention | Manually entered existing interventions now use the entered intervention start date as the inferred historical approval date for approval-date financial reporting. | The PATH entry timestamp remains in `created_at`; this prevents future historical backload entries from appearing in the fiscal year when staff keyed them into PATH.
@@ -451,9 +452,15 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Conflict resolution now requires reviewer notes, and conflict-related reassignment supports optional notes; both decisions are recorded and sent to the staff member who declared the conflict.
+- Final application submission now rechecks every required answer and signature on the applicant's applicable intake path and saves the core application records together so transient failures cannot leave a partial submission.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260710-r1-intake-completion-prod
+
+- Final application submission now rechecks every required answer and signature on the applicant's applicable intake path.
+- Client, case, submission, and application records are saved together, preventing a transient failure from leaving a partial submitted application.
+- Safe retries return the existing completed result instead of creating duplicate application records or repeating generated documents and notifications.
 
 #### Release 20260710-conflict-disposition-notes-prod
 
@@ -467,21 +474,21 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Direct links to the intake wizard now recheck eligibility before rendering the form and return the applicant to the dashboard when another application is blocking.
 - The eligibility check now covers admin/manual-intake, account-activation, and future console-created application-only cases by checking the applicant's linked client record as well as the original submission owner.
 
-#### Release 20260708-critical-feedback-reporting-prod
-
-- Manually entered existing interventions now use the entered intervention start date as the inferred historical approval date for approval-date financial reporting.
-- Regional Snapshot now labels the application-status count as `Approved Applications` instead of `Approved / Funded Applications`.
-- Bugs and Change Requests now emails System Administrators when a report is saved as Critical, including when an existing report is upgraded to Critical.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- La resolution d'un conflit exige maintenant des notes de revision, et la reaffectation liee a un conflit accepte des notes facultatives; les deux decisions sont consignees et envoyees au membre du personnel qui a declare le conflit.
+- La soumission finale reverifie maintenant chaque reponse et signature obligatoire du parcours applicable et enregistre ensemble les dossiers principaux afin qu'une erreur temporaire ne laisse pas une soumission partielle.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260710-r1-intake-completion-prod
+
+- La soumission finale reverifie maintenant chaque reponse et signature obligatoire du parcours d'admission applicable.
+- Les dossiers client, cas, soumission et demande sont enregistres ensemble afin qu'une erreur temporaire ne laisse pas une demande soumise partiellement.
+- Une nouvelle tentative securitaire retourne le resultat deja termine au lieu de creer des dossiers en double ou de repeter les documents et notifications generes.
 
 #### Release 20260710-conflict-disposition-notes-prod
 
@@ -494,12 +501,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Le tableau de bord demandeur masque maintenant Commencer une nouvelle demande et tout brouillon sauvegarde lorsqu'une demande soumise non terminale est en traitement.
 - Les liens directs vers le formulaire d'admission reverifient maintenant l'admissibilite avant d'afficher le formulaire et retournent le demandeur au tableau de bord lorsqu'une autre demande bloque le demarrage.
 - La verification couvre maintenant les cas d'admission manuelle/admin, d'activation de compte et les futurs cas d'application sans soumission creee dans la console, en utilisant le dossier client lie au demandeur en plus du proprietaire original de la soumission.
-
-#### Release 20260708-critical-feedback-reporting-prod
-
-- Les interventions existantes entrees manuellement utilisent maintenant la date de debut de l'intervention comme date d'approbation historique inferee pour les rapports financiers par date d'approbation.
-- Regional Snapshot nomme maintenant le compteur de statut des demandes `Approved Applications` au lieu de `Approved / Funded Applications`.
-- Bugs and Change Requests envoie maintenant un courriel aux administrateurs systeme lorsqu'un rapport est enregistre comme critique, y compris lorsqu'un rapport existant est augmente a critique.
 
 ### Problemes connus (brouillon - FR)
 

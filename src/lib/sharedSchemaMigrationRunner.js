@@ -13,6 +13,44 @@ const OPS_SQL_DIR = path.join(REPO_ROOT, 'sql', 'ops');
 const LEGACY_ARCHIVE_DIR = path.join(REPO_ROOT, 'db', 'migrations');
 const RETIRED_PORTAL_MIGRATIONS_DIR = path.join(PORTAL_ROOT, 'db', 'migrations');
 
+class SchemaMigrationApplyError extends Error {
+  constructor(result, context = 'Schema migration apply') {
+    const failedAttempts = Array.isArray(result?.attempted)
+      ? result.attempted.filter(attempt => attempt?.success !== true)
+      : [];
+    const failedFiles = failedAttempts
+      .map(attempt => attempt?.file)
+      .filter(Boolean);
+    const suffix = failedFiles.length
+      ? `: ${failedFiles.join(', ')}`
+      : '';
+    super(`${context} failed${suffix}`);
+    this.name = 'SchemaMigrationApplyError';
+    this.code = 'schema_migration_apply_failed';
+    this.result = result;
+    this.failedFiles = failedFiles;
+  }
+}
+
+function assertMigrationApplySucceeded(result, options = {}) {
+  const context = options.context || 'Schema migration apply';
+  if (
+    !result ||
+    typeof result !== 'object' ||
+    !Array.isArray(result.attempted) ||
+    typeof result.haltedOnFailure !== 'boolean'
+  ) {
+    throw new SchemaMigrationApplyError(result, `${context} returned an invalid result`);
+  }
+  const failedAttempts = Array.isArray(result.attempted)
+    ? result.attempted.filter(attempt => attempt?.success !== true)
+    : [];
+  if (result.haltedOnFailure === true || failedAttempts.length > 0) {
+    throw new SchemaMigrationApplyError(result, context);
+  }
+  return result;
+}
+
 function toBoolean(value, defaultValue = false) {
   if (value === undefined || value === null || value === '') {
     return defaultValue;
@@ -227,11 +265,11 @@ async function applyPendingSharedSchemaMigrations(pool, options = {}) {
     }
   }
 
-  return {
+  return assertMigrationApplySucceeded({
     ...plan,
     attempted,
     haltedOnFailure,
-  };
+  });
 }
 
 async function runStartupSharedSchemaMigrations(pool, options = {}) {
@@ -294,6 +332,8 @@ module.exports = {
   OPS_SQL_DIR,
   LEGACY_ARCHIVE_DIR,
   RETIRED_PORTAL_MIGRATIONS_DIR,
+  SchemaMigrationApplyError,
+  assertMigrationApplySucceeded,
   ensureTrackingTable,
   fetchAppliedMigrationRows,
   getSharedSchemaInventory,

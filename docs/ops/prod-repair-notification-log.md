@@ -2,9 +2,26 @@
 
 Purpose: track live PROD data repairs whose affected staff or business owners may need to be informed later.
 Audience: operations, product, support, and future AI-assisted maintenance threads.
-Last Updated: 2026-07-08
+Last Updated: 2026-07-10
 
 Use this log for repairs that may be externally invisible to staff but should be available for later owner communication. Keep entries concise, evidence-based, and linked to the exact scripts or reports where possible. Do not use this file as approval to mutate PROD; follow the PROD repair rules in `docs/ops/agent-operational-access.md`.
+
+## 2026-07-10 - Feedback #35 systemic intake-completion prevention
+
+Status: PROD portal prevention release complete; external owner communication explicitly parked.
+
+Reason: Historical feedback `#35` proved one submitted application had a blank main consent signature. The original file-level response was completed and the report was closed, but the server still lacked a full published-workflow completion guard and used split core commits.
+
+Release and evidence:
+
+- Portal-only release `20260710-r1-intake-completion-prod` deployed from clean commit `1b4734b7f3001db6255fc7bff4a39c1cbb54f540`; no historical application/submission repair, schema, data/runtime/workflow promotion, admin/shared artifact, or synthetic PROD submission was included.
+- Source SSM `5c64b682-60cc-4439-82aa-ef2ec9b67eb3` confirmed the production build, completion router, published-workflow validator call, single-transaction markers, syntax, local health, and online processes.
+- Read-only postflight SQL `b43bda4e-2582-4055-bc70-5a8ef0911178` found zero orphan submissions, duplicate links, or active/non-terminal ownership conflicts. The sole raw mismatch is the documented terminal archived duplicate from the May account merge, with its old user suspended and explicit merge marker present.
+- Feedback SQL artifacts `sql/ops/prod-feedback-35-r1-prerelease-20260710.sql` and `sql/ops/prod-feedback-35-r1-closeout-20260710.sql` ran through SSM commands `139f3a6c-18ed-491b-80f4-a10e8f60a96e` and `b6a216bc-2601-49d4-b635-de1c3185721a`. Report `#35` remains closed with its existing closed status history and current internal release evidence.
+
+Notification note:
+
+- No external owner message is required. The original applicant/file response was completed in April, the current release is systemic prevention with no new action for the reporter, and no live applicant flow was generated for PROD testing. Reopen communication only if a legitimate future submission exposes a regression.
 
 ## 2026-07-08 - BC historic backload finance-reporting date repair
 

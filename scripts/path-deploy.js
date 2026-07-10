@@ -7,6 +7,7 @@ const path = require('path');
 const https = require('https');
 const { spawnSync } = require('child_process');
 const archiver = require('archiver');
+const { assertMigrationApplySucceeded } = require('../src/lib/sharedSchemaMigrationRunner');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const PORTAL_ROOT = path.resolve(REPO_ROOT, '..', 'ISET-intake');
@@ -1542,7 +1543,10 @@ function applySchema(args, envConfig) {
   if (envConfig.name === 'prod') {
     scriptArgs.push('--yes');
   }
-  return runJsonNodeScript(path.join(REPO_ROOT, 'scripts', 'path-schema-migrate.js'), scriptArgs);
+  const result = runJsonNodeScript(path.join(REPO_ROOT, 'scripts', 'path-schema-migrate.js'), scriptArgs);
+  return assertMigrationApplySucceeded(result, {
+    context: `Deploy schema apply on ${envConfig.name}`,
+  });
 }
 
 function runTestDbRefresh(args, envConfig) {

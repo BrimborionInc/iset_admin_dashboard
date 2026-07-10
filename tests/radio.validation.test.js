@@ -1,5 +1,3 @@
-// Simple runtime test (manual) to invoke validation utility for radio component.
-// Run with: node tests/radio.validation.test.js (ensure server dependencies installed)
 const path = require('path');
 const fs = require('fs');
 const Ajv = require('ajv');
@@ -21,6 +19,21 @@ const good = {
 
 const bad = { name: '', fieldset: { legend: { text: '', isPageHeading: 'no', classes: 5 } }, items: [] };
 
-console.log('GOOD valid?', validate(good), validate.errors || null);
-validate(bad);
-console.log('BAD valid?', validate.errors);
+describe('radio component schema', () => {
+  test('accepts a complete radio definition', () => {
+    expect(validate(good)).toBe(true);
+    expect(validate.errors).toBeNull();
+  });
+
+  test('rejects empty and incorrectly typed required fields', () => {
+    expect(validate(bad)).toBe(false);
+    const paths = (validate.errors || []).map(error => `${error.instancePath}:${error.keyword}`);
+    expect(paths).toEqual(expect.arrayContaining([
+      '/name:minLength',
+      '/fieldset/legend/text:minLength',
+      '/fieldset/legend/isPageHeading:type',
+      '/fieldset/legend/classes:type',
+      '/items:minItems',
+    ]));
+  });
+});

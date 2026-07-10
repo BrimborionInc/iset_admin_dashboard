@@ -1,7 +1,7 @@
 Status: current
 Purpose: Track how faithfully the local Intacct mock and PATH sender model the external Sage Intacct interface.
 Audience: Admin dashboard engineers, mock-service engineers, future Intacct integration threads.
-Last Updated: 2026-06-15
+Last Updated: 2026-07-10
 
 # Sage Intacct Interface Fidelity Audit
 
@@ -33,6 +33,12 @@ Official Sage evidence checked on 2026-06-15:
 
 Note: several `developer.sage.com` REST pages are JavaScript-rendered and could not be captured line-by-line from this terminal session. Search-index snippets from those official pages showed the current REST object naming. Treat exact REST create/update payload shape as needing confirmation in the official OpenAPI page or a sandbox before implementation.
 
+Official Sage response-envelope evidence was rechecked on 2026-07-10:
+
+- Sage Intacct REST `Try it` documentation: https://developer.sage.com/intacct/docs/1/sage-intacct-rest-api/get-started/try-it
+- The current page directly exposes list, get, POST, and PATCH examples using `ia::result` plus `ia::meta`; this is no longer only a search-snippet inference.
+- The exact Accounts Payable bill/vendor request fields, OAuth flow, and supporting-document endpoint still require their object-specific OpenAPI pages or an approved sandbox replay.
+
 ## Current Local Contract
 
 PATH currently treats the Intacct integration as a REST-style flow:
@@ -44,8 +50,8 @@ PATH currently treats the Intacct integration as a REST-style flow:
 | AP bills | `POST /ia/api/v1/objects/accounts-payable/bill` | Creates in-memory bills on canonical route plus legacy local aliases; records PATH packet/case/client/intervention metadata when provided | Path now matches current official REST object-map evidence |
 | AP bill get | `GET /ia/api/v1/objects/accounts-payable/bill/:id` | Returns in-memory bill on canonical route plus legacy local aliases | Path now matches current official REST object-map evidence |
 | Attachments | `POST /ia/api/v1/objects/accounts-payable/bill/:id/attachments` | No-op accepted stub on canonical route plus legacy local aliases | Route is Sage-style, but exact supporting-document behavior still needs Sage evidence |
-| Errors | Expects `{ error: { message, details } }` | Returns `{ error: { code, message, details } }` | Likely response-envelope mismatch |
-| Success | Expects `{ data: { id } }` | Returns `{ data: ... }` | Likely response-envelope mismatch |
+| Errors | Expects `{ error: { message, details } }` | Returns `{ error: { code, message, details } }` | Does not model Sage's documented `ia::error` contract |
+| Success | Expects `{ data: { id } }` | Returns `{ data: ... }` | Confirmed mismatch with documented `ia::result` / `ia::meta` success envelopes; tracked as `EA-013` |
 
 The mock also serves dashboard-only endpoints under `/mock/api/*`. Those are allowed test conveniences and are not part of the simulated Sage-facing contract.
 
@@ -59,7 +65,7 @@ Strong evidence:
 - Sage XML vendors use the `VENDOR` object.
 - Official REST object-map snippets indicate `APBILL` maps to `accounts-payable/bill` and `VENDOR` maps to `accounts-payable/vendor`.
 - Official REST tutorial snippets use a base like `https://api.intacct.com/ia/api/v1` with paths under `/objects/accounts-payable/vendor/...`.
-- Official REST response examples/snippets use `ia::result`, `ia::meta`, and `ia::error` envelopes.
+- Official REST success examples directly use `ia::result` and `ia::meta`; official error-handling evidence still needs a directly captured object/error example for exact `ia::error` parsing.
 
 Needs confirmation:
 
@@ -73,7 +79,7 @@ Needs confirmation:
 | Gap | Risk | Current status | Recommended next move |
 | --- | --- | --- | --- |
 | Mock token endpoint returns a fixed token and only checks for any bearer header. | Medium | Accepted for local only | Add negative auth cases and token-shape validation mode once real auth pattern is confirmed. |
-| Mock success/error envelopes use `{ data }` and `{ error }`, not apparent Sage REST `ia::result` and `ia::meta`. | High | Needs fix/evidence | Add Sage-envelope mode to the mock and adapt PATH parsing before sandbox replay. |
+| Mock/PATH success envelopes use `{ data }`, not documented Sage REST `ia::result` and `ia::meta`; PATH records a 2xx Sage-style response as success with a null bill ID and skips attachments. | High | Confirmed interface incompatibility; cycle finding `EA-013` | Parse/validate Sage envelopes first, fail closed without an external ID, and add Sage-envelope mode to the mock before sandbox replay. |
 | PATH bill payload is simplified snake_case JSON (`vendor_id`, `bill_date`, `due_date`, `gl_account`). | High | Needs fix/evidence | Map PATH domain payloads to documented REST fields or to XML APBILL fields if XML is selected. |
 | Legacy local aliases under `/objects/vendors` and `/objects/apbills` remain accepted by the mock and are available as local fallback for PATH when the base URL is localhost. | Low | Accepted mock-only during transition | Remove after canonical route usage has been stable and no local tooling depends on the old paths. |
 | One PATH payment packet currently creates one external bill using the first line's vendor. | High | Known design gap | Split external bills by vendor/payee, then by any Sage-required grouping dimensions. |
@@ -115,6 +121,7 @@ Definition of done for future Intacct mock fidelity changes:
 
 ## Implementation Progress
 
+- 2026-07-10: Revalidated the REST success-envelope contract against the current official Sage `Try it` page. The contracts audit traced PATH's `submitPayload?.data?.id` parser through attachment dispatch and reconciliation metadata: a normal Sage `ia::result` success would leave `billId` null while PATH still records the communication and attempt as successful. This is now tracked as `EA-013` in `docs/planning/engineering-audit-register.md`. Current PROD has Intacct REST disabled and zero payment rows; no live mutation or sandbox call was performed. The exact bill/vendor payload, OAuth, attachment, and error-envelope gaps remain open.
 - 2026-06-15: Canonical Sage-style REST object paths became primary for PATH and the mock:
   - `/ia/api/v1/objects/accounts-payable/vendor`
   - `/ia/api/v1/objects/accounts-payable/bill`

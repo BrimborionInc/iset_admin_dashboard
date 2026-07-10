@@ -8,6 +8,7 @@ const {
   buildSourceSnapshotPlan,
   buildSourceSnapshot,
 } = require('../src/lib/testDbSourceSnapshotBuilder');
+const { assertMigrationApplySucceeded } = require('../src/lib/sharedSchemaMigrationRunner');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const DEFAULTS = {
@@ -653,7 +654,7 @@ function runRestore(plan, args) {
 }
 
 function applyCanonicalSchema(args) {
-  return runJsonNodeScript(path.join(REPO_ROOT, 'scripts', 'path-schema-migrate.js'), [
+  const result = runJsonNodeScript(path.join(REPO_ROOT, 'scripts', 'path-schema-migrate.js'), [
     'apply',
     '--target-env',
     'test',
@@ -662,6 +663,9 @@ function applyCanonicalSchema(args) {
     '--region',
     args.region,
   ]);
+  return assertMigrationApplySucceeded(result, {
+    context: 'TEST refresh canonical schema apply',
+  });
 }
 
 function runTestSmoke() {

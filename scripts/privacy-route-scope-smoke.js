@@ -36,16 +36,101 @@ function readSource(filePath) {
   return fs.readFileSync(filePath, 'utf8');
 }
 
-const sources = {
-  admin: readSource(ADMIN_SERVER),
-  portal: readSource(PORTAL_SERVER),
-  coordinator: readSource(COORDINATOR_ASSESSMENT_WIDGET),
-};
+function loadDefaultRouteScopeSources() {
+  return {
+    admin: readSource(ADMIN_SERVER),
+    portal: readSource(PORTAL_SERVER),
+    coordinator: readSource(COORDINATOR_ASSESSMENT_WIDGET),
+  };
+}
 
 function extractWindow(source, anchor, { before = 200, after = 5000 } = {}) {
   const index = source.indexOf(anchor);
   if (index < 0) return null;
   return source.slice(Math.max(0, index - before), Math.min(source.length, index + after));
+}
+
+function extractExpressRouteRegistration(source, anchor) {
+  const start = source.indexOf(anchor);
+  if (start < 0) return null;
+  const openParen = source.indexOf('(', start);
+  if (openParen < 0) return null;
+
+  let depth = 0;
+  let state = 'code';
+  let escaped = false;
+
+  for (let index = openParen; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+
+    if (state === 'line-comment') {
+      if (char === '\n') state = 'code';
+      continue;
+    }
+    if (state === 'block-comment') {
+      if (char === '*' && next === '/') {
+        state = 'code';
+        index += 1;
+      }
+      continue;
+    }
+    if (state === 'single-quote' || state === 'double-quote' || state === 'template') {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (
+        (state === 'single-quote' && char === '\'') ||
+        (state === 'double-quote' && char === '"') ||
+        (state === 'template' && char === '`')
+      ) {
+        state = 'code';
+      }
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      state = 'line-comment';
+      index += 1;
+      continue;
+    }
+    if (char === '/' && next === '*') {
+      state = 'block-comment';
+      index += 1;
+      continue;
+    }
+    if (char === '\'') {
+      state = 'single-quote';
+      continue;
+    }
+    if (char === '"') {
+      state = 'double-quote';
+      continue;
+    }
+    if (char === '`') {
+      state = 'template';
+      continue;
+    }
+    if (char === '(') {
+      depth += 1;
+      continue;
+    }
+    if (char === ')') {
+      depth -= 1;
+      if (depth === 0) {
+        let end = index + 1;
+        while (end < source.length && /\s/u.test(source[end])) end += 1;
+        if (source[end] === ';') end += 1;
+        return source.slice(start, end);
+      }
+    }
+  }
+  return null;
 }
 
 function containsAll(snippet, patterns) {
@@ -265,14 +350,22 @@ const checks = [
     ],
   },
   {
-    name: 'admin case conflict actions validate case access',
+    name: 'admin conflict revoke validates case access',
     source: 'admin',
     anchor: "app.post('/api/cases/:id/conflicts/revoke'",
     patterns: [
       'validateCaseAccessByCaseId(req, caseId)',
-      "app.post('/api/cases/:id/conflicts/resolve'",
     ],
-    after: 7000,
+    extraction: 'express-route',
+  },
+  {
+    name: 'admin conflict resolve validates case access',
+    source: 'admin',
+    anchor: "app.post('/api/cases/:id/conflicts/resolve'",
+    patterns: [
+      'validateCaseAccessByCaseId(req, caseId)',
+    ],
+    extraction: 'express-route',
   },
   {
     name: 'admin ILMP and ready-to-close case mutations validate case access',
@@ -468,13 +561,14 @@ const checks = [
     after: 6500,
   },
   {
-    name: 'admin feedback report detail requires System Administrator',
+    name: 'admin feedback report detail requires approved reviewer access',
     source: 'admin',
     anchor: "app.get('/api/admin/feedback-reports/:id'",
     patterns: [
-      "inferUserRole(req) !== 'System Administrator'",
+      'canReviewAdminFeedback(req)',
       'loadAdminFeedbackReportDetail(reportId)',
     ],
+    extraction: 'express-route',
   },
   {
     name: 'admin AI chat blocks sensitive content before external model call',
@@ -534,29 +628,85 @@ const checks = [
     ],
   },
   {
-    name: 'notification templates require System or NWAC administrator access',
+    name: 'notification template list requires route-matrix access',
     source: 'admin',
     anchor: "app.get('/api/templates'",
     patterns: [
-      'requireNotificationConfigAccess(req, res)',
-      "app.get('/api/templates/:templateId'",
-      "app.post('/api/templates/:templateId'",
-      "app.delete('/api/templates/:templateId'",
+      'requireNotificationConfigAccess(req, res, [TEMPLATE_EDITOR_ROUTE, MANAGE_NOTIFICATIONS_ROUTE])',
     ],
-    after: 8000,
+    extraction: 'express-route',
   },
   {
-    name: 'notification settings and sender config require System or NWAC administrator access',
+    name: 'notification template detail requires route-matrix access',
+    source: 'admin',
+    anchor: "app.get('/api/templates/:templateId'",
+    patterns: [
+      'requireNotificationConfigAccess(req, res, TEMPLATE_EDITOR_ROUTE)',
+    ],
+    extraction: 'express-route',
+  },
+  {
+    name: 'notification template save requires route-matrix access',
+    source: 'admin',
+    anchor: "app.post('/api/templates/:templateId'",
+    patterns: [
+      'requireNotificationConfigAccess(req, res, TEMPLATE_EDITOR_ROUTE)',
+    ],
+    extraction: 'express-route',
+  },
+  {
+    name: 'notification template delete requires route-matrix access',
+    source: 'admin',
+    anchor: "app.delete('/api/templates/:templateId'",
+    patterns: [
+      'requireNotificationConfigAccess(req, res, TEMPLATE_EDITOR_ROUTE)',
+    ],
+    extraction: 'express-route',
+  },
+  {
+    name: 'notification email settings read requires route-matrix access',
     source: 'admin',
     anchor: "app.get('/api/config/notifications/email-settings'",
     patterns: [
-      'requireNotificationConfigAccess(req, res)',
-      "app.patch('/api/config/notifications/email-settings'",
-      "app.get('/api/notifications'",
-      "app.post('/api/notifications'",
-      "app.delete('/api/notifications/:id'",
+      'requireNotificationConfigAccess(req, res, MANAGE_NOTIFICATIONS_ROUTE)',
     ],
-    after: 6500,
+    extraction: 'express-route',
+  },
+  {
+    name: 'notification email settings save requires route-matrix access',
+    source: 'admin',
+    anchor: "app.patch('/api/config/notifications/email-settings'",
+    patterns: [
+      'requireNotificationConfigAccess(req, res, MANAGE_NOTIFICATIONS_ROUTE)',
+    ],
+    extraction: 'express-route',
+  },
+  {
+    name: 'notification settings list requires route-matrix access',
+    source: 'admin',
+    anchor: "app.get('/api/notifications'",
+    patterns: [
+      'requireNotificationConfigAccess(req, res, MANAGE_NOTIFICATIONS_ROUTE)',
+    ],
+    extraction: 'express-route',
+  },
+  {
+    name: 'notification settings save requires route-matrix access',
+    source: 'admin',
+    anchor: "app.post('/api/notifications'",
+    patterns: [
+      'requireNotificationConfigAccess(req, res, MANAGE_NOTIFICATIONS_ROUTE)',
+    ],
+    extraction: 'express-route',
+  },
+  {
+    name: 'notification settings delete requires route-matrix access',
+    source: 'admin',
+    anchor: "app.delete('/api/notifications/:id'",
+    patterns: [
+      'requireNotificationConfigAccess(req, res, MANAGE_NOTIFICATIONS_ROUTE)',
+    ],
+    extraction: 'express-route',
   },
   {
     name: 'legacy generic shared-user list endpoint is retired',
@@ -717,43 +867,65 @@ const checks = [
   },
 ];
 
-function runChecks() {
-  return checks.map(check => {
-    const source = sources[check.source];
-    const snippet = extractWindow(source, check.anchor, { after: check.after || 5000 });
-    if (!snippet) {
-      return {
-        name: check.name,
-        pass: false,
-        missing: [`anchor not found: ${check.anchor}`],
-      };
-    }
-    const missing = containsAll(snippet, check.patterns);
-    const forbidden = containsForbidden(snippet, check.forbidden);
+function createDefaultRouteScopeChecks() {
+  return checks.map(check => ({ ...check }));
+}
+
+function evaluateRouteScopeCheck(source, check) {
+  const snippet = check.extraction === 'express-route'
+    ? extractExpressRouteRegistration(source, check.anchor)
+    : extractWindow(source, check.anchor, { after: check.after || 5000 });
+  if (!snippet) {
     return {
       name: check.name,
-      pass: missing.length === 0 && forbidden.length === 0,
-      missing,
-      forbidden,
+      pass: false,
+      missing: [`anchor not found: ${check.anchor}`],
+      forbidden: [],
     };
-  });
-}
-
-const results = runChecks();
-const failed = results.filter(result => !result.pass);
-
-if (jsonMode) {
-  console.log(JSON.stringify({ ok: failed.length === 0, results }, null, 2));
-} else {
-  for (const result of results) {
-    const prefix = result.pass ? 'PASS' : 'FAIL';
-    console.log(`${prefix} ${result.name}`);
-    if (!result.pass) {
-      result.missing.forEach(item => console.log(`  missing: ${item}`));
-      result.forbidden.forEach(item => console.log(`  forbidden: ${item}`));
-    }
   }
-  console.log(failed.length === 0 ? 'Privacy route-scope smoke passed.' : 'Privacy route-scope smoke failed.');
+  const missing = containsAll(snippet, check.patterns);
+  const forbidden = containsForbidden(snippet, check.forbidden);
+  return {
+    name: check.name,
+    pass: missing.length === 0 && forbidden.length === 0,
+    missing,
+    forbidden,
+  };
 }
 
-process.exit(failed.length ? 1 : 0);
+function runRouteScopeChecks(routeScopeSources, routeScopeChecks = createDefaultRouteScopeChecks()) {
+  return routeScopeChecks.map(check => evaluateRouteScopeCheck(routeScopeSources[check.source], check));
+}
+
+function main() {
+  const results = runRouteScopeChecks(loadDefaultRouteScopeSources());
+  const failed = results.filter(result => !result.pass);
+
+  if (jsonMode) {
+    console.log(JSON.stringify({ ok: failed.length === 0, results }, null, 2));
+  } else {
+    for (const result of results) {
+      const prefix = result.pass ? 'PASS' : 'FAIL';
+      console.log(`${prefix} ${result.name}`);
+      if (!result.pass) {
+        result.missing.forEach(item => console.log(`  missing: ${item}`));
+        result.forbidden.forEach(item => console.log(`  forbidden: ${item}`));
+      }
+    }
+    console.log(failed.length === 0 ? 'Privacy route-scope smoke passed.' : 'Privacy route-scope smoke failed.');
+  }
+
+  process.exitCode = failed.length ? 1 : 0;
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  createDefaultRouteScopeChecks,
+  evaluateRouteScopeCheck,
+  extractExpressRouteRegistration,
+  loadDefaultRouteScopeSources,
+  runRouteScopeChecks,
+};

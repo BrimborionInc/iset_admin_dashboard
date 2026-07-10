@@ -12,6 +12,7 @@ const {
   getCanonicalMigrationFiles,
   planPendingSharedSchemaMigrations,
   applyPendingSharedSchemaMigrations,
+  assertMigrationApplySucceeded,
 } = require('../src/lib/sharedSchemaMigrationRunner');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -551,12 +552,12 @@ function applyPendingRemoteSharedSchemaMigrations(remoteConfig, options = {}) {
     }
   }
 
-  return {
+  return assertMigrationApplySucceeded({
     ...plan,
     trackingTableExists: true,
     attempted,
     haltedOnFailure,
-  };
+  }, { context: `Schema migration apply on ${remoteConfig.targetEnv}` });
 }
 
 async function main() {

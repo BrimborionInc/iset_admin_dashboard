@@ -15,7 +15,7 @@ This directory contains active plans, execution logs, historical design notes, o
 
 ## Higher-Trust Current Planning Docs
 
-As of the 2026-04-29 documentation cleanup, these are the main planning docs intentionally linked from `docs/AGENTS.md`:
+As of 2026-07-10, these are the main planning docs intentionally linked from `docs/AGENTS.md`:
 
 - `client-case-application-target-model.md`
 - `client-case-application-migration-plan.md`
@@ -29,6 +29,7 @@ As of the 2026-04-29 documentation cleanup, these are the main planning docs int
 - `path-document-type-canonical-review.md`
 - `admin-ai-chatbot-knowledge-base-transformation.md`
 - `admin-ai-chatbot-coverage-register.md`
+- `engineering-audit-register.md`
 
 `client-case-application-cutover-dependency-inventory.md` is useful for dependency history, but `docs/AGENTS.md` currently says to use `client-case-application-target-model.md` for the live target model where they differ.
 

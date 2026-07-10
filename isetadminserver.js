@@ -66,6 +66,7 @@ const {
   getCaseAccessError,
   getRegionalManagerCaseAccessError,
 } = require('./src/lib/caseAccess');
+const { createPtmaRouter } = require('./src/routes/ptmaRoutes');
 const {
   createCaseWatch,
   deleteCaseWatch,
@@ -65707,67 +65708,8 @@ app.post('/api/applicant-watchlist', async (req, res) => {
 });
 
 // --- PTMA Endpoints ---
-
-// List all PTMAs or Hubs (filter by type if provided)
-app.get('/api/ptmas', async (req, res) => {
-  try {
-    const type = req.query.type;
-    let whereClause = '';
-    let params = [];
-    if (type === 'PTMA' || type === 'Hub') {
-      whereClause = 'WHERE type = ?';
-      params = [type];
-    }
-    // Get all PTMAs or Hubs
-    const [ptmas] = await pool.query(`
-      SELECT id, iset_full_name, iset_code, iset_status, iset_province, iset_indigenous_group, iset_full_address, iset_agreement_id, iset_notes, website_url, contact_name, contact_email, contact_phone, contact_notes
-      FROM ptma
-      ${whereClause}
-    `, params);
-
-    // Get applications (all cases per PTMA/Hub)
-    const [applicationCounts] = await pool.query(`
-      SELECT ptma_id, COUNT(*) AS applications
-      FROM iset_case
-      WHERE ptma_id IS NOT NULL
-      GROUP BY ptma_id
-    `);
-    // Get open cases per PTMA/Hub
-    const [openCaseCounts] = await pool.query(`
-      SELECT ptma_id, COUNT(*) AS cases
-      FROM iset_case
-      WHERE ptma_id IS NOT NULL AND status IN ('submitted','open')
-      GROUP BY ptma_id
-    `);
-    // Build lookup maps
-    const applicationsMap = Object.fromEntries(applicationCounts.map(r => [r.ptma_id, r.applications]));
-    const casesMap = Object.fromEntries(openCaseCounts.map(r => [r.ptma_id, r.cases]));
-
-    // Map DB fields to API fields for each PTMA/Hub, adding counts
-    const mapped = ptmas.map(db => ({
-      id: db.id,
-      full_name: db.iset_full_name,
-      code: db.iset_code,
-      status: db.iset_status,
-      province: db.iset_province,
-      indigenous_group: db.iset_indigenous_group,
-      full_address: db.iset_full_address,
-      agreement_id: db.iset_agreement_id,
-      notes: db.iset_notes,
-      website_url: db.website_url || null,
-      contact_name: db.contact_name || null,
-      contact_email: db.contact_email || null,
-      contact_phone: db.contact_phone || null,
-      contact_notes: db.contact_notes || null,
-      applications: applicationsMap[db.id] || 0,
-      cases: casesMap[db.id] || 0
-    }));
-    res.status(200).json(mapped);
-  } catch (error) {
-    console.error('Error fetching PTMAs:', error);
-    res.status(500).send({ message: 'Failed to fetch PTMAs' });
-  }
-});
+// PTMA is dormant legacy configuration, but retained routes remain System Administrator-only.
+app.use('/api/ptmas', createPtmaRouter({ pool }));
 
 // --- Finance: Budget Pots ---
 
@@ -84483,154 +84425,6 @@ app.put('/api/finance/spend-curve', async (req, res) => {
   } catch (err) {
     console.error('[finance] failed to save spend curve', err);
     res.status(500).json({ error: 'failed_to_save_spend_curve' });
-  }
-});
-
-// Get PTMA by ID
-app.get('/api/ptmas/:id', async (req, res) => {
-  const ptmaId = req.params.id;
-  try {
-    const [ptmas] = await pool.query(`
-      SELECT id, iset_full_name, iset_code, iset_status, iset_province, iset_indigenous_group, iset_full_address, iset_agreement_id, iset_notes, website_url, contact_name, contact_email, contact_phone, contact_notes
-      FROM ptma
-      WHERE id = ?
-    `, [ptmaId]);
-    if (ptmas.length === 0) {
-      return res.status(404).send({ message: 'PTMA not found' });
-    }
-    // Map DB fields to API fields
-    const db = ptmas[0];
-    res.status(200).json({
-      id: db.id,
-      full_name: db.iset_full_name,
-      code: db.iset_code,
-      status: db.iset_status,
-      province: db.iset_province,
-      indigenous_group: db.iset_indigenous_group,
-      full_address: db.iset_full_address,
-      agreement_id: db.iset_agreement_id,
-      notes: db.iset_notes,
-      website_url: db.website_url || null,
-      contact_name: db.contact_name || null,
-      contact_email: db.contact_email || null,
-      contact_phone: db.contact_phone || null,
-      contact_notes: db.contact_notes || null
-    });
-  } catch (error) {
-    console.error('Error fetching PTMA:', error);
-    res.status(500).send({ message: 'Failed to fetch PTMA' });
-  }
-});
-
-// Create PTMA
-app.post('/api/ptmas', async (req, res) => {
-  const {
-    location,
-    iset_full_name,
-    iset_code,
-    iset_status,
-    iset_province,
-    iset_indigenous_group,
-    iset_full_address,
-    iset_agreement_id,
-    iset_notes,
-    website_url,
-    contact_name,
-    contact_email,
-    contact_phone,
-    contact_notes
-  } = req.body;
-  try {
-    const [result] = await pool.query(`
-          INSERT INTO ptma (name, iset_full_name, iset_code, iset_status, iset_province, iset_indigenous_group, iset_full_address, iset_agreement_id, iset_notes, website_url, contact_name, contact_email, contact_phone, contact_notes)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [location, iset_full_name, iset_code, iset_status, iset_province, iset_indigenous_group, iset_full_address, iset_agreement_id, iset_notes, website_url, contact_name, contact_email, contact_phone, contact_notes]);
-    const ptmaId = result.insertId;
-    const [newPtma] = await pool.query(`
-      SELECT id, name AS location, iset_full_name, iset_code, iset_status, iset_province, iset_indigenous_group, iset_full_address, iset_agreement_id, iset_notes, website_url, contact_name, contact_email, contact_phone, contact_notes
-      FROM ptma
-      WHERE id = ?
-    `, [ptmaId]);
-    res.status(201).send(newPtma[0]);
-  } catch (error) {
-    console.error('Error creating PTMA:', error);
-    res.status(500).send({ message: 'Failed to create PTMA' });
-  }
-});
-
-// Update PTMA
-app.put('/api/ptmas/:id', async (req, res) => {
-  const ptmaId = req.params.id;
-  const {
-    full_name,
-    code,
-    status,
-    province,
-    indigenous_group,
-    full_address,
-    agreement_id,
-    notes,
-    website_url,
-    contact_name,
-    contact_email,
-    contact_phone,
-    contact_notes
-  } = req.body;
-  try {
-    await pool.query(`
-      UPDATE ptma SET 
-        iset_full_name = ?,
-        iset_code = ?,
-        iset_status = ?,
-        iset_province = ?,
-        iset_indigenous_group = ?,
-        iset_full_address = ?,
-        iset_agreement_id = ?,
-        iset_notes = ?,
-        website_url = ?,
-        contact_name = ?,
-        contact_email = ?,
-        contact_phone = ?,
-        contact_notes = ?
-      WHERE id = ?
-    `, [full_name, code, status, province, indigenous_group, full_address, agreement_id, notes, website_url, contact_name, contact_email, contact_phone, contact_notes, ptmaId]);
-    const [updatedPtma] = await pool.query(`
-      SELECT id, iset_full_name, iset_code, iset_status, iset_province, iset_indigenous_group, iset_full_address, iset_agreement_id, iset_notes, website_url, contact_name, contact_email, contact_phone, contact_notes
-      FROM ptma
-      WHERE id = ?
-    `, [ptmaId]);
-    const db = updatedPtma[0];
-    res.status(200).json({
-      id: db.id,
-      full_name: db.iset_full_name,
-      code: db.iset_code,
-      status: db.iset_status,
-      province: db.iset_province,
-      indigenous_group: db.iset_indigenous_group,
-      full_address: db.iset_full_address,
-      agreement_id: db.iset_agreement_id,
-      notes: db.iset_notes,
-      website_url: db.website_url || null,
-      contact_name: db.contact_name || null,
-      contact_email: db.contact_email || null,
-      contact_phone: db.contact_phone || null,
-      contact_notes: db.contact_notes || null
-    });
-  } catch (error) {
-    console.error('Error updating PTMA:', error);
-    res.status(500).send({ message: 'Failed to update PTMA' });
-  }
-});
-
-// Delete PTMA
-app.delete('/api/ptmas/:id', async (req, res) => {
-  const ptmaId = req.params.id;
-  try {
-    await pool.query('DELETE FROM ptma WHERE id = ?', [ptmaId]);
-    res.status(200).send({ message: 'PTMA deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting PTMA:', error);
-    res.status(500).send({ message: 'Failed to delete PTMA' });
   }
 });
 

@@ -1651,3 +1651,18 @@ TEST/PROD deployment considerations already visible:
 - The staff/profile shared-user cleanup assumes staff local-user rows can be resolved by Cognito subject. Before TEST/PROD rollout, count staff profiles without `cognito_sub`, local `user` rows with staff emails but missing or mismatched `cognito_sub`, and any live message/signing/funding-agreement rows whose staff display or routing would depend on email fallback. Repair or quarantine those rows; do not re-enable email fallback.
 - The retired unscoped application ingest endpoint should be smoke-checked in TEST/PROD rollout notes if any old operator workflow still references it; no current frontend caller was found in DEV.
 - PROD cleanup should not drop old columns/tables in the same release that first migrates message/document scope data.
+
+## 2026-07-10 GPT-5.6 Security/Privacy Revalidation
+
+- Current admin `4084e93`, portal `99c440c`, and shared `49ccb73` were reviewed read-only. No application, schema, configuration, or environment mutation occurred.
+- The current route-scope static smoke has four stale pattern failures. Conflict revoke/resolve routes still call `validateCaseAccessByCaseId`; feedback detail uses the intentionally expanded `canReviewAdminFeedback` policy; notification template/settings routes use the current route-aware access-matrix helper. The dedicated notification-access test passed 3/3. The stale smoke is queued for the later test-blind-spots lane.
+- The real-token denial harness reported 26 skips because tokens and fixture IDs were absent. This is a coverage limitation, not a denial pass. `node --test auth/__tests__/cognitoAuth.test.js` passed all 11 portal auth tests.
+- Schema-proven PROD aggregates found `0` strong-identity mismatches across `1,400` typed applicant messages and `107` signing requests. All `3,818` S3-shaped application-file paths match their owning `user_id`, and no application-file path is shared across owners. Seventeen document/application-file owner differences were traced to the reviewed 2026-05-21 Molly duplicate-identity merge; the source account is suspended and the canonical application owns the normalized document rows, so these are not unexplained `UP-01` residue.
+- One historical Contact Communications note is attributed to a shared-user row by email rather than matching the staff Cognito subject, and the current note-create route still retains that fail-open email fallback. This is now `EA-007` in the engineering audit register.
+- Admin `/api/ai/chat` applies the obvious-sensitive-content filter but accepts a caller-supplied OpenRouter model without enforcing `isModelAllowed()` or the System Administrator configuration boundary. This is now `EA-008` in the engineering audit register.
+
+### 2026-07-10 R0 Route-Scope Smoke Follow-Up
+
+- The four stale static route-scope failures were repaired locally under authorized tranche `R0`. Conflict actions, feedback review, template routes, notification settings, and sender settings now use one Express registration per assertion with the current route-matrix policy.
+- `npm run smoke:privacy-routes` now passes all 71 checks, and the new backend self-test removes each formerly stale guard in memory to prove the checker fails rather than accepting adjacent-route markers.
+- This changes only the local static verification tool. The real-token denial harness still needs approved TEST tokens/fixtures and was not run or reclassified by `R0`.

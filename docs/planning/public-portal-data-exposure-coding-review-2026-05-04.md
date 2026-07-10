@@ -1,6 +1,6 @@
 # Public Portal Data Exposure Coding Review - 2026-05-04
 
-Status: current, first review pass complete; follow-up fixes/audits pending
+Status: current; first review pass complete, code fixes revalidated 2026-07-10, open findings and live-denial coverage remain pending
 
 Purpose: persistent review log for coding/model errors in the deployed public portal that could cause one applicant to see another applicant's or staff-only information.
 
@@ -373,6 +373,29 @@ The retired high-risk legacy routes are fail-closed, but `GET /api/applications`
 - Are there any deployed TEST/PROD custom routes or reverse-proxy paths outside `../ISET-intake/server.js` that should be included in live denial testing?
 - Should this review produce immediate code patches as findings are confirmed, or should it first finish a full inventory for prioritization?
 
+## 2026-07-10 GPT-5.6 Revalidation
+
+The `GPT56-2026-07` security/privacy lane re-read the current portal at Git `99c440c`, compared its route inventory with the 2026-05-04 baseline, traced the applicant API gate and current UI consumers, ran the focused Cognito-auth tests, and performed schema-proven aggregate PROD checks. This was read-only; no portal behavior or live data changed.
+
+Current finding status:
+
+- `ID-01` remains open. `/api/me` still returns `isApplicantPortalUser`, while `AuthContext` and `AuthGuard` still enter the applicant shell from `authenticated`/`id` without requiring that flag. The server applicant gate remains the mitigating authorization boundary.
+- `SM-01` remains open. `GET /api/messages` still selects full `m.body`, while Header and dashboard consumers need counts and the Messages list does not render the body.
+- `SR-01` remains open. `GET /api/signing-requests` still selects and presigns `artifact_url` for the whole list; Header and Messages use the route for summaries while Documents is the download consumer.
+- `LG-01` remains open. The stale `GET /api/applications` route still queries retired `iset_application.user_id`, returns broad rows, and has no current frontend caller.
+- The only portal route added after the original review is `GET /api/application-start-eligibility`; it derives the applicant from `req.user.userId` and its database lookup is user-scoped. No new exposure finding was found in that delta.
+
+Patched-finding data follow-up:
+
+- `MSG-SR-01`: schema-proven PROD aggregates found `1,400` typed applicant messages and `107` signing requests, with `0` rows whose applicant participant lacked a strong case link through a submission user or client Cognito subject and `0` email-only matches. The code repair and current measured data remain clean.
+- `UP-01`: all `3,818` current `iset_application_file` rows with S3-shaped paths have an owner segment matching `user_id`, and no file path is shared across application-file owners. Seventeen application-file/document owner differences were investigated rather than counted as residue: they are the documented 2026-05-21 Molly duplicate-identity repair, where duplicate-account uploads were deliberately rehomed to the canonical application and the retired source account was suspended. No unexplained current application-file owner/path mismatch was found. Pending-upload rows do not retain enough history after consumption/expiry to prove every older finalize request independently, so this remains an aggregate data check rather than request-log proof.
+
+Verification and limitations:
+
+- `node --test auth/__tests__/cognitoAuth.test.js` passed all 11 focused portal auth tests, including cookie precedence, Cognito-sub conflicts, staff-email conflicts, and bounded session-audit behavior.
+- The current live denial harness had no real tokens or fixture IDs and reported 26 skips. No authenticated wrong-owner claim is made from that run; a future TEST rehearsal should run `npm run smoke:privacy-denials -- --require-live` with approved real-token fixtures.
+- The static privacy route smoke currently has four stale source-pattern failures in admin code. Source tracing found the corresponding guards still present; this is tracked as a test-blind-spot candidate in the engineering audit register, not as removal of a portal authorization control.
+
 ## Next Step
 
-Next review step: prioritize fixes or add live denial/data-audit queries for the open findings.
+Next review step: prioritize the four open findings and run the live denial harness with approved TEST tokens/fixtures. The message/signing and upload aggregate data follow-ups no longer need to block that prioritization.
