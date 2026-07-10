@@ -6929,6 +6929,27 @@ function normaliseString(value) {
   return null;
 }
 
+function sanitizeConflictResolutionNote(value) {
+  const trimmed = normaliseString(value);
+  return trimmed ? trimmed.slice(0, 4000) : null;
+}
+
+function normalizeConflictResolutionOutcome(value) {
+  const normalized = normaliseString(value)?.toLowerCase() || null;
+  if (!normalized) return null;
+  if (['cleared', 'clear', 'resolved', 'approved_to_continue'].includes(normalized)) return 'cleared';
+  if (['reassigned', 'reassign', 'routed'].includes(normalized)) return 'reassigned';
+  return null;
+}
+
+function buildApplicantNameFromRow(row = {}, fallback = 'Applicant') {
+  const preferred = normaliseString(row.submission_preferred_name);
+  const first = normaliseString(row.submission_first_name);
+  const last = normaliseString(row.submission_last_name);
+  const full = [first, last].filter(Boolean).join(' ').trim();
+  return full || preferred || normaliseString(row.applicant_name) || normaliseString(fallback) || 'Applicant';
+}
+
 function firstNonBlankValue(...values) {
   for (const value of values) {
     if (value === null || typeof value === 'undefined') continue;
@@ -21210,10 +21231,14 @@ async function captureCaseEvent({
   actorStaffProfileId = null,
   actorApplicantUserId = null,
   trackingId,
-  correlationId
+  correlationId,
+  queryExecutor = null,
+  skipNotificationHook = false,
+  allowMemoryFallback = true,
+  storeInMemory = true,
 }) {
   try {
-    await emitCaseEventSdk({
+    return await emitCaseEventSdk({
       type,
       caseId,
       actor: {
@@ -21226,6 +21251,10 @@ async function captureCaseEvent({
       payload,
       trackingId,
       correlationId,
+      queryExecutor,
+      skipNotificationHook,
+      allowMemoryFallback,
+      storeInMemory,
     });
   } catch (err) {
     if (err instanceof EventValidationError) {
@@ -21233,8 +21262,61 @@ async function captureCaseEvent({
     } else {
       console.error('[events] captureCaseEvent failed', type, err?.message || err);
     }
+    return null;
   }
 
+}
+
+async function emitDirectStaffBellNotification({
+  staffProfileId,
+  eventKey,
+  title,
+  message,
+  severity = 'info',
+  metadata = {},
+  queryExecutor = null,
+  throwOnError = false,
+}) {
+  const audienceStaffProfileId = Number(staffProfileId);
+  if (!Number.isInteger(audienceStaffProfileId) || audienceStaffProfileId < 1) return null;
+  const eventKeyValue = normaliseString(eventKey) || 'notification';
+  const titleValue = normaliseString(title) || 'Notification';
+  const messageValue = normaliseString(message);
+  if (!messageValue) return null;
+  const normalizedSeverity = normaliseString(severity)?.toLowerCase() || 'info';
+  const notificationStore = queryExecutor && typeof queryExecutor.query === 'function' ? queryExecutor : pool;
+  try {
+    const [result] = await notificationStore.query(
+      `INSERT INTO iset_internal_notification (
+          event_key,
+          severity,
+          title,
+          message,
+          audience_type,
+          audience_actor_type,
+          audience_role,
+          audience_staff_profile_id,
+          audience_applicant_user_id,
+          dismissible,
+          requires_ack,
+          metadata
+        )
+        VALUES (?, ?, ?, ?, 'user', 'staff_profile', NULL, ?, NULL, 1, 0, CAST(? AS JSON))`,
+      [
+        eventKeyValue,
+        normalizedSeverity,
+        titleValue,
+        messageValue,
+        audienceStaffProfileId,
+        JSON.stringify(metadata || {}),
+      ]
+    );
+    return result?.insertId || null;
+  } catch (err) {
+    if (throwOnError) throw err;
+    console.warn('[notifications] direct staff bell notification failed', err?.message || err);
+    return null;
+  }
 }
 let applicationVersionTableEnsured = false;
 let applicationVersionTypedAuthorColumns = null;
@@ -29360,75 +29442,276 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
   }
 });
 
-// POST /api/cases/:id/conflicts/revoke { staff_profile_id }
+// POST /api/cases/:id/conflicts/revoke { staff_profile_id, assignee_id, resolution_note? }
 app.post('/api/cases/:id/conflicts/revoke', async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
-  const { staff_profile_id } = req.body || {};
+  const { staff_profile_id, assignee_id, resolution_note } = req.body || {};
   const role = inferUserRole(req) || 'Guest';
+  const resolutionNote = sanitizeConflictResolutionNote(resolution_note);
+  const assigneeId = Number(assignee_id);
   if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
   if (!Number.isInteger(staff_profile_id) || staff_profile_id < 1) return res.status(400).json({ error: 'invalid_staff_profile_id' });
+  if (!Number.isInteger(assigneeId) || assigneeId < 1) return res.status(400).json({ error: 'invalid_assignee_id' });
   if (role !== 'NWAC Administrator' && role !== 'Regional Manager') {
     return res.status(403).json({ error: 'forbidden' });
   }
+  let connection = null;
   try {
     const accessError = await validateCaseAccessByCaseId(req, caseId);
     if (accessError) return res.status(accessError.status).json(accessError.body);
 
-    if (role === 'Regional Manager') {
-      const regionIds = resolveRequestRegionIds(req);
-      if (!regionIds.length) {
-        return res.status(403).json({ error: 'forbidden' });
-      }
-      const [[staffRow]] = await pool.query('SELECT region_id FROM staff_profiles WHERE id=? LIMIT 1', [staff_profile_id]);
-      const staffRegion = staffRow?.region_id != null ? Number(staffRow.region_id) : null;
-      if (!Number.isFinite(staffRegion) || !regionIds.includes(staffRegion)) {
-        return res.status(403).json({ error: 'forbidden' });
-      }
-    }
-    await pool.query(
-      `UPDATE iset_case_conflict_declaration
-         SET revoked_at = NOW(), revoked_reason = 'reassigned'
-       WHERE case_id = ? AND staff_profile_id = ? AND revoked_at IS NULL`,
-      [caseId, staff_profile_id]
+    const identity = getRequesterIdentity(req);
+    const [[targetStaff]] = await pool.query(
+      'SELECT id, display_name AS name, display_name, email, region_id AS regionId FROM staff_profiles WHERE id=? LIMIT 1',
+      [assigneeId]
     );
-    return res.json({ ok: true });
-  } catch (err) {
-    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
-      return res.json({ ok: true, note: 'table_missing' });
+    if (!targetStaff) return res.status(400).json({ error: 'staff_not_found' });
+    if (!ensureCanAssignCase(identity, targetStaff)) {
+      return res.status(403).json({ error: 'forbidden', detail: 'assignment_not_permitted' });
     }
-    console.error('POST /api/cases/:id/conflicts/revoke failed:', err.message);
-    return res.status(500).json({ error: 'conflict_revoke_failed', message: err.message });
-  }
-});
 
-// POST /api/cases/:id/conflicts/resolve { staff_profile_id } -> set declaration_choice to no_conflict, keep details
-app.post('/api/cases/:id/conflicts/resolve', async (req, res) => {
-  const caseId = parseInt(req.params.id, 10);
-  const { staff_profile_id } = req.body || {};
-  const role = inferUserRole(req) || 'Guest';
-  if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
-  if (!Number.isInteger(staff_profile_id) || staff_profile_id < 1) return res.status(400).json({ error: 'invalid_staff_profile_id' });
-  if (role !== 'NWAC Administrator' && role !== 'Regional Manager') {
-    return res.status(403).json({ error: 'forbidden' });
-  }
-  try {
-    const accessError = await validateCaseAccessByCaseId(req, caseId);
-    if (accessError) return res.status(accessError.status).json(accessError.body);
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
 
-    const [[conflictRow]] = await pool.query(`
+    const [[conflictRow]] = await connection.query(`
       SELECT
+        cd.id,
         cd.case_id,
         cd.staff_profile_id,
         cd.declaration_choice,
         cd.conflict_details,
         cd.signed_at,
+        cd.resolution_outcome,
+        sp.email AS staff_email,
+        sp.primary_role AS staff_role,
+        sp.display_name AS staff_display_name,
+        sp.region_id AS staff_region_id,
+        c.case_number,
+        c.assigned_staff_profile_id,
+        assignee.email AS previous_assigned_staff_email,
+        assignee.display_name AS previous_assigned_staff_display_name,
+        a.id AS application_id,
+        s.reference_number,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')) AS submission_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')) AS submission_preferred_name
+      FROM iset_case_conflict_declaration cd
+      JOIN staff_profiles sp ON sp.id = cd.staff_profile_id
+      LEFT JOIN iset_case c ON c.id = cd.case_id
+      LEFT JOIN staff_profiles assignee ON assignee.id = c.assigned_staff_profile_id
+      ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+      LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+     WHERE cd.case_id = ? AND cd.staff_profile_id = ? AND cd.revoked_at IS NULL
+     ORDER BY cd.signed_at DESC
+     LIMIT 1
+     FOR UPDATE
+    `, [caseId, staff_profile_id]);
+
+    if (!conflictRow) {
+      await connection.rollback();
+      return res.json({ ok: true, note: 'conflict_not_found' });
+    }
+
+    if (normalizeConflictResolutionOutcome(conflictRow.resolution_outcome)) {
+      await connection.rollback();
+      return res.json({ ok: true, note: 'conflict_already_disposed' });
+    }
+
+    if (role === 'Regional Manager') {
+      const regionIds = resolveRequestRegionIds(req);
+      if (!regionIds.length) {
+        await connection.rollback();
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const staffRegion = conflictRow?.staff_region_id != null ? Number(conflictRow.staff_region_id) : null;
+      if (!Number.isFinite(staffRegion) || !regionIds.includes(staffRegion)) {
+        await connection.rollback();
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+
+    const resolverStaffProfileId = resolveActiveStaffProfileId(req) || null;
+    await connection.query(
+      'UPDATE iset_case SET assigned_staff_profile_id=?, updated_at=NOW() WHERE id=?',
+      [assigneeId, caseId]
+    );
+    const [updateResult] = await connection.query(
+      `UPDATE iset_case_conflict_declaration
+         SET revoked_at = NOW(),
+             revoked_reason = 'reassigned',
+             resolution_outcome = 'reassigned',
+             resolved_at = NOW(),
+             resolved_by_staff_profile_id = ?,
+             resolution_note = ?
+       WHERE id = ? AND revoked_at IS NULL AND resolution_outcome IS NULL`,
+      [resolverStaffProfileId, resolutionNote, conflictRow.id]
+    );
+    if (Number(updateResult?.affectedRows) !== 1) {
+      await connection.rollback();
+      return res.json({ ok: true, note: 'conflict_already_disposed', updated: 0 });
+    }
+
+    const reassignedAt = new Date();
+    const trackingId = conflictRow?.reference_number || conflictRow?.case_number || `CASE-${caseId}`;
+    const applicantName = buildApplicantNameFromRow(conflictRow, 'the applicant');
+    const { actorId, actorName } = resolveRequestActor(req);
+    const resolverEmail = req?.auth?.email || req?.staffProfile?.email || null;
+    const resolverDisplay = actorName || resolverEmail || (actorId ? `User ${actorId}` : 'Reviewer');
+    const resolverRole = role || req?.auth?.role || req?.staffProfile?.primary_role || null;
+    const assigneeLabel =
+      normaliseString(targetStaff.display_name) ||
+      normaliseString(targetStaff.email) ||
+      `Staff profile ${assigneeId}`;
+    const conflictedStaffLabel =
+      normaliseString(conflictRow.staff_display_name) ||
+      normaliseString(conflictRow.staff_email) ||
+      'staff member';
+    const payload = {
+      tracking_id: trackingId,
+      reference_number: conflictRow?.reference_number || null,
+      case_number: conflictRow?.case_number || null,
+      applicant_name: applicantName,
+      conflicted_staff_profile_id: conflictRow?.staff_profile_id || null,
+      conflicted_staff_name: normaliseString(conflictRow?.staff_display_name) || null,
+      conflicted_staff_email: conflictRow?.staff_email || null,
+      conflicted_staff_role: conflictRow?.staff_role || null,
+      conflict_details: conflictRow?.conflict_details || null,
+      resolution_outcome: 'reassigned',
+      resolution_note: resolutionNote,
+      reassigned_to_staff_profile_id: assigneeId,
+      reassigned_to_name: normaliseString(targetStaff.display_name) || null,
+      reassigned_to_email: targetStaff.email || null,
+      resolved_by_id: actorId || null,
+      resolved_by_staff_profile_id: resolverStaffProfileId,
+      resolved_by_name: resolverDisplay,
+      resolved_by_email: resolverEmail || null,
+      resolved_by_role: resolverRole || null,
+      resolved_at: reassignedAt.toISOString(),
+      message: `${resolverDisplay} reassigned ${applicantName}'s file after reviewing ${conflictedStaffLabel}'s declared conflict. New assignee: ${assigneeLabel}.${resolutionNote ? ` Notes: ${resolutionNote}` : ''}`
+    };
+
+    const event = await captureCaseEvent({
+      type: 'conflict_declaration_reassigned',
+      caseId,
+      payload,
+      trackingId,
+      actorId,
+      actorName: resolverDisplay,
+      actorStaffProfileId: resolverStaffProfileId,
+      queryExecutor: connection,
+      skipNotificationHook: true,
+      allowMemoryFallback: false,
+      storeInMemory: false,
+    });
+    if (!event?.id) throw new Error('conflict_reassignment_event_not_recorded');
+
+    const notificationId = await emitDirectStaffBellNotification({
+      staffProfileId: conflictRow.staff_profile_id,
+      eventKey: 'conflict_declaration_reassigned',
+      title: 'Conflict declaration reviewed',
+      message: `${resolverDisplay} reassigned the file for ${applicantName} after reviewing your declared conflict. The file is now assigned to ${assigneeLabel}. No further action is needed.${resolutionNote ? ` Notes: ${resolutionNote}` : ''}`,
+      severity: 'info',
+      metadata: {
+        eventId: event?.id || null,
+        caseId,
+        trackingId,
+        eventType: 'conflict_declaration_reassigned',
+        applicantName,
+        reassignedToStaffProfileId: assigneeId,
+        resolutionNote,
+      },
+      queryExecutor: connection,
+      throwOnError: true,
+    });
+    if (!notificationId) throw new Error('conflict_reassignment_notification_not_recorded');
+
+    await connection.commit();
+
+    const previousAssigneeId = Number(conflictRow.assigned_staff_profile_id) || null;
+    if (previousAssigneeId !== assigneeId) {
+      const assignmentEventType = previousAssigneeId ? 'case_reassigned' : 'case_assigned';
+      await captureCaseEvent({
+        type: assignmentEventType,
+        caseId,
+        payload: {
+          tracking_id: trackingId,
+          from_assignee_id: previousAssigneeId,
+          from_assignee_staff_profile_id: previousAssigneeId,
+          from_assignee_email: conflictRow.previous_assigned_staff_email || null,
+          from_assignee_name: normaliseString(conflictRow.previous_assigned_staff_display_name) || null,
+          to_assignee_id: assigneeId,
+          to_assignee_staff_profile_id: assigneeId,
+          assigned_staff_profile_id: assigneeId,
+          to_assignee_email: targetStaff.email || null,
+          to_assignee_name: normaliseString(targetStaff.display_name) || null,
+          message: previousAssigneeId
+            ? `Case reassigned from ${normaliseString(conflictRow.previous_assigned_staff_display_name) || conflictRow.previous_assigned_staff_email || previousAssigneeId} to ${assigneeLabel}.`
+            : `Case assigned to ${assigneeLabel}.`,
+        },
+        trackingId,
+        actorId,
+        actorName: resolverDisplay,
+        actorStaffProfileId: resolverStaffProfileId,
+      });
+    }
+
+    return res.json({
+      ok: true,
+      updated: 1,
+      event_id: event.id,
+      notification_id: notificationId,
+      ...buildAssignedStaffProfileResponseFields(assigneeId),
+    });
+  } catch (err) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    console.error('POST /api/cases/:id/conflicts/revoke failed:', err.message);
+    return res.status(500).json({ error: 'conflict_revoke_failed', message: err.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+// POST /api/cases/:id/conflicts/resolve { staff_profile_id, resolution_note }
+app.post('/api/cases/:id/conflicts/resolve', async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  const { staff_profile_id, resolution_note } = req.body || {};
+  const role = inferUserRole(req) || 'Guest';
+  const resolutionNote = sanitizeConflictResolutionNote(resolution_note);
+  if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
+  if (!Number.isInteger(staff_profile_id) || staff_profile_id < 1) return res.status(400).json({ error: 'invalid_staff_profile_id' });
+  if (!resolutionNote) return res.status(400).json({ error: 'resolution_note_required' });
+  if (role !== 'NWAC Administrator' && role !== 'Regional Manager') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  let connection = null;
+  try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [[conflictRow]] = await connection.query(`
+      SELECT
+        cd.id,
+        cd.case_id,
+        cd.staff_profile_id,
+        cd.declaration_choice,
+        cd.conflict_details,
+        cd.signed_at,
+        cd.resolution_outcome,
         sp.email AS staff_email,
         sp.primary_role AS staff_role,
         sp.display_name AS staff_display_name,
         sp.region_id AS staff_region_id,
         c.case_number,
         a.id AS application_id,
-        s.reference_number
+        s.reference_number,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')) AS submission_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')) AS submission_preferred_name
       FROM iset_case_conflict_declaration cd
       JOIN staff_profiles sp ON sp.id = cd.staff_profile_id
       LEFT JOIN iset_case c ON c.id = cd.case_id
@@ -29437,68 +29720,119 @@ app.post('/api/cases/:id/conflicts/resolve', async (req, res) => {
      WHERE cd.case_id = ? AND cd.staff_profile_id = ? AND cd.revoked_at IS NULL
      ORDER BY cd.signed_at DESC
      LIMIT 1
+     FOR UPDATE
     `, [caseId, staff_profile_id]);
 
     if (!conflictRow) {
+      await connection.rollback();
       return res.json({ ok: true, note: 'conflict_not_found' });
+    }
+
+    if (normalizeConflictResolutionOutcome(conflictRow.resolution_outcome)) {
+      await connection.rollback();
+      return res.json({ ok: true, note: 'conflict_already_disposed' });
     }
 
     if (role === 'Regional Manager') {
       const staffRegion = conflictRow?.staff_region_id != null ? Number(conflictRow.staff_region_id) : null;
       const regionIds = resolveRequestRegionIds(req);
       if (!regionIds.length || !Number.isFinite(staffRegion) || !regionIds.includes(staffRegion)) {
+        await connection.rollback();
         return res.status(403).json({ error: 'forbidden' });
       }
     }
 
-    const [updateResult] = await pool.query(
+    const resolverStaffProfileId = resolveActiveStaffProfileId(req) || null;
+    const [updateResult] = await connection.query(
       `UPDATE iset_case_conflict_declaration
-         SET declaration_choice = 'no_conflict'
-       WHERE case_id = ? AND staff_profile_id = ? AND revoked_at IS NULL`,
-      [caseId, staff_profile_id]
+         SET resolution_outcome = 'cleared',
+             resolved_at = NOW(),
+             resolved_by_staff_profile_id = ?,
+             resolution_note = ?
+       WHERE id = ? AND revoked_at IS NULL AND resolution_outcome IS NULL`,
+      [resolverStaffProfileId, resolutionNote, conflictRow.id]
     );
+    if (Number(updateResult?.affectedRows) !== 1) {
+      await connection.rollback();
+      return res.json({ ok: true, note: 'conflict_already_disposed', updated: 0 });
+    }
 
     const resolvedAt = new Date();
     const trackingId = conflictRow?.reference_number || conflictRow?.case_number || `CASE-${caseId}`;
+    const applicantName = buildApplicantNameFromRow(conflictRow, 'the applicant');
     const { actorId, actorName } = resolveRequestActor(req);
     const resolverEmail = req?.auth?.email || req?.staffProfile?.email || null;
-    const resolverDisplay = actorName || resolverEmail || (actorId ? `User ${actorId}` : 'Resolver');
+    const resolverDisplay = actorName || resolverEmail || (actorId ? `User ${actorId}` : 'Reviewer');
     const resolverRole = role || req?.auth?.role || req?.staffProfile?.primary_role || null;
+    const conflictedStaffLabel =
+      normaliseString(conflictRow.staff_display_name) ||
+      normaliseString(conflictRow.staff_email) ||
+      'staff member';
     const payload = {
       tracking_id: trackingId,
       reference_number: conflictRow?.reference_number || null,
       case_number: conflictRow?.case_number || null,
+      applicant_name: applicantName,
       conflicted_staff_profile_id: conflictRow?.staff_profile_id || null,
+      conflicted_staff_name: normaliseString(conflictRow?.staff_display_name) || null,
       conflicted_staff_email: conflictRow?.staff_email || null,
       conflicted_staff_role: conflictRow?.staff_role || null,
       conflict_details: conflictRow?.conflict_details || null,
+      resolution_outcome: 'cleared',
+      resolution_note: resolutionNote,
       resolved_by_id: actorId || null,
+      resolved_by_staff_profile_id: resolverStaffProfileId,
+      resolved_by_name: resolverDisplay,
       resolved_by_email: resolverEmail || null,
       resolved_by_role: resolverRole || null,
       resolved_at: resolvedAt.toISOString(),
-      message: `${resolverDisplay} resolved conflict declaration for ${conflictRow?.staff_email || 'staff member'}.`
+      message: `${resolverDisplay} reviewed ${conflictedStaffLabel}'s declared conflict for ${applicantName} and cleared them to continue. Notes: ${resolutionNote}`
     };
 
-    try {
-      await captureCaseEvent({
-        type: 'conflict_declaration_resolved',
-        caseId,
-        payload,
-        trackingId,
-        actorId,
-        actorName: resolverDisplay
-      });
-    } catch (_) {
-      // event capture failures should not block the API
-    }
+    const event = await captureCaseEvent({
+      type: 'conflict_declaration_resolved',
+      caseId,
+      payload,
+      trackingId,
+      actorId,
+      actorName: resolverDisplay,
+      actorStaffProfileId: resolverStaffProfileId,
+      queryExecutor: connection,
+      skipNotificationHook: true,
+      allowMemoryFallback: false,
+      storeInMemory: false,
+    });
+    if (!event?.id) throw new Error('conflict_resolution_event_not_recorded');
 
-    return res.json({ ok: true, updated: updateResult?.affectedRows ?? 0 });
+    const notificationId = await emitDirectStaffBellNotification({
+      staffProfileId: conflictRow.staff_profile_id,
+      eventKey: 'conflict_declaration_resolved',
+      title: 'Conflict declaration reviewed',
+      message: `${resolverDisplay} reviewed your declared conflict for ${applicantName} and cleared you to continue. Notes: ${resolutionNote}`,
+      severity: 'success',
+      metadata: {
+        eventId: event?.id || null,
+        caseId,
+        trackingId,
+        eventType: 'conflict_declaration_resolved',
+        applicantName,
+      },
+      queryExecutor: connection,
+      throwOnError: true,
+    });
+    if (!notificationId) throw new Error('conflict_resolution_notification_not_recorded');
+
+    await connection.commit();
+
+    return res.json({ ok: true, updated: 1, event_id: event.id, notification_id: notificationId });
   } catch (err) {
-    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
-      return res.json({ ok: true, note: 'table_missing' });
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
     }
     console.error('POST /api/cases/:id/conflicts/resolve failed:', err.message);
     return res.status(500).json({ error: 'conflict_resolve_failed', message: err.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -41046,7 +41380,7 @@ app.get('/api/dashboard/conflict-declarations', async (req, res) => {
   const regionIds = resolveRequestRegionIds(req);
   const regionId = regionIds.length ? regionIds[0] : null;
   const params = ['conflict'];
-  const filters = ['cd.declaration_choice = ?', 'cd.revoked_at IS NULL'];
+  const filters = ['cd.declaration_choice = ?', 'cd.revoked_at IS NULL', 'cd.resolution_outcome IS NULL'];
   if (role === 'Regional Manager') {
     if (!regionIds.length) {
       return res.json({ role, declarations: [] });
@@ -41069,6 +41403,9 @@ app.get('/api/dashboard/conflict-declarations', async (req, res) => {
       cd.signed_at,
       cd.declaration_choice,
       cd.conflict_details,
+      cd.resolution_outcome,
+      cd.resolved_at,
+      cd.resolution_note,
       sp.email AS staff_email,
       sp.primary_role AS staff_role,
       sp.region_id AS staff_region_id,
@@ -41090,11 +41427,7 @@ app.get('/api/dashboard/conflict-declarations', async (req, res) => {
   try {
     const [rows] = await pool.query(sql, params);
     const declarations = Array.isArray(rows) ? rows.map(r => {
-      const preferred = normaliseString(r.submission_preferred_name);
-      const first = normaliseString(r.submission_first_name);
-      const last = normaliseString(r.submission_last_name);
-      const full = [first, last].filter(Boolean).join(' ').trim();
-      const applicantName = full || preferred || normaliseString(r.reference_number) || 'Applicant';
+      const applicantName = buildApplicantNameFromRow(r, r.reference_number);
       return {
         id: r.id,
         caseId: r.case_id || null,
@@ -41109,6 +41442,9 @@ app.get('/api/dashboard/conflict-declarations', async (req, res) => {
         staffRegionId: Number.isFinite(Number(r.staff_region_id)) ? Number(r.staff_region_id) : null,
         choice: r.declaration_choice || 'conflict',
         details: r.conflict_details || null,
+        resolutionOutcome: r.resolution_outcome || null,
+        resolvedAt: r.resolved_at ? new Date(r.resolved_at).toISOString() : null,
+        resolutionNote: r.resolution_note || null,
         signedAt: r.signed_at ? new Date(r.signed_at).toISOString() : null
       };
     }) : [];
@@ -53572,6 +53908,14 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       ? row.assessment_conflict_declaration_details.trim()
       : null;
     response.assessment_conflict_declaration_details = conflictDetailsRaw || null;
+    response.assessment_conflict_declaration_resolution_outcome =
+      normalizeConflictResolutionOutcome(row.assessment_conflict_declaration_resolution_outcome);
+    response.assessment_conflict_declaration_resolved_at =
+      toIsoDateTime(row.assessment_conflict_declaration_resolved_at);
+    const conflictResolutionNoteRaw = typeof row.assessment_conflict_declaration_resolution_note === 'string'
+      ? row.assessment_conflict_declaration_resolution_note.trim()
+      : null;
+    response.assessment_conflict_declaration_resolution_note = conflictResolutionNoteRaw || null;
 
     response.eligibility = response.assessment_esdc_eligibility;
     response.finance = financeSummary;
@@ -59957,7 +60301,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         cd.signed_at AS assessment_conflict_declaration_signed_at,
         cd.staff_profile_id AS assessment_conflict_declaration_signed_by,
         cd.declaration_choice AS assessment_conflict_declaration_choice,
-        cd.conflict_details AS assessment_conflict_declaration_details
+        cd.conflict_details AS assessment_conflict_declaration_details,
+        cd.resolution_outcome AS assessment_conflict_declaration_resolution_outcome,
+        cd.resolved_at AS assessment_conflict_declaration_resolved_at,
+        cd.resolution_note AS assessment_conflict_declaration_resolution_note
       FROM iset_case c
       ${applicationJoinSql}
       LEFT JOIN application_lock al ON al.application_id = a.id AND al.expires_at > NOW()
@@ -90015,7 +90362,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
                 cd2.signed_at AS assessment_conflict_declaration_signed_at,
                 cd2.staff_profile_id AS assessment_conflict_declaration_signed_by,
                 cd2.declaration_choice AS assessment_conflict_declaration_choice,
-                cd2.conflict_details AS assessment_conflict_declaration_details
+                cd2.conflict_details AS assessment_conflict_declaration_details,
+                cd2.resolution_outcome AS assessment_conflict_declaration_resolution_outcome,
+                cd2.resolved_at AS assessment_conflict_declaration_resolved_at,
+                cd2.resolution_note AS assessment_conflict_declaration_resolution_note
            FROM iset_case c
            ${applicationJoinSql}
            LEFT JOIN iset_application_submission s ON s.id = a.submission_id
@@ -90349,7 +90699,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
               cd2.signed_at AS assessment_conflict_declaration_signed_at,
               cd2.staff_profile_id AS assessment_conflict_declaration_signed_by,
               cd2.declaration_choice AS assessment_conflict_declaration_choice,
-              cd2.conflict_details AS assessment_conflict_declaration_details
+              cd2.conflict_details AS assessment_conflict_declaration_details,
+              cd2.resolution_outcome AS assessment_conflict_declaration_resolution_outcome,
+              cd2.resolved_at AS assessment_conflict_declaration_resolved_at,
+              cd2.resolution_note AS assessment_conflict_declaration_resolution_note
          FROM iset_case c
          ${applicationJoinSql}
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
@@ -90520,6 +90873,29 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         caseRow.assessment_conflict_declaration_details = trimmed || null;
       } else {
         caseRow.assessment_conflict_declaration_details = null;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(caseRow, 'assessment_conflict_declaration_resolution_outcome')) {
+      caseRow.assessment_conflict_declaration_resolution_outcome =
+        normalizeConflictResolutionOutcome(caseRow.assessment_conflict_declaration_resolution_outcome);
+    }
+    if (Object.prototype.hasOwnProperty.call(caseRow, 'assessment_conflict_declaration_resolved_at')) {
+      const resolvedAtValue = caseRow.assessment_conflict_declaration_resolved_at;
+      if (resolvedAtValue instanceof Date) {
+        caseRow.assessment_conflict_declaration_resolved_at = Number.isNaN(resolvedAtValue.getTime())
+          ? null
+          : resolvedAtValue.toISOString();
+      } else if (typeof resolvedAtValue !== 'string') {
+        caseRow.assessment_conflict_declaration_resolved_at = null;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(caseRow, 'assessment_conflict_declaration_resolution_note')) {
+      const rawResolutionNote = caseRow.assessment_conflict_declaration_resolution_note;
+      if (typeof rawResolutionNote === 'string') {
+        const trimmed = rawResolutionNote.trim();
+        caseRow.assessment_conflict_declaration_resolution_note = trimmed || null;
+      } else {
+        caseRow.assessment_conflict_declaration_resolution_note = null;
       }
     }
     const afterStatus =

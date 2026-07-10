@@ -780,6 +780,7 @@ const WorkQueueItemsTableWidget = ({
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignError, setAssignError] = useState(null);
   const [selectedAssignee, setSelectedAssignee] = useState(null);
+  const [assignNote, setAssignNote] = useState('');
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [eligibilityModalVisible, setEligibilityModalVisible] = useState(false);
   const [eligibilityTarget, setEligibilityTarget] = useState(null);
@@ -793,6 +794,8 @@ const WorkQueueItemsTableWidget = ({
   const [watchMap, setWatchMap] = useState(() => new Map());
   const [watchPending, setWatchPending] = useState(new Set());
   const [resolveTarget, setResolveTarget] = useState(null);
+  const [resolveNote, setResolveNote] = useState('');
+  const [resolveError, setResolveError] = useState(null);
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
   const [escalationAction, setEscalationAction] = useState(null);
   const [escalationNote, setEscalationNote] = useState('');
@@ -1022,6 +1025,8 @@ const WorkQueueItemsTableWidget = ({
           onFollow={event => {
             event.preventDefault();
             setAssignTarget(item);
+            setAssignNote('');
+            setAssignError(null);
             setAssignModalVisible(true);
           }}
         >
@@ -1093,6 +1098,8 @@ const WorkQueueItemsTableWidget = ({
           onFollow={event => {
             event.preventDefault();
             setResolveTarget(item);
+            setResolveNote('');
+            setResolveError(null);
           }}
         >
           Resolve
@@ -1659,36 +1666,45 @@ const WorkQueueItemsTableWidget = ({
     setAssignSubmitting(true);
     setAssignError(null);
     try {
-      const response = await apiFetch(`/api/cases/${caseId}/assign`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignee_id: selectedAssignee.value })
-      });
-      if (!response.ok) {
-        throw new Error('assign_failed');
-      }
       const conflictStaffProfileId = resolveConflictStaffProfileId(assignTarget);
       if (assignTarget?.bucketId === 'unresolved-conflicts' && conflictStaffProfileId) {
-        try {
-          await apiFetch(`/api/cases/${caseId}/conflicts/revoke`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ staff_profile_id: conflictStaffProfileId })
-          });
-        } catch (_) {
-          // non-fatal
+        const revokeResponse = await apiFetch(`/api/cases/${caseId}/conflicts/revoke`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            staff_profile_id: conflictStaffProfileId,
+            assignee_id: selectedAssignee.value,
+            resolution_note: assignNote.trim() || null
+          })
+        });
+        if (!revokeResponse.ok) {
+          throw new Error('conflict_reassign_failed');
+        }
+      } else {
+        const response = await apiFetch(`/api/cases/${caseId}/assign`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assignee_id: selectedAssignee.value })
+        });
+        if (!response.ok) {
+          throw new Error('assign_failed');
         }
       }
       setAssignModalVisible(false);
       setAssignTarget(null);
       setSelectedAssignee(null);
+      setAssignNote('');
       if (typeof onRefresh === 'function') {
         onRefresh();
       }
       // mirror ApplicationsWidget behavior: surface assign success to UI
       setAssignError(null);
     } catch (err) {
-      setAssignError('Assignment failed. Please try again.');
+      setAssignError(
+        err?.message === 'conflict_reassign_failed'
+          ? 'Conflict reassignment could not be recorded. No changes were saved; please try again.'
+          : 'Assignment failed. Please try again.'
+      );
     } finally {
       setAssignSubmitting(false);
     }
@@ -1823,22 +1839,29 @@ const WorkQueueItemsTableWidget = ({
       setResolveTarget(null);
       return;
     }
+    const note = resolveNote.trim();
+    if (!note) {
+      setResolveError('Enter notes for the staff member who declared the conflict.');
+      return;
+    }
     setResolveSubmitting(true);
+    setResolveError(null);
     try {
       const resp = await apiFetch(`/api/cases/${caseId}/conflicts/resolve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staff_profile_id: conflictStaffProfileId })
+        body: JSON.stringify({ staff_profile_id: conflictStaffProfileId, resolution_note: note })
       });
       if (!resp.ok) {
         throw new Error('resolve_failed');
       }
       setResolveTarget(null);
+      setResolveNote('');
       if (typeof onRefresh === 'function') {
         onRefresh();
       }
     } catch (_) {
-      setAssignError('Failed to resolve conflict.');
+      setResolveError('Failed to resolve conflict.');
     } finally {
       setResolveSubmitting(false);
     }
@@ -1852,6 +1875,9 @@ const WorkQueueItemsTableWidget = ({
     metricView?.periodIndependent ? metricView?.scopeNote : metricView?.period?.rangeLabel,
     metricView?.truncated ? `Showing first ${metricItems.length} result(s)` : `${metricItems.length} item(s)`
   ].filter(Boolean);
+  const isConflictReassignModal =
+    assignTarget?.bucketId === 'unresolved-conflicts' &&
+    Boolean(resolveConflictStaffProfileId(assignTarget));
 
   return (
     <BoardItem
@@ -2033,6 +2059,7 @@ const WorkQueueItemsTableWidget = ({
           setAssignModalVisible(false);
           setAssignTarget(null);
           setSelectedAssignee(null);
+          setAssignNote('');
           setAssignError(null);
         }}
         header={`${getAssignmentActionLabel(assignTarget)} ${assignTarget?.trackingId || assignTarget?.title || 'item'}`}
@@ -2044,6 +2071,7 @@ const WorkQueueItemsTableWidget = ({
                 setAssignModalVisible(false);
                 setAssignTarget(null);
                 setSelectedAssignee(null);
+                setAssignNote('');
                 setAssignError(null);
               }}
             >
@@ -2074,6 +2102,23 @@ const WorkQueueItemsTableWidget = ({
               filteringType="auto"
             />
           </FormField>
+          {isConflictReassignModal && (
+            <FormField
+              label="Reassignment notes"
+              description="Optional. These notes are recorded in the audit trail and sent to the staff member who declared the conflict."
+              stretch
+            >
+              <Textarea
+                value={assignNote}
+                onChange={({ detail }) => {
+                  setAssignNote(detail.value);
+                  setAssignError(null);
+                }}
+                rows={4}
+                disabled={assignSubmitting}
+              />
+            </FormField>
+          )}
         </SpaceBetween>
       </Modal>
       <Modal
@@ -2124,13 +2169,19 @@ const WorkQueueItemsTableWidget = ({
         visible={Boolean(resolveTarget)}
         onDismiss={() => {
           setResolveTarget(null);
+          setResolveNote('');
+          setResolveError(null);
         }}
         header="Resolve conflict"
         closeAriaLabel="Close resolve modal"
         footer={
           <SpaceBetween size="xs" direction="horizontal">
             <Button
-              onClick={() => setResolveTarget(null)}
+              onClick={() => {
+                setResolveTarget(null);
+                setResolveNote('');
+                setResolveError(null);
+              }}
               disabled={resolveSubmitting}
             >
               Cancel
@@ -2138,6 +2189,7 @@ const WorkQueueItemsTableWidget = ({
             <Button
               variant="primary"
               loading={resolveSubmitting}
+              disabled={resolveSubmitting || !resolveNote.trim()}
               onClick={handleResolveConfirm}
             >
               Resolve
@@ -2145,9 +2197,27 @@ const WorkQueueItemsTableWidget = ({
           </SpaceBetween>
         }
       >
-        <Box>
-          Resolve conflict for {resolveTarget?.trackingId || resolveTarget?.title || 'this item'}?
-        </Box>
+        <SpaceBetween size="s">
+          {resolveError && <Box color="text-status-error">{resolveError}</Box>}
+          <Box>
+            Resolve conflict for {resolveTarget?.trackingId || resolveTarget?.title || 'this item'}?
+          </Box>
+          <FormField
+            label="Resolution notes"
+            description="These notes are recorded in the audit trail and sent to the staff member who declared the conflict."
+            stretch
+          >
+            <Textarea
+              value={resolveNote}
+              onChange={({ detail }) => {
+                setResolveNote(detail.value);
+                setResolveError(null);
+              }}
+              rows={4}
+              disabled={resolveSubmitting}
+            />
+          </FormField>
+        </SpaceBetween>
       </Modal>
     </BoardItem>
   );

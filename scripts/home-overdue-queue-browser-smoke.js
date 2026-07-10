@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * DEV browser smoke for Home > Work Queue > Overdue status badges.
+ * DEV browser smoke for Home > Work Queue status and conflict actions.
  *
  * Catches the regression where overdue application rows were rebuilt without
  * assessment_esdc_eligibility and displayed a false Awaiting EI Validation
@@ -138,6 +138,20 @@ const overdueRows = [
   },
 ];
 
+const conflictDeclaration = {
+  id: 9201,
+  caseId: 9103,
+  referenceNumber: 'CONFLICT-SMOKE-1',
+  applicantName: 'Casey Conflict',
+  applicant_name: 'Casey Conflict',
+  address_province: 'ON',
+  staffProfileId: 503,
+  staffEmail: 'declaring.coordinator@example.invalid',
+  staffRole: 'ISET Coordinator',
+  details: 'A family relationship may create a perceived conflict.',
+  signedAt: '2026-07-09T12:00:00.000Z',
+};
+
 function buildApplicationsResponse(url) {
   const status = url.searchParams.get('status');
   const bucket = url.searchParams.get('bucket') || url.searchParams.get('statusGroup');
@@ -247,6 +261,10 @@ async function installApiStubs(page, apiCalls) {
       request.respond(jsonResponse(buildApplicationsResponse(url)));
       return;
     }
+    if (pathname === '/api/dashboard/conflict-declarations') {
+      request.respond(jsonResponse({ role: 'NWAC Administrator', declarations: [conflictDeclaration] }));
+      return;
+    }
     if (pathname === '/api/cases') {
       request.respond(jsonResponse({ items: [], total: 0 }));
       return;
@@ -260,7 +278,19 @@ async function installApiStubs(page, apiCalls) {
       return;
     }
     if (pathname === '/api/staff/assignable') {
-      request.respond(jsonResponse({ items: [], rows: [] }));
+      request.respond(jsonResponse([
+        {
+          id: 504,
+          display_name: 'Taylor Assignee',
+          email: 'taylor.assignee@example.invalid',
+          role: 'ISET Coordinator',
+          region_id: 1,
+        },
+      ]));
+      return;
+    }
+    if (/^\/api\/cases\/9103\/conflicts\/(resolve|revoke)$/.test(pathname)) {
+      request.respond(jsonResponse({ ok: true, updated: 1, event_id: 'event-smoke', notification_id: 9301 }));
       return;
     }
 
@@ -270,6 +300,16 @@ async function installApiStubs(page, apiCalls) {
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitUntil(predicate, label, timeoutMs = 10000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const value = predicate();
+    if (value) return value;
+    await delay(100);
+  }
+  throw new Error(`Timed out waiting for ${label}`);
 }
 
 async function clickVisibleText(page, text) {
@@ -288,6 +328,41 @@ async function clickVisibleText(page, text) {
   if (!point) {
     throw new Error(`Could not find visible text "${text}"`);
   }
+  await page.mouse.click(point.x, point.y);
+}
+
+async function clickRowAction(page, rowText, actionText) {
+  const point = await page.evaluate((expectedRow, expectedAction) => {
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const rows = Array.from(document.querySelectorAll('tr, [role="row"]'));
+    const row = rows.find(candidate => normalize(candidate.textContent).includes(expectedRow));
+    if (!row) return null;
+    const action = Array.from(row.querySelectorAll('button, a, [role="button"]'))
+      .find(candidate => normalize(candidate.textContent) === expectedAction);
+    if (!action) return null;
+    action.scrollIntoView({ block: 'center', inline: 'nearest' });
+    const rect = action.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  }, rowText, actionText);
+  if (!point) throw new Error(`Could not find ${actionText} action for row ${rowText}`);
+  await page.mouse.click(point.x, point.y);
+}
+
+async function clickModalButton(page, buttonText) {
+  const point = await page.evaluate(expected => {
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const dialogs = Array.from(document.querySelectorAll('[role="dialog"]')).filter(dialog => {
+      const rect = dialog.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+    const dialog = dialogs[dialogs.length - 1];
+    const button = dialog && Array.from(dialog.querySelectorAll('button'))
+      .find(candidate => normalize(candidate.textContent) === expected);
+    if (!button) return null;
+    const rect = button.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  }, buttonText);
+  if (!point) throw new Error(`Could not find ${buttonText} in the visible modal`);
   await page.mouse.click(point.x, point.y);
 }
 
@@ -360,6 +435,26 @@ async function waitForBodyText(page, text, timeoutMs = 15000) {
     { timeout: timeoutMs },
     text
   );
+}
+
+async function typeIntoVisibleTextarea(page, value) {
+  const focused = await page.evaluate(() => {
+    const textarea = Array.from(document.querySelectorAll('textarea')).find(candidate => {
+      const rect = candidate.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !candidate.disabled;
+    });
+    if (!textarea) return false;
+    textarea.focus();
+    return true;
+  });
+  if (!focused) throw new Error('Could not find a visible notes textarea');
+  await page.keyboard.type(value);
+}
+
+async function chooseSelectOption(page, placeholder, optionText) {
+  await clickVisibleText(page, placeholder);
+  await waitForBodyText(page, optionText);
+  await clickVisibleText(page, optionText);
 }
 
 async function dismissQuickStartIfVisible(page) {
@@ -485,6 +580,54 @@ async function main() {
       });
     }
 
+    await clickVisibleText(page, 'Unresolved Conflicts');
+    await waitForBodyText(page, 'Casey Conflict');
+    await clickRowAction(page, 'Casey Conflict', 'Resolve');
+    await waitForBodyText(page, 'Resolution notes');
+    const resolveInitiallyDisabled = await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll('button'));
+      const resolveButton = buttons.find(button => String(button.textContent || '').trim() === 'Resolve');
+      return Boolean(resolveButton?.disabled || resolveButton?.getAttribute('aria-disabled') === 'true');
+    });
+    if (!resolveInitiallyDisabled) {
+      failures.push({ type: 'assertion', message: 'Resolve was enabled before required notes were entered' });
+    }
+    const resolutionNote = 'Reviewed the disclosure; the coordinator may continue.';
+    await typeIntoVisibleTextarea(page, resolutionNote);
+    await clickModalButton(page, 'Resolve');
+    const resolveCall = await waitUntil(
+      () => apiCalls.find(call => call.method === 'POST' && call.path === '/api/cases/9103/conflicts/resolve'),
+      'conflict resolve request'
+    );
+    const resolveBody = JSON.parse(resolveCall.postData || '{}');
+    if (resolveBody.staff_profile_id !== 503 || resolveBody.resolution_note !== resolutionNote) {
+      failures.push({ type: 'assertion', message: 'Resolve payload did not include declaring staff and required notes', body: resolveBody });
+    }
+
+    await waitForBodyText(page, 'Casey Conflict');
+    await clickRowAction(page, 'Casey Conflict', 'Reassign');
+    await waitForBodyText(page, 'Reassignment notes');
+    await chooseSelectOption(page, 'Select assignee', 'Taylor Assignee (ISET Coordinator)');
+    const reassignmentNote = 'Reassigning to avoid the disclosed relationship.';
+    await typeIntoVisibleTextarea(page, reassignmentNote);
+    await clickModalButton(page, 'Reassign');
+    const reassignCall = await waitUntil(
+      () => apiCalls.find(call => call.method === 'POST' && call.path === '/api/cases/9103/conflicts/revoke'),
+      'conflict reassignment request'
+    );
+    const reassignBody = JSON.parse(reassignCall.postData || '{}');
+    if (
+      reassignBody.staff_profile_id !== 503 ||
+      String(reassignBody.assignee_id) !== '504' ||
+      reassignBody.resolution_note !== reassignmentNote
+    ) {
+      failures.push({ type: 'assertion', message: 'Reassign payload was not the atomic conflict disposition request', body: reassignBody });
+    }
+    const legacyAssignCall = apiCalls.find(call => call.method === 'PATCH' && call.path === '/api/cases/9103/assign');
+    if (legacyAssignCall) {
+      failures.push({ type: 'assertion', message: 'Conflict reassignment still used a separate case assignment request' });
+    }
+
     const screenshot = path.join(args.screenshotDir, 'home-overdue-queue.png');
     await page.screenshot({ path: screenshot, fullPage: true });
 
@@ -499,6 +642,10 @@ async function main() {
       rows: { avery, blair },
       apiCallCount: apiCalls.length,
       applicationsCallCount,
+      conflictActions: {
+        resolve: resolveBody,
+        reassign: reassignBody,
+      },
     }, null, 2));
   } catch (error) {
     const screenshot = path.join(args.screenshotDir, 'home-overdue-queue-failure.png');

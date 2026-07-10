@@ -1934,6 +1934,13 @@ const normalizeConflictDeclarationChoice = (value) => {
   if (['conflict', 'has_conflict', 'has-conflict', 'potential_conflict'].includes(normalized)) return 'conflict';
   return '';
 };
+const normalizeConflictResolutionOutcome = (value) => {
+  if (value === null || value === undefined) return '';
+  const normalized = String(value).trim().toLowerCase();
+  if (['cleared', 'clear', 'resolved', 'approved_to_continue'].includes(normalized)) return 'cleared';
+  if (['reassigned', 'reassign', 'routed'].includes(normalized)) return 'reassigned';
+  return '';
+};
 const mergeAssessmentState = (current, incoming) => {
   const next = { ...incoming };
   const takeIfNonEmpty = (key) => {
@@ -2579,6 +2586,9 @@ const CoordinatorAssessmentWidget = forwardRef(
   );
   const [persistedConflictDeclarationDetails, setPersistedConflictDeclarationDetails] = useState(
     caseData?.assessment_conflict_declaration_details || ''
+  );
+  const [conflictDeclarationResolutionOutcome, setConflictDeclarationResolutionOutcome] = useState(
+    normalizeConflictResolutionOutcome(caseData?.assessment_conflict_declaration_resolution_outcome)
   );
   const [conflictDeclarationChoice, setConflictDeclarationChoice] = useState(
     normalizeConflictDeclarationChoice(
@@ -3395,8 +3405,14 @@ const CoordinatorAssessmentWidget = forwardRef(
     () => normalizeConflictDeclarationChoice(persistedConflictDeclarationChoice),
     [persistedConflictDeclarationChoice]
   );
+  const normalizedConflictResolutionOutcome = useMemo(
+    () => normalizeConflictResolutionOutcome(conflictDeclarationResolutionOutcome),
+    [conflictDeclarationResolutionOutcome]
+  );
   const hasDraftDeclaredConflict = normalizedDraftConflictChoice === 'conflict';
-  const hasPersistedDeclaredConflict = normalizedPersistedConflictChoice === 'conflict';
+  const hasPersistedDeclaredConflict =
+    normalizedPersistedConflictChoice === 'conflict' &&
+    normalizedConflictResolutionOutcome !== 'cleared';
   const isDeclarationGateActive = !isNwacAdministrator && (!conflictDeclarationSigned || hasPersistedDeclaredConflict);
   const eligibilitySet = Boolean(assessment.esdcEligibility);
   const isEligibilityGateActive = isDeclarationGateActive || !eligibilitySet;
@@ -4542,6 +4558,9 @@ const CoordinatorAssessmentWidget = forwardRef(
     const incomingConflictDetails = caseData?.assessment_conflict_declaration_details || '';
     setPersistedConflictDeclarationChoice(incomingConflictChoice);
     setPersistedConflictDeclarationDetails(incomingConflictDetails);
+    setConflictDeclarationResolutionOutcome(
+      normalizeConflictResolutionOutcome(caseData?.assessment_conflict_declaration_resolution_outcome)
+    );
     setConflictDeclarationChoice(incomingConflictChoice);
     setConflictDeclarationDetails(incomingConflictDetails);
     setDeclarationError(null);
@@ -6662,6 +6681,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       setConflictDeclarationSignedAt(signedAtIso);
       setPersistedConflictDeclarationChoice(choice);
       setPersistedConflictDeclarationDetails(choice === 'conflict' ? detailsValue : '');
+      setConflictDeclarationResolutionOutcome('');
       setConflictDeclarationChoice(choice);
       setConflictDeclarationDetails(choice === 'conflict' ? detailsValue : '');
       if (typeof actions?.refreshCaseData === 'function') {
@@ -6675,7 +6695,10 @@ const CoordinatorAssessmentWidget = forwardRef(
           assessment_conflict_declaration_signed_at: signedAtIso,
           assessment_conflict_declaration_signed_by: currentUserId || null,
           assessment_conflict_declaration_choice: choice,
-          assessment_conflict_declaration_details: choice === 'conflict' ? detailsValue : ''
+          assessment_conflict_declaration_details: choice === 'conflict' ? detailsValue : '',
+          assessment_conflict_declaration_resolution_outcome: null,
+          assessment_conflict_declaration_resolved_at: null,
+          assessment_conflict_declaration_resolution_note: null
         };
         if (shouldPromoteToInReview) {
           updates.status = 'in_review';

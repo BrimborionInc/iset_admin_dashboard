@@ -83,4 +83,58 @@ describe('applicant names in notification content', () => {
 
     expect(content.message).toBe('Molly Hink sent a secure message from the applicant portal.');
   });
+
+  test('conflict resolution notifications use applicant names and include reviewer notes', () => {
+    const content = formatNotificationContent(
+      {
+        event_type: 'conflict_declaration_resolved',
+        event_data: {
+          applicant_name: 'ISET-20260709-ABC123',
+          resolution_note: 'Relationship reviewed; coordinator may continue.',
+          resolved_by_name: 'Shelley Stacey',
+        },
+        actor: {
+          type: 'staff',
+          staffProfileId: 12,
+          displayName: 'Shelley Stacey',
+        },
+      },
+      {
+        client_first_name: 'Avery',
+        client_last_name: 'Martin',
+      }
+    );
+
+    expect(content).toEqual({
+      title: 'Conflict declaration resolved',
+      message: 'Shelley Stacey reviewed a declared conflict for Avery Martin and cleared the staff member to continue. Note: Relationship reviewed; coordinator may continue.',
+      severity: 'success',
+    });
+    expect(content.message).not.toContain('ISET-20260709-ABC123');
+  });
+
+  test('conflict reassignment notifications use applicant names, new assignee, and reviewer notes', () => {
+    const content = formatNotificationContent(
+      {
+        event_type: 'conflict_declaration_reassigned',
+        event_data: {
+          applicant_name: 'ISET-20260709-XYZ789',
+          reassigned_to_name: 'Amanda Curtis',
+          resolution_note: 'Moving this file to avoid the disclosed relationship.',
+          resolved_by_name: 'Shelley Stacey',
+        },
+      },
+      {
+        submission_first_name: 'Jamie',
+        submission_last_name: 'River',
+      }
+    );
+
+    expect(content).toEqual({
+      title: 'Conflict declaration reassigned',
+      message: 'Shelley Stacey reassigned the file for Jamie River after reviewing a declared conflict. New assignee: Amanda Curtis. Note: Moving this file to avoid the disclosed relationship.',
+      severity: 'info',
+    });
+    expect(content.message).not.toContain('ISET-20260709-XYZ789');
+  });
 });

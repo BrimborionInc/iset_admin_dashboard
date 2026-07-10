@@ -91,7 +91,8 @@ Last Updated: 2026-06-22
 
 - `Unresolved Conflicts`
   - inline actions are `Assign` / `Reassign` and `Resolve`
-  - reassigning a conflict row uses the normal case assignment modal and then revokes the declaring staff member's conflict where possible
+  - resolving a conflict row requires resolution notes; the original declaration stays recorded, a `cleared` disposition unlocks the declaring staff member, and the notes are sent directly to that staff member
+  - reassigning a conflict row uses the normal case assignment modal with optional reassignment notes, then records a conflict-specific `reassigned` disposition/notification for the declaring staff member where possible
 - `Exceptions & Escalations`
   - assignment is suppressed because the queue action is escalation handling, not ownership management
   - `NWAC Administrator` rows show `Respond` and `Resolve`

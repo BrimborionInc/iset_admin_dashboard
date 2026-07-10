@@ -11,7 +11,8 @@ import {
   Select,
   SpaceBetween,
   StatusIndicator,
-  Table
+  Table,
+  Textarea
 } from '@cloudscape-design/components';
 import { apiFetch } from '../../../auth/apiClient';
 import { getRoleDisplayName } from '../../../utils/roleDisplay';
@@ -87,9 +88,12 @@ const ConflictDeclarationsWidget = ({ role, refreshKey, actions }) => {
   const [assignableLoading, setAssignableLoading] = useState(false);
   const [selectedAssignee, setSelectedAssignee] = useState(null);
   const [assignError, setAssignError] = useState(null);
+  const [assignNote, setAssignNote] = useState('');
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null);
   const [resolveTarget, setResolveTarget] = useState(null);
+  const [resolveNote, setResolveNote] = useState('');
+  const [resolveError, setResolveError] = useState(null);
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
   const {
     staffProfileId: currentStaffProfileId,
@@ -158,6 +162,7 @@ const ConflictDeclarationsWidget = ({ role, refreshKey, actions }) => {
     }
     setAssignTarget(item);
     setAssignError(null);
+    setAssignNote('');
     setSelectedAssignee(null);
     setAssignableLoading(true);
     setAssignModalVisible(true);
@@ -178,59 +183,65 @@ const ConflictDeclarationsWidget = ({ role, refreshKey, actions }) => {
     setAssignSubmitting(true);
     setAssignError(null);
     const chosen = selectedAssignee.value;
-    const payload = { assignee_id: chosen };
     const caseId = assignTarget.caseId;
     try {
-      const resp = await apiFetch(`/api/cases/${caseId}/assign`, {
-        method: 'PATCH',
+      const resp = await apiFetch(`/api/cases/${caseId}/conflicts/revoke`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          staff_profile_id: assignTarget.staffProfileId,
+          assignee_id: chosen,
+          resolution_note: assignNote.trim() || null
+        })
       });
-      if (!resp.ok) throw new Error('assign_failed');
-      if (assignTarget.staffProfileId) {
-        try {
-          await apiFetch(`/api/cases/${caseId}/conflicts/revoke`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ staff_profile_id: assignTarget.staffProfileId })
-          });
-        } catch (_) {
-          // non-fatal
-        }
-      }
+      if (!resp.ok) throw new Error('conflict_reassign_failed');
       setAssignModalVisible(false);
       setAssignTarget(null);
       setSelectedAssignee(null);
+      setAssignNote('');
       load();
     } catch (err) {
-      setAssignError('Assignment failed.');
+      setAssignError(
+        err?.message === 'conflict_reassign_failed'
+          ? 'Conflict reassignment could not be recorded. No changes were saved; please try again.'
+          : 'Assignment failed.'
+      );
     } finally {
       setAssignSubmitting(false);
     }
-  }, [assignTarget, selectedAssignee, load]);
+  }, [assignNote, assignTarget, selectedAssignee, load]);
 
   const handleResolveConfirm = useCallback(async () => {
     if (!resolveTarget?.caseId || !resolveTarget?.staffProfileId) return;
+    const note = resolveNote.trim();
+    if (!note) {
+      setResolveError('Enter notes for the staff member who declared the conflict.');
+      return;
+    }
     setResolveSubmitting(true);
+    setResolveError(null);
     try {
       const resp = await apiFetch(`/api/cases/${resolveTarget.caseId}/conflicts/resolve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staff_profile_id: resolveTarget.staffProfileId })
+        body: JSON.stringify({ staff_profile_id: resolveTarget.staffProfileId, resolution_note: note })
       });
       if (!resp.ok) throw new Error('resolve_failed');
       setResolveTarget(null);
+      setResolveNote('');
       load();
     } catch (_) {
-      setError('Failed to resolve conflict.');
+      setResolveError('Failed to resolve conflict.');
     } finally {
       setResolveSubmitting(false);
     }
-  }, [resolveTarget, load]);
+  }, [resolveNote, resolveTarget, load]);
 
   const handleResolve = useCallback((item) => {
     if (!item?.caseId || !item?.staffProfileId) return;
     setResolveTarget(item);
+    setResolveNote('');
+    setResolveError(null);
   }, []);
 
   const columnDefinitions = useMemo(() => buildColumns(openAssignModal, handleResolve), [openAssignModal, handleResolve]);
@@ -277,42 +288,95 @@ const ConflictDeclarationsWidget = ({ role, refreshKey, actions }) => {
       {resolveTarget && (
         <Modal
           visible={!!resolveTarget}
-          onDismiss={() => { if (!resolveSubmitting) setResolveTarget(null); }}
+          onDismiss={() => {
+            if (!resolveSubmitting) {
+              setResolveTarget(null);
+              setResolveNote('');
+              setResolveError(null);
+            }
+          }}
           header="Resolve conflict declaration"
           footer={
             <SpaceBetween direction="horizontal" size="xs">
-              <Button onClick={() => setResolveTarget(null)} disabled={resolveSubmitting}>Cancel</Button>
-              <Button variant="primary" loading={resolveSubmitting} onClick={handleResolveConfirm}>
+              <Button
+                onClick={() => {
+                  setResolveTarget(null);
+                  setResolveNote('');
+                  setResolveError(null);
+                }}
+                disabled={resolveSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                loading={resolveSubmitting}
+                disabled={resolveSubmitting || !resolveNote.trim()}
+                onClick={handleResolveConfirm}
+              >
                 Resolve
               </Button>
             </SpaceBetween>
           }
         >
           <SpaceBetween size="s">
+            {resolveError && <Box color="text-status-error">{resolveError}</Box>}
             <Box>
-              This will mark the declaration as <strong>no conflict</strong> so the assignee can continue working the case.
+              This will clear the declared conflict so the staff member can continue working the case.
             </Box>
             <Box>
               The original declaration details will be retained for the record.
             </Box>
+            <FormField
+              label="Resolution notes"
+              description="These notes are recorded in the audit trail and sent to the staff member who declared the conflict."
+              stretch
+            >
+              <Textarea
+                value={resolveNote}
+                onChange={({ detail }) => {
+                  setResolveNote(detail.value);
+                  setResolveError(null);
+                }}
+                rows={4}
+                disabled={resolveSubmitting}
+              />
+            </FormField>
           </SpaceBetween>
         </Modal>
       )}
       {assignModalVisible && (
         <Modal
           visible={assignModalVisible}
-          onDismiss={() => { if (!assignSubmitting) { setAssignModalVisible(false); setAssignTarget(null); } }}
-          header={`Assign Application ${assignTarget?.referenceNumber || ''}`}
+          onDismiss={() => {
+            if (!assignSubmitting) {
+              setAssignModalVisible(false);
+              setAssignTarget(null);
+              setAssignNote('');
+            }
+          }}
+          header={`Reassign Application ${assignTarget?.referenceNumber || ''}`}
           footer={
             <SpaceBetween direction="horizontal" size="xs">
-              <Button onClick={() => { if (!assignSubmitting) { setAssignModalVisible(false); setAssignTarget(null); } }} disabled={assignSubmitting}>Cancel</Button>
+              <Button
+                onClick={() => {
+                  if (!assignSubmitting) {
+                    setAssignModalVisible(false);
+                    setAssignTarget(null);
+                    setAssignNote('');
+                  }
+                }}
+                disabled={assignSubmitting}
+              >
+                Cancel
+              </Button>
               <Button
                 variant="primary"
                 loading={assignSubmitting}
                 disabled={!selectedAssignee || assignSubmitting}
                 onClick={handleAssignSubmit}
               >
-                Assign
+                Reassign
               </Button>
             </SpaceBetween>
           }
@@ -330,6 +394,21 @@ const ConflictDeclarationsWidget = ({ role, refreshKey, actions }) => {
                 })}
                 selectedOption={selectedAssignee}
                 onChange={({ detail }) => setSelectedAssignee(detail.selectedOption)}
+              />
+            </FormField>
+            <FormField
+              label="Reassignment notes"
+              description="Optional. These notes are recorded in the audit trail and sent to the staff member who declared the conflict."
+              stretch
+            >
+              <Textarea
+                value={assignNote}
+                onChange={({ detail }) => {
+                  setAssignNote(detail.value);
+                  setAssignError(null);
+                }}
+                rows={4}
+                disabled={assignSubmitting}
               />
             </FormField>
           </SpaceBetween>

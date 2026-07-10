@@ -1,15 +1,15 @@
 const buildInfo = {
   "packageVersion": "0.1.0",
-  "releaseId": "20260708-critical-feedback-reporting-prod",
-  "buildTarget": "production",
-  "builtAt": "2026-07-09T00:57:57.715Z",
-  "gitCommit": "99631c9ce044d25a305d97045db40ae3966db3b5",
-  "gitShort": "99631c9c",
-  "gitDirty": false,
-  "publicReleaseLabel": "Release 20260708-critical-feedback-reporting-prod",
-  "publicReleaseDateEn": "9th July 2026",
-  "publicReleaseDateFr": "9 juillet 2026",
-  "displayLabel": "release 20260708-critical-feedback-reporting-prod | 99631c9c"
+  "releaseId": "20260710-conflict-disposition-notes-test",
+  "buildTarget": "test",
+  "builtAt": "2026-07-10T10:05:33.079Z",
+  "gitCommit": "c32bbea595229caee45f5aa8e7c2391a6de9f2de",
+  "gitShort": "c32bbea5",
+  "gitDirty": true,
+  "publicReleaseLabel": "Release 20260710-conflict-disposition-notes-test",
+  "publicReleaseDateEn": "10th July 2026",
+  "publicReleaseDateFr": "10 juillet 2026",
+  "displayLabel": "release 20260710-conflict-disposition-notes-test | c32bbea5-dirty"
 };
 
 export default buildInfo;
