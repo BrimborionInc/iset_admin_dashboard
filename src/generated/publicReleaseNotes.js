@@ -1,5 +1,5 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-07-10T10:33:11.614Z",
+  "generatedAt": "2026-07-10T10:44:12.544Z",
   "releaseId": "20260710-conflict-disposition-notes-prod",
   "releaseLabel": "Release 20260710-conflict-disposition-notes-prod",
   "releaseDateEn": "10th July 2026",
