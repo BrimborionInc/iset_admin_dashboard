@@ -1,7 +1,7 @@
 # Admin Manual "New Application" Design (MVP Spec)
 
 Status: In Progress (staff-assisted intake/account triage first pass implemented)
-Last updated: 2026-06-11
+Last updated: 2026-07-11
 
 ## Context
 
@@ -59,7 +59,7 @@ Manual intake route is available to:
 3. Staff records the intake source and searches existing client/applicant-account rows when enough identity information is available.
 4. Staff selects an existing client/account match when the application belongs to a known PATH client, or chooses an account handling plan for a new file.
 5. Staff completes required fields in the dedicated manual intake form.
-6. Form working state remains frontend/session only while incomplete.
+6. Form working state remains in the mounted React page only while incomplete. Raw applicant answers, notes, searches, and selected matches are not written to browser storage.
 7. Backend create is blocked until required validation passes and the selected account strategy is internally consistent.
 8. On success, PATH creates or reuses the appropriate `client`/case context, writes `user`, `iset_application_submission`, `iset_application`, and `iset_case` records as needed, and can silently prepare the applicant account as `Ready to invite` when that strategy is explicitly selected.
 9. PATH emits `application_submitted` through the existing shared events pipeline with manual-origin and account-decision metadata.
@@ -138,7 +138,7 @@ What is reused directly:
 
 What is adapted (not a separate form definition):
 - Admin wrapper UX (header, intake-source metadata, create action, redirect).
-- Step runner orchestration (next/back progression, draft-in-session behavior, submit trigger).
+- Step runner orchestration (next/back progression, mounted-page working state, submit trigger).
 - Validation orchestration adapted from existing admin schema runner logic (same schema-driven required/rules model).
 
 Result:
@@ -193,7 +193,9 @@ Source-of-truth rule remains unchanged: intake origin is determined from persist
 
 ## Guardrails (MVP Non-Negotiable)
 
-- No backend persisted partial/draft manual application records.
+- No backend or browser-storage persisted partial/draft manual application records. Leaving/reloading the page discards incomplete applicant PII.
+- Existing-client selection is valid only for the current normalized search, applicant-identity fingerprint, and response generation. Query/identity edits or a newer search invalidate it.
+- The create endpoint rechecks selected-client strategy plus available email/DOB identity evidence under the transaction lock and fails closed on mismatch.
 - Existing workflow gating remains authoritative after record creation.
 - Manual intake uses existing event/audit framework; no parallel audit subsystem.
 - Origin metadata must be explicit and queryable.
@@ -256,14 +258,14 @@ MVP requirement:
 
 - Early design discussion explored backend partial-save lifecycle and resumable incomplete records.
 - That model is intentionally excluded from MVP to reduce complexity and queue clutter.
-- Current MVP keeps incomplete state in frontend/session only.
+- Current MVP keeps incomplete state only in the mounted frontend page; the earlier origin-wide `sessionStorage` draft was retired in R3a because it crossed staff authentication boundaries with applicant PII.
 
 ## Implementation Progress (2026-03-06)
 
 Implemented in this thread:
 - New intake page scaffold:
   - `src/pages/intake/ManualApplicationIntakePage.jsx`
-  - frontend/session working state + validation-gated create.
+  - in-memory frontend working state + validation-gated create; no raw applicant PII draft in browser storage.
 - Navigation/route/roles:
   - Side-nav `Application Intake` link.
   - Route `/iset/applications/intake`.
@@ -286,7 +288,7 @@ Implemented in this thread:
   - `src/pages/intake/ManualApplicationIntakePage.jsx` now loads published schema and renders schema-driven steps.
   - Uses shared portal renderer registry for component rendering.
   - Submits canonical body `{ workflowId, intakePayload, history, intakeSource, intakeSourceNotes }`.
-  - Retains frontend/session draft behavior only; no backend partial record persistence.
+  - Retains mounted-page working state only; no browser-storage or backend partial record persistence.
   - Signature/declaration steps are skipped in admin intake UI.
   - Document-upload (`file-upload`) steps are skipped in admin intake UI.
   - Manual Intake page now follows the standard configurable Cloudscape dashboard pattern (`Board`/`BoardItem`, palette integration, reset-layout wiring, layout persistence key).

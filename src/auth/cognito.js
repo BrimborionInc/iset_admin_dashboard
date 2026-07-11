@@ -1,4 +1,5 @@
 // Simple Cognito Hosted UI helpers for React app
+import { purgeLegacyManualIntakeDraft } from '../utils/manualIntakeOwnership';
 const region = process.env.REACT_APP_AWS_REGION;
 const domainPrefix = process.env.REACT_APP_COGNITO_DOMAIN_PREFIX;
 const clientId = process.env.REACT_APP_COGNITO_CLIENT_ID;
@@ -115,6 +116,7 @@ export async function refreshTokens(refreshToken) {
 }
 
 export function saveSession(tokens) {
+  purgeLegacyManualIntakeDraft();
   const now = Math.floor(Date.now() / 1000);
   const expiresIn = Number(tokens.expires_in || 3600);
   const session = {
@@ -137,6 +139,7 @@ export function loadSession() {
 }
 
 export function clearSession() {
+  purgeLegacyManualIntakeDraft();
   sessionStorage.removeItem('authSession');
   try {
     window.dispatchEvent(new CustomEvent('auth:session-changed', { detail: { session: null, action: 'clear' } }));

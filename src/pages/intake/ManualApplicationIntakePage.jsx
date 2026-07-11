@@ -37,9 +37,15 @@ import {
   findStepIndexByField,
   stepHasRenderableManualContent,
 } from '../../utils/manualIntakeRuntime';
+import {
+  bindManualIntakeSelection,
+  fingerprintManualIntakeIdentity,
+  fingerprintManualIntakeQuery,
+  manualIntakeSelectionIsCurrent,
+  purgeLegacyManualIntakeDraft,
+} from '../../utils/manualIntakeOwnership';
 import './ManualApplicationIntakePage.css';
 
-const STORAGE_KEY = 'manual-application-intake-runtime.v2';
 const DASHBOARD_STORAGE_KEY = 'manual-intake-dashboard-layout-v12';
 const ACCOUNT_SEARCH_NO_RESULTS_MESSAGE = 'No matching clients or applicant accounts found.';
 
@@ -301,6 +307,8 @@ function buildApplicantIdentityPreview(answers = {}) {
   const email = normalizeEmailValue(readFirstAnswer(answers, ['contact-email-address', 'contact_email_address', 'email']));
   const phone = readFirstAnswer(answers, ['telephone-day', 'telephone_day', 'phone']);
   const province = readFirstAnswer(answers, ['address-province', 'address_province', 'province']);
+  const dateOfBirth = readFirstAnswer(answers, ['dob', 'date-of-birth', 'date_of_birth']);
+  const sin = readFirstAnswer(answers, ['social-insurance-number', 'social_insurance_number', 'sin']);
   const fullName = [preferredName || firstName, lastName].filter(Boolean).join(' ').trim()
     || [firstName, lastName].filter(Boolean).join(' ').trim();
   const searchText = email || [firstName, lastName].filter(Boolean).join(' ').trim() || phone;
@@ -312,6 +320,8 @@ function buildApplicantIdentityPreview(answers = {}) {
     email,
     phone,
     province,
+    dateOfBirth,
+    sin,
     searchText,
   };
 }
@@ -812,45 +822,6 @@ function validateStep(step, answers, lang, componentLookup) {
   return errors;
 }
 
-function buildDraftPayload({
-  schemaVersion,
-  workflowId,
-  stepIndex,
-  answers,
-  history,
-  intakeSource,
-  intakeSourceNotes,
-  accountDecision,
-  selectedApplicantMatch,
-  noExistingMatchConfirmed,
-  lang,
-}) {
-  return {
-    schemaVersion,
-    workflowId,
-    stepIndex,
-    answers,
-    history,
-    intakeSource,
-    intakeSourceNotes,
-    accountDecision,
-    selectedApplicantMatch,
-    noExistingMatchConfirmed,
-    lang,
-  };
-}
-
-function loadDraft() {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch (_) {
-    return null;
-  }
-}
-
 const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, toggleHelpPanel }) => {
   const history = useHistory();
   const [layout, setLayout] = useState(() => loadDashboardLayoutFromStorage() ?? defaultLayout);
@@ -861,7 +832,6 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [schemaError, setSchemaError] = useState('');
-  const [schemaVersion, setSchemaVersion] = useState(null);
   const [workflowId, setWorkflowId] = useState('iset-v1');
   const [steps, setSteps] = useState([]);
   const [runner, setRunner] = useState({ stepIndex: 0, answers: {}, errors: {}, history: [] });
@@ -878,16 +848,33 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
   const [accountSearchResults, setAccountSearchResults] = useState([]);
   const [accountSearchLoading, setAccountSearchLoading] = useState(false);
   const [accountSearchError, setAccountSearchError] = useState('');
+  const [accountSearchContext, setAccountSearchContext] = useState(null);
   const [accountValidationError, setAccountValidationError] = useState('');
   const [wizardNavigationError, setWizardNavigationError] = useState('');
   const [submitError, setSubmitError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const accountSearchGenerationRef = useRef(0);
+  const priorIdentityFingerprintRef = useRef('');
 
   const componentLookup = useMemo(() => buildConditionComponentLookup(steps), [steps]);
   const applicantIdentityPreview = useMemo(
     () => buildApplicantIdentityPreview(runner.answers),
     [runner.answers]
   );
+  const applicantIdentityFingerprint = useMemo(
+    () => fingerprintManualIntakeIdentity(applicantIdentityPreview),
+    [applicantIdentityPreview]
+  );
+  const accountQueryFingerprint = useMemo(
+    () => fingerprintManualIntakeQuery(accountDecision.searchQuery),
+    [accountDecision.searchQuery]
+  );
+  const selectedApplicantMatchIsCurrent = manualIntakeSelectionIsCurrent(selectedApplicantMatch, {
+    queryFingerprint: accountQueryFingerprint,
+    identityFingerprint: applicantIdentityFingerprint,
+    generation: accountSearchGenerationRef.current,
+  });
+  const activeSelectedApplicantMatch = selectedApplicantMatchIsCurrent ? selectedApplicantMatch : null;
   const currentStep = steps[runner.stepIndex] || null;
   const currentStepId = currentStep ? getStepId(currentStep, runner.stepIndex) : null;
   const hiddenConditionalKeys = useMemo(
@@ -915,10 +902,16 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
   );
   const currentIntakeStepValid = Object.keys(currentIntakeStepErrors).length === 0;
   const identityStepComplete = Boolean(applicantIdentityPreview.fullName && applicantIdentityPreview.email && intakeSource);
-  const accountSearchStepComplete = Boolean(selectedApplicantMatch?.clientId || noExistingMatchConfirmed);
+  const accountSearchStepComplete = Boolean(
+    (selectedApplicantMatchIsCurrent && selectedApplicantMatch?.clientId) || noExistingMatchConfirmed
+  );
   const accountDecisionErrorText = useMemo(
-    () => getAccountDecisionError({ accountDecision, selectedApplicantMatch, applicantIdentityPreview }),
-    [accountDecision, applicantIdentityPreview, selectedApplicantMatch]
+    () => getAccountDecisionError({
+      accountDecision,
+      selectedApplicantMatch: selectedApplicantMatchIsCurrent ? selectedApplicantMatch : null,
+      applicantIdentityPreview,
+    }),
+    [accountDecision, applicantIdentityPreview, selectedApplicantMatch, selectedApplicantMatchIsCurrent]
   );
   const accountHandlingStepComplete = accountSearchStepComplete && !accountDecisionErrorText;
   const applicationDetailsStepComplete = Boolean(started && currentStep && isFinalStep && currentIntakeStepValid);
@@ -947,7 +940,7 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
   ]);
   const flowSteps = useMemo(() => buildManualIntakeFlowSteps({
     applicantIdentityPreview,
-    selectedApplicantMatch,
+    selectedApplicantMatch: activeSelectedApplicantMatch,
     accountDecision,
     accountSearchLoading,
     accountSearchResults,
@@ -971,11 +964,16 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
     isFinalStep,
     loading,
     schemaError,
-    selectedApplicantMatch,
+    activeSelectedApplicantMatch,
     started,
     submitting,
     totalVisibleSteps,
   ]);
+
+  useEffect(() => {
+    // R3a retired the origin-wide PII draft. Remove residue written by older builds.
+    purgeLegacyManualIntakeDraft();
+  }, []);
 
   useEffect(() => {
     const signature = JSON.stringify(paletteItems.map((item) => item.id));
@@ -1053,51 +1051,23 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
         }
         if (cancelled) return;
 
-        const draft = loadDraft();
-        const nextVersion = data.version || null;
         const nextWorkflowId = String(data.workflowId || data?.meta?.workflowId || 'iset-v1');
         const nextComponentLookup = buildConditionComponentLookup(nextSteps);
 
-        setSchemaVersion(nextVersion);
         setWorkflowId(nextWorkflowId);
         setSteps(nextSteps);
 
-        if (draft && draft.schemaVersion === nextVersion) {
-          const draftAnswers = draft.answers && typeof draft.answers === 'object' ? draft.answers : {};
-          const restoredIndex = Number.isInteger(draft.stepIndex) ? Math.min(Math.max(draft.stepIndex, 0), nextSteps.length - 1) : 0;
-          const restoredStepIsRenderable = stepHasRenderableManualContent(nextSteps[restoredIndex], draftAnswers, nextComponentLookup);
-          const restoredStepIndex = (() => {
-            if (restoredStepIsRenderable) return restoredIndex;
-            const candidate = restoredIndex > 0
-              ? findNextRenderableManualStepIndex(restoredIndex - 1, draftAnswers, nextSteps, nextComponentLookup)
-              : -1;
-            return candidate >= 0
-              ? candidate
-              : findFirstRenderableManualStepIndex(nextSteps, draftAnswers, nextComponentLookup);
-          })();
-          setRunner({
-            stepIndex: restoredStepIndex,
-            answers: draftAnswers,
-            errors: {},
-            history: Array.isArray(draft.history)
-              ? draft.history.filter((index) => Number.isInteger(index) && index >= 0 && index < nextSteps.length)
-              : [],
-          });
-          setIntakeSource(draft.intakeSource || 'paper');
-          setIntakeSourceNotes(draft.intakeSourceNotes || '');
-          setAccountDecision({
-            strategy: draft.accountDecision?.strategy || 'review_later',
-            searchQuery: draft.accountDecision?.searchQuery || '',
-            notes: draft.accountDecision?.notes || '',
-          });
-          setSelectedApplicantMatch(draft.selectedApplicantMatch || null);
-          setNoExistingMatchConfirmed(Boolean(draft.noExistingMatchConfirmed));
-          setLang(draft.lang === 'fr' ? 'fr' : 'en');
-        } else {
-          const firstRenderable = findFirstRenderableManualStepIndex(nextSteps, {}, nextComponentLookup);
-          setRunner(previous => ({ stepIndex: firstRenderable, answers: previous.answers || {}, errors: {}, history: [] }));
-          setLang('en');
-        }
+        setRunner(previous => ({
+          stepIndex: findFirstRenderableManualStepIndex(
+            nextSteps,
+            previous.answers || {},
+            nextComponentLookup
+          ),
+          answers: previous.answers || {},
+          errors: {},
+          history: [],
+        }));
+        setLang('en');
       } catch (error) {
         if (!cancelled) {
           setSchemaError(error?.message || 'Failed to load published intake schema');
@@ -1114,39 +1084,15 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
   }, [started]);
 
   useEffect(() => {
-    if (!started || !schemaVersion) return;
-    try {
-      const payload = buildDraftPayload({
-        schemaVersion,
-        workflowId,
-        stepIndex: runner.stepIndex,
-        answers: runner.answers,
-        history: runner.history,
-        intakeSource,
-        intakeSourceNotes,
-        accountDecision,
-        selectedApplicantMatch,
-        noExistingMatchConfirmed,
-        lang,
-      });
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    } catch (_) {
-      // ignore session storage errors
-    }
-  }, [
-    started,
-    schemaVersion,
-    workflowId,
-    runner.stepIndex,
-    runner.answers,
-    runner.history,
-    intakeSource,
-    intakeSourceNotes,
-    accountDecision,
-    selectedApplicantMatch,
-    noExistingMatchConfirmed,
-    lang,
-  ]);
+    if (priorIdentityFingerprintRef.current === applicantIdentityFingerprint) return;
+    priorIdentityFingerprintRef.current = applicantIdentityFingerprint;
+    accountSearchGenerationRef.current += 1;
+    setSelectedApplicantMatch(null);
+    setAccountSearchResults([]);
+    setAccountSearchContext(null);
+    setNoExistingMatchConfirmed(false);
+    setAccountSearchLoading(false);
+  }, [applicantIdentityFingerprint]);
 
   useEffect(() => {
     if (!hiddenConditionalKeys.size) return;
@@ -1228,10 +1174,20 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
   const runAccountSearch = useCallback(async (queryOverride = null) => {
     const query = String(queryOverride ?? accountDecision.searchQuery ?? '').trim();
     if (!query) {
+      accountSearchGenerationRef.current += 1;
+      setSelectedApplicantMatch(null);
       setAccountSearchError('Enter an email, name, case number, or region to search.');
       setAccountSearchResults([]);
+      setAccountSearchContext(null);
       return;
     }
+    const generation = accountSearchGenerationRef.current + 1;
+    accountSearchGenerationRef.current = generation;
+    const queryFingerprint = fingerprintManualIntakeQuery(query);
+    const identityFingerprint = applicantIdentityFingerprint;
+    setSelectedApplicantMatch(null);
+    setAccountSearchResults([]);
+    setAccountSearchContext(null);
     setAccountSearchLoading(true);
     setAccountSearchError('');
     setNoExistingMatchConfirmed(false);
@@ -1245,25 +1201,33 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
       });
       const response = await apiFetch(`/api/admin/applicants?${params.toString()}`);
       const data = await response.json().catch(() => ({}));
+      if (generation !== accountSearchGenerationRef.current) return;
       if (!response.ok) {
         throw new Error(data?.message || data?.error || 'Failed to search applicant accounts');
       }
       const users = Array.isArray(data.users) ? data.users : [];
       setAccountSearchResults(users);
+      setAccountSearchContext({ generation, queryFingerprint, identityFingerprint });
       if (!users.length) {
         setAccountSearchError(ACCOUNT_SEARCH_NO_RESULTS_MESSAGE);
         setNoExistingMatchConfirmed(true);
       }
     } catch (error) {
+      if (generation !== accountSearchGenerationRef.current) return;
       setAccountSearchResults([]);
+      setAccountSearchContext(null);
       setAccountSearchError(error?.message || 'Failed to search applicant accounts');
     } finally {
-      setAccountSearchLoading(false);
+      if (generation === accountSearchGenerationRef.current) setAccountSearchLoading(false);
     }
-  }, [accountDecision.searchQuery]);
+  }, [accountDecision.searchQuery, applicantIdentityFingerprint]);
 
   const validateAccountDecision = () => {
-    return getAccountDecisionError({ accountDecision, selectedApplicantMatch, applicantIdentityPreview });
+    return getAccountDecisionError({
+      accountDecision,
+      selectedApplicantMatch: selectedApplicantMatchIsCurrent ? selectedApplicantMatch : null,
+      applicantIdentityPreview,
+    });
   };
 
   const handleSubmit = async () => {
@@ -1296,7 +1260,10 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
             .map((entry) => getStepId(entry.step, entry.stepIndex)),
           intakeSource,
           intakeSourceNotes,
-          accountDecision: buildAccountDecisionPayload({ accountDecision, selectedApplicantMatch }),
+          accountDecision: buildAccountDecisionPayload({
+            accountDecision,
+            selectedApplicantMatch: selectedApplicantMatchIsCurrent ? selectedApplicantMatch : null,
+          }),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -1311,7 +1278,6 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
         }
         throw new Error(data?.message || data?.error || 'Failed to create application');
       }
-      try { sessionStorage.removeItem(STORAGE_KEY); } catch (_) {}
       history.push(`/application-case/${data.case_id}`, {
         flashMessage: `Application ${data.tracking_id || ''} created successfully.`,
         flashType: 'success',
@@ -1540,7 +1506,7 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
 
   const renderAccountSearchWizardStep = () => (
     <SpaceBetween size="m">
-      {selectedApplicantMatch ? (
+      {selectedApplicantMatchIsCurrent ? (
         <Alert type="success" header="Existing client selected">
           {selectedApplicantMatch.applicantName || 'Selected client'} will be used for this application.
         </Alert>
@@ -1555,7 +1521,12 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
           <Input
             value={accountDecision.searchQuery}
             onChange={({ detail }) => {
+              accountSearchGenerationRef.current += 1;
               setAccountDecision(current => ({ ...current, searchQuery: detail.value }));
+              setSelectedApplicantMatch(null);
+              setAccountSearchResults([]);
+              setAccountSearchContext(null);
+              setAccountSearchLoading(false);
               setAccountSearchError('');
               setNoExistingMatchConfirmed(false);
             }}
@@ -1575,7 +1546,11 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
           <Button
             onClick={() => {
               const query = applicantIdentityPreview.searchText;
+              accountSearchGenerationRef.current += 1;
               setAccountDecision(current => ({ ...current, searchQuery: query }));
+              setSelectedApplicantMatch(null);
+              setAccountSearchResults([]);
+              setAccountSearchContext(null);
               setNoExistingMatchConfirmed(false);
               if (query) runAccountSearch(query);
             }}
@@ -1598,12 +1573,22 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
           loading={accountSearchLoading}
           loadingText="Searching applicant accounts"
           selectionType="single"
-          selectedItems={selectedApplicantMatch ? [selectedApplicantMatch] : []}
+          selectedItems={selectedApplicantMatchIsCurrent ? [selectedApplicantMatch] : []}
           onSelectionChange={({ detail }) => {
             const selected = detail.selectedItems?.[0] || null;
-            setSelectedApplicantMatch(selected);
+            const contextIsCurrent = Boolean(
+              accountSearchContext &&
+              accountSearchContext.generation === accountSearchGenerationRef.current &&
+              accountSearchContext.queryFingerprint === accountQueryFingerprint &&
+              accountSearchContext.identityFingerprint === applicantIdentityFingerprint
+            );
+            setSelectedApplicantMatch(
+              selected && contextIsCurrent
+                ? bindManualIntakeSelection(selected, accountSearchContext)
+                : null
+            );
             setNoExistingMatchConfirmed(false);
-            if (selected) {
+            if (selected && contextIsCurrent) {
               setAccountDecision(current => ({ ...current, strategy: 'link_selected_client' }));
               setAccountValidationError('');
               setWizardNavigationError('');
@@ -1653,7 +1638,7 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
         />
       ) : null}
 
-      {!selectedApplicantMatch ? (
+      {!selectedApplicantMatchIsCurrent ? (
         <Button
           onClick={() => {
             setNoExistingMatchConfirmed(true);
@@ -1764,10 +1749,10 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
         </div>
         <div>
           <Box variant="awsui-key-label">Existing client/account</Box>
-          <Box variant="strong">{selectedApplicantMatch?.applicantName || (noExistingMatchConfirmed ? 'No match selected' : 'Not checked')}</Box>
+          <Box variant="strong">{activeSelectedApplicantMatch?.applicantName || (noExistingMatchConfirmed ? 'No match selected' : 'Not checked')}</Box>
           <Box margin={{ top: 'xxs' }}>
-            {selectedApplicantMatch
-              ? accountStatusBadge(selectedApplicantMatch.accountStatus, selectedApplicantMatch.accountStatusLabel)
+            {activeSelectedApplicantMatch
+              ? accountStatusBadge(activeSelectedApplicantMatch.accountStatus, activeSelectedApplicantMatch.accountStatusLabel)
               : <Badge color="grey">New or later review</Badge>}
           </Box>
         </div>

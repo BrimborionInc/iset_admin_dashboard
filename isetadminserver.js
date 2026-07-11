@@ -23,6 +23,9 @@ const {
   isSubmissionPayloadDocumentMatch,
 } = require('./src/lib/applicationSubmissionDocumentScope');
 const {
+  assertManualSelectedClientIdentity,
+} = require('./src/lib/manualIntakeSelectedClient');
+const {
   chooseIlmpApplicationId,
   mergeIlmpAnswers,
 } = require('./src/lib/ilmpContextMapping');
@@ -84798,11 +84801,13 @@ async function fetchManualSelectedClient(connection, selectedClientId) {
   const normalizedClientId = normalisePositiveInteger(selectedClientId);
   if (!normalizedClientId) return null;
   const [[row]] = await connection.query(
-    `SELECT id, first_name, last_name, address_json, applicant_cognito_sub,
-            applicant_cognito_username, applicant_account_status,
-            applicant_account_email, applicant_invited_at, applicant_activated_at
-       FROM client
-      WHERE id = ?
+    `SELECT c.id, c.first_name, c.last_name, c.dob, c.address_json, c.applicant_cognito_sub,
+            c.applicant_cognito_username, c.applicant_account_status,
+            c.applicant_account_email, c.applicant_invited_at, c.applicant_activated_at,
+            COALESCE(NULLIF(c.applicant_account_email, ''), NULLIF(u.email, '')) AS identity_email
+       FROM client c
+       LEFT JOIN user u ON BINARY u.cognito_sub = BINARY c.applicant_cognito_sub
+      WHERE c.id = ?
       LIMIT 1
       FOR UPDATE`,
     [normalizedClientId]
@@ -85059,6 +85064,11 @@ app.post('/api/applications/manual-intake', async (req, res) => {
     await connection.beginTransaction();
 
     const selectedClient = await fetchManualSelectedClient(connection, accountDecision.selectedClientId);
+    assertManualSelectedClientIdentity({
+      strategy: accountDecision.strategy,
+      selectedClient,
+      applicantSeed,
+    });
     const applicantUser = await resolveOrCreateManualApplicantUser(connection, applicantSeed, selectedClient);
 
     let referenceNumber = buildManualSubmissionReference();
@@ -85227,8 +85237,9 @@ app.post('/api/applications/manual-intake', async (req, res) => {
     console.error('POST /api/applications/manual-intake failed:', error);
     const statusCode = Number(error?.statusCode || error?.status || 500);
     return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 500).json({
-      error: 'manual_intake_create_failed',
+      error: error?.code || 'manual_intake_create_failed',
       message: error.message || 'Failed to create manual intake application.',
+      ...(Array.isArray(error?.mismatches) ? { mismatches: error.mismatches } : {}),
     });
   } finally {
     connection.release();
