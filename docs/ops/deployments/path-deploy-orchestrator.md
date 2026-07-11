@@ -1,7 +1,7 @@
 # PATH Deploy Orchestrator
 
 Status: current deployment control-plane reference.
-Last reviewed: 2026-06-16 after the intake runtime incident; command names checked against current `package.json`.
+Last reviewed: 2026-07-11 after engineering-audit R4a release-admission hardening; command names checked against current `package.json`.
 
 Start with the short operator runbook in `docs/ops/deployments/deployment-quick-guide.md` if you just need the normal commands.
 
@@ -12,7 +12,7 @@ Deployed admin environments now force `DISABLE_AUTO_MIGRATIONS=true`, so this ex
 Operator runtime caveat: in the current Codex sandbox, the trusted operator AWS profiles live in the bash/WSL-side AWS CLI config. The control-plane scripts intentionally shell AWS-backed checks through `bash` so `nwac-test` / `nwac-prod` resolve consistently. `nwac-prod` is now a reduced assumed-role profile and `default` is only a bootstrap IAM user, so direct prod resource calls through `default` are expected to fail.
 TEST app rollout is WSL-native in `scripts/path-deploy.js`: it builds/packages the WSL admin repo, sibling portal repo, and sibling shared tree, uploads artifacts with WSL AWS CLI, and runs the in-place SSM update commands directly. Do not route TEST deploys through stale Windows checkout instructions.
 Since 2026-06-08, TEST is cost-pruned to one steady-state app instance and one NAT gateway. The orchestrator already discovers healthy `nwac-test-asg` instances dynamically, so a current TEST deploy normally updates one host. Do not hard-code old TEST instance IDs or require two target-group targets when reading smoke output.
-PROD app rollout is also WSL-native in `scripts/path-deploy.js`: it uploads `shared/shared-latest.zip`, `admin/admin-dashboard-latest.zip`, and `portal/portal-latest.zip` to `nwac-prod-artifacts`, then starts and waits for the PROD ASG refresh.
+PROD app rollout is also WSL-native in `scripts/path-deploy.js`. It stages SHA-256-addressed immutable component objects and, for a complete shared/admin/portal release, one checksummed descriptor before refresh. It currently also updates `shared/shared-latest.zip`, `admin/admin-dashboard-latest.zip`, and `portal/portal-latest.zip` because the live bootstrap has not yet been activated to consume descriptors; this compatibility path remains the planned `EA-028` boundary and is not atomic.
 
 Use this from the WSL admin repo:
 
@@ -28,13 +28,14 @@ The sibling `/home/bill/ISET/shared` tree is now a Git repo with private GitHub 
 
 The admin artifact also stages selected operational support scripts used by deployed-runtime checks/backfills, currently the application-assessment backfill, context-backfill, and Option B smoke scripts referenced by package aliases.
 
-1. AWS/profile preflight
-2. prod restore point capture when DB mutation is planned
-3. canonical shared-schema migration preflight/apply
-4. optional allowlisted data/config promotion only when a dataset is explicitly included
-5. app deployment primitives
-6. environment-appropriate smoke checks
-7. release-manifest capture under `tmp/path-deploy/`
+1. AWS/profile and source-control preflight
+2. exact-tree release admission: scope-aware app tests, lint, and privacy-route checks
+3. prod restore point capture when DB mutation is planned
+4. canonical shared-schema migration preflight/apply
+5. optional allowlisted data/config promotion only when a dataset is explicitly included
+6. app build/package/upload and environment rollout
+7. environment-appropriate smoke checks
+8. release-manifest capture under `tmp/path-deploy/`
 
 Deployment scope boundary: app deploys mean the current app build plus planned schema migrations. They do not include runtime configuration, allowlisted data promotion, arbitrary SQL data fixes, or full database restores unless that exact data scope is explicitly approved. Do not include `--dataset intake-release` as boilerplate. Do not mirror DEV runtime config into PROD as routine deployment hygiene; PROD runtime setting changes must name specific keys/rows. For ordinary app/schema releases, use `--skip-data` or omit `--dataset`; for TEST/PROD, data/runtime mutation requires Bill to explicitly confirm the exact dataset or SQL scope in the current thread.
 
@@ -251,6 +252,8 @@ Current autosave rollout note:
   - `npm run test:db:refresh -- --snapshot-file /path/to/scrubbed.sql --yes`
 
 ## Release manifests
+
+The manifest records `release.preflight` evidence (checks, durations, Git heads, working-tree fingerprints, and evidence ID). A full PROD app package also records immutable object keys/SHA-256 values and the complete release descriptor. The descriptor is durable preparation for the planned pinned-bootstrap rollout; until that activation, rollback still follows the compatibility bootstrap runbook and must not be described as atomic descriptor rollback.
 
 Each `plan` or `run` command writes a manifest JSON file under:
 

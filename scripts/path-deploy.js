@@ -2,12 +2,20 @@
 'use strict';
 
 const fs = require('fs');
+const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 const https = require('https');
 const { spawnSync } = require('child_process');
 const archiver = require('archiver');
 const { assertMigrationApplySucceeded } = require('../src/lib/sharedSchemaMigrationRunner');
+const {
+  buildImmutableArtifactRecord,
+  buildPreflightPlan,
+  createReleaseDescriptor,
+  validatePrebuiltBuild,
+  writeBuildManifest,
+} = require('./lib/releaseAdmission');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const PORTAL_ROOT = path.resolve(REPO_ROOT, '..', 'ISET-intake');
@@ -392,6 +400,31 @@ function getGitHead(repoPath) {
   }
 }
 
+function getGitWorkingTreeFingerprint(repoPath) {
+  if (!fs.existsSync(repoPath)) return null;
+  const result = spawnSync('git', ['-C', repoPath, 'ls-files', '-co', '--exclude-standard', '-z'], {
+    cwd: REPO_ROOT,
+    encoding: 'buffer',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0) return null;
+  const files = result.stdout.toString('utf8').split('\0').filter(Boolean).sort();
+  const hash = crypto.createHash('sha256');
+  files.forEach(relative => {
+    const full = path.join(repoPath, relative);
+    hash.update(relative.split(path.sep).join('/'));
+    hash.update('\0');
+    try {
+      const stat = fs.lstatSync(full);
+      hash.update(stat.isSymbolicLink() ? fs.readlinkSync(full) : fs.readFileSync(full));
+    } catch (_) {
+      hash.update('<missing>');
+    }
+    hash.update('\0');
+  });
+  return hash.digest('hex');
+}
+
 function getGitStatusLines(repoPath) {
   if (!fs.existsSync(repoPath)) {
     return [];
@@ -415,6 +448,7 @@ function buildGitRepoState(repoPath) {
   return {
     path: repoPath,
     gitHead: getGitHead(repoPath),
+    treeFingerprint: getGitWorkingTreeFingerprint(repoPath),
     gitDirty: statusLines.length > 0,
     gitStatusCount: statusLines.length,
     gitStatus: statusLines.slice(0, 200),
@@ -650,6 +684,76 @@ function runNpmScript(scriptName, extraArgs, cwd) {
   runCommand('npm', ['run', scriptName, '--', ...extraArgs], { cwd });
 }
 
+function prepareAdminFrontendBuild(args, envConfig, releaseId) {
+  const buildPath = path.join(REPO_ROOT, 'build');
+  const expectedBuildTarget = envConfig.name === 'prod' ? 'production' : 'test';
+  if (!args.skipBuild && !args.preflightBuilds) {
+    removePath(buildPath);
+    runCommand('npm', ['run', envConfig.name === 'test' ? 'build:test' : 'build:production'], {
+      cwd: REPO_ROOT,
+      env: { ...process.env, PATH_DEPLOY_ENV: envConfig.name, PATH_RELEASE_ID: releaseId || '' },
+    });
+    writeBuildManifest({ repoRoot: REPO_ROOT, buildPath });
+  }
+  if (!fs.existsSync(buildPath)) {
+    throw new Error(`Build output not found at '${buildPath}'. Remove --skip-build or run the build step first.`);
+  }
+  validatePrebuiltBuild({
+    repoRoot: REPO_ROOT,
+    buildPath,
+    expected: {
+      buildTarget: expectedBuildTarget,
+      releaseId,
+      gitCommit: getGitHead(REPO_ROOT),
+      allowDirty: envConfig.name === 'test' && !args.skipBuild,
+    },
+  });
+  return buildPath;
+}
+
+function preparePortalFrontendBuild(args, envConfig, releaseId) {
+  const buildOutputDir = envConfig.name === 'test' ? 'build-test' : 'build';
+  const buildPath = path.join(PORTAL_ROOT, buildOutputDir);
+  const expectedBuildTarget = envConfig.name === 'prod' ? 'production' : 'test';
+  if (!args.skipBuild && !args.preflightBuilds) {
+    removePath(path.join(PORTAL_ROOT, 'build'));
+    removePath(path.join(PORTAL_ROOT, 'build-test'));
+    if (envConfig.name === 'test') {
+      runCommand(process.execPath, [path.join(PORTAL_ROOT, 'scripts', 'write-build-info.js'), '--build-target', 'test'], {
+        cwd: PORTAL_ROOT,
+        env: { ...process.env, PATH_DEPLOY_ENV: 'test', PATH_RELEASE_ID: releaseId || '' },
+      });
+      runCommand('npx', ['env-cmd', '-f', '.env.test', 'craco', 'build'], {
+        cwd: PORTAL_ROOT,
+        env: { ...process.env, BUILD_PATH: buildOutputDir, PATH_DEPLOY_ENV: 'test', PATH_RELEASE_ID: releaseId || '' },
+      });
+    } else {
+      runCommand('npm', ['run', 'build:production'], {
+        cwd: PORTAL_ROOT,
+        env: { ...process.env, PATH_DEPLOY_ENV: 'prod', PATH_RELEASE_ID: releaseId || '' },
+      });
+    }
+    writeBuildManifest({ repoRoot: PORTAL_ROOT, buildPath });
+  }
+  const resolvedPath = fs.existsSync(buildPath)
+    ? buildPath
+    : envConfig.name === 'test' && fs.existsSync(path.join(PORTAL_ROOT, 'build'))
+      ? path.join(PORTAL_ROOT, 'build')
+      : null;
+  if (!resolvedPath) throw new Error('Portal build output not found. Remove --skip-build or run the build step first.');
+  validatePrebuiltBuild({
+    repoRoot: PORTAL_ROOT,
+    buildPath: resolvedPath,
+    expected: {
+      buildTarget: expectedBuildTarget,
+      releaseId,
+      gitCommit: getGitHead(PORTAL_ROOT),
+      allowDirty: envConfig.name === 'test' && !args.skipBuild,
+    },
+  });
+  return resolvedPath;
+}
+
 function joinS3Key(prefix, name) {
   if (!prefix) {
     return name;
@@ -732,6 +836,34 @@ function sanitizeSsmOutput(value) {
 
 function uploadArtifactToS3(archivePath, bucket, key, envConfig) {
   runAwsNoOutput(['s3', 'cp', archivePath, `s3://${bucket}/${key}`], envConfig);
+}
+
+function uploadProdArtifactPair({ archivePath, component, releaseId, compatibilityKey, envConfig }) {
+  const immutable = buildImmutableArtifactRecord({ component, releaseId, archivePath });
+  console.log(`Staging immutable ${component} artifact at s3://${PROD_ARTIFACT_BUCKET}/${immutable.key}...`);
+  uploadArtifactToS3(archivePath, PROD_ARTIFACT_BUCKET, immutable.key, envConfig);
+  console.log(`Updating compatibility artifact at s3://${PROD_ARTIFACT_BUCKET}/${compatibilityKey}...`);
+  uploadArtifactToS3(archivePath, PROD_ARTIFACT_BUCKET, compatibilityKey, envConfig);
+  return {
+    artifact: `s3://${PROD_ARTIFACT_BUCKET}/${compatibilityKey}`,
+    immutableArtifact: `s3://${PROD_ARTIFACT_BUCKET}/${immutable.key}`,
+    immutableKey: immutable.key,
+    sha256: immutable.sha256,
+    archiveBytes: immutable.bytes,
+  };
+}
+
+function uploadProdReleaseDescriptor(descriptor, envConfig) {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'path-release-descriptor-'));
+  try {
+    const filename = path.join(tempRoot, 'release-descriptor.json');
+    fs.writeFileSync(filename, `${JSON.stringify(descriptor, null, 2)}\n`, 'utf8');
+    const key = `releases/${descriptor.releaseId}/release-descriptor.json`;
+    uploadArtifactToS3(filename, PROD_ARTIFACT_BUCKET, key, envConfig);
+    return { key, uri: `s3://${PROD_ARTIFACT_BUCKET}/${key}`, sha256: descriptor.descriptorSha256 };
+  } finally {
+    removePath(tempRoot);
+  }
 }
 
 function discoverAsgInstances(autoScalingGroupName, envConfig) {
@@ -1042,22 +1174,7 @@ async function deployAdminToTestNative(args, envConfig, releaseId) {
   const timestamp = formatDeployTimestamp();
   let tempRoot = null;
 
-  if (!args.skipBuild) {
-    console.log('Building admin frontend for TEST from WSL...');
-    runCommand('npm', ['run', 'build:test'], {
-      cwd: REPO_ROOT,
-      env: {
-        ...process.env,
-        PATH_DEPLOY_ENV: 'test',
-        PATH_RELEASE_ID: releaseId || '',
-      },
-    });
-  }
-
-  const buildPath = path.join(REPO_ROOT, 'build');
-  if (!fs.existsSync(buildPath)) {
-    throw new Error(`Build output not found at '${buildPath}'. Remove --skip-build or run the build step first.`);
-  }
+  const buildPath = prepareAdminFrontendBuild(args, envConfig, releaseId);
 
   try {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'admin-deploy-'));
@@ -1130,40 +1247,9 @@ async function deployPortalToTestNative(args, envConfig, releaseId) {
   const keyPrefix = 'portal';
   const autoScalingGroup = 'nwac-test-asg';
   const timestamp = formatDeployTimestamp();
-  const buildOutputDir = 'build-test';
   let tempRoot = null;
-
-  if (!args.skipBuild) {
-    console.log('Building portal frontend for TEST from WSL...');
-    removePath(path.join(PORTAL_ROOT, 'build'));
-    removePath(path.join(PORTAL_ROOT, buildOutputDir));
-    runCommand(process.execPath, [path.join(PORTAL_ROOT, 'scripts', 'write-build-info.js'), '--build-target', 'test'], {
-      cwd: PORTAL_ROOT,
-      env: {
-        ...process.env,
-        PATH_DEPLOY_ENV: 'test',
-        PATH_RELEASE_ID: releaseId || '',
-      },
-    });
-    runCommand('npx', ['env-cmd', '-f', '.env.test', 'craco', 'build'], {
-      cwd: PORTAL_ROOT,
-      env: {
-        ...process.env,
-        BUILD_PATH: buildOutputDir,
-        PATH_DEPLOY_ENV: 'test',
-        PATH_RELEASE_ID: releaseId || '',
-      },
-    });
-  }
-
-  const resolvedBuildOutputDir = fs.existsSync(path.join(PORTAL_ROOT, buildOutputDir))
-    ? buildOutputDir
-    : fs.existsSync(path.join(PORTAL_ROOT, 'build'))
-      ? 'build'
-      : null;
-  if (!resolvedBuildOutputDir) {
-    throw new Error(`Portal build output not found. Remove --skip-build or run the build step first.`);
-  }
+  const buildPath = preparePortalFrontendBuild(args, envConfig, releaseId);
+  const resolvedBuildOutputDir = path.relative(PORTAL_ROOT, buildPath);
 
   try {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-deploy-'));
@@ -1233,7 +1319,7 @@ async function deployPortalToTestNative(args, envConfig, releaseId) {
   }
 }
 
-async function deploySharedToProdNative(args, envConfig) {
+async function deploySharedToProdNative(args, envConfig, releaseId) {
   const keyPrefix = 'shared';
   const archiveName = 'shared-latest.zip';
   let tempRoot = null;
@@ -1249,15 +1335,15 @@ async function deploySharedToProdNative(args, envConfig) {
     copyDirectoryIfExists(SHARED_ROOT, path.join(stagingPath, 'shared'));
 
     const archivePath = path.join(tempRoot, archiveName);
-    const archive = await createZipFromDirectory(stagingPath, archivePath);
+    await createZipFromDirectory(stagingPath, archivePath);
     const s3Key = joinS3Key(keyPrefix, archiveName);
-    console.log(`Uploading shared artifact to s3://${PROD_ARTIFACT_BUCKET}/${s3Key}...`);
-    uploadArtifactToS3(archivePath, PROD_ARTIFACT_BUCKET, s3Key, envConfig);
-
-    return {
-      artifact: `s3://${PROD_ARTIFACT_BUCKET}/${s3Key}`,
-      archiveBytes: archive.bytes,
-    };
+    return uploadProdArtifactPair({
+      archivePath,
+      component: 'shared',
+      releaseId,
+      compatibilityKey: s3Key,
+      envConfig,
+    });
   } finally {
     if (tempRoot) {
       removePath(tempRoot);
@@ -1270,23 +1356,7 @@ async function deployAdminToProdNative(args, envConfig, releaseId) {
   const archiveName = 'admin-dashboard-latest.zip';
   let tempRoot = null;
 
-  if (!args.skipBuild) {
-    console.log('Building admin frontend for PROD from WSL...');
-    removePath(path.join(REPO_ROOT, 'build'));
-    runCommand('npm', ['run', 'build:production'], {
-      cwd: REPO_ROOT,
-      env: {
-        ...process.env,
-        PATH_DEPLOY_ENV: 'prod',
-        PATH_RELEASE_ID: releaseId || '',
-      },
-    });
-  }
-
-  const buildPath = path.join(REPO_ROOT, 'build');
-  if (!fs.existsSync(buildPath)) {
-    throw new Error(`Build output not found at '${buildPath}'. Remove --skip-build or run the build step first.`);
-  }
+  const buildPath = prepareAdminFrontendBuild(args, envConfig, releaseId);
 
   try {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'admin-prod-deploy-'));
@@ -1313,15 +1383,15 @@ async function deployAdminToProdNative(args, envConfig, releaseId) {
     copyDirectoryIfExists(SHARED_ROOT, path.join(stagingPath, 'shared'));
 
     const archivePath = path.join(tempRoot, archiveName);
-    const archive = await createZipFromDirectory(stagingPath, archivePath);
+    await createZipFromDirectory(stagingPath, archivePath);
     const s3Key = joinS3Key(keyPrefix, archiveName);
-    console.log(`Uploading admin artifact to s3://${PROD_ARTIFACT_BUCKET}/${s3Key}...`);
-    uploadArtifactToS3(archivePath, PROD_ARTIFACT_BUCKET, s3Key, envConfig);
-
-    return {
-      artifact: `s3://${PROD_ARTIFACT_BUCKET}/${s3Key}`,
-      archiveBytes: archive.bytes,
-    };
+    return uploadProdArtifactPair({
+      archivePath,
+      component: 'admin',
+      releaseId,
+      compatibilityKey: s3Key,
+      envConfig,
+    });
   } finally {
     if (tempRoot) {
       removePath(tempRoot);
@@ -1334,23 +1404,7 @@ async function deployPortalToProdNative(args, envConfig, releaseId) {
   const archiveName = 'portal-latest.zip';
   let tempRoot = null;
 
-  if (!args.skipBuild) {
-    console.log('Building portal frontend for PROD from WSL...');
-    removePath(path.join(PORTAL_ROOT, 'build'));
-    runCommand('npm', ['run', 'build:production'], {
-      cwd: PORTAL_ROOT,
-      env: {
-        ...process.env,
-        PATH_DEPLOY_ENV: 'prod',
-        PATH_RELEASE_ID: releaseId || '',
-      },
-    });
-  }
-
-  const buildPath = path.join(PORTAL_ROOT, 'build');
-  if (!fs.existsSync(buildPath)) {
-    throw new Error(`Portal build output not found at '${buildPath}'. Remove --skip-build or run the build step first.`);
-  }
+  const buildPath = preparePortalFrontendBuild(args, envConfig, releaseId);
 
   try {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-prod-deploy-'));
@@ -1392,15 +1446,15 @@ async function deployPortalToProdNative(args, envConfig, releaseId) {
     });
 
     const archivePath = path.join(tempRoot, archiveName);
-    const archive = await createZipFromDirectory(stagingPath, archivePath);
+    await createZipFromDirectory(stagingPath, archivePath);
     const s3Key = joinS3Key(keyPrefix, archiveName);
-    console.log(`Uploading portal artifact to s3://${PROD_ARTIFACT_BUCKET}/${s3Key}...`);
-    uploadArtifactToS3(archivePath, PROD_ARTIFACT_BUCKET, s3Key, envConfig);
-
-    return {
-      artifact: `s3://${PROD_ARTIFACT_BUCKET}/${s3Key}`,
-      archiveBytes: archive.bytes,
-    };
+    return uploadProdArtifactPair({
+      archivePath,
+      component: 'portal',
+      releaseId,
+      compatibilityKey: s3Key,
+      envConfig,
+    });
   } finally {
     if (tempRoot) {
       removePath(tempRoot);
@@ -1467,7 +1521,7 @@ function waitProdInstanceRefresh(refreshId, envConfig) {
   }
 }
 
-async function deployProdApplicationsNative(args, envConfig, appPlan, releaseId) {
+async function deployProdApplicationsNative(args, envConfig, appPlan, releaseId, releaseContext = {}) {
   const result = {
     ...appPlan,
     runner: 'wsl-native-node-artifacts-asg-refresh',
@@ -1475,13 +1529,34 @@ async function deployProdApplicationsNative(args, envConfig, appPlan, releaseId)
   };
 
   if (appPlan.deployShared) {
-    result.artifacts.shared = await deploySharedToProdNative(args, envConfig);
+    result.artifacts.shared = await deploySharedToProdNative(args, envConfig, releaseId);
   }
   if (appPlan.deployAdmin) {
     result.artifacts.admin = await deployAdminToProdNative(args, envConfig, releaseId);
   }
   if (appPlan.deployPortal) {
     result.artifacts.portal = await deployPortalToProdNative(args, envConfig, releaseId);
+  }
+  const descriptorComponents = ['shared', 'admin', 'portal'];
+  if (descriptorComponents.every(component => result.artifacts[component])) {
+    const descriptor = createReleaseDescriptor({
+      releaseId,
+      environment: envConfig.name,
+      requiredComponents: descriptorComponents,
+      artifacts: Object.fromEntries(descriptorComponents.map(component => [component, {
+        key: result.artifacts[component].immutableKey,
+        sha256: result.artifacts[component].sha256,
+        bytes: result.artifacts[component].archiveBytes,
+      }])),
+      source: releaseContext.repos || {},
+      preflight: releaseContext.preflight || {},
+    });
+    result.releaseDescriptor = uploadProdReleaseDescriptor(descriptor, envConfig);
+  } else {
+    result.releaseDescriptor = {
+      skipped: true,
+      reason: 'partial-release-requires-current-descriptor-merge-before-activation',
+    };
   }
   if (appPlan.refreshProd) {
     const refreshId = startProdInstanceRefresh(envConfig);
@@ -1596,7 +1671,7 @@ function applyData(args, envConfig) {
   return runJsonNodeScript(path.join(REPO_ROOT, 'scripts', 'path-data-sync.js'), scriptArgs);
 }
 
-async function deployApplications(args, envConfig, appPlan, releaseId) {
+async function deployApplications(args, envConfig, appPlan, releaseId, releaseContext = {}) {
   if (envConfig.name === 'test') {
     const result = {
       ...appPlan,
@@ -1613,7 +1688,7 @@ async function deployApplications(args, envConfig, appPlan, releaseId) {
   }
 
   if (envConfig.name === 'prod') {
-    return deployProdApplicationsNative(args, envConfig, appPlan, releaseId);
+    return deployProdApplicationsNative(args, envConfig, appPlan, releaseId, releaseContext);
   }
 
   return appPlan;
@@ -1716,6 +1791,61 @@ function buildRepoState() {
     portal: buildGitRepoState(PORTAL_ROOT),
     shared: buildGitRepoState(SHARED_ROOT),
   };
+}
+
+function repoPathForKey(key) {
+  if (key === 'adminDashboard') return REPO_ROOT;
+  if (key === 'portal') return PORTAL_ROOT;
+  if (key === 'shared') return SHARED_ROOT;
+  throw new Error(`Unknown preflight repository key: ${key}`);
+}
+
+function runReleasePreflight(args, envConfig, appPlan, releaseId, initialRepoState) {
+  const needsBoth = Boolean(appPlan.deployShared);
+  if (appPlan.deployAdmin || needsBoth) prepareAdminFrontendBuild(args, envConfig, releaseId);
+  if (appPlan.deployPortal || needsBoth) preparePortalFrontendBuild(args, envConfig, releaseId);
+  args.preflightBuilds = true;
+  const admittedRepoState = buildRepoState();
+  const checks = buildPreflightPlan(appPlan);
+  const results = [];
+  for (const check of checks) {
+    const startedAt = new Date().toISOString();
+    runCommand(check.command, check.args, { cwd: repoPathForKey(check.repo) });
+    const finishedAt = new Date().toISOString();
+    results.push({
+      ...check,
+      status: 'successful',
+      startedAt,
+      finishedAt,
+      durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
+    });
+  }
+  const finalRepoState = buildRepoState();
+  const sourceRepoKeys = new Set(checks.map(check => check.repo));
+  buildProdAppSourceRepoKeys(appPlan).forEach(key => sourceRepoKeys.add(key));
+  sourceRepoKeys.forEach(key => {
+    const before = admittedRepoState[key];
+    const after = finalRepoState[key];
+    if (!before || !after || before.gitHead !== after.gitHead || before.treeFingerprint !== after.treeFingerprint) {
+      throw new Error(`Release preflight source changed while checks were running: ${key}`);
+    }
+  });
+  const evidence = {
+    schemaVersion: 1,
+    originalSource: Object.fromEntries(Array.from(sourceRepoKeys).map(key => [key, {
+      gitHead: initialRepoState[key]?.gitHead || null,
+      treeFingerprint: initialRepoState[key]?.treeFingerprint || null,
+      gitDirty: Boolean(initialRepoState[key]?.gitDirty),
+    }])),
+    source: Object.fromEntries(Array.from(sourceRepoKeys).map(key => [key, {
+      gitHead: admittedRepoState[key]?.gitHead || null,
+      treeFingerprint: admittedRepoState[key]?.treeFingerprint || null,
+      gitDirty: Boolean(admittedRepoState[key]?.gitDirty),
+    }])),
+    checks: results,
+  };
+  evidence.evidenceId = crypto.createHash('sha256').update(JSON.stringify(evidence)).digest('hex');
+  return evidence;
 }
 
 function buildProdAppSourceRepoKeys(appPlan) {
@@ -1860,6 +1990,15 @@ async function handleRun(args, envConfig, identity) {
     manifest.sourceControl = assertProdDeploySourceState(args, envConfig, plan.app, manifest.repos);
     writeManifest(manifestPath, manifest);
 
+    if (plan.app.deployShared || plan.app.deployAdmin || plan.app.deployPortal) {
+      manifest.preflight = await runStep(
+        manifest,
+        manifestPath,
+        'release.preflight',
+        async () => runReleasePreflight(args, envConfig, plan.app, plan.releaseId, manifest.repos)
+      );
+    }
+
     if (plan.restorePoint && !plan.restorePoint.skipped) {
       const restorePointResult = await runStep(
         manifest,
@@ -1891,7 +2030,13 @@ async function handleRun(args, envConfig, identity) {
     }
 
     if (plan.app.deployShared || plan.app.deployAdmin || plan.app.deployPortal || plan.app.refreshProd) {
-      const appResult = await runStep(manifest, manifestPath, 'app.deploy', async () => deployApplications(args, envConfig, plan.app, plan.releaseId));
+      const appResult = await runStep(manifest, manifestPath, 'app.deploy', async () => deployApplications(
+        args,
+        envConfig,
+        plan.app,
+        plan.releaseId,
+        { repos: manifest.preflight?.source || manifest.repos, preflight: manifest.preflight }
+      ));
       manifest.appApply = appResult;
     }
 

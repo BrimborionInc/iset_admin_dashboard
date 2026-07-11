@@ -1,7 +1,7 @@
 # PATH Deployment Quick Guide
 
 Status: current primary operator guide for normal TEST/PROD PATH deploys.
-Last reviewed: 2026-07-08 after the admin-user/EI/notification release preflight; command names checked against current `package.json`.
+Last reviewed: 2026-07-11 after engineering-audit R4a release-admission hardening; command names checked against current `package.json`.
 
 This is the shortest operator guide for normal PATH deployments.
 
@@ -20,6 +20,8 @@ When Bill starts a new Codex thread for deploy work, the agent must first:
 - Read `docs/AGENTS.md`, this quick guide, `docs/ops/deployments/prod-deployment-guide.md`, `docs/ops/deployments/path-deploy-orchestrator.md`, and `docs/ops/deployments/data-promotion-catalog.md`.
 - Run `git status --short` from `/home/bill/ISET/admin-dashboard`, `git -C ../ISET-intake status --short`, and `git -C ../shared status --short`, then state that the deploy artifact packages the current WSL working trees, not only staged files.
 - For PROD app deploys, the deploy orchestrator now fails dirty source trees before mutation. Commit, stash, or isolate the admin/portal/shared source before deploy; use `--allow-dirty --dirty-reason "<specific approved reason>"` only for an explicitly approved emergency exception.
+- Every app deploy now runs a scope-aware `release.preflight` before restore points, TEST reset, schema/data mutation, packaging, upload, or refresh. It runs the selected app aggregates and lint plus the privacy-route smoke, binds the evidence to exact Git heads/working-tree fingerprints, and stops if a check fails or the tree changes. Do not treat later health checks as a substitute.
+- `--skip-build` requires `build/path-build-manifest.json` for the exact target, release ID, clean Git commit, and untampered build tree. Generate it with `npm run build:manifest` only after building the exact prebuilt release; an older TEST/PROD build cannot be relabelled during deploy.
 - `/home/bill/ISET/shared` should be a local Git repo. If it is missing or not a repo, stop and restore/recreate it before deploy unless Bill explicitly approves an emergency exception with marker/checksum verification.
 - State the intended deploy scope before planning. Ordinary TEST/PROD deploys mean the current app build plus planned schema migrations, and use `--skip-data`; runtime/config/data promotion is a separate scope and is not included by default.
 - Codex owns release composition. Do not ask Bill which code/config files to include; inspect the diffs, source trees, generated artifacts, and runtime-config boundaries, then choose the release package defensibly. Pause only for true business/data/runtime ambiguity with concrete consequences, such as whether to promote a named DEV-published intake runtime schema that appears experimental.

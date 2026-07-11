@@ -2,7 +2,7 @@
 
 Purpose: durable local-development handoff for the Linux filesystem checkout used by Codex/VS Code.
 
-Last updated: 2026-07-08
+Last updated: 2026-07-11
 
 ## Current Local Checkout
 
@@ -43,6 +43,14 @@ code /home/bill/ISET/admin-dashboard
 Confirm VS Code is connected to WSL before starting Codex or local dev tasks. The lower-left corner should say `WSL: Ubuntu`; if Explorer shows `X:\ISET` or `/mnt/x/ISET`, close that window and open `/home/bill/ISET/path-dev-wsl.code-workspace`.
 
 ## Starting The Full Local Dev Stack
+
+Canonical terminal entry point from either app repo:
+
+```bash
+npm run dev
+```
+
+This runs the same WSL service set through the shared Node launcher. Use `npm run dev:plan` for a bounded no-listener check of commands, paths, ports, and environment-key policy.
 
 From VS Code:
 
@@ -114,7 +122,7 @@ The Sage Intacct mock fills any missing `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PAS
 
 ## Common Pitfall
 
-Some package scripts still include Windows-oriented commands, including legacy PowerShell launchers and `set PORT=...` syntax. Prefer the WSL VS Code tasks or the manual Linux commands above for local development from `/home/bill/ISET/admin-dashboard`. For TEST deployment, prefer `npm run path:deploy` from the WSL admin repo; do not call the legacy component PowerShell scripts directly from WSL.
+The active `dev`, admin `start`, and admin `server` package scripts are now Node-based and safe in WSL; do not reintroduce PowerShell or Windows `set NAME=value` syntax. Legacy component deployment and MinIO PowerShell helpers remain historical/Windows-only. For TEST deployment, use `npm run path:deploy` from the WSL admin repo rather than calling legacy component scripts directly.
 
 ## Puppeteer/Chrome Dependencies
 
