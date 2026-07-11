@@ -1776,7 +1776,10 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       const response = await apiFetch(`/api/cases/${caseId}/action-plans`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(plan),
+        body: JSON.stringify({
+          ...plan,
+          applicationId: plan?.applicationId ?? applicationId ?? null,
+        }),
       });
       if (!response.ok) {
         let details = null;
@@ -1999,7 +2002,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       });
       return payload ?? null;
     },
-    [caseId]
+    [applicationId, caseId]
   );
 
   const contextValue = useMemo(() => {

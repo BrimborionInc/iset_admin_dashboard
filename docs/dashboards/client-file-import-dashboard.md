@@ -49,6 +49,11 @@ Date: 2026-03-23
   - create a new `client` and a new application-less `iset_case`
   - create an application-less `iset_case` for an existing matched client
   - update the single existing case already linked to the matched client
+- Commit is retry- and concurrency-safe at the database boundary:
+  - an identical request by the same staff actor replays its stored committed result
+  - a hashed row-identity claim serializes new-client creation without storing SIN in the claim key
+  - case cardinality is checked again after the canonical client is locked, so a concurrent case create is updated rather than duplicated
+  - if the locked client has multiple cases or an identity claim conflicts, commit fails closed for explicit review
 
 ## Intentional constraints
 

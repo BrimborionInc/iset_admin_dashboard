@@ -101,6 +101,11 @@ This means the database does not require a fake intake history just to preserve 
   - create a new `client` + application-less `iset_case`
   - create an application-less `iset_case` for an existing client
   - update the single existing case already linked to the matched client
+- Commit safety:
+  - the server derives a stable request hash and transactionally claims one import-run row, so a transport retry returns the first committed result
+  - each row claims a hashed import identity before client creation, preventing concurrent commits from creating separate clients for the same import identity
+  - after the client is locked, case cardinality is reloaded inside the write transaction; a concurrent create becomes an update, while multiple cases fail closed for review
+  - canonical migration `20260711_0002_harden_client_file_import_concurrency.sql` owns the run and identity-claim tables, and `/readyz` requires them before traffic opens
 - Current block conditions:
   - missing required name fields or required headers
   - duplicate rows in the uploaded file
@@ -113,6 +118,7 @@ This means the database does not require a fake intake history just to preserve 
   - no applicant `user` creation
   - no historical application recreation
   - no placeholder assessment/action-plan/intervention/document rows
+  - no global one-case-per-client unique constraint until historical exceptions and cleanup are separately proven
 
 ## Code touchpoints
 

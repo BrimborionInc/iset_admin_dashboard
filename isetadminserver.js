@@ -26,6 +26,21 @@ const {
   assertManualSelectedClientIdentity,
 } = require('./src/lib/manualIntakeSelectedClient');
 const {
+  resolveActionPlanApplicationLineage,
+} = require('./src/lib/actionPlanApplicationLineage');
+const {
+  linkCanonicalApprovalClient,
+} = require('./src/lib/approvalClientLink');
+const {
+  bindClientFileImportIdentity,
+  buildClientFileImportIdentityKey,
+  buildClientFileImportRequestHash,
+  claimClientFileImportIdentity,
+  claimClientFileImportRun,
+  completeClientFileImportRun,
+  reconcileClientFileImportCaseAction,
+} = require('./src/lib/clientFileImportIntegrity');
+const {
   chooseIlmpApplicationId,
   mergeIlmpAnswers,
 } = require('./src/lib/ilmpContextMapping');
@@ -6700,13 +6715,16 @@ async function ensureEsdcParticipantSubmissionRecord(db, caseId, applicationId, 
   const resolvedPlanId = Number.isInteger(Number(actionPlanId)) && Number(actionPlanId) > 0
     ? Number(actionPlanId)
     : await findPreferredActionPlanIdForCase(executor, Number(caseId));
-  let resolvedApplicationId = chooseIlmpApplicationId({ submissionApplicationId: applicationId });
-  if (!resolvedApplicationId) {
-    resolvedApplicationId = chooseIlmpApplicationId({
-      actionPlanApplicationId: await resolveActionPlanApplicationId(executor, resolvedPlanId),
-    });
+  const planApplicationId = resolvedPlanId
+    ? await resolveActionPlanApplicationId(executor, resolvedPlanId)
+    : null;
+  let resolvedApplicationId = chooseIlmpApplicationId({
+    actionPlanApplicationId: planApplicationId,
+  });
+  if (!resolvedPlanId && !resolvedApplicationId) {
+    resolvedApplicationId = chooseIlmpApplicationId({ submissionApplicationId: applicationId });
   }
-  if (!resolvedApplicationId) {
+  if (!resolvedPlanId && !resolvedApplicationId) {
     resolvedApplicationId = chooseIlmpApplicationId({
       primaryApplicationId: await resolvePrimaryApplicationIdForCase(executor, Number(caseId)),
     });
@@ -6731,7 +6749,7 @@ async function ensureEsdcParticipantSubmissionRecord(db, caseId, applicationId, 
          rejection_reason
        ) VALUES (?, ?, ?, 'needs_review', NULL, NULL, NULL, NULL, 'pending', NULL, NULL, NULL, NULL, NULL, NULL)
        ON DUPLICATE KEY UPDATE
-         application_id = VALUES(application_id),
+         application_id = COALESCE(VALUES(application_id), esdc_participant_submission.application_id),
          action_plan_id = VALUES(action_plan_id),
          readiness_status = 'needs_review',
          readiness_summary = NULL,
@@ -16993,6 +17011,19 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     return { createdPlan: false, createdIntervention: false, interventionId: null, planId: null };
   }
 
+  let actionPlanApplicationId = null;
+  if (applicationId) {
+    const [[applicationScope]] = await connection.query(
+      'SELECT id, case_id FROM iset_application WHERE id = ? LIMIT 1 FOR UPDATE',
+      [applicationId]
+    );
+    actionPlanApplicationId = resolveActionPlanApplicationLineage({
+      caseId,
+      requestedApplicationId: applicationId,
+      applicationCaseId: applicationScope?.case_id,
+    });
+  }
+
   const budgetPotIdNumeric = Number.isFinite(Number(budgetPotId)) && Number(budgetPotId) > 0
     ? Number(budgetPotId)
     : null;
@@ -17004,7 +17035,10 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     }
   }
 
-  const assessmentRow = await fetchApplicationAssessmentRow(connection, { caseId, applicationId });
+  const assessmentRow = await fetchApplicationAssessmentRow(connection, {
+    caseId,
+    applicationId: actionPlanApplicationId,
+  });
   if (!assessmentRow) {
     return { createdPlan: false, createdIntervention: false, interventionId: null, planId: null };
   }
@@ -17230,9 +17264,9 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   };
   let applicationAnswers = {};
   let applicationPayloadObj = {};
-  if (caseRow.application_id) {
+  if (actionPlanApplicationId) {
     try {
-      const appPayload = await readApplicationPayload(connection, caseRow.application_id, { forUpdate: false });
+      const appPayload = await readApplicationPayload(connection, actionPlanApplicationId, { forUpdate: false });
       applicationPayloadObj = appPayload?.payload || {};
       applicationAnswers = sanitiseAnswersPayload(applicationPayloadObj.answers || {});
     } catch (_) {
@@ -17360,10 +17394,11 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
 
   const [planInsert] = await connection.query(
     `INSERT INTO iset_case_action_plan
-       (case_id, name, status, agreement_number, budget_pot, funding_stream, EIClaimant, prev_employment, owner_staff_profile_id, owner_user_id, effective_date, review_date, activated_at, notes, metadata_json, esdc_action_plan_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (case_id, application_id, name, status, agreement_number, budget_pot, funding_stream, EIClaimant, prev_employment, owner_staff_profile_id, owner_user_id, effective_date, review_date, activated_at, notes, metadata_json, esdc_action_plan_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       caseId,
+      actionPlanApplicationId,
       planName,
       planStatus,
       agreementNumber || null,
@@ -17408,9 +17443,9 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       let applicationAnswers = {};
       let applicationPayloadObj = {};
       let applicationPersonal = {};
-      if (caseRow.application_id) {
+      if (actionPlanApplicationId) {
         try {
-          const appPayload = await readApplicationPayload(connection, caseRow.application_id, { forUpdate: false });
+          const appPayload = await readApplicationPayload(connection, actionPlanApplicationId, { forUpdate: false });
           applicationPayloadObj = appPayload?.payload || {};
           applicationPersonal = applicationPayloadObj.personal || {};
           applicationAnswers = sanitiseAnswersPayload(applicationPayloadObj.answers || {});
@@ -17616,7 +17651,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
 
   const planId = planInsert.insertId;
   try {
-    await ensureEsdcParticipantSubmissionRecord(connection, caseId, caseRow.application_id || null, planId);
+    await ensureEsdcParticipantSubmissionRecord(connection, caseId, actionPlanApplicationId, planId);
   } catch (err) {
     console.warn('[auto-plan] failed to seed participant submission for plan', planId, err?.message || err);
   }
@@ -17788,7 +17823,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       try {
         const moveResult = await moveApplicationDocumentsToIntervention(connection, {
           caseId,
-          applicationId: caseRow?.application_id,
+          applicationId: actionPlanApplicationId,
           interventionId,
         });
         movedDocuments += moveResult.moved || 0;
@@ -19773,7 +19808,7 @@ async function fetchInterventionWithCase(interventionId, connection = pool, { fo
        p.review_status AS proposal_review_status,
        p.reviewed_at AS proposal_reviewed_at,
        p.source_intervention_id AS proposal_source_intervention_id,
-       COALESCE(p.application_id, a.id) AS application_id,
+       COALESCE(p.application_id, ap.application_id, a.id) AS application_id,
        ${buildReviewWorkflowSelectColumns('rw')},
        c.assigned_staff_profile_id AS assigned_staff_profile_id,
        c.assigned_staff_profile_id AS assigned_to_user_id,
@@ -19783,7 +19818,7 @@ async function fetchInterventionWithCase(interventionId, connection = pool, { fo
      LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
      LEFT JOIN iset_case c ON c.id = ci.case_id
      LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = ci.id
-     LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ${buildCasePrimaryApplicationIdSql('c')})
+     LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
      LEFT JOIN iset_review_workflow rw
        ON rw.archived_at IS NULL
       AND rw.workflow_type = CASE
@@ -21685,6 +21720,7 @@ function mapActionPlanRow(plan) {
   return {
     id: plan.id,
     caseId: plan.case_id || plan.caseId || null,
+    applicationId: normalisePositiveInteger(plan.application_id ?? plan.applicationId),
     name: plan.name || null,
     status: plan.status || null,
     budgetPotId,
@@ -21996,7 +22032,11 @@ async function syncInterventionProposalCompatibility(interventionRow, connection
     revisionMeta?.sourceInterventionId || revisionMeta?.source_intervention_id || null
   );
   const proposalKind = sourceInterventionId ? 'revision' : 'new';
-  const applicationId = await resolveApplicationIdForCaseId(interventionRow.case_id, connection);
+  const actionPlanApplicationId = await resolveActionPlanApplicationId(
+    connection,
+    interventionRow.action_plan_id
+  );
+  const applicationId = actionPlanApplicationId || null;
   const title =
     metadata.title ||
     metadata.snapshot?.title ||
@@ -22076,7 +22116,7 @@ async function syncInterventionProposalCompatibility(interventionRow, connection
        ON DUPLICATE KEY UPDATE
          case_id = VALUES(case_id),
          action_plan_id = VALUES(action_plan_id),
-         application_id = VALUES(application_id),
+         application_id = COALESCE(VALUES(application_id), iset_intervention_proposal.application_id),
          source_intervention_id = VALUES(source_intervention_id),
          proposal_kind = VALUES(proposal_kind),
          review_status = VALUES(review_status),
@@ -24451,198 +24491,22 @@ async function findExistingClientCaseSummary(connection, { caseId, applicationId
 }
 
 async function ensureCaseClientLinkForApproval(connection, { caseId, applicationId, existingClientId, actorId = null, actorName = null }) {
-  if (existingClientId) return existingClientId;
-  if (!applicationId) return null;
+  if (!applicationId) return existingClientId || null;
 
-  const profile = await buildClientProfileFromApplication(connection, applicationId, { forUpdate: true });
-  if (!profile) {
-    console.warn('[cases] unable to build client profile for application %s (case %s)', applicationId, caseId);
-    return null;
-  }
-
-  const lowerFirst = profile.firstName.toLowerCase();
-  const lowerLast = profile.lastName.toLowerCase();
-  const sinHash = profile.sinHash || null;
-  let targetClientId = null;
-
-  let existingClientRow = null;
-
-  if (sinHash) {
-    const params = [sinHash];
-    let sql = `
-      SELECT id, address_json, dob, first_name, last_name
-        FROM client
-       WHERE JSON_UNQUOTE(JSON_EXTRACT(address_json, '$.sinHash')) = ?
-    `;
-    if (profile.dob) {
-      sql += ' AND dob = ?';
-      params.push(profile.dob);
-    }
-    sql += ' LIMIT 1';
-    const [[bySinHash]] = await connection.query(sql, params);
-    if (bySinHash) {
-      targetClientId = bySinHash.id;
-      existingClientRow = bySinHash;
-    }
-  }
-
-  if (!targetClientId && sinHash) {
-    // Fallback: scan prior submissions to reuse an existing client if the same SIN was used
-    const [sinCandidates] = await connection.query(
-      `SELECT c.client_id, s.intake_payload
-         FROM iset_case c
-         ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
-         JOIN iset_application_submission s ON s.id = a.submission_id
-        WHERE c.client_id IS NOT NULL`
-    );
-    for (const row of sinCandidates) {
-      if (!row?.intake_payload || !row?.client_id) continue;
-      let payloadObj = null;
-      try {
-        payloadObj = typeof row.intake_payload === 'string'
-          ? JSON.parse(row.intake_payload)
-          : row.intake_payload;
-      } catch (_) {
-        payloadObj = null;
-      }
-      if (!payloadObj || typeof payloadObj !== 'object') continue;
-      const candidateSinDigits = cleanSin(extractSin({ payload: {}, answers: payloadObj, caseContext: {} }));
-      if (!candidateSinDigits || !isValidSin(candidateSinDigits)) continue;
-      const candidateHash = hashSin(candidateSinDigits);
-      if (candidateHash && candidateHash === sinHash) {
-        targetClientId = row.client_id;
-        const [[clientRow]] = await connection.query('SELECT * FROM client WHERE id = ? LIMIT 1', [targetClientId]);
-        existingClientRow = clientRow || null;
-        break;
-      }
-    }
-  }
-
-  if (profile.emailNormalized) {
-    const [[byEmail]] = await connection.query(
-      `SELECT id
-         FROM client
-        WHERE address_json IS NOT NULL
-          AND JSON_UNQUOTE(JSON_EXTRACT(address_json, '$.contact.emailNormalized')) = ?
-        LIMIT 1`,
-      [profile.emailNormalized]
-    );
-    if (byEmail) {
-      targetClientId = byEmail.id;
-      const [[clientRow]] = await connection.query('SELECT * FROM client WHERE id = ? LIMIT 1', [targetClientId]);
-      existingClientRow = clientRow || null;
-    }
-  }
-
-  if (!targetClientId) {
-    if (profile.dob) {
-      const [[byNameDob]] = await connection.query(
-        `SELECT id
-           FROM client
-          WHERE LOWER(first_name) = ?
-            AND LOWER(last_name) = ?
-            AND dob = ?
-          LIMIT 1`,
-        [lowerFirst, lowerLast, profile.dob]
-      );
-      if (byNameDob) {
-        targetClientId = byNameDob.id;
-        const [[clientRow]] = await connection.query('SELECT * FROM client WHERE id = ? LIMIT 1', [targetClientId]);
-        existingClientRow = clientRow || null;
-      }
-    } else {
-      const [[byNameOnly]] = await connection.query(
-        `SELECT id
-           FROM client
-          WHERE LOWER(first_name) = ?
-            AND LOWER(last_name) = ?
-            AND dob IS NULL
-          LIMIT 1`,
-        [lowerFirst, lowerLast]
-      );
-      if (byNameOnly) {
-        targetClientId = byNameOnly.id;
-        const [[clientRow]] = await connection.query('SELECT * FROM client WHERE id = ? LIMIT 1', [targetClientId]);
-        existingClientRow = clientRow || null;
-      }
-    }
-  }
-
-  if (!targetClientId) {
-    const [insertResult] = await connection.query(
-      `INSERT INTO client (dob, gender, aboriginal_group, last_name, first_name, initials, address_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [
-        profile.dob,
-        profile.gender,
-        profile.aboriginalGroup,
-        profile.lastName,
-        profile.firstName,
-        profile.initials,
-        profile.addressJson
-      ]
-    );
-    targetClientId = insertResult.insertId;
-  } else {
-    await connection.query(
-      `UPDATE client
-          SET updated_at = NOW(),
-              address_json = CASE
-                WHEN ? IS NOT NULL AND (
-                  address_json IS NULL
-                  OR JSON_EXTRACT(address_json, '$.sinHash') IS NULL
-                  OR JSON_UNQUOTE(JSON_EXTRACT(address_json, '$.sinHash')) <> ?
-                )
-                  THEN JSON_SET(COALESCE(address_json, JSON_OBJECT()), '$.sinHash', ?)
-                ELSE address_json
-              END
-        WHERE id = ?`,
-      [sinHash, sinHash, sinHash, targetClientId]
-    );
-  }
-
-  await connection.query(
-    'UPDATE iset_case SET client_id = ?, updated_at = NOW() WHERE id = ?',
-    [targetClientId, caseId]
-  );
+  const targetClientId = await linkCanonicalApprovalClient(connection, {
+    caseId,
+    applicationId,
+    existingCaseClientId: existingClientId,
+  });
 
   try {
-    const changes = [];
-    const addChange = (field, fromValue, toValue) => {
-      const fromVal = fromValue === undefined ? null : fromValue;
-      const toVal = toValue === undefined ? null : toValue;
-      if (fromVal === toVal) return;
-      changes.push({ field, from: fromVal, to: toVal });
-    };
-    const normalizeDob = value => {
-      if (!value) return null;
-      if (value instanceof Date) {
-        return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
-      }
-      const asString = String(value);
-      if (!asString) return null;
-      return asString.slice(0, 10);
-    };
-
-    if (existingClientRow) {
-      addChange('first_name', existingClientRow.first_name, profile.firstName);
-      addChange('last_name', existingClientRow.last_name, profile.lastName);
-      addChange('dob', normalizeDob(existingClientRow.dob), profile.dob);
-      addChange('gender', existingClientRow.gender, profile.gender);
-      addChange('aboriginal_group', existingClientRow.aboriginal_group, profile.aboriginalGroup);
-      addChange('address_json', existingClientRow.address_json, profile.addressJson);
-    } else {
-      addChange('created', null, profile);
-    }
-    const identityWarning = changes.some(change => change.field === 'dob' || change.field === 'first_name' || change.field === 'last_name');
     await captureCaseEvent({
-      type: 'client_updated',
+      type: 'client_linked',
       caseId,
       payload: {
         clientId: targetClientId,
         applicationId,
-        changes,
-        identityWarning,
+        source: 'canonical_application_owner',
       },
       actorId,
       actorName,
@@ -25250,6 +25114,8 @@ app.get('/readyz', async (_req, res) => {
     await assertRuntimeTableReady(pool, 'staff_tutorial_progress', ['staff_profile_id', 'tutorial_id', 'status']);
     await assertRuntimeTableReady(pool, 'admin_ai_guidance_entry', ['slug', 'guidance_text']);
     await assertRuntimeTableReady(pool, 'admin_ai_guidance_example', ['guidance_slug', 'question_text', 'answer_text']);
+    await assertRuntimeTableReady(pool, 'client_file_import_run', ['request_hash', 'status', 'result_json']);
+    await assertRuntimeTableReady(pool, 'client_file_import_identity_claim', ['identity_key', 'client_id']);
     await assertEnumValueReady(pool, 'esdc_participant_submission_history', 'event_type', 'prepared');
     return res.status(200).json({ status: 'ready' });
   } catch (error) {
@@ -28113,7 +27979,7 @@ async function fetchMetricInterventionDetailRows(pool, { start, end, scope, mode
           ic.label AS intervention_label,
           c.case_number,
 c.assigned_staff_profile_id AS assigned_to_user_id,
-          a.id AS application_id,
+          COALESCE(ap.application_id, a.id) AS application_id,
           cl.first_name AS client_first_name,
           cl.last_name AS client_last_name,
           COALESCE(
@@ -28131,7 +27997,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.region_id AS assigned_user_region_id
         FROM iset_case_intervention ci
         JOIN iset_case c ON c.id = ci.case_id
-        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+        LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+        LEFT JOIN iset_application a ON a.id = COALESCE(ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN client cl ON cl.id = c.client_id
         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
@@ -28179,7 +28046,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           c.case_number,
 c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.region_id AS region_id,
-          COALESCE(p.application_id, a.id) AS application_id,
+          COALESCE(p.application_id, ap.application_id, a.id) AS application_id,
           cl.first_name AS client_first_name,
           cl.last_name AS client_last_name,
           COALESCE(
@@ -28198,7 +28065,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         FROM iset_intervention_proposal p
         JOIN iset_case c ON c.id = p.case_id
         LEFT JOIN iset_case_intervention ci ON ci.id = p.legacy_intervention_id
-        LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ${buildCasePrimaryApplicationIdSql('c')})
+        LEFT JOIN iset_case_action_plan ap ON ap.id = COALESCE(p.action_plan_id, ci.action_plan_id)
+        LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN client cl ON cl.id = c.client_id
         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
@@ -28225,7 +28093,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           c.case_number,
 c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.region_id AS region_id,
-          a.id AS application_id,
+          COALESCE(ap.application_id, a.id) AS application_id,
           cl.first_name AS client_first_name,
           cl.last_name AS client_last_name,
           COALESCE(
@@ -28244,7 +28112,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         FROM iset_case_intervention ci
         LEFT JOIN iset_intervention_proposal p_existing ON p_existing.legacy_intervention_id = ci.id
         JOIN iset_case c ON c.id = ci.case_id
-        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+        LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+        LEFT JOIN iset_application a ON a.id = COALESCE(ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN client cl ON cl.id = c.client_id
         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
@@ -34171,26 +34040,6 @@ app.post('/api/admin/contact-messages/:id/notes', async (req, res) => {
   let authorUserId = null;
   try {
     authorUserId = await resolveExistingUserIdFromAuth(req, pool);
-    if (authorUserId === null) {
-      const candidateEmails = new Set();
-      if (typeof req.auth?.email === 'string' && req.auth.email.trim()) {
-        candidateEmails.add(req.auth.email.trim());
-      }
-      if (typeof req.staffProfile?.email === 'string' && req.staffProfile.email.trim()) {
-        candidateEmails.add(req.staffProfile.email.trim());
-      }
-      if (candidateEmails.size) {
-        const emailList = Array.from(candidateEmails);
-        const placeholders = emailList.map(() => '?').join(', ');
-        const [emailRows] = await pool.query(
-          `SELECT id FROM user WHERE email IN (${placeholders}) LIMIT 1`,
-          emailList
-        );
-        if (emailRows && emailRows[0] && Number.isFinite(Number(emailRows[0].id))) {
-          authorUserId = Number(emailRows[0].id);
-        }
-      }
-    }
   } catch (lookupErr) {
     console.warn('[contact-admin] unable to resolve note author user id', lookupErr.message);
     authorUserId = null;
@@ -42105,7 +41954,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.region_id AS assigned_user_region_id,
           ca.esdc_eligibility AS assessment_esdc_eligibility,
           bp.code AS budget_pot_code,
-          COALESCE(p.application_id, a.id) AS application_id,
+          COALESCE(p.application_id, ap.application_id, a.id) AS application_id,
           c.case_context_json,
           cl.first_name AS client_first_name,
           cl.last_name AS client_last_name,
@@ -42129,7 +41978,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         LEFT JOIN iset_case_action_plan ap ON ap.id = COALESCE(p.action_plan_id, ci.action_plan_id)
         LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
         LEFT JOIN client cl ON cl.id = c.client_id
-        LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ${buildCasePrimaryApplicationIdSql('c')})
+        LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         LEFT JOIN esdc_intervention_code ic ON ic.code = COALESCE(p.intervention_code, ci.intervention_code)
@@ -42180,7 +42029,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.region_id AS assigned_user_region_id,
           ca.esdc_eligibility AS assessment_esdc_eligibility,
           bp.code AS budget_pot_code,
-          a.id AS application_id,
+          COALESCE(ap.application_id, a.id) AS application_id,
           c.case_context_json,
           cl.first_name AS client_first_name,
           cl.last_name AS client_last_name,
@@ -42203,7 +42052,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
         LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
         LEFT JOIN client cl ON cl.id = c.client_id
-        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+        LEFT JOIN iset_application a ON a.id = COALESCE(ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
@@ -42536,7 +42385,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       sp.region_id AS assigned_user_region_id,
       ca.esdc_eligibility AS assessment_esdc_eligibility,
       bp.code AS budget_pot_code,
-      COALESCE(p.application_id, a.id) AS application_id,
+      COALESCE(p.application_id, ap.application_id, a.id) AS application_id,
       c.case_context_json,
       cl.first_name AS client_first_name,
       cl.last_name AS client_last_name,
@@ -42564,7 +42413,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     LEFT JOIN iset_case_action_plan ap ON ap.id = COALESCE(p.action_plan_id, ci.action_plan_id)
     LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
     LEFT JOIN client cl ON cl.id = c.client_id
-    ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+    LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = COALESCE(p.intervention_code, ci.intervention_code)
@@ -52935,6 +52784,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       `SELECT
          ap.id,
          ap.case_id,
+         ap.application_id,
          ap.name,
          ap.status,
          ap.effective_date,
@@ -52992,13 +52842,13 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
            p.review_status AS proposal_review_status,
            p.reviewed_at AS proposal_reviewed_at,
            p.source_intervention_id AS proposal_source_intervention_id,
-           COALESCE(p.application_id, a.id) AS application_id,
+           COALESCE(p.application_id, ap.application_id, a.id) AS application_id,
            ${buildReviewWorkflowSelectColumns('rw')}
          FROM iset_case_intervention ci
          LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
          LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = ci.id
          LEFT JOIN iset_case c_for_app ON c_for_app.id = ci.case_id
-         LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ${buildCasePrimaryApplicationIdSql('c_for_app')})
+         LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ap.application_id, ${buildCasePrimaryApplicationIdSql('c_for_app')})
          LEFT JOIN iset_review_workflow rw
            ON rw.archived_at IS NULL
           AND rw.workflow_type = CASE
@@ -54799,6 +54649,9 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
     outcomeSummary = null,
     closureNotes = null,
   } = req.body || {};
+  const requestedActionPlanApplicationId = normalisePositiveInteger(
+    req.body?.applicationId ?? req.body?.application_id
+  );
   const isBackloadMode =
     backloadMode === true ||
     String(entryMode || '').trim().toLowerCase() === 'backload';
@@ -54931,9 +54784,23 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
   }
 
   let connection;
+  let actionPlanApplicationId = null;
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
+
+    const candidateApplicationId = requestedActionPlanApplicationId || normalisePositiveInteger(caseRow.application_id);
+    if (candidateApplicationId) {
+      const [[applicationScope]] = await connection.query(
+        'SELECT id, case_id FROM iset_application WHERE id = ? LIMIT 1 FOR UPDATE',
+        [candidateApplicationId]
+      );
+      actionPlanApplicationId = resolveActionPlanApplicationLineage({
+        caseId,
+        requestedApplicationId: candidateApplicationId,
+        applicationCaseId: applicationScope?.case_id,
+      });
+    }
 
     const CODE_SETS = {
       resultCode: new Set(['1','2','3','4','5','6','7','9']),
@@ -55215,10 +55082,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 
     const [result] = await connection.query(
       `INSERT INTO iset_case_action_plan
-         (case_id, name, status, agreement_number, budget_pot, funding_stream, EIClaimant, prev_employment, owner_staff_profile_id, owner_user_id, effective_date, review_date, notes, metadata_json, esdc_action_plan_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (case_id, application_id, name, status, agreement_number, budget_pot, funding_stream, EIClaimant, prev_employment, owner_staff_profile_id, owner_user_id, effective_date, review_date, notes, metadata_json, esdc_action_plan_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         caseId,
+        actionPlanApplicationId,
         trimmedName || null,
         planStatus,
         derivedAgreementNumber,
@@ -55279,7 +55147,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       if (!existingContext) {
         const assessmentRow = await fetchApplicationAssessmentRow(connection, {
           caseId,
-          applicationId: caseRow.application_id || null,
+          applicationId: actionPlanApplicationId,
         });
         const previousIsetNormalised = normalizeYesNoValue(assessmentRow?.previous_iset);
         const previousIsetBoolean =
@@ -55356,6 +55224,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       planRow ? mapActionPlanRow(planRow) : {
         id: result.insertId,
         caseId,
+        applicationId: actionPlanApplicationId,
         name: trimmedName || null,
         status: planStatus,
         effectiveDate: toIsoDateTime(startDate),
@@ -55391,7 +55260,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
         const insertReminderParams = [
           caseId,
-          Number.isFinite(caseRow.application_id) ? caseRow.application_id : null,
+          actionPlanApplicationId,
           payload.id,
           null,
           reminderTitle,
@@ -55418,7 +55287,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       try { await connection.rollback(); } catch (_) {}
     }
     console.error('POST /api/cases/:id/action-plans failed:', error);
-    res.status(500).json({ error: 'create_action_plan_failed', detail: error?.message || String(error) });
+    const status = Number(error?.statusCode || error?.status) || 500;
+    res.status(status).json({
+      error: error?.code || 'create_action_plan_failed',
+      detail: error?.message || String(error),
+    });
   } finally {
     if (connection) connection.release();
   }
@@ -55587,13 +55460,13 @@ app.get('/api/action-plans/:id/interventions', async (req, res) => {
          p.review_status AS proposal_review_status,
          p.reviewed_at AS proposal_reviewed_at,
          p.source_intervention_id AS proposal_source_intervention_id,
-         COALESCE(p.application_id, a.id) AS application_id,
+         COALESCE(p.application_id, ap.application_id, a.id) AS application_id,
          ${buildReviewWorkflowSelectColumns('rw')}
        FROM iset_case_intervention ci
        LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
        LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = ci.id
        LEFT JOIN iset_case c_for_app ON c_for_app.id = ci.case_id
-       LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ${buildCasePrimaryApplicationIdSql('c_for_app')})
+       LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ap.application_id, ${buildCasePrimaryApplicationIdSql('c_for_app')})
        LEFT JOIN iset_review_workflow rw
          ON rw.archived_at IS NULL
         AND rw.workflow_type = CASE
@@ -67509,16 +67382,16 @@ async function findClientFileImportClientCandidates(connection, normalized = {})
   });
 }
 
-async function loadClientFileImportCaseRows(connection, clientId) {
+async function loadClientFileImportCaseRows(connection, clientId, { forUpdate = false } = {}) {
   const [rows] = await connection.query(
     `SELECT c.id,
             c.case_number,
             c.status,
             ${buildCasePrimaryApplicationIdSql('c')} AS application_id,
             c.updated_at
-       FROM iset_case c
+      FROM iset_case c
       WHERE c.client_id = ?
-      ORDER BY c.updated_at DESC, c.id DESC`,
+      ORDER BY c.updated_at DESC, c.id DESC${forUpdate ? ' FOR UPDATE' : ''}`,
     [clientId]
   );
   return Array.isArray(rows) ? rows : [];
@@ -67926,69 +67799,49 @@ async function applyClientFileImportPlan(connection, planRows = [], importMeta =
         throw err;
       }
 
-      let clientId = row.matchedClient?.id ? Number(row.matchedClient.id) : null;
-      if (row.action === 'create_client_and_case') {
-        clientId = await upsertClientForImport(connection, normalized, meta, null);
-        createdClients += 1;
-        const { caseId, caseNumber } = await createCaseForImportedClient(connection, clientId, normalized, meta);
-        createdCases += 1;
-        const applicantAccountResult = await ensureApplicantAccountForImportedClient(connection, clientId, row, meta);
-        if (applicantAccountResult.createdApplicantUsername) {
-          createdApplicantUsernames.push(applicantAccountResult.createdApplicantUsername);
-        }
-        results.push({
-          rowNumber: row.rowNumber,
-          displayName: row.displayName,
-          action: row.action,
-          clientId,
-          caseId,
-          caseNumber,
-        });
-        continue;
-      }
-
+      const identityKey = buildClientFileImportIdentityKey(row);
+      const plannedClientId = row.matchedClient?.id ? Number(row.matchedClient.id) : null;
+      let clientId = await claimClientFileImportIdentity(connection, identityKey, plannedClientId);
+      const clientExistedBeforeCommit = Boolean(clientId);
       clientId = await upsertClientForImport(connection, normalized, meta, clientId);
-      if (row.action === 'create_case_for_existing_client') {
-        const { caseId, caseNumber } = await createCaseForImportedClient(connection, clientId, normalized, meta);
+      await bindClientFileImportIdentity(connection, identityKey, clientId);
+      if (!clientExistedBeforeCommit) createdClients += 1;
+
+      // The dry-run is advisory. Recheck case cardinality only after the canonical
+      // client row/identity claim is locked so concurrent imports cannot both create a case.
+      const lockedCaseRows = await loadClientFileImportCaseRows(connection, clientId, { forUpdate: true });
+      const caseDecision = reconcileClientFileImportCaseAction(lockedCaseRows);
+      let caseResult;
+      let committedAction;
+      if (caseDecision.action === 'create_case') {
+        caseResult = await createCaseForImportedClient(connection, clientId, normalized, meta);
         createdCases += 1;
-        const applicantAccountResult = await ensureApplicantAccountForImportedClient(connection, clientId, row, meta);
-        if (applicantAccountResult.createdApplicantUsername) {
-          createdApplicantUsernames.push(applicantAccountResult.createdApplicantUsername);
-        }
-        results.push({
-          rowNumber: row.rowNumber,
-          displayName: row.displayName,
-          action: row.action,
-          clientId,
-          caseId,
-          caseNumber,
-        });
-        continue;
-      }
-
-      if (row.action === 'update_existing_case') {
-        const targetCaseId = row.matchedClient?.existingCaseId ? Number(row.matchedClient.existingCaseId) : null;
-        const { caseId, caseNumber } = await updateExistingImportedCase(connection, targetCaseId, normalized, meta);
+        committedAction = clientExistedBeforeCommit
+          ? 'create_case_for_existing_client'
+          : 'create_client_and_case';
+      } else {
+        caseResult = await updateExistingImportedCase(
+          connection,
+          caseDecision.caseId,
+          normalized,
+          meta
+        );
         updatedCases += 1;
-        const applicantAccountResult = await ensureApplicantAccountForImportedClient(connection, clientId, row, meta);
-        if (applicantAccountResult.createdApplicantUsername) {
-          createdApplicantUsernames.push(applicantAccountResult.createdApplicantUsername);
-        }
-        results.push({
-          rowNumber: row.rowNumber,
-          displayName: row.displayName,
-          action: row.action,
-          clientId,
-          caseId,
-          caseNumber,
-        });
-        continue;
+        committedAction = 'update_existing_case';
       }
 
-      const err = new Error('unsupported_import_action');
-      err.code = 'unsupported_import_action';
-      err.details = { rowNumber: row.rowNumber, action: row.action };
-      throw err;
+      const applicantAccountResult = await ensureApplicantAccountForImportedClient(connection, clientId, row, meta);
+      if (applicantAccountResult.createdApplicantUsername) {
+        createdApplicantUsernames.push(applicantAccountResult.createdApplicantUsername);
+      }
+      results.push({
+        rowNumber: row.rowNumber,
+        displayName: row.displayName,
+        action: committedAction,
+        clientId,
+        caseId: caseResult.caseId,
+        caseNumber: caseResult.caseNumber,
+      });
     }
   } catch (error) {
     error.createdApplicantUsernames = Array.from(new Set(createdApplicantUsernames.filter(Boolean)));
@@ -85326,8 +85179,32 @@ app.post('/api/imports/client-files/commit', async (req, res) => {
   const connection = await pool.getConnection();
   let commitResult = null;
   try {
+    const requestHash = buildClientFileImportRequestHash({
+      actorStaffProfileId: Number.isFinite(actorStaffProfileId) ? actorStaffProfileId : null,
+      fileName,
+      worksheetName,
+      rows: planInput,
+    });
+    await connection.beginTransaction();
+    const importRun = await claimClientFileImportRun(connection, {
+      requestHash,
+      actorStaffProfileId: Number.isFinite(actorStaffProfileId) ? actorStaffProfileId : null,
+      fileName,
+      worksheetName,
+    });
+    if (importRun.replay) {
+      await connection.commit();
+      return res.status(200).json({
+        message: 'client_file_import_committed',
+        summary: importRun.result.summary,
+        results: importRun.result.results,
+        replayed: true,
+      });
+    }
+
     const plan = await prepareClientFileImportPlan(connection, planInput);
     if (!plan.canCommit) {
+      await connection.rollback();
       return res.status(422).json({
         error: 'import_plan_blocked',
         message: 'One or more rows still require review before commit.',
@@ -85336,7 +85213,6 @@ app.post('/api/imports/client-files/commit', async (req, res) => {
       });
     }
 
-    await connection.beginTransaction();
     commitResult = await applyClientFileImportPlan(connection, plan.rows, {
       fileName,
       worksheetName,
@@ -85344,6 +85220,7 @@ app.post('/api/imports/client-files/commit', async (req, res) => {
       actorStaffProfileId: Number.isFinite(actorStaffProfileId) ? actorStaffProfileId : null,
       importedAt,
     });
+    await completeClientFileImportRun(connection, importRun.id, commitResult);
     await connection.commit();
 
     return res.status(200).json({
@@ -85375,6 +85252,13 @@ app.post('/api/imports/client-files/commit', async (req, res) => {
         error: error.code,
         message: 'One or more rows were no longer ready to import.',
         details: error.details || null,
+      });
+    }
+    if (Number(error?.statusCode || error?.status) === 409) {
+      return res.status(409).json({
+        error: error?.code || 'client_file_import_conflict',
+        message: error?.message || 'The import conflicted with a concurrent client-file change.',
+        details: error?.details || null,
       });
     }
     console.error('[client-file-import] commit failed', error);
