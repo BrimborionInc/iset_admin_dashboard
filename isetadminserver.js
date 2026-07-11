@@ -41,6 +41,10 @@ const {
   reconcileClientFileImportCaseAction,
 } = require('./src/lib/clientFileImportIntegrity');
 const {
+  claimReminderLifecycleEvent,
+  markReminderLifecycleEventEmitted,
+} = require('./src/lib/reminderLifecycleEvents');
+const {
   chooseIlmpApplicationId,
   mergeIlmpAnswers,
 } = require('./src/lib/ilmpContextMapping');
@@ -100,7 +104,14 @@ const nunjucks = require("nunjucks");
 let pool; // Initialized after DB config loads
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
 const { buildHelpPanelGuidanceResult } = require('./src/server/adminAiGuidanceService');
-const { createEventService, EventValidationError, registerNotificationHook } = require('../shared/events');
+const {
+  createEventService,
+  EventValidationError,
+  registerNotificationHook,
+  replayEventDelivery,
+  runNotificationHook,
+  startEventDeliveryWorker,
+} = require('../shared/events');
 const {
   emitApplicantWatchlistHitEvents,
   getApplicantWatchlistMatchesForApplication,
@@ -19498,9 +19509,11 @@ async function dispatchStaffSecureMessageSentEmail({ pool, event, logger = conso
       recipientDisplayName,
       senderDisplayName,
       messageReceivedAt: event.created_at,
+      deliveryEvent: event,
     });
   } catch (err) {
     logger.error('[notifications] staff_secure_message_sent email dispatch failed', err?.message || err);
+    throw err;
   }
 }
 
@@ -21237,6 +21250,7 @@ function resolveStaffRole(req) {
 }
 
 async function captureCaseEvent({
+  eventId = null,
   type,
   caseId,
   payload,
@@ -21254,6 +21268,7 @@ async function captureCaseEvent({
 }) {
   try {
     return await emitCaseEventSdk({
+      eventId,
       type,
       caseId,
       actor: {
@@ -25116,6 +25131,10 @@ app.get('/readyz', async (_req, res) => {
     await assertRuntimeTableReady(pool, 'admin_ai_guidance_example', ['guidance_slug', 'question_text', 'answer_text']);
     await assertRuntimeTableReady(pool, 'client_file_import_run', ['request_hash', 'status', 'result_json']);
     await assertRuntimeTableReady(pool, 'client_file_import_identity_claim', ['identity_key', 'client_id']);
+    await assertRuntimeTableReady(pool, 'iset_event_entry', ['id', 'notification_delivery_mode']);
+    await assertRuntimeTableReady(pool, 'iset_event_delivery', ['event_id', 'channel', 'audience_key', 'status']);
+    await assertRuntimeTableReady(pool, 'iset_case_reminder', ['id', 'lifecycle_generation']);
+    await assertRuntimeTableReady(pool, 'iset_reminder_lifecycle_event', ['reminder_id', 'lifecycle_generation', 'event_type', 'status']);
     await assertEnumValueReady(pool, 'esdc_participant_submission_history', 'event_type', 'prepared');
     return res.status(200).json({ status: 'ready' });
   } catch (error) {
@@ -36227,6 +36246,62 @@ app.patch('/api/admin/event-capture-rules', async (req, res) => {
   }
 });
 
+app.get('/api/admin/event-deliveries', async (req, res) => {
+  if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+  const status = normaliseString(req.query?.status) || null;
+  const allowedStatuses = new Set(['pending', 'processing', 'sending', 'delivered', 'dead_letter', 'ambiguous']);
+  if (status && !allowedStatuses.has(status)) {
+    return res.status(400).json({ error: 'invalid_event_delivery_status' });
+  }
+  try {
+    const params = [];
+    const where = status ? 'WHERE d.status = ?' : '';
+    if (status) params.push(status);
+    const [summaryRows] = await pool.query(
+      `SELECT channel, status, COUNT(*) AS count, MIN(available_at) AS oldest_available_at
+         FROM iset_event_delivery
+        GROUP BY channel, status
+        ORDER BY channel, status`
+    );
+    const [items] = await pool.query(
+      `SELECT d.id, d.event_id, e.event_type, d.channel, d.audience_key, d.worker_scope, d.status,
+              d.attempt_count, d.available_at, d.last_error, d.last_attempt_at, d.delivered_at,
+              d.replay_count, d.replay_reason, d.replayed_by_staff_profile_id, d.replayed_at,
+              d.created_at, d.updated_at
+         FROM iset_event_delivery d
+         JOIN iset_event_entry e ON e.id = d.event_id
+         ${where}
+        ORDER BY CASE WHEN d.status IN ('dead_letter', 'ambiguous') THEN 0 ELSE 1 END, d.updated_at DESC
+        LIMIT 100`,
+      params
+    );
+    return res.json({ summary: summaryRows || [], items: items || [] });
+  } catch (error) {
+    console.error('[events] delivery visibility failed', error);
+    return res.status(500).json({ error: 'event_delivery_fetch_failed' });
+  }
+});
+
+app.post('/api/admin/event-deliveries/:id/replay', async (req, res) => {
+  if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+  const deliveryId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(deliveryId) || deliveryId <= 0) {
+    return res.status(400).json({ error: 'invalid_event_delivery_id' });
+  }
+  try {
+    const replayed = await replayEventDelivery(pool, {
+      deliveryId,
+      reason: req.body?.reason,
+      replayedByStaffProfileId: req.staffProfile?.id || null,
+    });
+    if (!replayed) return res.status(409).json({ error: 'event_delivery_not_replayable' });
+    return res.json({ replayed: true, deliveryId });
+  } catch (error) {
+    const statusCode = Number(error?.statusCode || error?.status) || 500;
+    return res.status(statusCode).json({ error: error?.code || 'event_delivery_replay_failed' });
+  }
+});
+
 function splitSqlStatements(rawSql = '') {
   const statements = [];
   let current = '';
@@ -43022,6 +43097,16 @@ registerNotificationHook(async (event) => {
   await dispatchAssignmentNotificationEmails({ pool, event, logger: console });
   await dispatchStaffSecureMessageSentEmail({ pool, event, logger: console });
 });
+if (process.env.NODE_ENV !== 'test' || process.env.ENABLE_EVENT_DELIVERY_WORKER_IN_TEST === '1') {
+  startEventDeliveryWorker({
+    pool,
+    workerScope: 'admin',
+    handler: runNotificationHook,
+    sendEmail: sendNotificationEmail,
+    logger: console,
+    intervalMs: Number(process.env.EVENT_DELIVERY_POLL_INTERVAL_MS || 15000),
+  });
+}
 
 const emitEvent = eventService.emit;
 const emitCaseEventSdk = eventService.emitCaseEvent;
@@ -44231,6 +44316,7 @@ const REMINDER_SELECT = `
     r.description,
     r.category,
     r.status,
+    r.lifecycle_generation,
     r.due_at,
     r.completed_at,
     r.completed_by_staff_profile_id,
@@ -44275,6 +44361,7 @@ const mapReminderRow = (row = {}) => {
     description: row.description || null,
     category: row.category || null,
     status: row.status,
+    lifecycleGeneration: Number(row.lifecycle_generation || 1),
     dueAt: row.due_at || null,
     completedAt: row.completed_at || null,
     completedByStaffProfileId: row.completed_by_staff_profile_id || null,
@@ -44355,7 +44442,7 @@ async function validateReminderAccess(req, reminder, { allowGlobal = false, conn
   });
 }
 
-const emitReminderEvent = async ({ type, reminder, actorId, actorName }) => {
+const emitReminderEvent = async ({ eventId = null, type, reminder, actorId, actorName }) => {
   if (!reminder || !reminder.caseId) return;
   const payload = {
     reminder_id: reminder.id,
@@ -44368,7 +44455,8 @@ const emitReminderEvent = async ({ type, reminder, actorId, actorName }) => {
     overdue_days: reminder.daysOverdue || null,
     assigned_staff_profile_id: reminder.assignedStaffProfileId || null,
   };
-  await captureCaseEvent({
+  return captureCaseEvent({
+    eventId,
     type,
     caseId: reminder.caseId,
     payload,
@@ -44392,6 +44480,38 @@ const mapReminderMetadata = (row) => {
   return meta && typeof meta === 'object' ? meta : {};
 };
 
+const emitClaimedReminderLifecycleStage = async ({ type, reminder }) => {
+  const lifecycleGeneration = Number(reminder?.lifecycleGeneration || 1);
+  const claim = await claimReminderLifecycleEvent(pool, {
+    reminderId: reminder.id,
+    lifecycleGeneration,
+    eventType: type,
+  });
+  if (claim.emitted) return false;
+  const event = await emitReminderEvent({
+    eventId: claim.eventId,
+    type,
+    reminder,
+    actorId: null,
+    actorName: null,
+  });
+  if (!event) {
+    await markReminderLifecycleEventEmitted(pool, {
+      reminderId: reminder.id,
+      lifecycleGeneration,
+      eventType: type,
+      status: 'suppressed',
+    });
+    return false;
+  }
+  await markReminderLifecycleEventEmitted(pool, {
+    reminderId: reminder.id,
+    lifecycleGeneration,
+    eventType: type,
+  });
+  return true;
+};
+
 const clearReminderEmissionMetadata = (metadata) => {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     return metadata ?? null;
@@ -44413,7 +44533,7 @@ function pollRemindersForDue() {
   let rows = [];
   try {
     const [result] = await pool.query(
-      `SELECT r.id, r.case_id, r.application_id, r.title, r.description, r.category, r.status, r.due_at, r.metadata_json
+      `SELECT r.id, r.case_id, r.application_id, r.title, r.description, r.category, r.status, r.lifecycle_generation, r.due_at, r.metadata_json
          FROM iset_case_reminder r
          LEFT JOIN iset_case c ON c.id = r.case_id
         WHERE r.deleted_at IS NULL
@@ -44440,6 +44560,7 @@ function pollRemindersForDue() {
       description: row.description || null,
       category: row.category || null,
       status: row.status || null,
+      lifecycleGeneration: Number(row.lifecycle_generation || 1),
       dueAt: row.due_at || null,
       metadata: mapReminderMetadata(row),
     };
@@ -44449,28 +44570,29 @@ function pollRemindersForDue() {
     const dueBusinessDay = getReminderBusinessDayStamp(dueAt);
     if (dueBusinessDay === null || todayBusinessDay === null) continue;
 
-    const dueEmitted = meta.due_emitted === true;
-    const overdueEmitted = meta.overdue_emitted === true;
-
-    if (!dueEmitted && dueBusinessDay === todayBusinessDay) {
+    if (dueBusinessDay === todayBusinessDay) {
       try {
-        await emitReminderEvent({ type: 'reminder_due', reminder, actorId: null, actorName: null });
-        meta.due_emitted = true;
-        await updateReminderMetadata(reminder.id, meta);
+        const emitted = await emitClaimedReminderLifecycleStage({ type: 'reminder_due', reminder });
+        if (emitted) {
+          meta.due_emitted = true;
+          await updateReminderMetadata(reminder.id, meta);
+        }
       } catch (eventErr) {
         console.warn('[reminders] failed to emit reminder_due', eventErr?.message || eventErr);
       }
       continue;
     }
 
-    if (!overdueEmitted && dueBusinessDay < todayBusinessDay) {
+    if (dueBusinessDay < todayBusinessDay) {
       const daysOverdue = Math.max(1, getReminderBusinessDayDiffDays(dueAt, now) || 0);
       reminder.daysOverdue = daysOverdue;
       try {
-        await emitReminderEvent({ type: 'reminder_overdue', reminder, actorId: null, actorName: null });
-        meta.overdue_emitted = true;
-        meta.overdue_days_on_emit = daysOverdue;
-        await updateReminderMetadata(reminder.id, meta);
+        const emitted = await emitClaimedReminderLifecycleStage({ type: 'reminder_overdue', reminder });
+        if (emitted) {
+          meta.overdue_emitted = true;
+          meta.overdue_days_on_emit = daysOverdue;
+          await updateReminderMetadata(reminder.id, meta);
+        }
       } catch (eventErr) {
         console.warn('[reminders] failed to emit reminder_overdue', eventErr?.message || eventErr);
       }
@@ -44806,6 +44928,7 @@ const upsertDocRequestReminders = async ({
                   description = ?,
                   category = ?,
                   status = 'open',
+                  lifecycle_generation = lifecycle_generation + IF(NOT (due_at <=> ?), 1, 0),
                   due_at = ?,
                   completed_at = NULL,
                   completed_by_staff_profile_id = NULL,
@@ -44818,6 +44941,7 @@ const upsertDocRequestReminders = async ({
             threshold.title,
             description,
             DOC_REQUEST_REMINDER_CATEGORY,
+            dueAt,
             dueAt,
             metadataJson,
             actorId,
@@ -45117,13 +45241,16 @@ const updateReminderForCaseNote = async (connection, reminderId, { noteId, noteB
   const metadataJson = buildNoteReminderMetadata(noteId);
   const actorId = Number.isInteger(staffProfileId) && staffProfileId > 0 ? staffProfileId : null;
   const sql = `UPDATE iset_case_reminder
-    SET title = ?, description = ?, category = ?, status = 'open', due_at = ?, completed_at = NULL, completed_by_staff_profile_id = NULL,
+    SET title = ?, description = ?, category = ?,
+        lifecycle_generation = lifecycle_generation + IF(status <> 'open' OR NOT (due_at <=> ?), 1, 0),
+        status = 'open', due_at = ?, completed_at = NULL, completed_by_staff_profile_id = NULL,
         assigned_staff_profile_id = ?, metadata_json = ?, updated_by_staff_profile_id = ?, deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND deleted_at IS NULL`;
   const params = [
     title,
     description,
     NOTE_REMINDER_CATEGORY,
+    dueAt,
     dueAt,
     actorId,
     metadataJson,
@@ -62634,6 +62761,7 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
     : false;
   const reminderReopened = statusProvided && existing.status !== 'open' && statusValue === 'open';
   if (dueBusinessDayChanged || reminderReopened) {
+    updates.push('lifecycle_generation = lifecycle_generation + 1');
     metadataValue = clearReminderEmissionMetadata(metadataValue);
     metadataJsonValue = encodeReminderMetadataValue(metadataValue);
     metadataShouldWrite = true;

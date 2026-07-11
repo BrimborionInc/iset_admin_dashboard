@@ -13,13 +13,13 @@
 - **Performance**: Efficient querying for timeline widgets and notification feeds.
 - **Security**: Enforce scoping so staff only see events tied to cases they manage.
 
-## Current State Summary (updated 2026-05-10)
-- Admin server now instantiates `createEventService` from `../shared/events` in `isetadminserver.js`, replacing the legacy `addCaseEvent` helper and deprecated `/api/case-events` endpoint; the public portal backend still needs to migrate.
-- Event emission flows through `shared/events/emitter.js` (`emitEvent`), which validates types and subjects, enforces object payloads, honours capture toggles stored in `iset_runtime_config` (scope `events_capture`), persists to `iset_event_entry`, invokes the in-process notification hook, and falls back to an in-memory buffer if event tables are missing.
+## Current State Summary (updated 2026-07-11)
+- Admin and portal instantiate the shared event service from `../shared/events`; canonical events are persisted in `iset_event_entry`.
+- `emitEvent()` validates types/subjects/payloads, honours capture toggles, persists the canonical event synchronously, and creates one durable `fanout` delivery. A reconciliation pass recovers a committed queued event if the process failed between those writes.
 - `/api/cases/:case_id/events`, `/api/events/feed`, `/api/events` (POST), and `/api/events/:eventId/read` now proxy to the shared service with filter/receipt support and consistent error handling.
 - Event taxonomy and metadata are sourced from `shared/events/catalog.js`, providing category, severity, source, draft, and lock flags consumed by the capture-rule tooling.
 - Frontend widgets (`src/widgets/ApplicationEvents.js`, `src/widgets/caseUpdates.js`) consume the new endpoints, rendering severity badges, read-state indicators, and filter/sort controls against the normalized event payloads.
-- The unfinished `iset_event_outbox` async-delivery scaffold was retired on 2026-05-10. `emitEvent` no longer writes it, and migration `20260510_0001_retire_event_outbox.sql` drops the table.
+- The unfinished `iset_event_outbox` scaffold remains retired. Migration `20260711_0003_add_durable_event_delivery.sql` introduces the distinct, fully consumed `iset_event_delivery` queue for notification fan-out and recipient email outcomes.
 - Assessment recall now emits `assessment_recalled` from the application-assessment and intervention-proposal recall endpoints. The event records the case/application/proposal scope, recalled assessment version, archived document ids, and status transition so withdrawn submissions remain auditable without staying in the active approver document stream.
 
 ## Progress Log
@@ -39,6 +39,12 @@
 ### 2026-05-10 - Event outbox retired
 - Retired the unfinished `iset_event_outbox` scaffold after DEV/PROD evidence showed every row remained `pending` and no worker consumed it.
 - `shared/events/emitter.js` now persists only the canonical event row and invokes the in-process notification hook. Migration `20260510_0001_retire_event_outbox.sql` drops the unused table.
+
+### 2026-07-11 - Durable notification delivery
+- Canonical event insertions enqueue one scope-owned fan-out record. Admin workers own non-portal catalogue sources; portal workers own portal sources. Database claims use leases and `FOR UPDATE SKIP LOCKED` for multi-instance safety.
+- Fan-out retries template, audience, and bell planning failures with bounded exponential backoff. Recipient emails are unique by `(event_id, channel, audience_key)` and retry only known provider failures.
+- An email whose provider outcome is uncertain is quarantined as `ambiguous` and is never resent automatically. System Administrators can inspect delivery counts/items and replay dead-letter or ambiguous rows through `/api/admin/event-deliveries` with a required reason and recorded staff identity.
+- Successful delivery rows are retained for 90 days; dead-letter and ambiguous rows remain until reviewed.
 
 ### 2025-09-30 - Admin endpoints & widgets upgraded
 - Hardened `/api/cases/:case_id/events`, `/api/events/feed`, and `/api/events` with filter parsing, validation (types, categories, date bounds), and consistent error codes.
@@ -64,12 +70,12 @@
 
 ### Persistence and receipts
 - Successful emissions create rows in `iset_event_entry` with UUID identifiers plus optional `tracking_id`/`correlation_id`; acknowledgements live in `iset_event_receipt` keyed by the typed viewer fields.
-- Event-driven bell/email side effects currently run through the registered in-process notification hook, not through an async outbox queue.
+- Event-driven bell/email planning runs from durable fan-out jobs. Bell writes remain idempotent by event/audience, and actual emails run as recipient-level durable jobs.
 
 ### Fallback behaviour & known gaps
 - When tables are missing (e.g., local dev without migrations), the emitter stores events in an in-memory ring buffer so dashboards keep working until the schema is provisioned.
-- The public portal backend still posts directly to `iset_case_event`; migrating it onto the shared service remains outstanding.
-- There is no durable async event-delivery queue. Reintroduce one only as a deliberate notification-delivery design with a worker, idempotency, retry, monitoring, and retention.
+- Some historical portal event call sites still use compatibility adapters, but shared-service events use the canonical delivery contract.
+- `notification_delivery_mode='legacy'` prevents historical rows from being fanned out during rollout; only new `queued` events are reconciled. `suppressed` preserves transaction-aware paths that deliberately write their own bell state.
 
 *The sections below are historical 2025 planning context. They are not current implementation instructions; the outbox parts are superseded by the 2026-05-10 retirement decision above.*
 
@@ -257,8 +263,7 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 
 ### Resilience & Delivery
 - Historical note: an outbox pattern was considered in 2025 but the unfinished `iset_event_outbox` implementation was retired in 2026 before a worker existed.
-- If durable async delivery is reintroduced, design it as a new notification-delivery mechanism with retries, dead-letter handling, ownership, monitoring, and retention.
-- Current event emission remains synchronous for the event-row insert and in-process for notification hooks.
+- Durable delivery now uses `iset_event_delivery`, not the retired outbox. Event persistence remains synchronous; notification fan-out is asynchronous with database ownership, retry/backoff, dead-letter/ambiguous states, System Administrator visibility/replay, and bounded successful-row retention.
 
 ### API Surface Refresh
 - Expose `/api/cases/:id/events` and `/api/events/feed` endpoints backed by the new store, honouring filters (category, type, subject, time range).
@@ -316,8 +321,6 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 - Finalise scope for Step 2 (legacy code removal) and create tracking tasks.
 - Draft schema migration scripts and event service interface skeletons.
 - Define API contracts (OpenAPI/TypeScript types) for frontend and portal teams.
-
-
 
 
 
