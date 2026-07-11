@@ -113,6 +113,12 @@ const {
   startEventDeliveryWorker,
 } = require('../shared/events');
 const {
+  isModelAllowed: isSharedAiModelAllowed,
+  loadAiRuntimeConfig,
+  normalizeParams: normalizeAiRuntimeParams,
+  resolveAiChatModel,
+} = require('../shared/ai/runtimeConfig');
+const {
   emitApplicantWatchlistHitEvents,
   getApplicantWatchlistMatchesForApplication,
 } = require('../shared/applicantWatchlist');
@@ -34964,17 +34970,7 @@ async function fetchOpenRouterModels(force = false) {
 }
 // Policy allowlist: env OPENROUTER_ALLOWED_MODELS (comma) or prefixes OPENROUTER_ALLOWED_PREFIXES
 function isModelAllowed(modelId) {
-  if (!modelId) return false;
-  const allowModels = (process.env.OPENROUTER_ALLOWED_MODELS || '').split(',').map(s => s.trim()).filter(Boolean);
-  if (allowModels.length && allowModels.includes(modelId)) return true;
-  const allowPrefixes = (process.env.OPENROUTER_ALLOWED_PREFIXES || '').split(',').map(s => s.trim()).filter(Boolean);
-  if (allowPrefixes.length && allowPrefixes.some(p => modelId.startsWith(p))) return true;
-  // Fallback to legacy prefix list if none configured
-  if (!allowModels.length && !allowPrefixes.length) {
-    const legacy = ['openai/','mistralai/','anthropic/','google/','meta/'];
-    return legacy.some(p => modelId.startsWith(p));
-  }
-  return false;
+  return isSharedAiModelAllowed(modelId, process.env);
 }
 
 function detectAdminAiExternalSensitiveContent(value) {
@@ -35039,18 +35035,13 @@ app.get('/api/ai/models', async (req, res) => {
     res.status(500).json({ error: 'models_fetch_failed', message: e.message });
   }
 });
-app.get('/api/ai/status', (_req, res) => {
-  const enabled = !!AI_KEY;
-  const configuredModel = (process.env.OPENROUTER_MODEL || '').trim();
-  const params = {
-    temperature: parseFloat(process.env.OPENROUTER_TEMPERATURE || '0.7'),
-    top_p: parseFloat(process.env.OPENROUTER_TOP_P || '1'),
-    max_tokens: parseInt(process.env.OPENROUTER_MAX_TOKENS || '0', 10) || null,
-    presence_penalty: parseFloat(process.env.OPENROUTER_PRESENCE_PENALTY || '0'),
-    frequency_penalty: parseFloat(process.env.OPENROUTER_FREQUENCY_PENALTY || '0')
-  };
-  const fallbacks = (process.env.OPENROUTER_FALLBACK_MODELS || '').split(',').map(s => s.trim()).filter(Boolean);
-  res.json({ enabled, provider: enabled ? 'openrouter' : null, model: (global.__AI_MODEL_OVERRIDE || configuredModel || DEFAULT_OPENROUTER_MODEL), params, fallbacks });
+app.get('/api/ai/status', async (_req, res) => {
+  try {
+    const runtime = await loadAiRuntimeConfig(pool, { defaultModel: DEFAULT_OPENROUTER_MODEL });
+    res.json({ enabled: !!AI_KEY, provider: AI_KEY ? 'openrouter' : null, ...runtime });
+  } catch (error) {
+    res.status(503).json({ error: 'ai_runtime_config_unavailable', message: error.message });
+  }
 });
 // Body: { messages: [{ role, content }], model? }
 app.post('/api/ai/chat', async (req, res) => {
@@ -35108,9 +35099,17 @@ app.post('/api/ai/chat', async (req, res) => {
         console.warn('[AI] guidance retrieval failed:', guidanceError.message);
       }
     }
-    const defaultModel = (global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '').trim() || DEFAULT_OPENROUTER_MODEL;
+    const runtime = await loadAiRuntimeConfig(pool, { defaultModel: DEFAULT_OPENROUTER_MODEL });
+    const defaultModel = runtime.model || DEFAULT_OPENROUTER_MODEL;
     const requestedModel = (typeof model === 'string' && model.trim()) ? model.trim() : null;
-    const mdl = requestedModel || defaultModel;
+    const modelResolution = resolveAiChatModel({
+      requestedModel,
+      runtimeModel: defaultModel,
+      isSystemAdministrator: sysAdminOnly(req),
+      isAllowed: isModelAllowed,
+    });
+    if (modelResolution.error) return res.status(modelResolution.status).json({ error: modelResolution.error });
+    const mdl = modelResolution.model;
     const headers = {
       Authorization: `Bearer ${key}`,
       'Content-Type': 'application/json',
@@ -35119,15 +35118,14 @@ app.post('/api/ai/chat', async (req, res) => {
     };
     // Generation params (defaults from env; allow per-request override if provided)
     const params = {
-      temperature: Math.min(2, Math.max(0, typeof req.body.temperature === 'number' ? req.body.temperature : parseFloat(process.env.OPENROUTER_TEMPERATURE || '0.7'))),
-      top_p: Math.min(1, Math.max(0, typeof req.body.top_p === 'number' ? req.body.top_p : parseFloat(process.env.OPENROUTER_TOP_P || '1'))),
-      presence_penalty: Math.min(2, Math.max(-2, typeof req.body.presence_penalty === 'number' ? req.body.presence_penalty : parseFloat(process.env.OPENROUTER_PRESENCE_PENALTY || '0'))),
-      frequency_penalty: Math.min(2, Math.max(-2, typeof req.body.frequency_penalty === 'number' ? req.body.frequency_penalty : parseFloat(process.env.OPENROUTER_FREQUENCY_PENALTY || '0'))),
+      temperature: Math.min(2, Math.max(0, typeof req.body.temperature === 'number' ? req.body.temperature : runtime.params.temperature)),
+      top_p: Math.min(1, Math.max(0, typeof req.body.top_p === 'number' ? req.body.top_p : runtime.params.top_p)),
+      presence_penalty: Math.min(2, Math.max(-2, typeof req.body.presence_penalty === 'number' ? req.body.presence_penalty : runtime.params.presence_penalty)),
+      frequency_penalty: Math.min(2, Math.max(-2, typeof req.body.frequency_penalty === 'number' ? req.body.frequency_penalty : runtime.params.frequency_penalty)),
     };
-    const maxTokensEnv = parseInt(process.env.OPENROUTER_MAX_TOKENS || '0', 10);
-    const max_tokens = typeof req.body.max_tokens === 'number' ? req.body.max_tokens : (maxTokensEnv > 0 ? maxTokensEnv : undefined);
+    const max_tokens = typeof req.body.max_tokens === 'number' ? req.body.max_tokens : (runtime.params.max_tokens || undefined);
     if (max_tokens && (!Number.isInteger(max_tokens) || max_tokens < 1)) return res.status(400).json({ error: 'invalid_max_tokens' });
-    const fallbacksChain = (process.env.OPENROUTER_FALLBACK_MODELS || '').split(',').map(s => s.trim()).filter(Boolean);
+    const fallbacksChain = runtime.fallbacks.filter(isModelAllowed);
     const attempted = [];
     async function tryModel(modelId) {
       attempted.push(modelId);
@@ -35178,112 +35176,31 @@ app.patch('/api/config/runtime/ai-model', async (req, res) => {
     const body = req.body || {};
     const nextModel = (body.model || '').trim();
     if (!nextModel) return res.status(400).json({ error: 'model_required' });
-    // Basic allowlist (can be expanded)
-    const allowedPrefixes = ['openai/', 'mistralai/', 'anthropic/', 'google/', 'meta/'];
-    if (!allowedPrefixes.some(p => nextModel.startsWith(p))) {
-      return res.status(400).json({ error: 'unsupported_model', message: 'Model prefix not allowed in this environment.' });
-    }
     if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    if (!isModelAllowed(nextModel)) return res.status(400).json({ error: 'unsupported_model' });
     const effectiveRole = req.auth?.role || null;
-    const prev = global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '';
-    // Persist to .env file (atomic-ish replace). We retain previous lines & replace/append OPENROUTER_MODEL.
-    let persisted = false;
-    try {
-      const envFile = dotenvPath; // resolved earlier depending on NODE_ENV
-      let content = '';
-      try { content = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : ''; } catch { /* ignore read error */ }
-      const lines = content.split(/\r?\n/);
-      let found = false;
-      for (let i = 0; i < lines.length; i++) {
-        if (/^\s*OPENROUTER_MODEL\s*=/.test(lines[i])) { lines[i] = `OPENROUTER_MODEL=${nextModel}`; found = true; break; }
-      }
-      if (!found) {
-        if (lines.length && lines[lines.length - 1].trim() !== '') lines.push('');
-        lines.push(`OPENROUTER_MODEL=${nextModel}`);
-      }
-      const newContent = lines.join('\n');
-      // Write via temp file then rename for a bit more safety
-      const tmpPath = envFile + '.tmp';
-      fs.writeFileSync(tmpPath, newContent, 'utf8');
-      fs.renameSync(tmpPath, envFile);
-      persisted = true;
-      // Reflect immediately in process env & clear volatile override
-      process.env.OPENROUTER_MODEL = nextModel;
-      delete global.__AI_MODEL_OVERRIDE;
-      __runtimeAiModelCache = { fetchedAt: Date.now(), model: nextModel };
-    } catch (fileErr) {
-      // Fall back to in-memory override if file write fails
-      global.__AI_MODEL_OVERRIDE = nextModel;
-      __runtimeAiModelCache = { fetchedAt: Date.now(), model: nextModel };
-      console.warn('[ai-model] Failed to persist to .env, using in-memory override only:', fileErr.message);
-    }
-    // Also persist to shared runtime_config for public scope so portal can consume
-    try {
-  await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
-      await pool.query("INSERT INTO iset_runtime_config (scope,k,v) VALUES ('public','ai.model',JSON_OBJECT('model',?)) ON DUPLICATE KEY UPDATE v=VALUES(v)", [ nextModel ]);
-    } catch (dbErr) {
-      console.warn('[ai-model] DB persist failed (non-fatal):', dbErr.message);
-    }
+    const current = await loadAiRuntimeConfig(pool, { defaultModel: DEFAULT_OPENROUTER_MODEL });
+    const prev = current.model;
+    await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
+    await pool.query("INSERT INTO iset_runtime_config (scope,k,v) VALUES ('public','ai.model',JSON_OBJECT('model',?)) ON DUPLICATE KEY UPDATE v=VALUES(v)", [nextModel]);
+    __runtimeAiModelCache = { fetchedAt: Date.now(), model: nextModel };
     // Lightweight audit log (stdout). Could be extended to DB later.
-    console.log('[audit] ai-model-change', JSON.stringify({ when: new Date().toISOString(), prev, next: nextModel, by: req.auth?.sub || 'unknown', role: effectiveRole || null, persisted }));
-    res.json({ ok: true, model: nextModel, persisted });
+    console.log('[audit] ai-model-change', JSON.stringify({ when: new Date().toISOString(), prev, next: nextModel, by: req.auth?.sub || 'unknown', role: effectiveRole || null, persisted: 'runtime_config' }));
+    res.json({ ok: true, model: nextModel, persisted: 'runtime_config' });
   } catch (e) {
     res.status(500).json({ error: 'ai_model_update_failed', message: e.message });
   }
 });
 
 // GET current AI generation params & fallbacks
-app.get('/api/config/runtime/ai-params', (req, res) => {
+app.get('/api/config/runtime/ai-params', async (_req, res) => {
   try {
-    const params = {
-      temperature: parseFloat(process.env.OPENROUTER_TEMPERATURE || '0.7'),
-      top_p: parseFloat(process.env.OPENROUTER_TOP_P || '1'),
-      max_tokens: parseInt(process.env.OPENROUTER_MAX_TOKENS || '0', 10) || null,
-      presence_penalty: parseFloat(process.env.OPENROUTER_PRESENCE_PENALTY || '0'),
-      frequency_penalty: parseFloat(process.env.OPENROUTER_FREQUENCY_PENALTY || '0')
-    };
-    const fallbacks = (process.env.OPENROUTER_FALLBACK_MODELS || '').split(',').map(s => s.trim()).filter(Boolean);
-    res.json({ params, fallbacks });
+    const runtime = await loadAiRuntimeConfig(pool, { defaultModel: DEFAULT_OPENROUTER_MODEL });
+    res.json({ params: runtime.params, fallbacks: runtime.fallbacks });
   } catch (e) {
     res.status(500).json({ error: 'ai_params_fetch_failed', message: e.message });
   }
 });
-
-function persistEnvUpdates(updates) {
-  const envFile = dotenvPath;
-  let content = '';
-  try { content = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : ''; } catch { /* ignore */ }
-  const lines = content.split(/\r?\n/);
-  const map = new Map();
-  for (const l of lines) {
-    const m = l.match(/^\s*([^#=]+?)\s?=\s?(.*)$/);
-    if (m) map.set(m[1].trim(), m[2]);
-  }
-  Object.entries(updates).forEach(([k,v]) => { if (v === null || typeof v === 'undefined') return; map.set(k, String(v)); });
-  const newLines = [];
-  const seen = new Set();
-  for (const l of lines) {
-    const m = l.match(/^\s*([^#=]+?)\s?=/);
-    if (m) {
-      const key = m[1].trim();
-      if (updates[key] !== undefined && !seen.has(key)) {
-        newLines.push(`${key}=${map.get(key)}`);
-        seen.add(key);
-        continue;
-      }
-    }
-    newLines.push(l);
-  }
-  for (const [k,v] of Object.entries(updates)) {
-    if (!seen.has(k)) newLines.push(`${k}=${v}`);
-  }
-  const finalContent = newLines.join('\n');
-  const tmp = envFile + '.tmp';
-  fs.writeFileSync(tmp, finalContent, 'utf8');
-  fs.renameSync(tmp, envFile);
-  // Reflect into process.env
-  Object.entries(updates).forEach(([k,v]) => { process.env[k] = String(v); });
-}
 
 // PATCH AI generation params
 app.patch('/api/config/runtime/ai-params', async (req, res) => {
@@ -35310,21 +35227,18 @@ app.patch('/api/config/runtime/ai-params', async (req, res) => {
     if (presence_penalty !== null) updates.OPENROUTER_PRESENCE_PENALTY = presence_penalty;
     if (frequency_penalty !== null) updates.OPENROUTER_FREQUENCY_PENALTY = frequency_penalty;
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'no_updates' });
-    try { persistEnvUpdates(updates); } catch (e) { return res.status(500).json({ error: 'persist_failed', message: e.message }); }
-    try {
-      const payload = {};
-      if (updates.OPENROUTER_TEMPERATURE !== undefined) payload.temperature = Number(updates.OPENROUTER_TEMPERATURE);
-      if (updates.OPENROUTER_TOP_P !== undefined) payload.top_p = Number(updates.OPENROUTER_TOP_P);
-      if (updates.OPENROUTER_PRESENCE_PENALTY !== undefined) payload.presence_penalty = Number(updates.OPENROUTER_PRESENCE_PENALTY);
-      if (updates.OPENROUTER_FREQUENCY_PENALTY !== undefined) payload.frequency_penalty = Number(updates.OPENROUTER_FREQUENCY_PENALTY);
-      if (updates.OPENROUTER_MAX_TOKENS !== undefined) payload.max_tokens = Number(updates.OPENROUTER_MAX_TOKENS);
-  await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
-      await pool.query("INSERT INTO iset_runtime_config (scope,k,v) VALUES ('public','ai.params',JSON_OBJECT('temperature',?, 'top_p',?, 'presence_penalty',?, 'frequency_penalty',?, 'max_tokens', ?)) ON DUPLICATE KEY UPDATE v=VALUES(v)", [ payload.temperature ?? null, payload.top_p ?? null, payload.presence_penalty ?? null, payload.frequency_penalty ?? null, payload.max_tokens ?? null ]);
-    } catch (dbErr) {
-      console.warn('[ai-params] DB persist failed (non-fatal):', dbErr.message);
-    }
+    const current = await loadAiRuntimeConfig(pool, { defaultModel: DEFAULT_OPENROUTER_MODEL });
+    const patch = {};
+    if (updates.OPENROUTER_TEMPERATURE !== undefined) patch.temperature = Number(updates.OPENROUTER_TEMPERATURE);
+    if (updates.OPENROUTER_TOP_P !== undefined) patch.top_p = Number(updates.OPENROUTER_TOP_P);
+    if (updates.OPENROUTER_PRESENCE_PENALTY !== undefined) patch.presence_penalty = Number(updates.OPENROUTER_PRESENCE_PENALTY);
+    if (updates.OPENROUTER_FREQUENCY_PENALTY !== undefined) patch.frequency_penalty = Number(updates.OPENROUTER_FREQUENCY_PENALTY);
+    if (updates.OPENROUTER_MAX_TOKENS !== undefined) patch.max_tokens = Number(updates.OPENROUTER_MAX_TOKENS);
+    const params = normalizeAiRuntimeParams(patch, current.params);
+    await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
+    await pool.query("INSERT INTO iset_runtime_config (scope,k,v) VALUES ('public','ai.params',CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v)", [JSON.stringify(params)]);
     console.log('[audit] ai-params-change', JSON.stringify({ when: new Date().toISOString(), updates, by: req.auth?.sub || 'unknown', role }));
-    res.json({ ok: true, updates });
+    res.json({ ok: true, params });
   } catch (e) { res.status(500).json({ error: 'ai_params_update_failed', message: e.message }); }
 });
 
@@ -35334,17 +35248,14 @@ app.patch('/api/config/runtime/ai-fallbacks', async (req, res) => {
     const body = req.body || {};
     if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
     const role = req.auth?.role || null;
-    const listRaw = body.fallbackModels || body.fallbacks || [];
+    const hasFallbacks = Object.prototype.hasOwnProperty.call(body, 'fallbackModels') || Object.prototype.hasOwnProperty.call(body, 'fallbacks');
+    if (!hasFallbacks) return res.status(400).json({ error: 'fallback_models_required' });
+    const listRaw = body.fallbackModels ?? body.fallbacks;
     const list = Array.isArray(listRaw) ? listRaw : String(listRaw).split(',');
     const cleaned = list.map(s => String(s).trim()).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i);
     for (const mdl of cleaned) { if (!isModelAllowed(mdl)) return res.status(400).json({ error: 'unsupported_model_in_fallbacks', model: mdl }); }
-    try { persistEnvUpdates({ OPENROUTER_FALLBACK_MODELS: cleaned.join(',') }); } catch (e) { return res.status(500).json({ error: 'persist_failed', message: e.message }); }
-    try {
-      await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
-      await pool.query("INSERT INTO iset_runtime_config (scope,k,v) VALUES ('public','ai.fallbacks', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v)", [ JSON.stringify(cleaned) ]);
-    } catch (dbErr) {
-      console.warn('[ai-fallbacks] DB persist failed (non-fatal):', dbErr.message);
-    }
+    await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
+    await pool.query("INSERT INTO iset_runtime_config (scope,k,v) VALUES ('public','ai.fallbacks', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v)", [ JSON.stringify(cleaned) ]);
     console.log('[audit] ai-fallbacks-change', JSON.stringify({ when: new Date().toISOString(), fallbackModels: cleaned, by: req.auth?.sub || 'unknown', role }));
     res.json({ ok: true, fallbackModels: cleaned });
   } catch (e) { res.status(500).json({ error: 'ai_fallbacks_update_failed', message: e.message }); }
@@ -36131,15 +36042,7 @@ function sysAdminOnly(req) {
 app.get('/api/config/runtime', async (req, res) => {
   try {
     const enabled = !!AI_KEY;
-    const aiModel = (process.env.OPENROUTER_MODEL || '').trim() || DEFAULT_OPENROUTER_MODEL;
-    const aiParams = {
-      temperature: parseFloat(process.env.OPENROUTER_TEMPERATURE || '0.7'),
-      top_p: parseFloat(process.env.OPENROUTER_TOP_P || '1'),
-      max_tokens: parseInt(process.env.OPENROUTER_MAX_TOKENS || '0',10) || null,
-      presence_penalty: parseFloat(process.env.OPENROUTER_PRESENCE_PENALTY || '0'),
-      frequency_penalty: parseFloat(process.env.OPENROUTER_FREQUENCY_PENALTY || '0')
-    };
-    const fallbackModels = (process.env.OPENROUTER_FALLBACK_MODELS || '').split(',').map(s=>s.trim()).filter(Boolean);
+    const aiRuntime = await loadAiRuntimeConfig(pool, { defaultModel: DEFAULT_OPENROUTER_MODEL });
     const allowedOrigins = (process.env.ALLOWED_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
     const nodeEnv = process.env.NODE_ENV || 'development';
     const authAdmin = __authConfig.admin;
@@ -36150,7 +36053,7 @@ app.get('/api/config/runtime', async (req, res) => {
       readDemoNavigationVisibilityConfig(),
     ]);
     res.json({
-      ai: { enabled, model: aiModel, params: aiParams, fallbackModels },
+      ai: { enabled, model: aiRuntime.model, params: aiRuntime.params, fallbackModels: aiRuntime.fallbacks },
       auth: { // legacy combined surface (admin-focused)
         tokenTtl: authAdmin.tokenTtl,
         mfa: { mode: authAdmin.policy.mfaMode },
@@ -37523,7 +37426,7 @@ async function seedDummyDraftUploadMetadata({ schemaSteps, payloadData, userId }
 }
 
 // --- AI-generated dummy draft helpers --------------------------------------
-const AI_DUMMY_DEFAULT_MODEL = (global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '').trim() || DEFAULT_OPENROUTER_MODEL;
+const AI_DUMMY_DEFAULT_MODEL = (process.env.OPENROUTER_MODEL || '').trim() || DEFAULT_OPENROUTER_MODEL;
 const AI_DUMMY_MAX_TOKENS = Math.max(400, Math.min(1600, parseInt(process.env.AI_DUMMY_MAX_TOKENS || '900', 10) || 900));
 const AI_DUMMY_TEMP = Math.min(1, Math.max(0.1, parseFloat(process.env.AI_DUMMY_TEMPERATURE || '0.55')));
 const AI_DUMMY_TOP_P = Math.min(1, Math.max(0.1, parseFloat(process.env.AI_DUMMY_TOP_P || '0.9')));
@@ -37564,7 +37467,7 @@ async function resolveRuntimeAiModel({ force = false } = {}) {
   } catch (_) {
     dbModel = null;
   }
-  const resolved = dbModel || (global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '').trim() || AI_DUMMY_DEFAULT_MODEL;
+  const resolved = dbModel || (process.env.OPENROUTER_MODEL || '').trim() || AI_DUMMY_DEFAULT_MODEL;
   __runtimeAiModelCache = { fetchedAt: now, model: resolved };
   return resolved;
 }

@@ -1165,18 +1165,21 @@ export default function ConfigurationSettings({
       return Number.isFinite(num) ? num : null;
     };
     try {
+      setError(null);
       await fetchJSON("/api/config/runtime/ai-params", {
         method: "PATCH",
-        body: {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           temperature: coerceNumber(params.temperature),
           top_p: coerceNumber(params.top_p),
           max_tokens: coerceNumber(params.max_tokens),
           presence_penalty: coerceNumber(params.presence_penalty),
           frequency_penalty: coerceNumber(params.frequency_penalty),
-        },
+        }),
       });
     } catch (err) {
       console.error("[configuration] Failed to save AI parameters:", err);
+      setError(err.message);
     } finally {
       setSavingParams(false);
     }
@@ -1185,12 +1188,15 @@ export default function ConfigurationSettings({
   const saveFallbacks = useCallback(async () => {
     setSavingFallbacks(true);
     try {
+      setError(null);
       await fetchJSON("/api/config/runtime/ai-fallbacks", {
         method: "PATCH",
-        body: { fallbackModels: fallbackValues },
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fallbackModels: fallbackValues }),
       });
     } catch (err) {
       console.error("[configuration] Failed to save AI fallbacks:", err);
+      setError(err.message);
     } finally {
       setSavingFallbacks(false);
     }
