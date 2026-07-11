@@ -32,6 +32,34 @@ class SchemaMigrationApplyError extends Error {
   }
 }
 
+class MigrationChecksumDriftError extends Error {
+  constructor(drift) {
+    super(`Applied migration checksum drift detected: ${drift.map(item => item.file).join(', ')}`);
+    this.name = 'MigrationChecksumDriftError';
+    this.code = 'schema_migration_checksum_drift';
+    this.drift = drift;
+  }
+}
+
+function assertNoMigrationChecksumDrift(migrations, appliedRows) {
+  const successfulByFilename = new Map();
+  (appliedRows || []).filter(row => Number(row.success) === 1).forEach(row => {
+    if (!successfulByFilename.has(row.filename)) successfulByFilename.set(row.filename, new Set());
+    successfulByFilename.get(row.filename).add(row.checksum);
+  });
+  const drift = (migrations || []).flatMap(migration => {
+    const appliedChecksums = successfulByFilename.get(migration.file);
+    if (!appliedChecksums || appliedChecksums.has(migration.checksum)) return [];
+    return [{
+      file: migration.file,
+      filesystemChecksum: migration.checksum,
+      appliedChecksums: Array.from(appliedChecksums).sort(),
+    }];
+  });
+  if (drift.length) throw new MigrationChecksumDriftError(drift);
+  return true;
+}
+
 function assertMigrationApplySucceeded(result, options = {}) {
   const context = options.context || 'Schema migration apply';
   if (
@@ -143,12 +171,13 @@ async function planPendingSharedSchemaMigrations(pool, options = {}) {
   await ensureTrackingTable(pool, { trackingTable });
 
   const appliedRows = await fetchAppliedMigrationRows(pool, { trackingTable });
+  const migrations = getCanonicalMigrationFiles({ migrationsDir });
+  assertNoMigrationChecksumDrift(migrations, appliedRows);
   const successfulAppliedMap = new Map(
     appliedRows
       .filter(row => Number(row.success) === 1)
       .map(row => [`${row.filename}|${row.checksum}`, row])
   );
-  const migrations = getCanonicalMigrationFiles({ migrationsDir });
   const pending = migrations.filter(migration => !successfulAppliedMap.has(`${migration.file}|${migration.checksum}`));
 
   return {
@@ -332,7 +361,9 @@ module.exports = {
   OPS_SQL_DIR,
   LEGACY_ARCHIVE_DIR,
   RETIRED_PORTAL_MIGRATIONS_DIR,
+  MigrationChecksumDriftError,
   SchemaMigrationApplyError,
+  assertNoMigrationChecksumDrift,
   assertMigrationApplySucceeded,
   ensureTrackingTable,
   fetchAppliedMigrationRows,

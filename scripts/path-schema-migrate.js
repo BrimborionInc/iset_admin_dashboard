@@ -13,6 +13,7 @@ const {
   planPendingSharedSchemaMigrations,
   applyPendingSharedSchemaMigrations,
   assertMigrationApplySucceeded,
+  assertNoMigrationChecksumDrift,
 } = require('../src/lib/sharedSchemaMigrationRunner');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -450,6 +451,7 @@ function planPendingRemoteSharedSchemaMigrations(remoteConfig, options = {}) {
   const trackingTable = options.trackingTable || DEFAULT_TRACKING_TABLE;
   const migrations = getCanonicalMigrationFiles({ migrationsDir: options.migrationsDir });
   const { trackingTableExists, rows: appliedRows } = fetchRemoteAppliedMigrationRows(remoteConfig, { trackingTable });
+  assertNoMigrationChecksumDrift(migrations, appliedRows);
   const successfulAppliedMap = new Map(
     appliedRows
       .filter(row => Number(row.success) === 1)

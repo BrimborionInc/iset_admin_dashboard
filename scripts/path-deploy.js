@@ -49,10 +49,10 @@ const ENVIRONMENTS = {
     expectedAccountId: '468278742295',
     dbClusterIdentifier: 'nwac-prod-db',
     smokeMode: 'public-http',
-    adminSmokeUrl: 'https://nwac-console.awentech.ca/healthz',
+    adminSmokeUrl: 'https://nwac-console.awentech.ca/readyz',
     portalSmokeUrls: [
-      'https://iset.nwac.ca/healthz',
-      'https://nwac-public.awentech.ca/healthz',
+      'https://iset.nwac.ca/readyz',
+      'https://nwac-public.awentech.ca/readyz',
     ],
   },
 };

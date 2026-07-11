@@ -212,7 +212,7 @@ Current autosave rollout note:
   - WSL-native PROD validation: release `20260507-prod-contact-retirement` captured restore point `path-prod-20260507-prod-contact-retirement-20260508000234`, uploaded all three artifacts, completed ASG refresh `f323cb21-bc0c-4063-b0e8-017b40f31544` on replacement instance `i-00b00ebdff3f55dc5`, and passed final public smoke.
   - The boot-time app bootstrap already removes deployed `node_modules` before reinstalling runtime dependencies; keep any future prod in-place helper aligned with that rule.
   - The frontend bundles now carry a visible build stamp derived from package version + release ID + git SHA. Check the admin landing-page footer or the public portal Help page after deploy.
-  - Smoke currently uses public `/healthz` URLs (`nwac-console.awentech.ca`, `iset.nwac.ca`, `nwac-public.awentech.ca`).
+  - Normal public smoke uses schema-aware `/readyz` URLs (`nwac-console.awentech.ca`, `iset.nwac.ca`, `nwac-public.awentech.ca`). `/healthz` remains a shallow process probe for local bootstrap/ALB troubleshooting.
   - `bash scripts/run-prod-sql-via-ssm.sh` currently reads DB credentials from `nwac-prod-db-credentials`, but supplies the prod cluster host/database/port itself because that secret currently contains only `username` and `password`.
   - `bash scripts/run-db-dump-via-ssm.sh` now uses `aws configure export-credentials`, so assumed-role profiles such as `nwac-prod` also work for prod dump capture.
 

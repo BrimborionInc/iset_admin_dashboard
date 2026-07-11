@@ -265,7 +265,7 @@ function sqlLiteral(value) {
 
 function buildSetSql(payload) {
   return [
-    'CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;',
+    'SELECT scope, k, v, updated_at FROM iset_runtime_config LIMIT 0;',
     `INSERT INTO iset_runtime_config (scope, k, v) VALUES (${sqlLiteral(SERVICE_ANNOUNCEMENT_SCOPE)}, ${sqlLiteral(SERVICE_ANNOUNCEMENT_KEY)}, CAST(${sqlLiteral(JSON.stringify(payload))} AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;`,
   ].join('\n');
 }

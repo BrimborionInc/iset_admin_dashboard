@@ -64,6 +64,7 @@ const {
 } = require('./src/lib/backloadParticipantDetailsSeeding');
 const { normaliseIlmpEducationLevelCode } = require('./src/lib/ilmpEducationMapping');
 const { runStartupSharedSchemaMigrations } = require('./src/lib/sharedSchemaMigrationRunner');
+const { SchemaReadinessError, assertEnumValueReady, assertRuntimeTableReady } = require('./src/lib/schemaReadiness');
 const {
   buildRegionalManagerCaseAccessSql,
   getCaseAccessError,
@@ -6566,33 +6567,8 @@ async function ensureEsdcPreparedHistoryEventType(connection) {
   if (ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared) return;
   const executor = connection && typeof connection.query === 'function' ? connection : pool;
   if (!executor || typeof executor.query !== 'function') return;
-  try {
-    await executor.query(`
-      ALTER TABLE esdc_participant_submission_history
-      MODIFY COLUMN event_type ENUM('validated','ready','prepared','submitted','accepted','rejected') NOT NULL
-    `);
-    ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared = true;
-  } catch (err) {
-    const code = err && err.code;
-    if (code === 'ER_NO_SUCH_TABLE') {
-      ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared = true;
-      return;
-    }
-    if (code === 'ER_TABLEACCESS_DENIED_ERROR') {
-      console.warn('[esdc] insufficient privileges to alter history event_type enum:', err.message);
-      return;
-    }
-    if (code && code.startsWith('ER_')) {
-      const message = err.message || '';
-      if (/duplicate/i.test(message) || /already exists/i.test(message)) {
-        ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared = true;
-        return;
-      }
-    }
-    if (!ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared) {
-      console.warn('[esdc] failed to ensure prepared event history enum:', err.message || err);
-    }
-  }
+  await assertEnumValueReady(executor, 'esdc_participant_submission_history', 'event_type', 'prepared');
+  ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared = true;
 }
 
 async function findPreferredActionPlanIdForCase(executor, caseId) {
@@ -19094,7 +19070,7 @@ async function readAccessControlMatrix() {
 
 async function writeAccessControlMatrix(nextMatrix) {
   const normalised = mergeAccessControlMatrixWithDefaults(nextMatrix);
-  await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
   await pool.query(
     "INSERT INTO iset_runtime_config (scope,k,v) VALUES ('admin','accessControlMatrix', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP",
     [JSON.stringify(normalised)]
@@ -21326,33 +21302,15 @@ let applicationVersionTableEnsured = false;
 let applicationVersionTypedAuthorColumns = null;
 async function ensureApplicationVersionTable() {
   if (applicationVersionTableEnsured) return;
-  const createSql = `
-    CREATE TABLE IF NOT EXISTS iset_application_version (
-      id bigint unsigned NOT NULL AUTO_INCREMENT,
-      application_id bigint unsigned NOT NULL,
-      version int NOT NULL,
-      payload_json json NOT NULL,
-      change_summary text,
-      created_by_staff_profile_id bigint unsigned NULL,
-      created_by_user_id int NULL,
-      created_by_name varchar(255),
-      restored_from_version int DEFAULT NULL,
-      created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (id),
-      UNIQUE KEY uq_application_version (application_id, version),
-      KEY idx_application_version_created_by_staff_profile (created_by_staff_profile_id),
-      KEY idx_application_version_created_by_user (created_by_user_id),
-      KEY idx_application_version_created (created_at),
-      CONSTRAINT fk_iset_application_version_application FOREIGN KEY (application_id) REFERENCES iset_application(id) ON DELETE RESTRICT,
-      CONSTRAINT fk_iset_application_version_created_staff_profile FOREIGN KEY (created_by_staff_profile_id) REFERENCES staff_profiles(id) ON DELETE RESTRICT,
-      CONSTRAINT fk_iset_application_version_created_user FOREIGN KEY (created_by_user_id) REFERENCES user(id) ON DELETE RESTRICT
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-  `;
   try {
-    await pool.query(createSql);
+    await assertRuntimeTableReady(pool, 'iset_application_version', [
+      'id', 'application_id', 'version', 'payload_json', 'change_summary',
+      'created_by_staff_profile_id', 'created_by_user_id', 'created_by_name',
+      'restored_from_version', 'created_at',
+    ]);
     applicationVersionTableEnsured = true;
   } catch (err) {
-    console.error('[versions] failed to ensure version table', err.message || err);
+    console.error('[versions] required version schema is not ready', err.message || err);
     throw err;
   }
 }
@@ -24984,7 +24942,7 @@ async function clearServiceAnnouncementConfig() {
 
 async function writeLockConfig(config) {
   const normalised = normaliseLockConfig(config);
-  await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
   await pool.query(
     "INSERT INTO iset_runtime_config (scope,k,v) VALUES ('admin','locking',CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v)",
     [JSON.stringify(normalised)]
@@ -25086,7 +25044,7 @@ async function readAutoAssignmentConfig() {
 
 async function writeAutoAssignmentConfig(payload) {
   const normalised = normaliseAutoAssignmentConfig(payload);
-  await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
   await pool.query(
     "INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP",
     [AUTO_ASSIGNMENT_SCOPE, AUTO_ASSIGNMENT_KEY, JSON.stringify(normalised)]
@@ -25155,7 +25113,7 @@ async function readBackendJobsConfig() {
 
 async function writeBackendJobsConfig(config) {
   const normalised = normaliseBackendJobsConfig(config || {});
-  await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
   await pool.query(
     "INSERT INTO iset_runtime_config (scope,k,v) VALUES ('admin','backend.jobs',CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v)",
     [JSON.stringify(normalised)]
@@ -25281,6 +25239,27 @@ const buildDir = path.join(__dirname, 'build');
 // Lightweight health check for ALB
 app.get('/healthz', (_req, res) => {
   res.status(200).json({ status: 'ok' });
+});
+app.get('/readyz', async (_req, res) => {
+  try {
+    if (!pool) throw new Error('database_pool_unavailable');
+    await assertRuntimeTableReady(pool, 'staff_profiles', ['id', 'cognito_sub', 'region_id']);
+    await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
+    await assertRuntimeTableReady(pool, 'iset_application_version', ['id', 'application_id', 'version', 'payload_json']);
+    await assertRuntimeTableReady(pool, 'message_item', ['message_id', 'owner_user_id', 'folder', 'purged_at']);
+    await assertRuntimeTableReady(pool, 'staff_tutorial_progress', ['staff_profile_id', 'tutorial_id', 'status']);
+    await assertRuntimeTableReady(pool, 'admin_ai_guidance_entry', ['slug', 'guidance_text']);
+    await assertRuntimeTableReady(pool, 'admin_ai_guidance_example', ['guidance_slug', 'question_text', 'answer_text']);
+    await assertEnumValueReady(pool, 'esdc_participant_submission_history', 'event_type', 'prepared');
+    return res.status(200).json({ status: 'ready' });
+  } catch (error) {
+    return res.status(503).json({
+      status: 'not_ready',
+      error: error?.code || 'schema_not_ready',
+      table: error?.table || null,
+      columns: error?.columns || [],
+    });
+  }
 });
 
 app.use(bodyParser.json({ limit: '1mb' }));
@@ -25835,47 +25814,16 @@ async function staffProfileMiddleware(req, res, next) {
     const { sub, email, role } = req.auth;
     const authRegionId = Number(req.auth?.regionId);
     const persistedRegionId = Number.isInteger(authRegionId) && authRegionId > 0 ? authRegionId : null;
-    await pool.query(`CREATE TABLE IF NOT EXISTS staff_profiles (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      cognito_sub VARCHAR(64) NOT NULL UNIQUE,
-      email VARCHAR(320) NULL,
-      primary_role VARCHAR(64) NULL,
-      region_id TINYINT UNSIGNED NULL,
-      last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_role (primary_role),
-      INDEX idx_region (region_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`);
-    // Attempt to add region_id if supported (ignore failures / old MySQL not supporting IF NOT EXISTS)
-    try { await pool.query('ALTER TABLE staff_profiles ADD COLUMN region_id TINYINT UNSIGNED NULL'); } catch(_) {}
-    try { await pool.query('ALTER TABLE staff_profiles ADD INDEX idx_region (region_id)'); } catch(_) {}
-    // Determine if region_id column exists (cache per process)
-    if (typeof global.__HAS_REGION_ID_COL === 'undefined') {
-      try {
-        await pool.query('SELECT region_id FROM staff_profiles LIMIT 0');
-        global.__HAS_REGION_ID_COL = true;
-      } catch { global.__HAS_REGION_ID_COL = false; }
-    }
+    await assertRuntimeTableReady(pool, 'staff_profiles', [
+      'id', 'cognito_sub', 'email', 'primary_role', 'region_id', 'last_seen_at', 'created_at',
+    ]);
     // Ensure non-null email if schema has NOT NULL constraint (fallback to synthetic)
     const derivedEmail = email || req.auth?.claims?.email || req.auth?.claims?.Email || null;
     const safeEmail = derivedEmail || (sub ? `${sub}@placeholder.local` : 'unknown@placeholder.local');
-    if (global.__HAS_REGION_ID_COL) {
-      await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role,region_id) VALUES (?,?,?,?)
-        ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role), region_id=COALESCE(VALUES(region_id), region_id)`,
-        [sub, safeEmail, role || null, persistedRegionId]);
-    } else {
-      await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role) VALUES (?,?,?)
-        ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role)`,
-        [sub, safeEmail, role || null]);
-    }
-    let rows;
-    try {
-      [rows] = await pool.query('SELECT id, cognito_sub, email, primary_role, region_id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [sub]);
-    } catch (selErr) {
-      if (/region_id/.test(selErr.message)) {
-        [rows] = await pool.query('SELECT id, cognito_sub, email, primary_role FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [sub]);
-      } else throw selErr;
-    }
+    await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role,region_id) VALUES (?,?,?,?)
+      ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role), region_id=COALESCE(VALUES(region_id), region_id)`,
+      [sub, safeEmail, role || null, persistedRegionId]);
+    const [rows] = await pool.query('SELECT id, cognito_sub, email, primary_role, region_id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [sub]);
     if (rows && rows[0]) {
       req.staffProfile = rows[0];
       const numericStaffId = Number(rows[0].id);
@@ -25914,10 +25862,12 @@ async function staffProfileMiddleware(req, res, next) {
       }
     }
   } catch (e) {
+    if (e instanceof SchemaReadinessError || e?.code === 'schema_not_ready') {
+      return res.status(503).json({ error: 'schema_not_ready', table: e.table, columns: e.columns });
+    }
     console.warn('[staff_profiles] middleware failed (non-fatal):', e.message);
-  } finally {
-    return next();
   }
+  return next();
 }
 
 // --- Authentication (Cognito) ---
@@ -35401,7 +35351,7 @@ app.patch('/api/config/runtime/ai-model', async (req, res) => {
     }
     // Also persist to shared runtime_config for public scope so portal can consume
     try {
-      await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
       await pool.query("INSERT INTO iset_runtime_config (scope,k,v) VALUES ('public','ai.model',JSON_OBJECT('model',?)) ON DUPLICATE KEY UPDATE v=VALUES(v)", [ nextModel ]);
     } catch (dbErr) {
       console.warn('[ai-model] DB persist failed (non-fatal):', dbErr.message);
@@ -35500,7 +35450,7 @@ app.patch('/api/config/runtime/ai-params', async (req, res) => {
       if (updates.OPENROUTER_PRESENCE_PENALTY !== undefined) payload.presence_penalty = Number(updates.OPENROUTER_PRESENCE_PENALTY);
       if (updates.OPENROUTER_FREQUENCY_PENALTY !== undefined) payload.frequency_penalty = Number(updates.OPENROUTER_FREQUENCY_PENALTY);
       if (updates.OPENROUTER_MAX_TOKENS !== undefined) payload.max_tokens = Number(updates.OPENROUTER_MAX_TOKENS);
-      await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
       await pool.query("INSERT INTO iset_runtime_config (scope,k,v) VALUES ('public','ai.params',JSON_OBJECT('temperature',?, 'top_p',?, 'presence_penalty',?, 'frequency_penalty',?, 'max_tokens', ?)) ON DUPLICATE KEY UPDATE v=VALUES(v)", [ payload.temperature ?? null, payload.top_p ?? null, payload.presence_penalty ?? null, payload.frequency_penalty ?? null, payload.max_tokens ?? null ]);
     } catch (dbErr) {
       console.warn('[ai-params] DB persist failed (non-fatal):', dbErr.message);
@@ -35522,7 +35472,7 @@ app.patch('/api/config/runtime/ai-fallbacks', async (req, res) => {
     for (const mdl of cleaned) { if (!isModelAllowed(mdl)) return res.status(400).json({ error: 'unsupported_model_in_fallbacks', model: mdl }); }
     try { persistEnvUpdates({ OPENROUTER_FALLBACK_MODELS: cleaned.join(',') }); } catch (e) { return res.status(500).json({ error: 'persist_failed', message: e.message }); }
     try {
-      await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+      await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
       await pool.query("INSERT INTO iset_runtime_config (scope,k,v) VALUES ('public','ai.fallbacks', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v)", [ JSON.stringify(cleaned) ]);
     } catch (dbErr) {
       console.warn('[ai-fallbacks] DB persist failed (non-fatal):', dbErr.message);
@@ -36218,7 +36168,7 @@ function loadAuthConfigFromFile() {
 
 async function ensureRuntimeConfigTable() {
   if (!pool) return;
-  await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
 }
 
 async function readAuthConfigFromDatabase() {
@@ -60334,6 +60284,13 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       const noTable = e && e.code === 'ER_NO_SUCH_TABLE';
       const badField = e && e.code === 'ER_BAD_FIELD_ERROR';
       if (noTable || badField) {
+        console.error('[case:detail] canonical schema contract failed', e.code, e.message || e);
+        return res.status(503).json({
+          error: 'case_detail_schema_not_ready',
+          code: e.code,
+          message: 'The case detail schema is not ready for this application version.',
+        });
+        /* istanbul ignore next -- historical fallback retained temporarily as unreachable archaeology */
         usedFallbackQuery = true;
         fallbackReason = e.code || 'fallback';
         if (!global.__LOGGED_CASE_DETAIL_FALLBACK) {
@@ -61504,22 +61461,10 @@ function normaliseCaseMessageFolder(raw) {
 
 async function ensureCaseMessageItemTable(connection = pool) {
   if (__caseMessageItemTableReady) return;
-  await connection.query(`CREATE TABLE IF NOT EXISTS message_item (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    message_id INT NOT NULL,
-    owner_user_id INT NOT NULL,
-    folder ENUM('inbox','sent','deleted') NOT NULL,
-    folder_before_deleted ENUM('inbox','sent') NULL,
-    read_at DATETIME NULL,
-    deleted_at DATETIME NULL,
-    purged_at DATETIME NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    UNIQUE KEY uniq_message_owner (message_id, owner_user_id),
-    KEY idx_message_item_owner_folder (owner_user_id, folder, purged_at),
-    KEY idx_message_item_message (message_id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`);
+  await assertRuntimeTableReady(connection, 'message_item', [
+    'id', 'message_id', 'owner_user_id', 'folder', 'folder_before_deleted',
+    'read_at', 'deleted_at', 'purged_at', 'created_at', 'updated_at',
+  ]);
   __caseMessageItemTableReady = true;
 }
 
@@ -64866,20 +64811,10 @@ async function resolveAutoFundingFormsAttachments(connection = pool) {
 let __tutorialProgressTableReady = false;
 async function ensureStaffTutorialProgressTable(connection = pool) {
   if (__tutorialProgressTableReady) return;
-  await connection.query(`CREATE TABLE IF NOT EXISTS staff_tutorial_progress (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    staff_profile_id INT NOT NULL,
-    tutorial_id VARCHAR(128) NOT NULL,
-    status VARCHAR(32) NOT NULL,
-    completed_at DATETIME NULL,
-    dismissed_at DATETIME NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uniq_staff_tutorial (staff_profile_id, tutorial_id),
-    INDEX idx_staff_profile (staff_profile_id),
-    INDEX idx_tutorial (tutorial_id),
-    INDEX idx_status (status)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`);
+  await assertRuntimeTableReady(connection, 'staff_tutorial_progress', [
+    'id', 'staff_profile_id', 'tutorial_id', 'status', 'completed_at',
+    'dismissed_at', 'created_at', 'updated_at',
+  ]);
   __tutorialProgressTableReady = true;
 }
 

@@ -251,16 +251,18 @@ aws autoscaling describe-instance-refreshes --region ca-central-1 --auto-scaling
 Check health:
 
 ```bash
-curl https://nwac-console.awentech.ca/healthz
-curl https://iset.nwac.ca/healthz
-curl https://nwac-public.awentech.ca/healthz
+curl https://nwac-console.awentech.ca/readyz
+curl https://iset.nwac.ca/readyz
+curl https://nwac-public.awentech.ca/readyz
 ```
 
 Expected result for each health URL:
 
 ```json
-{"status":"ok"}
+{"status":"ready"}
 ```
+
+`/healthz` remains the shallow local process/ALB troubleshooting probe. Normal public post-deploy smoke uses `/readyz` so missing runtime schema returns `503` instead of a false-green release.
 
 If the run included prod schema or allowlisted data mutation, the manifest under `tmp/path-deploy/prod/` will also record the captured restore-point snapshot identifier for `nwac-prod-db`.
 

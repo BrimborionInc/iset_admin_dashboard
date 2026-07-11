@@ -1,11 +1,12 @@
-# Case Detail Endpoint Fallback
+# Case Detail Endpoint Fallback (Retired)
 
 Date: 2025-09-20
+Status: historical. Retired locally 2026-07-11 under engineering-audit R4b; not deployed.
 
 ## Problem
 Environments missing newer evaluator/assessment schema (`iset_evaluators`, added columns like `priority`) caused `/api/cases/:id` to 500 with `ER_NO_SUCH_TABLE` or `ER_BAD_FIELD_ERROR`, leaving the Application Case dashboard stuck on "Loading...".
 
-## Solution
+## Historical Solution
 `/api/cases/:id` now:
 1. Attempts full enriched SELECT (joins evaluators, ptma, assessment fields).
 2. On `ER_NO_SUCH_TABLE` or `ER_BAD_FIELD_ERROR`, logs a warning and builds a dynamic minimal query:
@@ -21,8 +22,9 @@ Environments missing newer evaluator/assessment schema (`iset_evaluators`, added
 ## Logs
 Warning pattern: `[case:detail] falling back (reason=ER_BAD_FIELD_ERROR): building dynamic minimal query`
 
-## Future Cleanup
-Remove dynamic fallback once all target environments migrated with evaluator + assessment schema. Replace with a startup migration guard if strict schema is desired.
+## Current Contract
+
+Canonical target schemas are now required. `ER_NO_SUCH_TABLE` or `ER_BAD_FIELD_ERROR` in Case Detail returns `503 case_detail_schema_not_ready`; the endpoint never presents reduced data as a normal `200`. Admin `/readyz` provides the schema-aware release/readiness gate. The old fallback body remains unreachable source archaeology pending later monolith cleanup.
 
 ## Related Files
 - `isetadminserver.js` (case detail route)

@@ -1,4 +1,5 @@
 const HELP_PANEL_SURFACE = "help-panel";
+const { assertRuntimeTableReady } = require('../lib/schemaReadiness');
 const ENTRY_TABLE = "admin_ai_guidance_entry";
 const EXAMPLE_TABLE = "admin_ai_guidance_example";
 
@@ -2386,12 +2387,6 @@ const ENTRY_COLUMN_DEFINITIONS = [
   ["last_reviewed_at", "DATE NULL"],
 ];
 
-const ENTRY_INDEX_DEFINITIONS = [
-  ["idx_guidance_source_type", "source_type"],
-  ["idx_guidance_coverage_domain", "coverage_domain"],
-  ["idx_guidance_coverage_status", "coverage_status"],
-];
-
 const EXAMPLE_COLUMN_DEFINITIONS = [
   ["route_context_json", "JSON NULL"],
   ["role_context_json", "JSON NULL"],
@@ -2402,123 +2397,21 @@ const EXAMPLE_COLUMN_DEFINITIONS = [
   ["coverage_status", "VARCHAR(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'drafted'"],
 ];
 
-const EXAMPLE_INDEX_DEFINITIONS = [
-  ["idx_guidance_example_fixture", "eval_fixture_id"],
-  ["idx_guidance_example_coverage_status", "coverage_status"],
-];
-
-async function tableColumnExists(pool, tableName, columnName) {
-  const [rows] = await pool.query(
-    `
-      SELECT 1
-        FROM information_schema.columns
-       WHERE table_schema = DATABASE()
-         AND table_name = ?
-         AND column_name = ?
-       LIMIT 1
-    `,
-    [tableName, columnName],
-  );
-  return rows.length > 0;
-}
-
-async function tableIndexExists(pool, tableName, indexName) {
-  const [rows] = await pool.query(
-    `
-      SELECT 1
-        FROM information_schema.statistics
-       WHERE table_schema = DATABASE()
-         AND table_name = ?
-         AND index_name = ?
-       LIMIT 1
-    `,
-    [tableName, indexName],
-  );
-  return rows.length > 0;
-}
-
-async function ensureColumns(pool, tableName, definitions) {
-  for (const [columnName, definition] of definitions) {
-    if (await tableColumnExists(pool, tableName, columnName)) continue;
-    await pool.query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
-  }
-}
-
-async function ensureIndexes(pool, tableName, definitions) {
-  for (const [indexName, columnName] of definitions) {
-    if (await tableIndexExists(pool, tableName, indexName)) continue;
-    await pool.query(`CREATE INDEX ${indexName} ON ${tableName} (${columnName})`);
-  }
-}
-
 async function ensureGuidanceSchema(pool) {
   if (guidanceSchemaPromise) return guidanceSchemaPromise;
   guidanceSchemaPromise = (async () => {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${ENTRY_TABLE} (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        slug VARCHAR(128) NOT NULL,
-        title VARCHAR(255) NOT NULL,
-        surface VARCHAR(64) NOT NULL DEFAULT '${HELP_PANEL_SURFACE}',
-        priority INT NOT NULL DEFAULT 100,
-        active TINYINT(1) NOT NULL DEFAULT 1,
-        source_type VARCHAR(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'workflow',
-        coverage_domain VARCHAR(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-        coverage_status VARCHAR(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'drafted',
-        route_patterns_json JSON NULL,
-        help_titles_json JSON NULL,
-        roles_json JSON NULL,
-        workflow_states_json JSON NULL,
-        topic_tags_json JSON NULL,
-        keywords_json JSON NULL,
-        state_hints_json JSON NULL,
-        source_refs_json JSON NULL,
-        expected_anchors_json JSON NULL,
-        do_not_say_json JSON NULL,
-        applicability_text TEXT NULL,
-        answer_style_text TEXT NULL,
-        steps_text MEDIUMTEXT NULL,
-        side_effects_text TEXT NULL,
-        restrictions_text TEXT NULL,
-        guidance_text MEDIUMTEXT NOT NULL,
-        last_reviewed_at DATE NULL,
-        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uniq_slug (slug),
-        KEY idx_surface_active (surface, active),
-        KEY idx_guidance_source_type (source_type),
-        KEY idx_guidance_coverage_domain (coverage_domain),
-        KEY idx_guidance_coverage_status (coverage_status)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    `);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${EXAMPLE_TABLE} (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        guidance_slug VARCHAR(128) NOT NULL,
-        sort_order INT NOT NULL DEFAULT 0,
-        active TINYINT(1) NOT NULL DEFAULT 1,
-        route_context_json JSON NULL,
-        role_context_json JSON NULL,
-        must_mention_json JSON NULL,
-        must_not_mention_json JSON NULL,
-        source_refs_json JSON NULL,
-        eval_fixture_id VARCHAR(128) COLLATE utf8mb4_unicode_ci NULL,
-        coverage_status VARCHAR(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'drafted',
-        question_text TEXT NOT NULL,
-        answer_text MEDIUMTEXT NOT NULL,
-        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uniq_guidance_slug_sort (guidance_slug, sort_order),
-        KEY idx_guidance_slug_active (guidance_slug, active),
-        KEY idx_guidance_example_fixture (eval_fixture_id),
-        KEY idx_guidance_example_coverage_status (coverage_status)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    `);
-
-    await ensureColumns(pool, ENTRY_TABLE, ENTRY_COLUMN_DEFINITIONS);
-    await ensureIndexes(pool, ENTRY_TABLE, ENTRY_INDEX_DEFINITIONS);
-    await ensureColumns(pool, EXAMPLE_TABLE, EXAMPLE_COLUMN_DEFINITIONS);
-    await ensureIndexes(pool, EXAMPLE_TABLE, EXAMPLE_INDEX_DEFINITIONS);
+    await assertRuntimeTableReady(pool, ENTRY_TABLE, [
+      'id', 'slug', 'title', 'surface', 'priority', 'active',
+      'route_patterns_json', 'help_titles_json', 'roles_json', 'topic_tags_json',
+      'keywords_json', 'state_hints_json', 'source_refs_json', 'answer_style_text',
+      'guidance_text', 'created_at', 'updated_at',
+      ...ENTRY_COLUMN_DEFINITIONS.map(([name]) => name),
+    ]);
+    await assertRuntimeTableReady(pool, EXAMPLE_TABLE, [
+      'id', 'guidance_slug', 'sort_order', 'active', 'question_text', 'answer_text',
+      'created_at', 'updated_at',
+      ...EXAMPLE_COLUMN_DEFINITIONS.map(([name]) => name),
+    ]);
 
     for (const entry of SEEDED_GUIDANCE_ENTRIES) {
       await pool.query(
