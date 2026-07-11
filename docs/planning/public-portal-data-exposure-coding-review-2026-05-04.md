@@ -135,9 +135,11 @@ Deployment status:
 
 - 2026-05-04: deployed to TEST as release `public-portal-exposure-hardening-test` through the normal `path:deploy` admin + portal rollout. Both TEST portal instances contained the deployed `upload_key_mismatch` and `bindPendingUploadLocalPath` markers after rollout.
 
-### Open Findings
+### Findings
 
 #### ID-01 - Low - Frontend auth guard treats any authenticated token as portal-authenticated
+
+Status: closed locally 2026-07-11 under engineering-audit tranche R3c; not deployed.
 
 Evidence:
 
@@ -155,9 +157,11 @@ Recommended fix:
 
 Make the portal frontend distinguish "valid token" from "valid applicant portal account." `AuthContext` / `AuthGuard` should treat `isApplicantPortalUser !== true` as not authorized for applicant-only routes and show the existing applicant-account-required message instead of entering the dashboard shell.
 
-Review status: code review only; no patch applied in this review pass.
+Review status: R3c now requires `isApplicantPortalUser === true` in session establishment and protected-route rendering. `src/__tests__/AuthGuard.applicantGate.test.js` proves a valid non-applicant token receives the applicant-account-required gate while an applicant enters the protected shell.
 
 #### SM-01 - Medium - Secure-message list route overreturns message bodies to count/table consumers
+
+Status: closed locally 2026-07-11 under engineering-audit tranche R3c; not deployed.
 
 Evidence:
 
@@ -180,9 +184,11 @@ Split secure-message summary/list/detail payloads:
 - `/api/messages` list should omit `body` or return only a deliberately bounded preview if the UX needs one.
 - Keep full `body` only on `GET /api/messages/:id` after the existing participant/case/application access checks.
 
-Review status: code review only; no patch applied in this review pass.
+Review status: R3c removes `body` from the message list contract, keeps it on owned detail only, and moves header/dashboard badges to `GET /api/messages/summary`. Production payload-contract tests prove list and count responses remain least-data.
 
 #### SR-01 - Medium - Signing-request list route returns artifact URLs to count/summary consumers
+
+Status: closed locally 2026-07-11 under engineering-audit tranche R3c; not deployed.
 
 Evidence:
 
@@ -204,9 +210,11 @@ Split signing-request summary/list/detail/download payloads:
 - The list endpoint should omit `artifact_url` unless the UI surface is explicitly a document download list.
 - Prefer a scoped `GET /api/signing-requests/:id/download` route that verifies participant ownership and generates the presigned URL at click time.
 
-Review status: code review only; no patch applied in this review pass.
+Review status: R3c removes artifact/internal ownership fields from signing lists and details, moves badge consumers to `GET /api/signing-requests/summary`, and generates a presigned URL only from owned `GET /api/signing-requests/:id/download` after signed/artifact checks. Payload and signing-route regressions pass.
 
 #### LG-01 - Low - Stale `GET /api/applications` still uses retired legacy ownership shape
+
+Status: closed locally 2026-07-11 under engineering-audit tranche R3c; not deployed.
 
 Evidence:
 
@@ -223,6 +231,8 @@ In the current schema this route likely fails rather than returns data. The conc
 Recommended fix:
 
 Retire `GET /api/applications` with the same `410 legacy_endpoint_retired` response as the companion legacy routes, or replace it with a narrow wrapper around the current `/api/submissions` query that uses `iset_application_submission.user_id = req.user.userId` and returns only dashboard-safe fields.
+
+Review status: R3c mounts the active retired route ahead of the legacy handler and returns `410 legacy_endpoint_retired`. A request-level regression proves the response occurs without a DB query.
 
 Review status: code review only; no patch applied in this review pass.
 
@@ -396,6 +406,12 @@ Verification and limitations:
 - The current live denial harness had no real tokens or fixture IDs and reported 26 skips. No authenticated wrong-owner claim is made from that run; a future TEST rehearsal should run `npm run smoke:privacy-denials -- --require-live` with approved real-token fixtures.
 - The static privacy route smoke currently has four stale source-pattern failures in admin code. Source tracing found the corresponding guards still present; this is tracked as a test-blind-spot candidate in the engineering audit register, not as removal of a portal authorization control.
 
+## 2026-07-11 R3c Local Remediation
+
+Tranche R3c revalidated and repaired all four findings retained by this specialist register. `ID-01`, `SM-01`, `SR-01`, and `LG-01` are closed in the local portal code line. The implementation also closed cross-system findings `EA-001` and `EA-021` in `engineering-audit-register.md`.
+
+Evidence includes the real applicant auth provider/guard test, an owner-scoped request through the production message-cleanup router, a no-DB request through the retired applications route, strict production message/signing/intake/draft payload-contract tests, visible-field-only rendered intake hydration, and the existing signing durability suite. The full portal aggregate passed 15 frontend suites / 68 tests and 4 backend suites / 47 tests. TEST and PROD were not accessed or changed; environment authentication and deployed-source proof remain release-time work.
+
 ## Next Step
 
-Next review step: prioritize the four open findings and run the live denial harness with approved TEST tokens/fixtures. The message/signing and upload aggregate data follow-ups no longer need to block that prioritization.
+The four retained findings are complete locally. Their eventual portal release should include authenticated TEST checks for the applicant gate, message purge, list/summary/detail/download contracts, draft resume, and intake navigation before any PROD rollout.
