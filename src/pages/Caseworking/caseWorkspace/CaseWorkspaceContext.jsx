@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../../../auth/apiClient.js";
 import {
   normalizeInterventionReviewStatus,
@@ -9,6 +9,35 @@ import { resolveApplicationStateFields } from "../../../utils/applicationStatus.
 const interventionWizardStepStore = new Map();
 const interventionWizardDraftStore = new Map();
 const interventionWizardLastKeyByCase = new Map();
+
+const buildWorkspaceScopeKey = (caseId, applicationId) =>
+  `${caseId === null || typeof caseId === "undefined" ? "" : String(caseId)}::${
+    applicationId === null || typeof applicationId === "undefined" ? "" : String(applicationId)
+  }`;
+
+const createWorkspaceScopeError = () => {
+  const error = new Error("Case workspace actions are unavailable until the current route has loaded.");
+  error.code = "WORKSPACE_SCOPE_NOT_READY";
+  return error;
+};
+
+const waitForRetryDelay = (delayMs, signal) => new Promise(resolve => {
+  if (signal?.aborted) {
+    resolve(false);
+    return;
+  }
+  let settled = false;
+  const finish = value => {
+    if (settled) return;
+    settled = true;
+    if (signal) signal.removeEventListener("abort", onAbort);
+    clearTimeout(timeoutId);
+    resolve(value);
+  };
+  const onAbort = () => finish(false);
+  const timeoutId = setTimeout(() => finish(true), delayMs);
+  if (signal) signal.addEventListener("abort", onAbort, { once: true });
+});
 
 const cloneWizardDraft = value => {
   if (!value || typeof value !== "object") return value;
@@ -578,6 +607,7 @@ const CaseWorkspaceContext = createContext({
   caseId: null,
   caseData: null,
   isLoading: false,
+  isScopeReady: false,
   error: null,
   refresh: () => Promise.resolve(),
   createActionPlan: () => Promise.resolve({}),
@@ -612,6 +642,7 @@ const CaseWorkspaceContext = createContext({
   selectedActionPlanId: null,
   selectedInterventionId: null,
   setSelectedActionPlanId: () => {},
+  setSelectedInterventionId: () => {},
   getInterventionWizardStep: () => null,
   getInterventionWizardKeyForCase: () => null,
   getInterventionWizardDraft: () => null,
@@ -622,11 +653,18 @@ const CaseWorkspaceContext = createContext({
 });
 
 export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }) => {
-  const [state, setState] = useState({
+  const workspaceScopeKey = buildWorkspaceScopeKey(caseId, applicationId);
+  const activeScopeRef = useRef(workspaceScopeKey);
+  const requestGenerationRef = useRef(0);
+  const requestControllerRef = useRef(null);
+  activeScopeRef.current = workspaceScopeKey;
+
+  const [state, setState] = useState(() => ({
+    scopeKey: workspaceScopeKey,
     caseData: null,
-    isLoading: false,
+    isLoading: Boolean(caseId),
     error: null,
-  });
+  }));
   const [selectedActionPlanId, setSelectedActionPlanId] = useState(null);
   const [selectedInterventionId, setSelectedInterventionId] = useState(null);
   const [interventionCodes, setInterventionCodes] = useState([]);
@@ -732,12 +770,38 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     return date.toISOString();
   };
 
-  const loadCase = useCallback(async () => {
+  const loadCase = useCallback(async ({ clearData = false } = {}) => {
+    const requestScopeKey = workspaceScopeKey;
+    const requestGeneration = requestGenerationRef.current + 1;
+    requestGenerationRef.current = requestGeneration;
+    if (requestControllerRef.current) {
+      requestControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
+    const isCurrentRequest = () => (
+      !controller.signal.aborted &&
+      activeScopeRef.current === requestScopeKey &&
+      requestGenerationRef.current === requestGeneration
+    );
+
     if (!caseId) {
-      setState(prev => ({ ...prev, isLoading: false, error: "Failed to load case." }));
+      if (isCurrentRequest()) {
+        setState({
+          scopeKey: requestScopeKey,
+          caseData: null,
+          isLoading: false,
+          error: "Failed to load case.",
+        });
+      }
       return null;
     }
-    setState(prev => ({ ...prev, isLoading: true, error: null }));
+    setState(prev => ({
+      scopeKey: requestScopeKey,
+      caseData: !clearData && prev.scopeKey === requestScopeKey ? prev.caseData : null,
+      isLoading: true,
+      error: null,
+    }));
     try {
       const fetchOnce = async () => {
         const params = new URLSearchParams();
@@ -745,7 +809,10 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
           params.set("applicationId", String(applicationId));
         }
         const query = params.toString() ? `?${params.toString()}` : "";
-        const resp = await apiFetch(`/api/cases/${caseId}/workspace${query}`, { method: "GET" });
+        const resp = await apiFetch(`/api/cases/${caseId}/workspace${query}`, {
+          method: "GET",
+          signal: controller.signal,
+        });
         if (!resp.ok) {
           const error = new Error("Failed to load case.");
           error.status = resp.status;
@@ -762,32 +829,55 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
         const status = err?.status;
         // Retry once for transient errors (network/5xx/locked)
         if (status && status >= 500) {
-          await new Promise(resolve => setTimeout(resolve, 250));
+          const shouldRetry = await waitForRetryDelay(250, controller.signal);
+          if (!shouldRetry || !isCurrentRequest()) return null;
           payload = await fetchOnce();
         } else {
           throw err;
         }
       }
+      if (!payload || !isCurrentRequest()) return null;
       const data = buildCaseFromWorkspaceApi(caseId, payload);
-      setState({ caseData: data, isLoading: false, error: null });
+      if (!isCurrentRequest()) return null;
+      setState({ scopeKey: requestScopeKey, caseData: data, isLoading: false, error: null });
       if (typeof window !== 'undefined') {
-        window.__CASE_WORKSPACE = { caseData: data };
+        window.__CASE_WORKSPACE = { scopeKey: requestScopeKey, caseData: data };
       }
       setSelectedActionPlanId(currentSelectedActionPlanId =>
         resolvePreferredActionPlanId(data.actionPlans, currentSelectedActionPlanId)
       );
       return data;
     } catch (error) {
-      setState(prev => ({ ...prev, isLoading: false, error: error?.message || "Failed to load case." }));
+      if (!isCurrentRequest() || error?.name === "AbortError") return null;
+      setState(prev => ({
+        ...prev,
+        scopeKey: requestScopeKey,
+        isLoading: false,
+        error: error?.message || "Failed to load case.",
+      }));
       throw error;
     }
-  }, [caseId, applicationId]);
+  }, [caseId, applicationId, workspaceScopeKey]);
 
   useEffect(() => {
-    loadCase().catch(() => {});
-  }, [loadCase]);
+    setSelectedActionPlanId(null);
+    setSelectedInterventionId(null);
+    if (typeof window !== "undefined") {
+      window.__CASE_WORKSPACE = { scopeKey: workspaceScopeKey, caseData: null };
+    }
+    loadCase({ clearData: true }).catch(() => {});
+    return () => {
+      if (requestControllerRef.current) requestControllerRef.current.abort();
+    };
+  }, [loadCase, workspaceScopeKey]);
 
-  const lockApplicationId = state.caseData?.applicationId ?? state.caseData?.application_id ?? null;
+  const stateOwnsCurrentScope = state.scopeKey === workspaceScopeKey;
+  const currentCaseData = stateOwnsCurrentScope ? state.caseData : null;
+  const currentIsLoading = !stateOwnsCurrentScope || state.isLoading;
+  const currentError = stateOwnsCurrentScope ? state.error : null;
+  const isScopeReady = stateOwnsCurrentScope && !state.isLoading && Boolean(state.caseData);
+
+  const lockApplicationId = currentCaseData?.applicationId ?? currentCaseData?.application_id ?? null;
 
   useEffect(() => {
     return () => {
@@ -1912,57 +2002,72 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     [caseId]
   );
 
-  const contextValue = useMemo(() => ({
-    caseId,
-    caseData: state.caseData,
-    isLoading: state.isLoading,
-    error: state.error,
-    refresh: loadCase,
-    createActionPlan,
-    updateActionPlan,
-    createIntervention,
-    reviseIntervention,
-    updateIntervention,
-    closeIntervention,
-    runComplianceChecks,
-    prepareIlmpExport,
-    markReadyToClose,
-    closeCase,
-    reopenCase,
-    reopenCaseRecovery,
-    archiveCase,
-    fetchActionPlanContext,
-    upsertActionPlanReviewReminder,
-    saveCaseContext,
-    deleteActionPlan,
-    deleteIntervention,
-    interventionCodes,
-    interventionCodesLoading,
-    loadInterventionCodes,
-    interventionOutcomes,
-    interventionOutcomesLoading,
-    loadInterventionOutcomes,
-    fundingStreams,
-    fundingStreamsLoading,
-    loadFundingStreams,
-    nocVersions,
-    nocVersionsLoading,
-    loadNocVersions,
-    searchNocCodes,
-    activateActionPlan,
-    closeActionPlan,
-    selectedActionPlanId,
-    setSelectedActionPlanId,
-    selectedInterventionId,
-    setSelectedInterventionId,
-    getInterventionWizardStep,
-    getInterventionWizardKeyForCase,
-    getInterventionWizardDraft,
-    setInterventionWizardStep,
-    setInterventionWizardDraft,
-    clearInterventionWizardStep,
-    clearInterventionWizardDraft,
-  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, reviseIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, markReadyToClose, closeCase, reopenCase, reopenCaseRecovery, archiveCase, fetchActionPlanContext, upsertActionPlanReviewReminder, saveCaseContext, deleteActionPlan, deleteIntervention, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, selectedActionPlanId, selectedInterventionId, getInterventionWizardStep, getInterventionWizardKeyForCase, getInterventionWizardDraft, setInterventionWizardStep, setInterventionWizardDraft, clearInterventionWizardStep, clearInterventionWizardDraft]);
+  const contextValue = useMemo(() => {
+    const guardScope = action => (...args) => {
+      if (!isScopeReady || activeScopeRef.current !== workspaceScopeKey) {
+        return Promise.reject(createWorkspaceScopeError());
+      }
+      return action(...args);
+    };
+    const setScopedSelection = setter => value => {
+      if (!isScopeReady || activeScopeRef.current !== workspaceScopeKey) return false;
+      setter(value);
+      return true;
+    };
+
+    return {
+      caseId,
+      caseData: currentCaseData,
+      isLoading: currentIsLoading,
+      isScopeReady,
+      error: currentError,
+      refresh: loadCase,
+      createActionPlan: guardScope(createActionPlan),
+      updateActionPlan: guardScope(updateActionPlan),
+      createIntervention: guardScope(createIntervention),
+      reviseIntervention: guardScope(reviseIntervention),
+      updateIntervention: guardScope(updateIntervention),
+      closeIntervention: guardScope(closeIntervention),
+      runComplianceChecks: guardScope(runComplianceChecks),
+      prepareIlmpExport: guardScope(prepareIlmpExport),
+      markReadyToClose: guardScope(markReadyToClose),
+      closeCase: guardScope(closeCase),
+      reopenCase: guardScope(reopenCase),
+      reopenCaseRecovery: guardScope(reopenCaseRecovery),
+      archiveCase: guardScope(archiveCase),
+      fetchActionPlanContext: guardScope(fetchActionPlanContext),
+      upsertActionPlanReviewReminder: guardScope(upsertActionPlanReviewReminder),
+      saveCaseContext: guardScope(saveCaseContext),
+      deleteActionPlan: guardScope(deleteActionPlan),
+      deleteIntervention: guardScope(deleteIntervention),
+      interventionCodes,
+      interventionCodesLoading,
+      loadInterventionCodes,
+      interventionOutcomes,
+      interventionOutcomesLoading,
+      loadInterventionOutcomes,
+      fundingStreams,
+      fundingStreamsLoading,
+      loadFundingStreams,
+      nocVersions,
+      nocVersionsLoading,
+      loadNocVersions,
+      searchNocCodes,
+      activateActionPlan: guardScope(activateActionPlan),
+      closeActionPlan: guardScope(closeActionPlan),
+      selectedActionPlanId: isScopeReady ? selectedActionPlanId : null,
+      setSelectedActionPlanId: setScopedSelection(setSelectedActionPlanId),
+      selectedInterventionId: isScopeReady ? selectedInterventionId : null,
+      setSelectedInterventionId: setScopedSelection(setSelectedInterventionId),
+      getInterventionWizardStep,
+      getInterventionWizardKeyForCase,
+      getInterventionWizardDraft,
+      setInterventionWizardStep,
+      setInterventionWizardDraft,
+      clearInterventionWizardStep,
+      clearInterventionWizardDraft,
+    };
+  }, [caseId, currentCaseData, currentIsLoading, currentError, isScopeReady, workspaceScopeKey, loadCase, createActionPlan, updateActionPlan, createIntervention, reviseIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, markReadyToClose, closeCase, reopenCase, reopenCaseRecovery, archiveCase, fetchActionPlanContext, upsertActionPlanReviewReminder, saveCaseContext, deleteActionPlan, deleteIntervention, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, selectedActionPlanId, selectedInterventionId, getInterventionWizardStep, getInterventionWizardKeyForCase, getInterventionWizardDraft, setInterventionWizardStep, setInterventionWizardDraft, clearInterventionWizardStep, clearInterventionWizardDraft]);
 
   return (
     <CaseWorkspaceContext.Provider value={contextValue}>

@@ -28,6 +28,7 @@ export function useWidgetDataLoader(fetcher, {
   const [error, setError] = useState(null);
   const abortRef = useRef(null);
   const mountedRef = useRef(false);
+  const dependencyEffectInitializedRef = useRef(false);
 
   const disposeController = () => {
     if (abortRef.current) {
@@ -120,6 +121,10 @@ export function useWidgetDataLoader(fetcher, {
   }, [...normalizedDeps]);
 
   useEffect(() => {
+    if (!dependencyEffectInitializedRef.current) {
+      dependencyEffectInitializedRef.current = true;
+      return;
+    }
     if (!mountedRef.current) return;
     if (!immediate) return;
     load('dep-change');

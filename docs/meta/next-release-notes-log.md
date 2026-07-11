@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-07-10
+Last Updated: 2026-07-11
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-07-11 | Release TBD | Fix/Casework | Case Workspace navigation | Moving between cases or applications no longer leaves the previous participant, action plan, or selection visible or actionable while the new workspace loads. | Older responses and abandoned retries cannot overwrite the current route, and the prior application lock is released. Completed locally under R3b; not deployed.
+- 2026-07-11 | Release TBD | Fix/Workflow Studio | Workflow Library | Workflow Library now performs one initial data load instead of immediately starting and cancelling a duplicate request. | Dependency changes and manual refresh still reload normally. Completed locally under R3b; not deployed.
 - 2026-07-11 | Release TBD | Fix/Manual Intake | Staff-assisted intake privacy and client selection | Incomplete applicant details are no longer retained in browser storage, and changing the search or applicant identity clears any previously selected client. | Older search responses are ignored, and the server refuses a stale/tampered selected client when its strategy or available email/date-of-birth evidence conflicts. Completed locally under R3a; not deployed.
 - 2026-07-10 | Release TBD | Fix/Public portal | Signed forms | Repeated or concurrent signing submissions now converge on one immutable signed PDF, one canonical document, and one audit event. | Completed locally under R2; additive schema, shared runtime, and portal must release together after a separately authorized TEST rehearsal. Historical duplicate artifacts are not changed by this release.
 - 2026-07-10 | Release 20260710-r1-intake-completion-prod | Fix/Public portal | Intake completion | Applicants are prevented from completing an application when a required answer or signature on their applicable intake path is missing, and transient persistence failures no longer leave a partial submission. | Deployed to PROD after authenticated TEST rehearsal. No published workflow/runtime or historical data change was included.

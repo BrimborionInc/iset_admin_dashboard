@@ -3,6 +3,7 @@
 Format: YYYY-MM-DD - Category: Short description
 
 ## 2026-07-11
+- Fix/Case Workspace and Workflow Library/Local: Completed engineering-audit tranche R3b locally. Case/application route changes now hide prior Case Workspace records and selections immediately, disable record actions until the new scope is loaded, release the prior application lock, stop abandoned retries, and ignore stale responses. Workflow Library now issues one initial load instead of starting and aborting a duplicate. Full admin tests passed; TEST and PROD were not accessed or changed.
 - Fix/Manual Intake/Local: Completed engineering-audit tranche R3a locally. Manual Intake no longer stores incomplete applicant answers, notes, searches, or selected clients in browser storage; legacy residue is cleared at page/auth boundaries. Existing-client selection is bound to the current query, applicant identity, and search generation, stale responses are ignored, and the backend fails closed when selected-client strategy or available email/DOB evidence conflicts. Full admin tests passed; TEST and PROD were not accessed or changed.
 
 ## 2026-07-10
