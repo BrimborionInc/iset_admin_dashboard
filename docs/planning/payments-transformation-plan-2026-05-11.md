@@ -165,6 +165,14 @@ Use computed packet status from lines/events where practical. Keep existing pack
 
 ## Implementation Progress
 
+### 2026-07-12 Engineering-Audit R7 Local Safety Tranche
+
+- Added canonical migration `20260712_0001_add_payment_submission_attempt.sql`. Submission attempts are claimed and committed before any Finance email/Intacct call; accepted/suppressed outcomes replay without resending, known failures can retry, and uncertain/expired sends stop as `ambiguous` for review.
+- The canonical packet status transition now finalizes packet/line/follow-up/ledger state in a separate transaction after the durable external outcome. A scoped read route exposes attempt status without raw request/result bodies.
+- Payment follow-up evidence requires both ordinary document access and packet client/case containment before any status/event write.
+- Payment Workspace packet/selection/communication state is filter-owned; case changes mask prior data immediately, discard stale responses, and block out-of-scope mutations.
+- No payment routing, real email, Intacct provider, database, TEST, or PROD environment was accessed or enabled. Full local tests pass; schema and authenticated provider workflow still require a separately authorized TEST rehearsal before any activation.
+
 ### 2026-05-11 Safety Tranche Started
 
 - Added target operating-model memory in `docs/planning/payments-target-operating-model-2026-05-11.md`.

@@ -91,6 +91,16 @@ const {
 } = require('./src/lib/caseAccess');
 const { createHubRouter } = require('./src/routes/hubRoutes');
 const {
+  extractIntacctRestCollection,
+  extractIntacctRestObjectId,
+} = require('./src/lib/intacctRestEnvelope');
+const { applyBudgetAllocationExactlyOnce } = require('./src/lib/allocationApply');
+const {
+  completePaymentSubmissionAttempt,
+  dispatchPaymentSubmissionWithAttempt,
+} = require('./src/lib/paymentSubmissionAttempt');
+const { validatePaymentFollowUpEvidence } = require('./src/lib/paymentFollowUpEvidence');
+const {
   createCaseWatch,
   deleteCaseWatch,
   listCaseWatchesForUser,
@@ -153,7 +163,14 @@ const {
 
 // Increase default listener cap to avoid noisy warnings when wiring shared buses.
 events.EventEmitter.defaultMaxListeners = 20;
-const PATH_REPAIR_EXPORT_MODE = process.env.PATH_REPAIR_EXPORTS === '1';
+const PATH_APP_FACTORY_MODE = process.env.NODE_ENV === 'test' && process.env.PATH_APP_FACTORY_MODE === '1';
+const appFactoryTestDependencies = PATH_APP_FACTORY_MODE
+  ? require('./src/server/appFactoryTestDeps').getAppFactoryTestDependencies()
+  : null;
+if (PATH_APP_FACTORY_MODE && !appFactoryTestDependencies) {
+  throw new Error('PATH_APP_FACTORY_MODE requires injected test dependencies');
+}
+const PATH_REPAIR_EXPORT_MODE = process.env.PATH_REPAIR_EXPORTS === '1' || PATH_APP_FACTORY_MODE;
 
 const resolveServerFetch = async () => {
   if (typeof global !== 'undefined' && typeof global.fetch === 'function') {
@@ -6428,6 +6445,7 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'payment_batch_line',
   'payment_packet_document',
   'payment_packet_communication',
+  'payment_submission_attempt',
   'payment_followup_event',
   'payment_status_event',
   'payment_override',
@@ -25143,6 +25161,12 @@ app.get('/readyz', async (_req, res) => {
     await assertRuntimeTableReady(pool, 'iset_case_reminder', ['id', 'lifecycle_generation']);
     await assertRuntimeTableReady(pool, 'iset_reminder_lifecycle_event', ['reminder_id', 'lifecycle_generation', 'event_type', 'status']);
     await assertRuntimeTableReady(pool, 'ptma', ['id', 'type', 'iset_full_name']);
+    await assertRuntimeTableReady(pool, 'payment_submission_attempt', [
+      'payment_packet_id',
+      'submission_key',
+      'status',
+      'lease_expires_at',
+    ]);
     await assertEnumValueReady(pool, 'esdc_participant_submission_history', 'event_type', 'prepared');
     return res.status(200).json({ status: 'ready' });
   } catch (error) {
@@ -25176,11 +25200,13 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-let authnMiddlewareFactory = null;
-try {
-  ({ authnMiddleware: authnMiddlewareFactory } = require('./src/middleware/authn'));
-} catch (e) {
-  console.warn('Auth middleware init failed:', e?.message);
+let authnMiddlewareFactory = appFactoryTestDependencies?.authnMiddlewareFactory || null;
+if (!authnMiddlewareFactory) {
+  try {
+    ({ authnMiddleware: authnMiddlewareFactory } = require('./src/middleware/authn'));
+  } catch (e) {
+    console.warn('Auth middleware init failed:', e?.message);
+  }
 }
 
 function requireAuthenticatedStaff(req, res, next) {
@@ -40352,7 +40378,7 @@ const dbConfig = {
   charset: 'utf8mb4_unicode_ci'
 };
 
-pool = mysql.createPool(dbConfig);
+pool = appFactoryTestDependencies?.pool || mysql.createPool(dbConfig);
 app.locals.pool = pool;
 configureSesMailer({ pool });
 if (!PATH_REPAIR_EXPORT_MODE) {
@@ -43009,12 +43035,14 @@ app.get('/api/dashboard/metrics/details', async (req, res) => {
 
 
 const eventService = createEventService({ pool, logger: console });
-registerNotificationHook(async (event) => {
-  await dispatchInternalNotifications({ pool, event, logger: console });
-  await dispatchAssignmentNotificationEmails({ pool, event, logger: console });
-  await dispatchStaffSecureMessageSentEmail({ pool, event, logger: console });
-});
-if (process.env.NODE_ENV !== 'test' || process.env.ENABLE_EVENT_DELIVERY_WORKER_IN_TEST === '1') {
+if (!PATH_REPAIR_EXPORT_MODE) {
+  registerNotificationHook(async (event) => {
+    await dispatchInternalNotifications({ pool, event, logger: console });
+    await dispatchAssignmentNotificationEmails({ pool, event, logger: console });
+    await dispatchStaffSecureMessageSentEmail({ pool, event, logger: console });
+  });
+}
+if (!PATH_REPAIR_EXPORT_MODE && (process.env.NODE_ENV !== 'test' || process.env.ENABLE_EVENT_DELIVERY_WORKER_IN_TEST === '1')) {
   startEventDeliveryWorker({
     pool,
     workerScope: 'admin',
@@ -74729,8 +74757,11 @@ const fetchIntacctVendors = async ({ baseUrl, accessToken }) => {
     }
     if (!resp.ok) return [];
     const payload = await resp.json().catch(() => null);
-    return Array.isArray(payload?.data) ? payload.data : [];
-  } catch (_) {
+    return extractIntacctRestCollection(payload, {
+      allowLegacyData: allowIntacctLegacyPathFallback(baseUrl),
+    });
+  } catch (error) {
+    if (error?.code?.startsWith('intacct_rest_')) throw error;
     return [];
   }
 };
@@ -74757,9 +74788,11 @@ const createIntacctVendor = async ({ baseUrl, accessToken, vendorId, name }) => 
     }
     if (!resp.ok) return null;
     const payload = await resp.json().catch(() => null);
-    const data = payload?.data || null;
-    return data?.id || data?.vendor_id || vendorId || null;
-  } catch (_) {
+    return extractIntacctRestObjectId(payload, {
+      allowLegacyData: allowIntacctLegacyPathFallback(baseUrl),
+    });
+  } catch (error) {
+    if (error?.code?.startsWith('intacct_rest_')) throw error;
     return null;
   }
 };
@@ -75262,7 +75295,35 @@ async function sendIntacctRestForPacket({
   } catch {
     submitPayload = null;
   }
-  const billId = submitPayload?.data?.id || null;
+  let billId = null;
+  try {
+    billId = extractIntacctRestObjectId(submitPayload, {
+      allowLegacyData: allowIntacctLegacyPathFallback(baseUrl),
+    });
+  } catch (err) {
+    const code = err?.code || 'intacct_rest_invalid_success_response';
+    const message = err?.message || 'Intacct REST success response was invalid.';
+    await persistReconciliationError({
+      status: submitResp?.status || null,
+      message,
+      details: err?.details ? [err.details] : null,
+    });
+    await recordIntacctAttempt({
+      stage: 'submit',
+      error: code,
+      message,
+      httpStatus: submitResp?.status || null,
+      details: err?.details || null,
+      baseUrl,
+    });
+    return {
+      error: code,
+      message,
+      status: submitResp?.status || null,
+      details: err?.details || null,
+      baseUrl,
+    };
+  }
 
   const attachments = buildPacketAttachmentSummary(packet);
   const attachmentErrors = [];
@@ -78620,157 +78681,11 @@ const resolveEffectiveDate = allocation => {
 };
 
 async function applyAllocationTransaction({ allocation, appliedAtOverride = null }) {
-  const amount = Number(allocation.amount || 0);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error('invalid_amount');
-  }
-  const effectiveDate = resolveEffectiveDate(allocation);
-  const appliedAt = appliedAtOverride || effectiveDate || new Date();
-  // Capture before/after balances for audit using remaining available authority.
-  const [[sourcePot]] = await pool.query(
-    'SELECT adjusted_amount, committed_amount, actual_amount, metadata FROM budget_pot WHERE id = ? LIMIT 1',
-    [allocation.sourcePotId]
-  );
-  const [[destPot]] = await pool.query(
-    'SELECT adjusted_amount, committed_amount, actual_amount, metadata FROM budget_pot WHERE id = ? LIMIT 1',
-    [allocation.destPotId]
-  );
-  const availableFor = pot =>
-    pot
-      ? Number(pot.adjusted_amount || 0) -
-        Number(pot.committed_amount || 0) -
-        Number(pot.actual_amount || 0)
-      : null;
-  const beforeBalances = {
-    source: availableFor(sourcePot),
-    destination: availableFor(destPot),
-  };
-  const afterBalances = {
-    source: Number.isFinite(beforeBalances.source) ? beforeBalances.source - amount : null,
-    destination: Number.isFinite(beforeBalances.destination)
-      ? beforeBalances.destination + amount
-      : null,
-  };
-  const meta = allocation.metadata || {};
-  const appliedByName =
-    allocation.appliedBy ||
-    allocation.approvedBy ||
-    meta.appliedBy ||
-    allocation.requestedBy ||
-    'Finance';
-  const approvalOwner =
-    (Array.isArray(meta.approvers) && meta.approvers.length ? meta.approvers.join(', ') : appliedByName) ||
-    appliedByName;
-  const allocationEvidence = Array.isArray(meta.evidence) ? meta.evidence : [];
-  const normalizeEvidenceEntry = (entry, index) => {
-    if (!entry) return null;
-    if (typeof entry === 'string') {
-      return { id: `alloc-${allocation.id}-ev-${index}`, label: entry, href: null, attachments: [] };
-    }
-    if (typeof entry === 'object') {
-      const label = entry.label || entry.id || String(entry);
-      const id = entry.id || `alloc-${allocation.id}-ev-${index}`;
-      const attachments = Array.isArray(entry.attachments) ? entry.attachments : [];
-      return { id, label, href: entry.href || null, type: entry.type || null, attachments };
-    }
-    return null;
-  };
-  const mergeEvidence = (metaObj, entries) => {
-    const existing =
-      Array.isArray(metaObj.evidence) && metaObj.evidence.length
-        ? metaObj.evidence
-            .map((entry, idx) => normalizeEvidenceEntry(entry, idx))
-            .filter(Boolean)
-        : [];
-    const incoming = entries
-      .map((entry, idx) => normalizeEvidenceEntry(entry, idx + existing.length))
-      .filter(Boolean);
-    metaObj.evidence = [...existing, ...incoming];
-  };
-
-  const sourceMeta = safeJsonParse(sourcePot?.metadata, {});
-  const destMeta = safeJsonParse(destPot?.metadata, {});
-  const applyAdjustment = (metaObj, entry) => {
-    const arr = Array.isArray(metaObj.adjustments) ? metaObj.adjustments.slice() : [];
-    arr.push(entry);
-    metaObj.adjustments = arr;
-  };
-  const applyApproval = (metaObj, entry) => {
-    const arr = Array.isArray(metaObj.approvals) ? metaObj.approvals.slice() : [];
-    arr.push(entry);
-    metaObj.approvals = arr;
-  };
-
-  const adjustmentDate = toDateOnly(appliedAt);
-  applyAdjustment(sourceMeta, {
-    id: `alloc-${allocation.id}-out`,
-    date: adjustmentDate,
-    type: 'Transfer out',
-    amount: -amount,
-    reason: `Transfer to ${allocation.destPotName || allocation.destPotId || 'destination pot'}`,
-    user: appliedByName,
+  await applyBudgetAllocationExactlyOnce({
+    pool,
+    allocationId: allocation?.id,
+    appliedAtOverride,
   });
-  applyAdjustment(destMeta, {
-    id: `alloc-${allocation.id}-in`,
-    date: adjustmentDate,
-    type: 'Transfer in',
-    amount,
-    reason: `Transfer from ${allocation.sourcePotName || allocation.sourcePotId || 'source pot'}`,
-    user: appliedByName,
-  });
-
-  applyApproval(sourceMeta, {
-    id: `alloc-${allocation.id}`,
-    type: 'Transfer approved',
-    date: toDateOnly(allocation.approvedAt || appliedAt),
-    owner: approvalOwner,
-  });
-  applyApproval(destMeta, {
-    id: `alloc-${allocation.id}`,
-    type: 'Transfer approved',
-    date: toDateOnly(allocation.approvedAt || appliedAt),
-    owner: approvalOwner,
-  });
-  mergeEvidence(sourceMeta, allocationEvidence);
-  mergeEvidence(destMeta, allocationEvidence);
-
-  const metadata = {
-    ...meta,
-    evidence: allocationEvidence.map((entry, idx) => normalizeEvidenceEntry(entry, idx)).filter(Boolean),
-    beforeBalances,
-    afterBalances,
-    appliedBy: appliedByName,
-    appliedAtEffective: appliedAt.toISOString(),
-    scheduledApplyAt: null,
-  };
-
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    await conn.query(
-      `UPDATE budget_pot SET adjusted_amount = adjusted_amount - ?, metadata = ? WHERE id = ?`,
-      [amount, JSON.stringify(sourceMeta), allocation.sourcePotId]
-    );
-    await conn.query(
-      `UPDATE budget_pot SET adjusted_amount = adjusted_amount + ?, metadata = ? WHERE id = ?`,
-      [amount, JSON.stringify(destMeta), allocation.destPotId]
-    );
-    await conn.query(
-      `UPDATE budget_allocation
-          SET status = 'applied',
-              metadata = ?,
-              applied_at = ?,
-              updated_at = NOW()
-        WHERE id = ?`,
-      [JSON.stringify(metadata), appliedAt, allocation.id]
-    );
-    await conn.commit();
-  } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
-    conn.release();
-  }
   return fetchAllocationById(allocation.id);
 }
 app.get('/api/finance/allocations', async (req, res) => {
@@ -78952,9 +78867,25 @@ app.post('/api/finance/allocations/:id/approve', async (req, res) => {
     metadata.approvers = approvers;
     const effectiveDate = resolveEffectiveDate(allocation);
     if (effectiveDate && effectiveDate <= new Date()) {
-      // Auto-apply immediately when effective date is today/past
+      const [approvalResult] = await pool.query(
+        `UPDATE budget_allocation
+            SET status = 'approved',
+                approved_by_user_id = ?,
+                metadata = ?,
+                approved_at = NOW(),
+                updated_at = NOW()
+          WHERE id = ? AND status = 'proposed'`,
+        [userId, JSON.stringify(metadata), allocationId]
+      );
+      if (Number(approvalResult?.affectedRows || 0) !== 1) {
+        const current = await fetchAllocationById(allocationId);
+        if (current?.status === 'applied') return res.status(200).json(current);
+        if (current?.status !== 'approved') {
+          return res.status(409).json({ error: 'allocation_approval_claim_lost' });
+        }
+      }
       const applied = await applyAllocationTransaction({
-        allocation: { ...allocation, metadata },
+        allocation: { id: allocationId },
         appliedAtOverride: effectiveDate,
       });
       return res.status(200).json(applied);
@@ -78978,16 +78909,19 @@ app.post('/api/finance/allocations/:id/approve', async (req, res) => {
       );
       metadata.scheduledApplyAt = scheduledAt.toISOString();
     }
-    await pool.query(
+    const [approvalResult] = await pool.query(
       `UPDATE budget_allocation
           SET status = 'approved',
               approved_by_user_id = ?,
               metadata = ?,
               approved_at = NOW(),
               updated_at = NOW()
-        WHERE id = ?`,
+        WHERE id = ? AND status = 'proposed'`,
       [userId, JSON.stringify(metadata), allocationId]
     );
+    if (Number(approvalResult?.affectedRows || 0) !== 1) {
+      return res.status(409).json({ error: 'allocation_approval_claim_lost' });
+    }
     const updated = await fetchAllocationById(allocationId);
     res.status(200).json(updated);
   } catch (err) {
@@ -79044,6 +78978,9 @@ app.post('/api/finance/allocations/:id/schedule-apply', async (req, res) => {
     if (!allocation) {
       return res.status(404).json({ error: 'allocation_not_found' });
     }
+    if (allocation.status === 'applied') {
+      return res.status(200).json(allocation);
+    }
     if (allocation.status !== 'approved') {
       return res.status(400).json({ error: 'invalid_status_transition' });
     }
@@ -79088,6 +79025,9 @@ app.post('/api/finance/allocations/:id/apply', async (req, res) => {
     const allocation = await fetchAllocationById(allocationId);
     if (!allocation) {
       return res.status(404).json({ error: 'allocation_not_found' });
+    }
+    if (allocation.status === 'applied') {
+      return res.status(200).json(allocation);
     }
     if (allocation.status !== 'approved') {
       return res.status(400).json({ error: 'invalid_status_transition' });
@@ -80722,18 +80662,17 @@ async function handleRecordPaymentFollowUp(req, res, { packetId, lineId = null }
         await conn.rollback();
         return res.status(400).json({ error: 'follow_up_document_not_found' });
       }
-      let documentAccessError = await validateDocumentAccess(req, docRow, { connection: conn });
-      if (documentAccessError) {
-        const packetDocumentAccessError = await validatePaymentPacketDocumentAccess(req, {
+      const evidenceAccessError = await validatePaymentFollowUpEvidence({
+        validateDocument: () => validateDocumentAccess(req, docRow, { connection: conn }),
+        validatePacketDocument: () => validatePaymentPacketDocumentAccess(req, {
           packetId: packetValue,
           documentRow: docRow,
           connection: conn,
-        });
-        documentAccessError = packetDocumentAccessError || null;
-      }
-      if (documentAccessError) {
+        }),
+      });
+      if (evidenceAccessError) {
         await conn.rollback();
-        return res.status(documentAccessError.status).json(documentAccessError.body);
+        return res.status(evidenceAccessError.status).json(evidenceAccessError.body);
       }
     }
 
@@ -81532,6 +81471,47 @@ app.post('/api/finance/payment-packets/:id/validate', async (req, res) => {
   }
 });
 
+app.get('/api/finance/payment-packets/:id/submission-attempts', async (req, res) => {
+  if (requirePaymentsRole(req, res)) return;
+  const packetId = parsePaymentPacketId(req.params.id);
+  if (!Number.isFinite(packetId)) {
+    return res.status(400).json({ error: 'invalid_payment_packet_id' });
+  }
+  const accessError = await validatePaymentPacketAccess(req, packetId);
+  if (accessError) return res.status(accessError.status).json(accessError.body);
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, submission_key, mode, status, attempt_count, provider_message_id,
+              error_json, created_at, updated_at, completed_at
+         FROM payment_submission_attempt
+        WHERE payment_packet_id = ?
+        ORDER BY id DESC`,
+      [packetId]
+    );
+    return res.json((rows || []).map(row => {
+      const error = safeJsonParse(row.error_json, null);
+      return {
+        id: String(row.id),
+        submissionKey: row.submission_key,
+        mode: row.mode || null,
+        status: row.status,
+        attemptCount: Number(row.attempt_count || 0),
+        providerMessageId: row.provider_message_id || null,
+        error: error ? {
+          code: error.error || error.code || null,
+          message: error.message || null,
+        } : null,
+        createdAt: row.created_at || null,
+        updatedAt: row.updated_at || null,
+        completedAt: row.completed_at || null,
+      };
+    }));
+  } catch (error) {
+    console.error('[payments] failed to list submission attempts', error);
+    return res.status(500).json({ error: 'failed_to_list_payment_submission_attempts' });
+  }
+});
+
 app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
   if (requirePaymentsRole(req, res)) return;
   const packetId = parsePaymentPacketId(req.params.id);
@@ -81843,23 +81823,32 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       }
     }
 
+    let submissionAttemptId = null;
     if (nextStatus === 'submitted') {
-      const submissionResult = await submitPaymentPacketExternally({
+      // Persist validation/override state and release the packet lock before any provider call.
+      // The durable attempt is committed independently and owns retry/reconciliation safety.
+      await conn.commit();
+      const submissionResult = await dispatchPaymentSubmissionWithAttempt({
+        pool,
         packetId,
-        packetRow,
-        note: notes,
-        req,
-        connection: conn,
+        request: { note: notes || null, requestedStatus: nextStatus },
+        actorUserId,
+        dispatch: () => submitPaymentPacketExternally({
+          packetId,
+          packetRow,
+          note: notes,
+          req,
+          connection: pool,
+        }),
       });
+      submissionAttemptId = submissionResult?.submissionAttemptId || null;
       if (submissionResult?.error === 'intacct_rest_already_accepted') {
-        await conn.rollback();
         return res.status(409).json({
           error: submissionResult.error,
           message: submissionResult.message,
         });
       }
       if (submissionResult?.error === 'finance_email_missing') {
-        await conn.rollback();
         return res.status(409).json({
           error: submissionResult.error,
           message: submissionResult.message,
@@ -81867,11 +81856,16 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
         });
       }
       if (submissionResult?.error === 'payment_packet_not_found') {
-        await conn.rollback();
         return res.status(404).json({ error: submissionResult.error });
       }
+      if (['payment_submission_in_progress', 'payment_submission_outcome_ambiguous'].includes(submissionResult?.error)) {
+        return res.status(409).json({
+          error: submissionResult.error,
+          message: submissionResult.message,
+          submissionAttemptId,
+        });
+      }
       if (submissionResult?.error) {
-        await conn.rollback();
         if (submissionResult?.mode === 'intacct_rest') {
           try {
             await recordPaymentPacketSubmissionMeta({
@@ -81898,6 +81892,35 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
           details: submissionResult.details || null,
           communication: submissionResult.communication,
           mode: submissionResult.mode,
+          submissionAttemptId,
+        });
+      }
+      await conn.beginTransaction();
+      const [[currentPacketRow]] = await conn.query(
+        'SELECT * FROM payment_packet WHERE id = ? LIMIT 1 FOR UPDATE',
+        [packetId]
+      );
+      if (!currentPacketRow) {
+        await conn.rollback();
+        return res.status(404).json({ error: 'payment_packet_not_found' });
+      }
+      const currentAccessError = await validatePaymentPacketAccess(req, packetId, { connection: conn });
+      if (currentAccessError) {
+        await conn.rollback();
+        return res.status(currentAccessError.status).json(currentAccessError.body);
+      }
+      if (normalizePacketWorkflowStage(currentPacketRow.status) === 'submitted') {
+        await conn.commit();
+        try { await completePaymentSubmissionAttempt(pool, submissionAttemptId); } catch (_) {}
+        const currentPacket = await fetchPaymentPacketById(packetId);
+        return res.status(200).json(currentPacket);
+      }
+      if (normalizePacketWorkflowStage(currentPacketRow.status) !== 'draft') {
+        await conn.rollback();
+        return res.status(409).json({
+          error: 'payment_packet_changed_during_submission',
+          status: currentPacketRow.status || null,
+          submissionAttemptId,
         });
       }
     }
@@ -82152,6 +82175,13 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
     }
 
     await conn.commit();
+    if (submissionAttemptId) {
+      try {
+        await completePaymentSubmissionAttempt(pool, submissionAttemptId);
+      } catch (attemptError) {
+        console.warn('[payments] failed to mark submission attempt complete', attemptError?.message || attemptError);
+      }
+    }
     await refreshFinancePotSums();
     const packet = await fetchPaymentPacketById(packetId);
     if (!packet) {
@@ -86382,24 +86412,6 @@ if (fs.existsSync(buildDir)) {
       return next();
     }
     res.sendFile(path.join(buildDir, 'index.html'));
-  });
-}
-
-if (process.env.PATH_REPAIR_EXPORTS === '1') {
-  module.exports = {
-    pool,
-    startInterventionReviewWorkflow,
-    storeAssessmentPdfDocument,
-    syncInterventionProposalCompatibility,
-    generateAndStoreInterventionAssessmentPdf,
-    generateAndStoreRevisionAssessmentPdf,
-    fetchInterventionWithCase,
-    REVIEW_WORKFLOW_TYPES,
-  };
-} else {
-  app.listen(port, '0.0.0.0', () => {
-    console.log(`Server running on port ${port}`);
-    console.log(`CORS allowed origin: ${corsOptions.origin}`);
   });
 }
 
@@ -92822,3 +92834,30 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
+
+const adminRepairExports = {
+  pool,
+  startInterventionReviewWorkflow,
+  storeAssessmentPdfDocument,
+  syncInterventionProposalCompatibility,
+  generateAndStoreInterventionAssessmentPdf,
+  generateAndStoreRevisionAssessmentPdf,
+  fetchInterventionWithCase,
+  REVIEW_WORKFLOW_TYPES,
+};
+
+if (require.main === module && !PATH_REPAIR_EXPORT_MODE) {
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`Server running on port ${port}`);
+    console.log(`CORS allowed origin: ${corsOptions.origin}`);
+  });
+}
+
+if (PATH_REPAIR_EXPORT_MODE) {
+  module.exports = {
+    app,
+    ...adminRepairExports,
+  };
+} else {
+  module.exports = app;
+}

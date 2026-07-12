@@ -1,6 +1,6 @@
 # Payments Workflow Automation
 
-Status: TEST rehearsal green on 2026-05-11 for the NWAC email payment transformation; PROD preflight/config remains pending.
+Status: R7 local safety regression green on 2026-07-12; the 2026-05-11 TEST rehearsal remains historical evidence and fresh TEST/PROD preflight/config is still required.
 
 This note tracks the automated test strategy for PATH payments. The goal is to cover the workflow in layers so implementation changes are checked before PROD rollout and before real payment use is enabled.
 
@@ -17,6 +17,14 @@ This note tracks the automated test strategy for PATH payments. The goal is to c
   - Checks that payment communications use selected-packet scope and no longer create a placeholder `finance@nwac.org` log on one click.
   - Checks that line-level payment evidence attach is supported by API and UI.
   - Checks that budget/reporting labels use PATH operational payment semantics (`Recorded paid`, `Recorded actual`) and that Financial Reports read explicit follow-up state.
+  - Checks that follow-up evidence composes document authorization with packet containment, external handoff commits a durable attempt before dispatch, and Intacct success requires a documented envelope plus external ID.
+
+- R7 focused concurrency/scope suites
+  - `tests/paymentSubmissionAttempt.test.js` proves one provider dispatch for competing callers, accepted replay, known-failure retry, and ambiguous quarantine without a real provider call.
+  - `tests/allocationApply.test.js` proves competing allocation applies transfer once and insufficient authority rolls back.
+  - `tests/paymentFollowUpEvidence.test.js` proves both authorization layers are required.
+  - `src/pages/finance/widgets/PaymentsDataContext.scope.test.jsx` proves case changes immediately mask old payment state, ignore stale packet/communication responses, and prevent an old-packet mutation.
+  - `src/lib/__tests__/intacctRestEnvelope.test.js` proves current `ia::result` / `ia::meta` parsing and fail-closed object-ID rules.
 
 - `DB_HOST=172.26.176.1 npm run payments:workflow:smoke`
   - Runs a rollback-only DEV database workflow smoke through `scripts/payments-workflow-smoke.js`.
@@ -96,3 +104,4 @@ Build the remaining automation in this order:
 - Use documented DEV/TEST/PROD DB access paths; do not experiment with ad hoc connection attempts.
 - Browser smokes should fail on console errors, failed API responses, backend `500`s, and visible workflow mismatches.
 - Every persistent fixture mode must include cleanup verification.
+- An attempt in `ambiguous` state must be reconciled by an authorized operator/provider check; automation must not resend it.

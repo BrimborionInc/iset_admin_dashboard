@@ -1,7 +1,7 @@
 Status: current
 Purpose: Track how faithfully the local Intacct mock and PATH sender model the external Sage Intacct interface.
 Audience: Admin dashboard engineers, mock-service engineers, future Intacct integration threads.
-Last Updated: 2026-07-10
+Last Updated: 2026-07-12
 
 # Sage Intacct Interface Fidelity Audit
 
@@ -18,8 +18,8 @@ Important boundary: the local audit script proves that the PATH sender and mock 
 Local evidence:
 
 - PATH sender in `isetadminserver.js`, especially `resolveIntacctRestBaseUrl`, `fetchIntacctRestAccessToken`, `fetchIntacctVendors`, `createIntacctVendor`, `buildIntacctRestBillPayload`, and `sendIntacctRestForPacket`.
-- Mock service in `../intacct-mock-service/src/server.js`.
-- Mock service README in `../intacct-mock-service/README.md`.
+- Mock service in `../../../intacct-mock-service/src/server.js`.
+- Mock service README in `../../../intacct-mock-service/README.md`.
 - Historical PATH finance docs and UI previews that still mention the XML Web Services APBILL shape.
 
 Official Sage evidence checked on 2026-06-15:
@@ -51,7 +51,7 @@ PATH currently treats the Intacct integration as a REST-style flow:
 | AP bill get | `GET /ia/api/v1/objects/accounts-payable/bill/:id` | Returns in-memory bill on canonical route plus legacy local aliases | Path now matches current official REST object-map evidence |
 | Attachments | `POST /ia/api/v1/objects/accounts-payable/bill/:id/attachments` | No-op accepted stub on canonical route plus legacy local aliases | Route is Sage-style, but exact supporting-document behavior still needs Sage evidence |
 | Errors | Expects `{ error: { message, details } }` | Returns `{ error: { code, message, details } }` | Does not model Sage's documented `ia::error` contract |
-| Success | Expects `{ data: { id } }` | Returns `{ data: ... }` | Confirmed mismatch with documented `ia::result` / `ia::meta` success envelopes; tracked as `EA-013` |
+| Success | Parses `ia::result` / `ia::meta`, requires object `id` or `key`, and fails on `totalError` | Returns Sage-style `ia::result` / `ia::meta` on object endpoints | Success-envelope mismatch closed locally under `EA-013`; old `data` parsing is explicit local-transition compatibility only |
 
 The mock also serves dashboard-only endpoints under `/mock/api/*`. Those are allowed test conveniences and are not part of the simulated Sage-facing contract.
 
@@ -79,7 +79,7 @@ Needs confirmation:
 | Gap | Risk | Current status | Recommended next move |
 | --- | --- | --- | --- |
 | Mock token endpoint returns a fixed token and only checks for any bearer header. | Medium | Accepted for local only | Add negative auth cases and token-shape validation mode once real auth pattern is confirmed. |
-| Mock/PATH success envelopes use `{ data }`, not documented Sage REST `ia::result` and `ia::meta`; PATH records a 2xx Sage-style response as success with a null bill ID and skips attachments. | High | Confirmed interface incompatibility; cycle finding `EA-013` | Parse/validate Sage envelopes first, fail closed without an external ID, and add Sage-envelope mode to the mock before sandbox replay. |
+| Exact Sage REST error envelope/details are not yet modeled. | Medium | Success envelopes fixed locally under `EA-013`; error fidelity still needs evidence | Capture current object-specific `ia::error` examples or approved sandbox responses before implementing a canonical error parser. |
 | PATH bill payload is simplified snake_case JSON (`vendor_id`, `bill_date`, `due_date`, `gl_account`). | High | Needs fix/evidence | Map PATH domain payloads to documented REST fields or to XML APBILL fields if XML is selected. |
 | Legacy local aliases under `/objects/vendors` and `/objects/apbills` remain accepted by the mock and are available as local fallback for PATH when the base URL is localhost. | Low | Accepted mock-only during transition | Remove after canonical route usage has been stable and no local tooling depends on the old paths. |
 | One PATH payment packet currently creates one external bill using the first line's vendor. | High | Known design gap | Split external bills by vendor/payee, then by any Sage-required grouping dimensions. |
@@ -113,14 +113,14 @@ Definition of done for future Intacct mock fidelity changes:
 
 ## Recommended Next Implementation Slice
 
-1. Add a Sage-envelope response mode in the mock and update PATH parsing to accept `ia::result`/`ia::meta` first while retaining local envelope parsing during transition.
-2. Refactor bill creation so one packet can produce multiple external bills grouped by vendor/payee and any confirmed Sage grouping dimensions.
-3. Confirm exact REST create payload fields for `accounts-payable/bill` and `accounts-payable/vendor` against the official OpenAPI reference or sandbox evidence.
-4. Verify Sage attachment/supporting-document behavior and replace the no-op attachment stub with a faithful simulation.
-5. Add sandbox replay fixtures once a Sage Intacct sandbox tenant is available.
+1. Refactor bill creation so one packet can produce multiple external bills grouped by vendor/payee and any confirmed Sage grouping dimensions.
+2. Confirm exact REST create payload fields for `accounts-payable/bill` and `accounts-payable/vendor` against the official OpenAPI reference or sandbox evidence.
+3. Verify Sage attachment/supporting-document and error-envelope behavior, then replace the current stubs with a faithful simulation.
+4. Add sandbox replay fixtures once a Sage Intacct sandbox tenant is available.
 
 ## Implementation Progress
 
+- 2026-07-12: Rechecked current official Sage object examples, which continue to show collections/objects under `ia::result` with `ia::meta`, object `id`/`key`, and create metadata including `totalError`. PATH now parses that contract first, rejects error-bearing/malformed/no-ID 2xx responses before attachment or success recording, and limits the old `data` wrapper to the explicit local transition boundary. The unversioned mock now emits Sage-style success envelopes; its closure hashes are recorded in the engineering audit register. Four parser tests, payment source contracts, mock/server syntax, manifest JSON, and all 18 local drift checks pass. `EA-013` is closed locally for the success-envelope defect only; no provider/sandbox/environment call occurred and the other fidelity gaps above remain open.
 - 2026-07-10: Revalidated the REST success-envelope contract against the current official Sage `Try it` page. The contracts audit traced PATH's `submitPayload?.data?.id` parser through attachment dispatch and reconciliation metadata: a normal Sage `ia::result` success would leave `billId` null while PATH still records the communication and attempt as successful. This is now tracked as `EA-013` in `docs/planning/engineering-audit-register.md`. Current PROD has Intacct REST disabled and zero payment rows; no live mutation or sandbox call was performed. The exact bill/vendor payload, OAuth, attachment, and error-envelope gaps remain open.
 - 2026-06-15: Canonical Sage-style REST object paths became primary for PATH and the mock:
   - `/ia/api/v1/objects/accounts-payable/vendor`

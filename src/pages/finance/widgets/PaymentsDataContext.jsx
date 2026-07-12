@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../../../auth/apiClient";
 
 const PaymentsDataContext = createContext(undefined);
@@ -636,27 +636,69 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       }),
     [status, statuses, caseId, clientId, interventionId, reportingUnit, limit]
   );
-  const [requests, setRequests] = useState([]);
+  const scopeKey = queryString || "all";
+  const scopeKeyRef = useRef(scopeKey);
+  scopeKeyRef.current = scopeKey;
+  const [requestState, setRequestState] = useState({ scopeKey: null, items: [] });
+  const requests = requestState.scopeKey === scopeKey ? requestState.items : [];
+  const setRequests = useCallback(nextValue => {
+    setRequestState(previousState => {
+      const previousItems = previousState.scopeKey === scopeKey ? previousState.items : [];
+      const items = typeof nextValue === "function" ? nextValue(previousItems) : nextValue;
+      return { scopeKey, items: Array.isArray(items) ? items : [] };
+    });
+  }, [scopeKey]);
   const [selectedRequestId, setSelectedRequestId] = useState(null);
-  const [communications, setCommunications] = useState([]);
+  const [communicationState, setCommunicationState] = useState({ scopeKey: null, items: [] });
+  const activeSelectedRequestId = selectedRequestId && requests.some(entry => entry.id === selectedRequestId)
+    ? selectedRequestId
+    : null;
+  const communicationOwnerKey = `${scopeKey}|${activeSelectedRequestId || "none"}`;
+  const communications = communicationState.scopeKey === communicationOwnerKey
+    ? communicationState.items
+    : [];
+  const setCommunications = useCallback(nextValue => {
+    setCommunicationState(previousState => {
+      const previousItems = previousState.scopeKey === communicationOwnerKey
+        ? previousState.items
+        : [];
+      const items = typeof nextValue === "function" ? nextValue(previousItems) : nextValue;
+      return { scopeKey: communicationOwnerKey, items: Array.isArray(items) ? items : [] };
+    });
+  }, [communicationOwnerKey]);
+  const requestGenerationRef = useRef(0);
+  const communicationGenerationRef = useRef(0);
+  const requestAbortRef = useRef(null);
+  const communicationAbortRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [paymentTypeMapping, setPaymentTypeMapping] = useState(null);
   const [paymentTypeMappingLoading, setPaymentTypeMappingLoading] = useState(false);
 
   const loadCommunications = useCallback(async (packetIdOverride = null) => {
+    const scopedPacketId =
+      packetIdOverride !== null && packetIdOverride !== undefined && packetIdOverride !== ""
+        ? String(packetIdOverride)
+        : "";
+    const ownerKey = `${scopeKey}|${scopedPacketId || "none"}`;
+    const generation = communicationGenerationRef.current + 1;
+    communicationGenerationRef.current = generation;
+    communicationAbortRef.current?.abort();
+    const controller = new AbortController();
+    communicationAbortRef.current = controller;
+    if (!scopedPacketId) {
+      setCommunicationState({ scopeKey: ownerKey, items: [] });
+      return;
+    }
     try {
-      const scopedPacketId =
-        packetIdOverride !== null && packetIdOverride !== undefined && packetIdOverride !== ""
-          ? String(packetIdOverride)
-          : "";
       const endpoint = scopedPacketId
         ? `/api/finance/payment-communications?packetId=${encodeURIComponent(scopedPacketId)}`
         : "/api/finance/payment-communications";
-      const resp = await apiFetch(endpoint);
+      const resp = await apiFetch(endpoint, { signal: controller.signal });
+      if (generation !== communicationGenerationRef.current || scopeKeyRef.current !== scopeKey) return;
       if (!resp.ok) {
         if (!scopedPacketId && (resp.status === 400 || resp.status === 403)) {
-          setCommunications([]);
+          setCommunicationState({ scopeKey: ownerKey, items: [] });
           return;
         }
         throw new Error(`Communications load failed (${resp.status})`);
@@ -665,12 +707,14 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       const normalized = Array.isArray(data)
         ? data.map(normalizeCommunication).filter(Boolean)
         : [];
-      setCommunications(normalized);
+      if (generation !== communicationGenerationRef.current || scopeKeyRef.current !== scopeKey) return;
+      setCommunicationState({ scopeKey: ownerKey, items: normalized });
     } catch (err) {
+      if (controller.signal.aborted || generation !== communicationGenerationRef.current || scopeKeyRef.current !== scopeKey) return;
       console.error("[Payments] failed to load communications", err);
-      setCommunications([]);
+      setCommunicationState({ scopeKey: ownerKey, items: [] });
     }
-  }, []);
+  }, [scopeKey]);
 
   const loadPaymentTypeMapping = useCallback(async () => {
     setPaymentTypeMappingLoading(true);
@@ -691,35 +735,50 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
   }, []);
 
   const loadRequests = useCallback(async () => {
+    const generation = requestGenerationRef.current + 1;
+    requestGenerationRef.current = generation;
+    requestAbortRef.current?.abort();
+    const controller = new AbortController();
+    requestAbortRef.current = controller;
     setLoading(true);
     setError(null);
     try {
       const endpoint = queryString
         ? `/api/finance/payment-packets?${queryString}`
         : "/api/finance/payment-packets";
-      const resp = await apiFetch(endpoint);
+      const resp = await apiFetch(endpoint, { signal: controller.signal });
+      if (generation !== requestGenerationRef.current || scopeKeyRef.current !== scopeKey) return;
       if (!resp.ok) {
         throw new Error(`Load failed (${resp.status})`);
       }
       const data = await resp.json();
       const normalized = Array.isArray(data) ? data.map(normalizePacket) : [];
+      if (generation !== requestGenerationRef.current || scopeKeyRef.current !== scopeKey) return;
       setRequests(normalized);
     } catch (err) {
+      if (controller.signal.aborted || generation !== requestGenerationRef.current || scopeKeyRef.current !== scopeKey) return;
       console.error("[Payments] failed to load packets", err);
       setError(err.message || "Failed to load payment packets");
       setRequests([]);
     } finally {
-      setLoading(false);
+      if (generation === requestGenerationRef.current && scopeKeyRef.current === scopeKey) {
+        setLoading(false);
+      }
     }
-  }, [queryString]);
+  }, [queryString, scopeKey, setRequests]);
+
+  useEffect(() => () => {
+    requestAbortRef.current?.abort();
+    communicationAbortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     loadRequests();
   }, [loadRequests]);
 
   useEffect(() => {
-    loadCommunications(selectedRequestId || null);
-  }, [loadCommunications, selectedRequestId]);
+    loadCommunications(activeSelectedRequestId);
+  }, [activeSelectedRequestId, loadCommunications, scopeKey]);
 
   useEffect(() => {
     loadPaymentTypeMapping();
@@ -740,12 +799,55 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
     setSelectedRequestId(null);
   }, [autoSelectFirst, requests, selectedRequestId]);
 
-  const selectRequest = useCallback(requestId => {
-    setSelectedRequestId(requestId ?? null);
+  const paymentScopeError = useCallback(resource => {
+    const error = new Error(`Payment ${resource} is outside the active workspace scope.`);
+    error.code = "PAYMENT_SCOPE_NOT_READY";
+    return error;
   }, []);
+
+  const assertPacketInCurrentScope = useCallback(packetId => {
+    const id = packetId === null || packetId === undefined ? "" : String(packetId);
+    const packet = requests.find(entry => String(entry.id) === id) || null;
+    if (!packet) throw paymentScopeError("packet");
+    return packet;
+  }, [paymentScopeError, requests]);
+
+  const assertLineInCurrentScope = useCallback(lineId => {
+    const id = lineId === null || lineId === undefined ? "" : String(lineId);
+    const packet = requests.find(entry =>
+      (entry.lines || []).some(line => String(line.id) === id)
+    ) || null;
+    if (!packet) throw paymentScopeError("line");
+    return packet;
+  }, [paymentScopeError, requests]);
+
+  const assertDocumentLinkInCurrentScope = useCallback(documentLinkId => {
+    const id = documentLinkId === null || documentLinkId === undefined ? "" : String(documentLinkId);
+    const matches = item => String(item?.id || item?.linkId || item?.documentLinkId || "") === id;
+    const evidenceMatches = list => (Array.isArray(list) ? list : []).some(item =>
+      matches(item) || (item?.documentLinks || []).some(matches)
+    );
+    const packet = requests.find(entry =>
+      (entry.documents || []).some(matches) ||
+      evidenceMatches(entry.baselineEvidence) ||
+      (entry.lines || []).some(line => evidenceMatches(line.evidenceChecklist))
+    ) || null;
+    if (!packet) throw paymentScopeError("document link");
+    return packet;
+  }, [paymentScopeError, requests]);
+
+  const selectRequest = useCallback(requestId => {
+    if (requestId === null || requestId === undefined) {
+      setSelectedRequestId(null);
+      return;
+    }
+    assertPacketInCurrentScope(requestId);
+    setSelectedRequestId(String(requestId));
+  }, [assertPacketInCurrentScope]);
 
   const updatePacketStatus = useCallback(async (packetId, status, options = {}) => {
     if (!packetId || !status) return null;
+    assertPacketInCurrentScope(packetId);
     try {
       const resp = await apiFetch(
         `/api/finance/payment-packets/${encodeURIComponent(packetId)}/status`,
@@ -784,10 +886,11 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       setError(message);
       throw err;
     }
-  }, [loadCommunications]);
+  }, [assertPacketInCurrentScope, loadCommunications]);
 
   const validatePacket = useCallback(async packetId => {
     if (!packetId) return null;
+    assertPacketInCurrentScope(packetId);
     try {
       const resp = await apiFetch(
         `/api/finance/payment-packets/${encodeURIComponent(packetId)}/validate`,
@@ -819,10 +922,11 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       setError(message);
       throw err;
     }
-  }, []);
+  }, [assertPacketInCurrentScope]);
 
   const updateLineStatus = useCallback(async (lineId, status, options = {}) => {
     if (!lineId || !status) return null;
+    assertLineInCurrentScope(lineId);
     try {
       const resp = await apiFetch(
         `/api/finance/payment-lines/${encodeURIComponent(lineId)}/status`,
@@ -875,10 +979,11 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       setError(message);
       throw err;
     }
-  }, []);
+  }, [assertLineInCurrentScope]);
 
   const updateLine = useCallback(async (lineId, payload = {}) => {
     if (!lineId) return null;
+    assertLineInCurrentScope(lineId);
     try {
       const resp = await apiFetch(
         `/api/finance/payment-lines/${encodeURIComponent(lineId)}`,
@@ -931,10 +1036,11 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       setError(message);
       throw err;
     }
-  }, []);
+  }, [assertLineInCurrentScope]);
 
   const logPaymentFollowUp = useCallback(async (packetId, payload = {}) => {
     if (!packetId) return null;
+    assertPacketInCurrentScope(packetId);
     try {
       const resp = await apiFetch(
         `/api/finance/payment-packets/${encodeURIComponent(packetId)}/follow-up`,
@@ -971,10 +1077,11 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       setError(message);
       throw err;
     }
-  }, []);
+  }, [assertPacketInCurrentScope]);
 
   const deleteLine = useCallback(async lineId => {
     if (!lineId) return null;
+    assertLineInCurrentScope(lineId);
     try {
       const resp = await apiFetch(
         `/api/finance/payment-lines/${encodeURIComponent(lineId)}`,
@@ -1006,7 +1113,7 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       setError(message);
       throw err;
     }
-  }, [loadRequests]);
+  }, [assertLineInCurrentScope, loadRequests]);
 
   const createPacket = useCallback(async payload => {
     try {
@@ -1046,6 +1153,7 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
 
   const deletePacket = useCallback(async packetId => {
     if (!packetId) return null;
+    assertPacketInCurrentScope(packetId);
     try {
       const resp = await apiFetch(
         `/api/finance/payment-packets/${encodeURIComponent(packetId)}`,
@@ -1071,10 +1179,11 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       setError(message);
       throw err;
     }
-  }, [selectedRequestId]);
+  }, [assertPacketInCurrentScope, selectedRequestId]);
 
   const addPacketLines = useCallback(async (packetId, payload = {}) => {
     if (!packetId) return null;
+    assertPacketInCurrentScope(packetId);
     try {
       const resp = await apiFetch(
         `/api/finance/payment-packets/${encodeURIComponent(packetId)}/lines`,
@@ -1106,13 +1215,14 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       setError(message);
       throw err;
     }
-  }, []);
+  }, [assertPacketInCurrentScope]);
 
   const createBatch = useCallback(async lineIds => {
     const normalized = Array.isArray(lineIds)
       ? lineIds.map(id => String(id)).filter(Boolean)
       : [];
     if (!normalized.length) return null;
+    normalized.forEach(assertLineInCurrentScope);
     try {
       const resp = await apiFetch("/api/finance/payment-batches", {
         method: "POST",
@@ -1131,7 +1241,7 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       setError(message);
       throw new Error(message);
     }
-  }, [loadRequests]);
+  }, [assertLineInCurrentScope, loadRequests]);
 
   const updateBatchStatus = useCallback(async (batchId, status) => {
     if (!batchId || !status) return null;
@@ -1160,6 +1270,7 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
 
   const createRecurringLines = useCallback(async (packetId, payload = {}) => {
     if (!packetId) return null;
+    assertPacketInCurrentScope(packetId);
     try {
       const resp = await apiFetch(
         `/api/finance/payment-packets/${encodeURIComponent(packetId)}/lines/recurring`,
@@ -1191,10 +1302,11 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       setError(message);
       throw new Error(message);
     }
-  }, []);
+  }, [assertPacketInCurrentScope]);
 
   const updateEvidence = useCallback(async (documentLinkId, payload = {}) => {
     if (!documentLinkId) return null;
+    assertDocumentLinkInCurrentScope(documentLinkId);
     try {
       const resp = await apiFetch(
         `/api/finance/payment-documents/${encodeURIComponent(documentLinkId)}`,
@@ -1216,10 +1328,11 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       setError(message);
       throw new Error(message);
     }
-  }, [loadRequests]);
+  }, [assertDocumentLinkInCurrentScope, loadRequests]);
 
   const addCommunication = useCallback(async payload => {
     if (!payload?.packetId) return null;
+    assertPacketInCurrentScope(payload.packetId);
     try {
       const resp = await apiFetch("/api/finance/payment-communications", {
         method: "POST",
@@ -1248,7 +1361,7 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       console.error("[Payments] failed to log communication", err);
       return null;
     }
-  }, []);
+  }, [assertPacketInCurrentScope, setCommunications]);
 
   const sendPacketEmail = useCallback(async (packetId, note = null) => {
     if (!packetId) return null;
@@ -1256,8 +1369,8 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
   }, [updatePacketStatus]);
 
   const selectedRequest = useMemo(
-    () => requests.find(entry => entry.id === selectedRequestId) ?? null,
-    [requests, selectedRequestId],
+    () => requests.find(entry => entry.id === activeSelectedRequestId) ?? null,
+    [activeSelectedRequestId, requests],
   );
 
   const paymentTypeMappingLookup = useMemo(
@@ -1310,7 +1423,7 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
     () => ({
       requests,
       selectedRequest,
-      selectedRequestId,
+      selectedRequestId: activeSelectedRequestId,
       selectRequest,
       updatePacketStatus,
       validatePacket,
@@ -1345,7 +1458,7 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
     [
       requests,
       selectedRequest,
-      selectedRequestId,
+      activeSelectedRequestId,
       selectRequest,
       updatePacketStatus,
       validatePacket,

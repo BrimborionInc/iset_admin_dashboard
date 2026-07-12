@@ -1,9 +1,15 @@
 {
   "schemaVersion": 1,
-  "lastUpdated": "2026-06-15",
+  "lastUpdated": "2026-07-12",
   "purpose": "Static drift guard for the PATH Intacct sender and local Intacct mock contract. This manifest does not certify Sage fidelity; it records the local contract and known gaps that must be resolved with official Sage documentation or sandbox evidence.",
   "auditDoc": "docs/planning/intacct-interface-fidelity-audit.md",
   "externalReferences": [
+    {
+      "id": "sage-rest-success-envelope",
+      "title": "Sage Intacct REST success envelope examples",
+      "url": "https://developer.sage.com/intacct/docs/1/sage-intacct-rest-api/get-started/try-it",
+      "status": "authoritative-reference"
+    },
     {
       "id": "sage-rest-openapi",
       "title": "Sage Intacct REST API reference",
@@ -83,11 +89,27 @@
       "description": "PATH keeps old local mock paths only as localhost/default compatibility fallback."
     },
     {
-      "id": "path-current-success-envelope",
+      "id": "path-sage-success-envelope",
       "file": "isetadminserver.js",
-      "mustContain": "submitPayload?.data?.id",
+      "mustContain": [
+        "extractIntacctRestCollection",
+        "extractIntacctRestObjectId",
+        "intacct_rest_invalid_success_response"
+      ],
       "severity": "pass-fail",
-      "description": "PATH currently expects the mock success envelope to contain data.id."
+      "description": "PATH parses ia::result/ia::meta and refuses to record success without a stable external object ID."
+    },
+    {
+      "id": "mock-sage-success-envelope",
+      "file": "../intacct-mock-service/src/server.js",
+      "mustContain": [
+        "buildSageObjectEnvelope",
+        "buildSageCollectionEnvelope",
+        "\"ia::result\"",
+        "\"ia::meta\""
+      ],
+      "severity": "pass-fail",
+      "description": "The mock object endpoints return Sage-style success envelopes instead of the old data wrapper."
     },
     {
       "id": "path-current-payload-fields",
@@ -199,10 +221,10 @@
       "summary": "The mock returns a fixed bearer token and accepts any Authorization header beginning with Bearer."
     },
     {
-      "id": "sage-rest-response-envelope",
-      "status": "target-fidelity",
-      "severity": "high",
-      "summary": "The mock returns data/error envelopes while current Sage REST examples use ia::result, ia::meta, and ia::error."
+      "id": "sage-rest-error-envelope",
+      "status": "needs-sage-evidence",
+      "severity": "medium",
+      "summary": "Success envelopes now use ia::result/ia::meta; exact object-specific ia::error parsing and mock error fidelity still need current official examples or sandbox evidence."
     },
     {
       "id": "bill-payload-field-shape",

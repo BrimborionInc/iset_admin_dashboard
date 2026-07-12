@@ -17,6 +17,9 @@ const extractBetween = (source, start, end) => {
 describe("payments workflow safety rails", () => {
   const serverSource = readRepoFile("isetadminserver.js");
   const followUpMigration = readRepoFile("sql/migrations/20260511_0001_add_payment_followup_model.sql");
+  const submissionAttemptMigration = readRepoFile("sql/migrations/20260712_0001_add_payment_submission_attempt.sql");
+  const submissionAttemptService = readRepoFile("src/lib/paymentSubmissionAttempt.js");
+  const followUpEvidenceService = readRepoFile("src/lib/paymentFollowUpEvidence.js");
   const paymentEvidenceBaselineOpsSql = readRepoFile("sql/ops/update-payment-evidence-baseline-20260523.sql");
   const dataContextSource = readRepoFile("src/pages/finance/widgets/PaymentsDataContext.jsx");
   const detailWidgetSource = readRepoFile("src/pages/finance/widgets/PaymentDetailWidget.jsx");
@@ -79,6 +82,53 @@ describe("payments workflow safety rails", () => {
     expect(serverSource).toContain("app.post('/api/finance/payment-packets/:id/follow-up'");
     expect(dataContextSource).toContain("const logPaymentFollowUp = useCallback");
     expect(detailWidgetSource).toContain("Log follow-up");
+  });
+
+  test("payment follow-up evidence requires document access and packet containment", () => {
+    const route = extractBetween(
+      serverSource,
+      "async function handleRecordPaymentFollowUp",
+      "app.post('/api/finance/payment-packets/:id/follow-up'"
+    );
+
+    const documentAccess = route.indexOf("validateDocument: () => validateDocumentAccess(req, docRow");
+    const packetContainment = route.indexOf("validatePacketDocument: () => validatePaymentPacketDocumentAccess(req");
+    const firstFollowUpWrite = route.indexOf("UPDATE payment_packet_line");
+    expect(documentAccess).toBeGreaterThan(0);
+    expect(packetContainment).toBeGreaterThan(documentAccess);
+    expect(packetContainment).toBeLessThan(firstFollowUpWrite);
+    expect(route).toContain("await validatePaymentFollowUpEvidence");
+    expect(followUpEvidenceService.indexOf("await validateDocument()")).toBeLessThan(
+      followUpEvidenceService.indexOf("await validatePacketDocument()")
+    );
+  });
+
+  test("external payment handoff is claimed durably before provider dispatch", () => {
+    const route = extractBetween(
+      serverSource,
+      "app.post('/api/finance/payment-packets/:id/status'",
+      "app.post('/api/finance/payment-packets/:id/lines'"
+    );
+    expect(submissionAttemptMigration).toContain("uq_payment_submission_attempt_packet_key");
+    expect(submissionAttemptService).toContain("payment_submission_outcome_ambiguous");
+    expect(route).toContain("await conn.commit();");
+    expect(route).toContain("dispatchPaymentSubmissionWithAttempt");
+    expect(route.indexOf("await conn.commit();")).toBeLessThan(
+      route.indexOf("dispatchPaymentSubmissionWithAttempt")
+    );
+    expect(route).toContain("completePaymentSubmissionAttempt");
+  });
+
+  test("Intacct success requires the documented result envelope and external object id", () => {
+    const sender = extractBetween(
+      serverSource,
+      "const fetchIntacctVendors = async",
+      "async function fetchPaymentCommunicationById"
+    );
+    expect(sender).toContain("extractIntacctRestCollection");
+    expect(sender).toContain("extractIntacctRestObjectId");
+    expect(sender).toContain("intacct_rest_invalid_success_response");
+    expect(sender).not.toContain("submitPayload?.data?.id");
   });
 
   test("cross-client payments dashboard is an operational surface, not the old scaffold", () => {
