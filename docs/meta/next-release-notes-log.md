@@ -464,9 +464,20 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Final application submission now rechecks every required answer and signature on the applicant's applicable intake path and saves the core application records together so transient failures cannot leave a partial submission.
+- PATH now keeps case, payment, applicant, and notification work tied to the correct record while making retries and overlapping background work safer.
+- Public portal signing, staff-assisted intake, client imports, budget transfers, and external payment handoffs now have stronger duplicate and partial-failure protection.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260712-engineering-audit-test
+
+- Moving between cases, applications, or payment filters now hides the previous record immediately and prevents older responses or selections from acting on the new workspace.
+- Public portal screens require an applicant account, prior intake answers stay on the server, and message/signing lists return only the information they display.
+- Repeated signing, client-import, budget-allocation, notification, and payment-handoff work now converges safely instead of creating duplicate or uncertain actions.
+- Reminder and notification delivery can recover from known temporary failures, while uncertain email outcomes are held for System Administrator review rather than blindly resent.
+- AI model, parameter, and fallback settings now use one durable configuration across admin, portal, restarts, and instance replacement.
+- Intake component choices are explicitly static-only, the unused PTMA administration surface is retired, and NWAC Hub Management remains available to System Administrators.
+- Payment evidence and follow-up actions remain inside their packet/case scope; Finance email and Intacct routing remain disabled for this release rehearsal.
 
 #### Release 20260710-r1-intake-completion-prod
 
@@ -480,21 +491,26 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Conflict-related reassignment now records a separate `reassigned` disposition and supports optional reviewer notes.
 - Both outcomes create a human-readable audit event and send the declaring staff member a direct notification using the applicant's name.
 
-#### Release 20260709-portal-application-start-gate-prod
-
-- The applicant dashboard now hides Start New and any saved draft while a submitted non-terminal application is in process.
-- Direct links to the intake wizard now recheck eligibility before rendering the form and return the applicant to the dashboard when another application is blocking.
-- The eligibility check now covers admin/manual-intake, account-activation, and future console-created application-only cases by checking the applicant's linked client record as well as the original submission owner.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- La soumission finale reverifie maintenant chaque reponse et signature obligatoire du parcours applicable et enregistre ensemble les dossiers principaux afin qu'une erreur temporaire ne laisse pas une soumission partielle.
+- PATH conserve maintenant le travail lie aux cas, paiements, demandeurs et notifications dans le bon dossier, tout en rendant plus securitaires les nouvelles tentatives et les taches d'arriere-plan simultanees.
+- La signature du portail public, l'admission assistee, l'importation de clients, les transferts budgetaires et les transferts de paiement externes offrent maintenant une meilleure protection contre les doublons et les echecs partiels.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260712-engineering-audit-test
+
+- Le passage entre les cas, demandes ou filtres de paiement masque immediatement l'ancien dossier et empeche les anciennes reponses ou selections d'agir dans le nouvel espace de travail.
+- Les ecrans du portail public exigent un compte demandeur, les reponses d'admission precedentes restent sur le serveur et les listes de messages et de signatures retournent seulement les renseignements affiches.
+- Les nouvelles tentatives de signature, d'importation de clients, d'affectation budgetaire, de notification et de transfert de paiement convergent maintenant de facon securitaire au lieu de creer des actions en double ou incertaines.
+- La livraison des rappels et notifications peut reprendre apres un echec temporaire connu; les resultats de courriel incertains sont conserves pour examen par un administrateur systeme plutot que renvoyes automatiquement.
+- Les modeles, parametres et solutions de repli de l'IA utilisent maintenant une configuration durable commune a l'administration, au portail, aux redemarrages et au remplacement d'instance.
+- Les choix de composants d'admission sont maintenant explicitement statiques, l'ancienne administration PTMA inutilisee est retiree et la gestion des carrefours NWAC demeure offerte aux administrateurs systeme.
+- Les preuves et suivis de paiement restent limites a leur dossier de paiement et a leur cas; le routage des courriels Finance et d'Intacct demeure desactive pendant cette repetition.
 
 #### Release 20260710-r1-intake-completion-prod
 
@@ -507,12 +523,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - La resolution d'un conflit declare exige maintenant des notes et consigne une decision `cleared` sans modifier la declaration originale.
 - La reaffectation liee a un conflit consigne maintenant une decision distincte `reassigned` et accepte des notes de revision facultatives.
 - Les deux resultats creent un evenement d'audit lisible et envoient une notification directe au membre du personnel qui a declare le conflit, en utilisant le nom du demandeur.
-
-#### Release 20260709-portal-application-start-gate-prod
-
-- Le tableau de bord demandeur masque maintenant Commencer une nouvelle demande et tout brouillon sauvegarde lorsqu'une demande soumise non terminale est en traitement.
-- Les liens directs vers le formulaire d'admission reverifient maintenant l'admissibilite avant d'afficher le formulaire et retournent le demandeur au tableau de bord lorsqu'une autre demande bloque le demarrage.
-- La verification couvre maintenant les cas d'admission manuelle/admin, d'activation de compte et les futurs cas d'application sans soumission creee dans la console, en utilisant le dossier client lie au demandeur en plus du proprietaire original de la soumission.
 
 ### Problemes connus (brouillon - FR)
 
