@@ -204,6 +204,7 @@ Treat this file as the current project context for this repo. If the user refere
 - Documentation cleanup audit: `docs/meta/documentation-audit-2026-04-29.md`
 - Documentation cleanup execution tracker: `docs/meta/documentation-cleanup-plan-2026-04-29.md`
 - Cross-system engineering audit register: `docs/planning/engineering-audit-register.md`
+- Consolidated engineering-audit application release boundary: `docs/planning/engineering-audit-release-wave-manifest.md`
 - Codex thread/context recovery index: `docs/meta/codex-thread-index.md`
 - Public portal documentation entry point: `../ISET-intake/docs/AGENTS.md`
 - Applicant-account activation data model: `docs/data/applicant-account-activation.md`
