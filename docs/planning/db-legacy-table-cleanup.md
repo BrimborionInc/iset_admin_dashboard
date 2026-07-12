@@ -1,5 +1,5 @@
 # Legacy Table Cleanup Plan (Dev)
-_Last updated: 2025-01-13_
+_Last updated: 2026-07-12_
 
 ## Objective
 Identify tables in the shared database that are unused by the current admin dashboard or public intake codebases, validate no live dependencies, and drop them safely in development.
@@ -62,6 +62,7 @@ Identify tables in the shared database that are unused by the current admin dash
   - 2025-01-13: Dropped zero-row legacy tables in dev: `booking`, `counter_session`, `counter`, `queue_event_log`, `queue_ticket_config`, `queue`, `ticket_counter`, `slot`, `appointment`, `user_role_link`, `option_data_sources`, `operating_hours`, `value_added_service`, `role`.
   - 2025-01-13: User approved dropping remaining small-row legacy tables; confirmed `intake_workflow` and `service_type` (and dependents) are safe to drop; `location` is unused and can be dropped; keep `organization` and `ptma` at that time.
   - 2026-05-29 update: Bill clarified that PTMA data should now be considered legacy/dormant early-development residue. Do not seed PTMA rows for TEST sandbox/demo data or new workflows unless the PTMA operating model is explicitly revived.
+  - 2026-07-12 R6b local update: retired the never-used PTMA navigation, pages, help, role inventory, application compatibility fields/routes, and `/api/ptmas` contract. Active NWAC Hub Management is preserved through the separate System Administrator-only `/api/hubs` list/detail/partial-update contract; every query is constrained to `type='Hub'`, and readiness verifies the retained table shape. The physical legacy-named `ptma` table was not queried, dropped, reshaped, or otherwise changed. Any future table cleanup requires separately authorized read-only dependency/data proof across the target environments first.
   - 2025-01-13: Dropped small-row legacy tables in dev via batch DROP (warning: `queue_ticket_config` already absent): `location_language_link`, `location_service_link`, `intake_workflow_blockstep_link`, `intake_workflow`, `facility_requirement`, `reason_code`, `service_type_component_link`, `service_type`, `location`, `location_type`, `ircc_office`, `hub_and_spoke_link`, `country_holiday_link`, `holiday`, `country`, `language`. `queue_ticket_config` previously dropped.
   - 2025-01-13: Post-drop inventory (`iset_intake`): only current app/case tables remain (e.g., `iset_application*`, `iset_case*`, `workflow*`, `component*`, `organization`, `ptma`, `noc_*`, `notification_*`, `iset_event_*`, `iset_internal_notification_*`, `iset_runtime_config`, `schema_migrations`, `__migrations`, `zz_legacy_documents`, etc.).
   - 2025-01-13: Pruned legacy backend endpoints in `isetadminserver.js` (removed appointment/queue/counter/location/service API routes and option-data-sources helper) to avoid hitting dropped tables.

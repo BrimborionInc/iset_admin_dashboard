@@ -1,25 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { Form, FormField, Input, Grid, SpaceBetween, Header, Button, Flashbar, Box } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
+import { apiFetch } from '../auth/apiClient';
 
-const ContactInformation = ({ ptma }) => {
-  const [ptmaData, setPtmaData] = useState(ptma || {});
-  const [initialPtma, setInitialPtma] = useState(ptma || {});
+const ContactInformation = ({ hub }) => {
+  const [hubData, setHubData] = useState(hub || {});
+  const [initialHub, setInitialHub] = useState(hub || {});
   const [flashMessages, setFlashMessages] = useState([]);
   const [isChanged, setIsChanged] = useState(false);
 
   useEffect(() => {
-    if (ptma) {
-      setPtmaData(ptma);
-      setInitialPtma(ptma);
+    if (hub) {
+      setHubData(hub);
+      setInitialHub(hub);
     }
-  }, [ptma]);
+  }, [hub]);
 
   const handleSave = () => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/ptmas/${ptmaData.id}`, {
+    const contactFields = {
+      contact_name: hubData.contact_name,
+      contact_email: hubData.contact_email,
+      contact_phone: hubData.contact_phone,
+      contact_notes: hubData.contact_notes,
+    };
+    apiFetch(`/api/hubs/${hubData.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(ptmaData),
+      body: JSON.stringify(contactFields),
     })
       .then(response => {
         if (!response.ok) {
@@ -28,8 +35,8 @@ const ContactInformation = ({ ptma }) => {
         return response.json();
       })
       .then(data => {
-        setPtmaData(data);
-        setInitialPtma(data);
+        setHubData(data);
+        setInitialHub(data);
         setIsChanged(false);
         setFlashMessages([{ type: 'success', content: 'Contact information saved successfully', dismissible: true, onDismiss: () => setFlashMessages([]) }]);
       })
@@ -40,15 +47,15 @@ const ContactInformation = ({ ptma }) => {
   };
 
   const handleCancel = () => {
-    setPtmaData(initialPtma);
+    setHubData(initialHub);
     setIsChanged(false);
   };
 
   const handleChange = (field, value) => {
-    setPtmaData(prevPtma => {
-      const updatedPtma = { ...prevPtma, [field]: value };
-      setIsChanged(JSON.stringify(updatedPtma) !== JSON.stringify(initialPtma));
-      return updatedPtma;
+    setHubData(previousHub => {
+      const updatedHub = { ...previousHub, [field]: value };
+      setIsChanged(JSON.stringify(updatedHub) !== JSON.stringify(initialHub));
+      return updatedHub;
     });
   };
 
@@ -62,7 +69,7 @@ const ContactInformation = ({ ptma }) => {
       }}
       header={
         <Header
-          description="Contact information for this PTMA"
+          description="Contact information for this NWAC Hub"
           actions={
             <SpaceBetween direction="horizontal" size="s">
               <Button variant="primary" onClick={handleSave} disabled={!isChanged}>Save</Button>
@@ -88,25 +95,25 @@ const ContactInformation = ({ ptma }) => {
         >
           <FormField label="Contact Name">
             <Input
-              value={ptmaData.contact_name || ''}
+              value={hubData.contact_name || ''}
               onChange={e => handleChange('contact_name', e.detail.value)}
             />
           </FormField>
           <FormField label="Contact Email">
             <Input
-              value={ptmaData.contact_email || ''}
+              value={hubData.contact_email || ''}
               onChange={e => handleChange('contact_email', e.detail.value)}
             />
           </FormField>
           <FormField label="Contact Phone">
             <Input
-              value={ptmaData.contact_phone || ''}
+              value={hubData.contact_phone || ''}
               onChange={e => handleChange('contact_phone', e.detail.value)}
             />
           </FormField>
           <FormField label="Notes">
             <Input
-              value={ptmaData.contact_notes || ''}
+              value={hubData.contact_notes || ''}
               onChange={e => handleChange('contact_notes', e.detail.value)}
             />
           </FormField>

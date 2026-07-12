@@ -89,7 +89,7 @@ const {
   getCaseAccessError,
   getRegionalManagerCaseAccessError,
 } = require('./src/lib/caseAccess');
-const { createPtmaRouter } = require('./src/routes/ptmaRoutes');
+const { createHubRouter } = require('./src/routes/hubRoutes');
 const {
   createCaseWatch,
   deleteCaseWatch,
@@ -6479,6 +6479,7 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'esdc_reporting_package',
   'system_config_audit',
   'iset_case',
+  'client_applicant_account_event',
   'client',
   'iset_application',
 ];
@@ -25141,6 +25142,7 @@ app.get('/readyz', async (_req, res) => {
     await assertRuntimeTableReady(pool, 'iset_event_delivery', ['event_id', 'channel', 'audience_key', 'status']);
     await assertRuntimeTableReady(pool, 'iset_case_reminder', ['id', 'lifecycle_generation']);
     await assertRuntimeTableReady(pool, 'iset_reminder_lifecycle_event', ['reminder_id', 'lifecycle_generation', 'event_type', 'status']);
+    await assertRuntimeTableReady(pool, 'ptma', ['id', 'type', 'iset_full_name']);
     await assertEnumValueReady(pool, 'esdc_participant_submission_history', 'event_type', 'prepared');
     return res.status(200).json({ status: 'ready' });
   } catch (error) {
@@ -34893,6 +34895,18 @@ app.post('/api/clear-iset-test-data', requireUnsafeAdminDebugAccess, async (_req
         err.tableName = tableName;
         throw err;
       }
+    }
+    const [[accountEventIntegrity]] = await connection.query(
+      `SELECT COUNT(*) AS orphan_count
+         FROM client_applicant_account_event e
+         LEFT JOIN client c ON c.id = e.client_id
+        WHERE c.id IS NULL`
+    );
+    if (Number(accountEventIntegrity?.orphan_count || 0) !== 0) {
+      const integrityError = new Error('Client applicant-account event orphans remain after clear.');
+      integrityError.code = 'clear_test_data_integrity_failed';
+      integrityError.tableName = 'client_applicant_account_event';
+      throw integrityError;
     }
     await refreshFinancePotSums(connection);
     await connection.query('SET FOREIGN_KEY_CHECKS = 1');
@@ -65549,9 +65563,8 @@ app.post('/api/applicant-watchlist', async (req, res) => {
   }
 });
 
-// --- PTMA Endpoints ---
-// PTMA is dormant legacy configuration, but retained routes remain System Administrator-only.
-app.use('/api/ptmas', createPtmaRouter({ pool }));
+// NWAC Hub configuration is stored in the legacy-named ptma table, but the API is Hub-only.
+app.use('/api/hubs', createHubRouter({ pool }));
 
 // --- Finance: Budget Pots ---
 
@@ -84250,8 +84263,6 @@ app.put('/api/finance/spend-curve', async (req, res) => {
   }
 });
 
-// --- End PTMA Endpoints ---
-
 const MANUAL_INTAKE_WORKFLOW_ID = 'iset-v1';
 
 function buildManualSubmissionReference() {
@@ -85390,7 +85401,7 @@ app.get('/api/applications/:id', async (req, res) => {
 
     // Get case info (if exists) with defensive column detection (legacy schemas may lack some fields)
     const caseBaseCols = ['id', 'assigned_staff_profile_id AS assigned_to_user_id', 'status'];
-    const optionalCols = ['priority','program_type','case_summary','opened_at','closed_at','last_activity_at','ptma_id'];
+    const optionalCols = ['priority','program_type','case_summary','opened_at','closed_at','last_activity_at'];
     const presentOptional = [];
     for (const col of optionalCols) {
       try { await pool.query(`SELECT ${col} FROM iset_case LIMIT 0`); presentOptional.push(col); } catch(_) { /* skip missing */ }
@@ -85414,15 +85425,6 @@ app.get('/api/applications/:id', async (req, res) => {
         caseId: linkedCaseId,
         applicationId,
       });
-    }
-
-    let ptma = null;
-    if (caseRow && caseRow.ptma_id) {
-      const [[ptmaRow]] = await pool.query(
-        'SELECT id, name, iset_code FROM ptma WHERE id = ?',
-        [caseRow.ptma_id]
-      );
-      ptma = ptmaRow || null;
     }
 
     if (application.row_version !== undefined && application.row_version !== null) {
@@ -85452,47 +85454,10 @@ app.get('/api/applications/:id', async (req, res) => {
     }
     application.assessment_esdc_eligibility =
       normaliseString(assessmentRow?.esdc_eligibility) || null;
-    res.status(200).json({ ...application, ptma, case: caseRow || null });
+    res.status(200).json({ ...application, case: caseRow || null });
   } catch (error) {
     console.error('Error fetching application:', error);
     res.status(500).json({ error: 'Failed to fetch application' });
-  }
-});
-
-// Update case_summary for a given application
-app.put('/api/applications/:id/ptma-case-summary', async (req, res) => {
-  const applicationId = req.params.id;
-  const { case_summary } = req.body;
-  if (!case_summary) {
-    return res.status(400).json({ error: 'Missing case_summary in request body' });
-  }
-  try {
-    const visibility = await enforceApplicationVisibility(req, applicationId);
-    if (!visibility.ok) {
-      return sendApplicationVisibilityFailure(res, visibility, 'Case not found for this application');
-    }
-    const linkedCaseId = await resolveCaseIdFromApplicationId(applicationId);
-    if (!linkedCaseId) {
-      return res.status(404).json({ error: 'Case not found for this application' });
-    }
-    // Update the case_summary in iset_case for the resolved application case
-    let upd = 'UPDATE iset_case c SET case_summary = ? WHERE id = ?';
-    const updParams = [case_summary, linkedCaseId];
-    try {
-      const { scopeCases } = require('./src/lib/dbScope');
-      const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
-      upd += ` AND ${scopeSql}`;
-      updParams.push(...scopeParams);
-    } catch (_) {}
-    const [result] = await pool.query(upd, updParams);
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Case not found for this application' });
-    }
-    const [[updatedCase]] = await pool.query('SELECT case_summary FROM iset_case WHERE id = ? LIMIT 1', [linkedCaseId]);
-    res.status(200).json({ case_summary: updatedCase.case_summary });
-  } catch (error) {
-    console.error('Error updating case summary:', error);
-    res.status(500).json({ error: 'Failed to update case summary' });
   }
 });
 
@@ -86494,7 +86459,7 @@ app.get('/api/cases/:case_id/events', async (req, res) => {
 //   ISET Coordinator  -> only cases assigned to them
 // If a submission exists with no case yet:
 //   - Visible only to NWAC Administrators (future) ??? currently excluded for simplicity
-// Response: { count, rows:[ { case_id, tracking_id, applicant_name, status, assigned_user_id, assigned_user_name, submitted_at, region, ptma_codes, sla_risk } ] }
+// Response: { count, rows:[ { case_id, tracking_id, applicant_name, status, assigned_user_id, assigned_user_name, submitted_at, region, sla_risk } ] }
 app.get('/api/applications', async (req, res) => {
   try {
     if (!req.auth || req.auth.subjectType !== 'staff') return res.status(403).json({ error: 'forbidden' });
@@ -87104,7 +87069,6 @@ app.get('/api/applications', async (req, res) => {
         submitted_at: r.submitted_at,
         application_updated_at: r.application_updated_at || null,
         last_activity_at: r.last_activity_at || null,
-        ptma_codes: null, // legacy field removed; placeholder for future taxonomy
         region: null, // region derivation TBD (could parse from application payload or staff profile)
         is_unassigned: r.is_unassigned_submission === 1,
         sla_risk,

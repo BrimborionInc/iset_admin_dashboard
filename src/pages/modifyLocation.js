@@ -7,11 +7,12 @@ import Board from '@cloudscape-design/board-components/board';
 import { useParams } from 'react-router-dom';
 import GeneralLocationInformation from '../widgets/GeneralLocationInformation'; // Import GeneralLocationInformation
 import ContactInformation from '../widgets/ContactInformation'; // Import ContactInformation
-import PtmaIsetStatistics from '../widgets/PtmaIsetStatistics'; // Import the new widget
+import HubIsetStatistics from '../widgets/HubIsetStatistics';
+import { apiFetch } from '../auth/apiClient';
 
 const ModifyLocation = ({ header, headerInfo, toggleHelpPanel, updateBreadcrumbs }) => {
   const { id } = useParams();
-  const [ptma, setPtma] = useState(null);
+  const [hub, setHub] = useState(null);
   const [items, setItems] = useState([
     {
       id: 'general-information',
@@ -26,39 +27,39 @@ const ModifyLocation = ({ header, headerInfo, toggleHelpPanel, updateBreadcrumbs
       data: { title: 'Contact Information' },
     },
     {
-      id: 'ptma-iset-statistics',
+      id: 'hub-iset-statistics',
       rowSpan: 3,
       columnSpan: 2,
-      data: { title: 'PTMA ISET Statistics' },
+      data: { title: 'Hub ISET Statistics' },
     }
   ]);
 
   useEffect(() => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/ptmas/${id}`)
+    apiFetch(`/api/hubs/${id}`)
       .then(response => response.json())
       .then(data => {
-        setPtma(data);
-        console.log('Updating breadcrumbs with PTMA:', data.location);
+        setHub(data);
+        console.log('Updating breadcrumbs with Hub:', data.full_name);
         updateBreadcrumbs([
           { text: 'Home', href: '/' },
-          { text: 'Manage Locations', href: '/ptma-management' },
-          { text: data.location, href: '#' }
+          { text: 'NWAC Hub Management', href: '/nwac-hub-management' },
+          { text: data.full_name, href: '#' }
         ]);
       })
-      .catch(error => console.error('Error fetching PTMA:', error));
+      .catch(error => console.error('Error fetching Hub:', error));
   }, [id, updateBreadcrumbs]);
 
   useEffect(() => {
-    if (ptma) {
+    if (hub) {
       updateBreadcrumbs([
         { text: 'Home', href: '/' },
-        { text: 'Manage Locations', href: '/ptma-management' },
-        { text: ptma.location, href: '#' }
+        { text: 'NWAC Hub Management', href: '/nwac-hub-management' },
+        { text: hub.full_name, href: '#' }
       ]);
     }
-  }, [ptma, updateBreadcrumbs]);
+  }, [hub, updateBreadcrumbs]);
 
-  if (!ptma) {
+  if (!hub) {
     return <div>Loading...</div>;
   }
 
@@ -73,13 +74,13 @@ const ModifyLocation = ({ header, headerInfo, toggleHelpPanel, updateBreadcrumbs
       <Board
         renderItem={(item) => {
           if (item.id === 'general-information') {
-            return <GeneralLocationInformation ptma={ptma} />;
+            return <GeneralLocationInformation />;
           }
           if (item.id === 'contact-information') {
-            return <ContactInformation ptma={ptma} />;
+            return <ContactInformation hub={hub} />;
           }
-          if (item.id === 'ptma-iset-statistics') {
-            return <PtmaIsetStatistics />;
+          if (item.id === 'hub-iset-statistics') {
+            return <HubIsetStatistics />;
           }
           return null;
         }}

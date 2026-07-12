@@ -2,7 +2,7 @@ import React from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { Box, Header, StatusIndicator } from '@cloudscape-design/components';
 
-const PtmaIsetStatistics = () => {
+const HubIsetStatistics = () => {
   return (
     <BoardItem
       i18nStrings={{
@@ -20,4 +20,4 @@ const PtmaIsetStatistics = () => {
   );
 };
 
-export default PtmaIsetStatistics;
+export default HubIsetStatistics;

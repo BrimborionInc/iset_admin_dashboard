@@ -77,7 +77,6 @@ const NAV_SECTIONS = [
     section: 'ISET Administration',
     items: [
       { href: '/nwac-hub-management', label: 'NWAC Hub Management' },
-      { href: '/ptma-management', label: 'PTMA Management' },
     ],
   },
   {
@@ -187,7 +186,6 @@ const ROUTE_LABELS = {
   '/modify-component/:id': 'Modify Intake Step',
   '/modify-workflow': 'Modify Workflow',
   '/nwac-hub-management': 'NWAC Hub Management',
-  '/ptma-management': 'PTMA Management',
   '/release-management-dashboard': 'Release Management',
   '/reporting/regional-snapshot': 'Regional Snapshot',
   '/reporting/data-and-results': 'Data and Results',

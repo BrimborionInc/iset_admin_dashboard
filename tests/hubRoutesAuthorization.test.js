@@ -1,12 +1,12 @@
 const http = require('http');
 const express = require('express');
 
-const { createPtmaRouter } = require('../src/routes/ptmaRoutes');
+const { createHubRouter } = require('../src/routes/hubRoutes');
 
-const PTMA_ROW = {
+const HUB_ROW = {
   id: 1,
-  name: 'Fixture PTMA',
-  iset_full_name: 'Fixture PTMA',
+  name: 'Fixture Hub',
+  iset_full_name: 'Fixture Hub',
   iset_code: 'FIX',
   iset_status: 'Active',
   iset_province: 'ON',
@@ -25,12 +25,9 @@ function createPool() {
   return {
     query: jest.fn(async statement => {
       const sql = String(statement).replace(/\s+/gu, ' ').trim();
-      if (sql.includes('FROM iset_case')) return [[], []];
-      if (sql.startsWith('INSERT INTO ptma')) return [{ insertId: PTMA_ROW.id }, []];
       if (sql.startsWith('UPDATE ptma')) return [{ affectedRows: 1 }, []];
-      if (sql.startsWith('DELETE FROM ptma')) return [{ affectedRows: 1 }, []];
-      if (sql.includes('FROM ptma')) return [[PTMA_ROW], []];
-      throw new Error(`Unexpected PTMA test query: ${sql}`);
+      if (sql.includes('FROM ptma')) return [[HUB_ROW], []];
+      throw new Error(`Unexpected Hub test query: ${sql}`);
     }),
   };
 }
@@ -67,7 +64,7 @@ function requestJson(server, { method, pathname, role, body }) {
   });
 }
 
-describe('PTMA route authorization', () => {
+describe('NWAC Hub route authorization', () => {
   let pool;
   let server;
 
@@ -79,7 +76,7 @@ describe('PTMA route authorization', () => {
       req.auth = { subjectType: 'staff', role: req.get('x-test-role') };
       next();
     });
-    app.use('/api/ptmas', createPtmaRouter({ pool }));
+    app.use('/api/hubs', createHubRouter({ pool }));
     server = http.createServer(app);
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   });
@@ -89,15 +86,13 @@ describe('PTMA route authorization', () => {
   });
 
   const routes = [
-    { method: 'GET', pathname: '/api/ptmas' },
-    { method: 'GET', pathname: '/api/ptmas/1' },
-    { method: 'POST', pathname: '/api/ptmas', body: { location: 'Fixture PTMA' } },
-    { method: 'PUT', pathname: '/api/ptmas/1', body: { full_name: 'Updated PTMA' } },
-    { method: 'DELETE', pathname: '/api/ptmas/1' },
+    { method: 'GET', pathname: '/api/hubs' },
+    { method: 'GET', pathname: '/api/hubs/1' },
+    { method: 'PUT', pathname: '/api/hubs/1', body: { full_name: 'Updated Hub' } },
   ];
 
   test.each(['NWAC Administrator', 'Regional Manager', 'ISET Coordinator', 'Program Administrator'])(
-    'denies every PTMA method to %s before any database access',
+    'denies every Hub method to %s before any database access',
     async role => {
       for (const route of routes) {
         pool.query.mockClear();
@@ -108,13 +103,41 @@ describe('PTMA route authorization', () => {
     }
   );
 
-  test('keeps every PTMA method reachable for System Administrator', async () => {
+  test('keeps every Hub method reachable for System Administrator and scopes rows to Hub type', async () => {
     for (const route of routes) {
       pool.query.mockClear();
       const response = await requestJson(server, { ...route, role: 'System Administrator' });
       expect(response.status).toBeGreaterThanOrEqual(200);
       expect(response.status).toBeLessThan(300);
       expect(pool.query).toHaveBeenCalled();
+      expect(pool.query.mock.calls.some(([sql]) => String(sql).includes("type = 'Hub'"))).toBe(true);
     }
+  });
+
+  test('updates only supplied Hub fields so separate forms cannot erase one another', async () => {
+    const response = await requestJson(server, {
+      method: 'PUT',
+      pathname: '/api/hubs/1',
+      role: 'System Administrator',
+      body: { full_name: 'Updated Hub' },
+    });
+
+    expect(response.status).toBe(200);
+    const [statement, params] = pool.query.mock.calls[0];
+    expect(String(statement)).toContain('SET iset_full_name = ?');
+    expect(String(statement)).not.toContain('contact_email = ?');
+    expect(params).toEqual(['Updated Hub', '1']);
+  });
+
+  test('rejects an empty Hub update before database access', async () => {
+    const response = await requestJson(server, {
+      method: 'PUT',
+      pathname: '/api/hubs/1',
+      role: 'System Administrator',
+      body: {},
+    });
+
+    expect(response).toEqual({ status: 400, body: { error: 'hub_update_empty' } });
+    expect(pool.query).not.toHaveBeenCalled();
   });
 });

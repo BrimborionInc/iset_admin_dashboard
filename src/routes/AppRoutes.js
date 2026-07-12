@@ -19,9 +19,7 @@ import AdminDashboard from '../pages/home/HomeDashboardPage.jsx';
 // Remove the old manageAppointments import
 
 import UserManagementDashboard from '../pages/manageUsers.js';
-import LocationsManagementDashboard from '../pages/manageLocations.js';
 import ModifyLocation from '../pages/modifyLocation.js';
-import NewLocationForm from '../pages/newLocationForm.js';
 import BookAppointmentQ1 from '../previews/bookAppointmentQ1.js';
 import BookAppointmentQ2 from '../previews/bookAppointmentQ2.js';
 import BookAppointmentQ3 from '../previews/bookAppointmentQ3.js';
@@ -39,7 +37,6 @@ import { ManageNotificationsHelp } from '../helpPanelContents/manageNotification
 import TemplateEditorDashboard from '../pages/templateEditorDashboard.js';
 import TemplateEditorDashboardHelp from '../helpPanelContents/templateEditorDashboardHelp.js';
 import RegionalSnapshotDashboardHelp from '../helpPanelContents/regionalSnapshotDashboardHelp.js';
-import ManageLocationsHelp from '../helpPanelContents/manageLocationsHelp'; // Import the help panel content
 import ModifyComponent from '../pages/modifyIntakeStep.js'; // Import the new component
 import ModifyIntakeStepHelp from '../helpPanelContents/modifyIntakeStep.js'; // Renamed help panel content
 import ManageSecurityOptions from '../pages/manageSecurityOptions.js'; // Import the renamed component
@@ -274,33 +271,15 @@ const AppRoutes = ({
         </Guard>
       </Route>
 
-      <Route path="/ptma-management">
-        <Guard path="/ptma-management">
+      <Route path="/modify-hub/:id">
+        <Guard path="/modify-hub/:id">
           {renderContent(
-            LocationsManagementDashboard,
-            [{ text: 'Home', href: '/' }, { text: 'Manage PTMAs', href: '/ptma-management' }],
-            'Manage PTMAs',
-            <ManageLocationsHelp />
+            ModifyLocation,
+            [{ text: 'Home', href: '/' }, { text: 'NWAC Hub Management', href: '/nwac-hub-management' }, { text: 'Modify Hub', href: '/modify-hub/:id' }],
+            'Manage NWAC Hub',
+            'modifyHub'
           )}
         </Guard>
-      </Route>
-
-      <Route path="/locations-management-dashboard">
-        {renderContent(
-          LocationsManagementDashboard,
-          [{ text: 'Home', href: '/' }, { text: 'Manage Locations', href: '/locations-management-dashboard' }],
-          'Manage Locations',
-          ManageLocationsHelp.aiContext
-        )}
-      </Route>
-
-      <Route path="/modify-ptma/:id">
-        {renderContent(
-          ModifyLocation,
-          [{ text: 'Home', href: '/' }, { text: 'Manage PTMAs', href: '/ptma-management' }, { text: 'Modify Location', href: '/modify-ptma/:id' }],
-          'Manage Location',
-          'modifyPtma'
-        )}
       </Route>
 
       <Route path="/user-management-dashboard">
@@ -314,15 +293,6 @@ const AppRoutes = ({
             UserManagementHelp.aiContext
           )}
         </Guard>
-      </Route>
-
-      <Route path="/new-location">
-        {renderContent(
-          NewLocationForm,
-          [{ text: 'Home', href: '/' }, { text: 'Manage PTMAs', href: '/ptma-management' }, { text: 'New PTMA', href: '/new-location' }],
-          'New PTMA',
-          'newPtma'
-        )}
       </Route>
 
       <Route path="/book-appointment-q1">

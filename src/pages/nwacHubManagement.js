@@ -13,11 +13,9 @@ import {
 } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import BoardItem from '@cloudscape-design/board-components/board-item';
-import { useHistory } from 'react-router-dom';
 import { apiFetch } from '../auth/apiClient';
 
 const NWACHubManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
-  const history = useHistory();
   const [selectedItems, setSelectedItems] = useState([]);
   const [hubs, setHubs] = useState([]);
   const [items, setItems] = useState([
@@ -34,7 +32,7 @@ const NWACHubManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => 
 
   // Placeholder fetch for NWAC Hubs
   const fetchHubs = () => {
-    apiFetch(`/api/ptmas?type=Hub`)
+    apiFetch('/api/hubs')
       .then(response => response.json())
       .then(data => setHubs(data))
       .catch(error => {
@@ -46,11 +44,6 @@ const NWACHubManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => 
   useEffect(() => {
     fetchHubs();
   }, []);
-
-  const handleNewHub = () => {
-    // Placeholder for navigation to new hub form
-    history.push('/new-nwac-hub');
-  };
 
   return (
     <ContentLayout>
@@ -140,7 +133,7 @@ const NWACHubManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => 
                         <Button
                           variant="inline-link"
                           ariaLabel={`Modify ${item.full_name}`}
-                          href={`/modify-ptma/${item.id}`}
+                          href={`/modify-hub/${item.id}`}
                         >
                           Modify
                         </Button>
@@ -167,7 +160,6 @@ const NWACHubManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => 
                   <Box margin={{ vertical: "xs" }} textAlign="center" color="inherit">
                     <SpaceBetween size="m">
                       <b>No NWAC Hubs</b>
-                      <Button onClick={handleNewHub}>Create NWAC Hub</Button>
                     </SpaceBetween>
                   </Box>
                 }
@@ -185,7 +177,6 @@ const NWACHubManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => 
                         >
                           Actions
                         </ButtonDropdown>
-                        <Button variant="primary" onClick={handleNewHub}>New NWAC Hub</Button>
                       </SpaceBetween>
                     }
                   >

@@ -1,5 +1,5 @@
 // Updated rewrite of PropertiesPanel.js – consistent Container usage and spacing
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 // Switched from raw axios calls to authenticated apiFetch wrapper (adds bearer / dev bypass headers)
 import { apiFetch } from '../auth/apiClient';
 import { Box, Container, Header, Table, Input, Button, Select, SpaceBetween, FormField, Textarea, Badge, Popover, Checkbox, Toggle, ExpandableSection, Modal, Alert } from '@cloudscape-design/components';
@@ -8,11 +8,6 @@ import get from 'lodash/get';
 import Ajv from 'ajv';
 
 const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pageProperties, setPageProperties, currentLang = 'en', latestTemplateVersionByKey, onUpgradeTemplate, allComponents, addExternalComponent, availableTemplates = [], stepGroupOptions = [], stepGroupsLoading = false }) => {
-  const [availableDataSources, setAvailableDataSources] = useState([]);
-  const [selectedEndpoint, setSelectedEndpoint] = useState(null);
-  const [optionSourceMode, setOptionSourceMode] = useState('static');
-  const suppressOptionModeEffectRef = useRef(false);
-  const suppressNextModeEffect = useRef(false);
   const [validationErrors, setValidationErrors] = useState({});
   // AI option generation state
   const [aiPrompt, setAiPrompt] = useState('');
@@ -29,87 +24,6 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
 
   const ajv = useMemo(() => new Ajv({ allErrors: true, strict: false }), []);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const resp = await apiFetch('/api/option-data-sources');
-        if (!resp.ok) throw new Error('option-data-sources fetch failed: ' + resp.status);
-        const json = await resp.json();
-        if (!cancelled) setAvailableDataSources(json || []);
-      } catch (e) {
-        console.error('Failed to load data sources', e);
-        if (!cancelled) setAvailableDataSources([]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    if (!selectedComponent) return;
-
-    if (suppressNextModeEffect.current) {
-      suppressNextModeEffect.current = false;
-      return;
-    }
-    if (suppressOptionModeEffectRef.current) {
-      suppressOptionModeEffectRef.current = false;
-      return;
-    }
-    const mode = selectedComponent.props?.mode ?? 'static';
-    setOptionSourceMode(mode === 'simple' ? 'static' : mode);
-    const endpoint = selectedComponent.props?.endpoint;
-    setSelectedEndpoint(mode === 'dynamic' ? endpoint || null : null);
-  }, [selectedComponent]);
-
-  const handleOptionModeChange = (mode, editableField) => {
-    suppressOptionModeEffectRef.current = true;
-    if (mode === 'dynamic') suppressNextModeEffect.current = true;
-    setOptionSourceMode(mode);
-    if (mode === 'static' || mode === 'simple') {
-      updateComponentProperty('props.mode', 'static', true);
-      updateComponentProperty('props.endpoint', null, true);
-      updateComponentProperty('props.attributes', null, true);
-    } else if (mode === 'dynamic') {
-      setSelectedEndpoint(null);
-      updateComponentProperty('props.mode', 'dynamic', true);
-      updateComponentProperty('props.endpoint', null, true);
-      updateComponentProperty('props.attributes', null, true);
-    } else if (mode === 'snapshot') {
-      updateComponentProperty('props.mode', 'snapshot', true);
-      updateComponentProperty(editableField.path, [], true);
-    }
-  };
-
-  const handleSnapshotFetch = async (endpoint, editableField) => {
-    try {
-  const resp = await apiFetch(endpoint.startsWith('http') ? endpoint : endpoint);
-  if (!resp.ok) throw new Error('snapshot fetch failed ' + resp.status);
-  const data = await resp.json();
-      const schema = selectedComponent?.option_schema || ['text', 'value'];
-      const mapped = data.map((item) => {
-        const option = {};
-        if (schema.includes('text')) option.text = item.name;
-        if (schema.includes('value')) option.value = String(item.id);
-        return option;
-      });
-      updateComponentProperty(editableField.path, mapped, true);
-      updateComponentProperty('props.mode', 'static', true);
-      updateComponentProperty('props.endpoint', null, true);
-      setOptionSourceMode('static');
-    } catch (err) {
-      console.error('Snapshot fetch failed', err);
-    }
-  };
-
-  const handleEndpointChange = (endpoint, editableField) => {
-    setSelectedEndpoint(endpoint);
-    if (endpoint) {
-      updateComponentProperty('props.endpoint', endpoint, true);
-      updateComponentProperty('props.attributes', { 'data-options-endpoint': endpoint }, true);
-      updateComponentProperty(editableField.path, [], true);
-    }
-  };
 
   const handleAddOption = (editableField) => {
     const current = get(selectedComponent?.props, editableField.path) || [];
@@ -123,7 +37,6 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
   };
 
   const getSchema = () => selectedComponent?.option_schema || ['text', 'value'];
-  const currentMode = optionSourceMode;
 
   // --- AI Option Generation ---
   const generateOptionsWithAI = async (editableField) => {
@@ -218,7 +131,6 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
       updateComponentProperty('props.mode', 'static', true);
       updateComponentProperty('props.endpoint', null, true);
       updateComponentProperty('props.attributes', null, true);
-      setOptionSourceMode('static');
     }
     setAiStatus({ type: 'success', text: `Applied ${cleaned.length} option(s).` });
     setAiPreview(null);
@@ -1126,50 +1038,11 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                   <ExpandableSection headerText="Options Properties" defaultExpanded>
                     <Container padding="m" variant="stacked">
                     <SpaceBetween size="m">
-                      <FormField label="Options Source">
-                        <Select
-                          expandToViewport
-                          selectedOption={{
-                            label: currentMode === 'dynamic' ? 'Code Table: Dynamic' : (currentMode === 'snapshot' ? 'Code Table: Snapshot' : 'Static (manually entered)'),
-                            value: currentMode,
-                          }}
-                          onChange={({ detail }) => handleOptionModeChange(detail.selectedOption.value, field)}
-                          options={[
-                            { label: 'Static (manually entered)', value: 'static' },
-                            { label: 'Dynamic (from endpoint at runtime', value: 'dynamic' },
-                            { label: 'Snapshot (fill static from endpoint now)', value: 'snapshot' },
-                          ]}
-                        />
+                      <FormField label="Options Source" description="PATH currently supports manually entered static options only.">
+                        <Input value="Static (manually entered)" readOnly />
                       </FormField>
 
-                      {(currentMode === 'dynamic' || currentMode === 'snapshot') && (
-                        <>
-                          {currentMode === 'dynamic' && (
-                            <FormField label="Select Data Source (Dynamic)">
-                              <Select
-                                expandToViewport
-                                selectedOption={selectedEndpoint ? { label: availableDataSources.find(ds => ds.endpoint === selectedEndpoint)?.label || '', value: selectedEndpoint } : null}
-                                onChange={({ detail }) => handleEndpointChange(detail.selectedOption.value, field)}
-                                options={[{ label: 'Select a data source...', value: null }, ...availableDataSources.map(ds => ({ label: ds.label, value: ds.endpoint }))]}
-                                placeholder="Select a data source..."
-                              />
-                            </FormField>
-                          )}
-                          {currentMode === 'snapshot' && (
-                            <FormField label="Select Data Source (Snapshot)">
-                              <Select
-                                expandToViewport
-                                selectedOption={null}
-                                onChange={({ detail }) => handleSnapshotFetch(detail.selectedOption.value, field)}
-                                options={availableDataSources.map(ds => ({ label: ds.label, value: ds.endpoint }))}
-                              />
-                            </FormField>
-                          )}
-                        </>
-                      )}
-
-                      {currentMode === 'static' && (
-                        <>
+                      <>
                           <Modal
                             visible={showAiOptionsModal}
                             onDismiss={() => setShowAiOptionsModal(false)}
@@ -1294,7 +1167,6 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                           })()}
                         {/* Validation block relocated below (after options UI) */}
                       </>
-                    )}
                     </SpaceBetween>
                     </Container>
                   </ExpandableSection>

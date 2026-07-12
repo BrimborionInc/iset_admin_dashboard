@@ -171,7 +171,6 @@ const SideNavigation = ({ showTutorialHotspots = false, notificationCount = 0, r
       text: 'ISET Administration',
       items: [
         { type: 'link', text: 'NWAC Hub Management', href: '/nwac-hub-management' },
-        { type: 'link', text: 'PTMA Management', href: '/ptma-management' },
       ],
     },
     {

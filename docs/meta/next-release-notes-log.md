@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-07-11
+Last Updated: 2026-07-12
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-07-12 | Release TBD | Fix/Workflow Studio and Administration | Intake options, test-data cleanup, and legacy PTMA management | Intake component options are now explicitly static-only, test-data cleanup preserves client-account event integrity, and the unused PTMA management surface is removed. | NWAC Hub Management remains available to System Administrators through a separate Hub-only contract. Completed locally under R6b; the physical legacy-named table is retained and TEST/PROD were not accessed.
 - 2026-07-11 | Release TBD | Fix/Reliability | AI configuration | AI model, parameter, and fallback settings now persist consistently across admin, public portal, restarts, and instance replacement. | Parameter/fallback buttons send valid JSON; partial saves preserve other values; ordinary staff cannot bypass the approved model policy. Completed locally under R6a; not deployed.
 - 2026-07-11 | Release TBD | Fix/Reliability | Reminders and notifications | Reminder due/overdue signals no longer duplicate when background workers overlap, and committed workflow notifications retry after known transient failures. | Uncertain email outcomes are held for System Administrator review instead of blindly resent; delivery status and reviewed replay are available through the admin API. Completed locally under R5b; shared/admin/portal/additive schema must release together and TEST/PROD were not accessed.
 - 2026-07-11 | Release TBD | Fix/Data Integrity | Casework and Client Batch Import | Action plans retain the application they came from, client ownership conflicts stop for review, and repeated or concurrent client-file imports converge on one client file. | Contact-message notes also stop using email-only staff attribution. Completed locally under R5a with additive schema; ambiguous historical plan/note rows are not changed automatically and TEST/PROD were not accessed.

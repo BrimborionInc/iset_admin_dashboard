@@ -512,7 +512,6 @@ function endpointSnapshot(apiCalls) {
     stepDetail: countCalls(apiCalls, `/api/steps/${STEP_ID}`, 'GET'),
     stepGroups: countCalls(apiCalls, '/api/step-groups', 'GET'),
     templates: countCalls(apiCalls, '/api/component-templates', 'GET'),
-    optionDataSources: countCalls(apiCalls, '/api/option-data-sources', 'GET'),
     renderComponent: countCalls(apiCalls, '/api/render/component', 'POST'),
     workflows: countCalls(apiCalls, '/api/workflows', 'GET'),
     saves: countCalls(apiCalls, `/api/steps/${STEP_ID}`, 'PUT'),
@@ -668,14 +667,6 @@ async function installApiStubs(page, apiCalls, saveState) {
       } catch (error) {
         request.respond(jsonResponse({ error: error.message }, 500));
       }
-      return;
-    }
-
-    if (pathname === '/api/option-data-sources') {
-      request.respond(jsonResponse([
-        { label: 'Communities', endpoint: '/api/code-tables/communities' },
-        { label: 'Provinces and territories', endpoint: '/api/code-tables/provinces' },
-      ]));
       return;
     }
 

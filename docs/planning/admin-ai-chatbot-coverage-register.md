@@ -111,8 +111,6 @@ Initial route inventory from `src/routes/AppRoutes.js`.
 | `/manage-security-options` | Manage Security Options | Configuration / security | P2 | security/encryption help files | inventory-only | Cover security settings, encryption, secret rotation intent, and safe admin scope. |
 | `/access-control` | Access Control | Configuration / RBAC | P2 | access-control code/help | inventory-only | Cover role matrix, route access, admin-only editing, and default deny behavior. |
 | `/user-management-dashboard` | User Management | Staff/applicant administration | P1 | `userManagement` help key; `docs/features/user-management.md` | inventory-only | Cover staff profile editing, display name, applicants, Cognito subject rules, region scope. |
-| `/ptma-management` | Manage PTMAs | Configuration / locations | P2 | `manageLocationsHelp.js` | inventory-only | Cover PTMA/location administration and downstream effects. |
-| `/locations-management-dashboard` | Manage Locations | Configuration / locations | P2 | `manageLocationsHelp.js` | inventory-only | Determine whether this route is current or legacy alias. |
 | `/modify-ptma/:id` | Modify Location | Configuration / locations | P2 | `modifyPtma` help key | inventory-only | Cover edit behavior if route remains current. |
 | `/new-location` | New PTMA | Configuration / locations | P2 | `newPtma` help key | inventory-only | Cover create behavior if route remains current. |
 | `/nwac-hub-management` | NWAC Hub Management | Configuration / legacy | P3 | none identified in route wrapper | inventory-only | Verify current use and whether to defer. |

@@ -183,7 +183,7 @@
     "/nwac-hub-management": [
       "System Administrator"
     ],
-    "/ptma-management": [
+    "/modify-hub/:id": [
       "System Administrator"
     ],
     "/release-management-dashboard": [

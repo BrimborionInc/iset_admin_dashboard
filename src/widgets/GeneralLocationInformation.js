@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Form, FormField, Input, Select, Grid, SpaceBetween, Header, Button, Flashbar, Box, ButtonDropdown } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { useParams } from 'react-router-dom';
+import { apiFetch } from '../auth/apiClient';
 
 const GeneralInformation = () => {
-  const { id: ptmaId } = useParams();
+  const { id: hubId } = useParams();
   const [location, setLocation] = useState({});
   const [initialLocation, setInitialLocation] = useState({});
   const [statusOptions] = useState([
@@ -38,7 +39,7 @@ const GeneralInformation = () => {
   const [isChanged, setIsChanged] = useState(false);
 
   useEffect(() => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/ptmas/${ptmaId}`)
+    apiFetch(`/api/hubs/${hubId}`)
       .then(response => response.json())
       .then(data => {
         setLocation({
@@ -64,8 +65,8 @@ const GeneralInformation = () => {
           website_url: data.website_url,
         });
       })
-      .catch(error => console.error('Error fetching PTMA:', error));
-  }, [ptmaId]);
+      .catch(error => console.error('Error fetching Hub:', error));
+  }, [hubId]);
 
   const validateInputs = () => {
     const newErrors = {};
@@ -81,7 +82,7 @@ const GeneralInformation = () => {
 
   const handleSave = () => {
     if (!validateInputs()) return;
-    const updatedPtma = {
+    const updatedHub = {
       full_name: location.full_name,
       code: location.code,
       status: location.status,
@@ -92,25 +93,24 @@ const GeneralInformation = () => {
       notes: location.notes,
       website_url: location.website_url,
     };
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/ptmas/${ptmaId}`, {
+    apiFetch(`/api/hubs/${hubId}`, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify(updatedPtma)
+      body: JSON.stringify(updatedHub)
     })
       .then(response => {
         if (!response.ok) throw new Error('Network response was not ok');
         return response.json();
       })
       .then(data => {
-        setFlashMessages([{ content: 'PTMA information saved successfully', type: 'success', dismissible: true, onDismiss: () => setFlashMessages([]) }]);
+        setFlashMessages([{ content: 'Hub information saved successfully', type: 'success', dismissible: true, onDismiss: () => setFlashMessages([]) }]);
         setIsChanged(false);
       })
       .catch(error => {
-        setFlashMessages([{ content: 'Failed to save PTMA information', type: 'error', dismissible: true, onDismiss: () => setFlashMessages([]) }]);
-        console.error('Error updating PTMA:', error);
+        setFlashMessages([{ content: 'Failed to save Hub information', type: 'error', dismissible: true, onDismiss: () => setFlashMessages([]) }]);
+        console.error('Error updating Hub:', error);
       });
   };
 

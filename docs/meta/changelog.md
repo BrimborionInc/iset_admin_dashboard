@@ -2,6 +2,9 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-07-12
+- Fix/Legacy Cleanup and Workflow Studio/Local: Completed engineering-audit tranche R6b locally. Intake component authoring now offers only supported static options; Clear Test Data removes client-account events before clients and verifies the relationship before commit; and the never-used PTMA UI/API/application compatibility surface is retired. NWAC Hub Management remains available through a separate System Administrator-only, Hub-scoped partial-update API. The physical legacy-named table was retained and no environment or database was accessed; TEST and PROD were not changed.
+
 ## 2026-07-11
 - Fix/AI Configuration/Local: Completed engineering-audit tranche R6a locally. Admin and portal now resolve model, parameters, and fallback chain from one DB-backed runtime contract with deployment environment defaults; partial parameter saves preserve untouched values; configuration buttons send real JSON and surface errors; ordinary staff cannot override the approved model; and both apps fail closed on disallowed configured models. TEST and PROD were not accessed or changed.
 - Fix/Notifications/Local: Completed engineering-audit tranche R5b locally. Reminder due/overdue workers now use stable lifecycle-generation claims, and committed workflow events enqueue durable bell/email fan-out with multi-instance claims, retry/backoff, recipient dedupe, dead-letter/ambiguous quarantine, System Administrator inspection/replay attribution, and 90-day successful-delivery retention. Shared, admin, portal, and additive schema must release together; TEST and PROD were not accessed or changed.
