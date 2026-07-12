@@ -4,7 +4,7 @@ Purpose: define the minimum coherent release boundary for the completed `GPT56-2
 
 Audience: release operator and future Codex threads.
 
-Status: current local release candidate; TEST and PROD are not authorized by this document.
+Status: accepted in TEST on 2026-07-12; PROD remains separately unauthorized.
 
 Last Updated: 2026-07-12
 
@@ -23,8 +23,8 @@ Keep these out of the application release:
 
 | Component | Candidate commit / fingerprint | Required release scope |
 | --- | --- | --- |
-| Admin | `8472bb449e1e4cc96c80f58ae06ed968c272c7a8` | Deploy admin source/build and include canonical migrations. |
-| Portal | `28863443f2dc2d0eb58ed8db64de80ffd6eeaf2d` | Deploy portal source/build. |
+| Admin | `8dc8c564502dbe7c2cea628bebd0be73b27b0088` | TEST-accepted admin app/build and canonical migrations. |
+| Portal | `357e2ad97b5a9c4b780adf2cd24b5494b0e2b134` | TEST-accepted portal app/build, including readiness and clean-provenance fix-forwards. |
 | Shared | `cf6bfe9bac0949c6ab27fb12ce51f811524afd55` | Deploy shared runtime with both apps. |
 | Intacct mock server | SHA-256 `913bdd695f255cc73f0b24b17b8d5fd81d7ab79f408fc9ced3bbf6a9768fddbf` | Local controlled rehearsal only; do not package into PATH. |
 | Intacct mock README | SHA-256 `aaf04e97ed5821e91d17f56d9993803d765a41b030bfc5ba549bd49d2a7532b9` | Local contract documentation only. |
@@ -69,7 +69,7 @@ After normal routing is restored, acceptance must cover:
 - one controlled client-import replay/concurrency fixture with no duplicate identity claim;
 - durable event delivery with one controlled event/recipient, including lease/replay status inspection and no historical `legacy` fan-out;
 - allocation competition/rollback against isolated budget fixtures;
-- PTMA retirement (`410`) and System Administrator-only Hub access;
+- PTMA management absence and System Administrator-only, `type='Hub'`-scoped Hub access;
 - AI runtime read/partial-save behavior without `.env` mutation;
 - payment readiness/schema only, with provider/email routing still disabled and no real send.
 
@@ -95,3 +95,15 @@ Use one all-surface warning/five-minute notice/ALB fallback/release/normal-routi
 - Admin and portal quiet lint, server/test syntax, migration/manifest JSON, and both repository diff checks passed.
 - Documentation link audit reports three unrelated pre-existing missing references; no release-manifest or edited Intacct reference is missing.
 - No DEV, TEST, PROD, AWS resource, database, runtime configuration, provider, email, artifact, deployment, or live backlog record was accessed or changed while preparing this manifest.
+
+## TEST Acceptance Evidence
+
+TEST release `20260712-engineering-audit-test` is accepted. The main coordinated manifest is `tmp/path-deploy/test/20260712-engineering-audit-test--2026-07-12T13-18-30-212Z.json`; portal fix-forward manifests are `...T13-31-47-857Z.json` for the canonical readiness-column correction and `...T13-55-55-671Z.json` for clean build provenance.
+
+- All five migration rows match the checksums above and succeeded; the current TEST plan has zero pending migrations. Eleven older failed-attempt ledger rows all have successful successor rows and are historical, not current failures.
+- Admin and portal `/readyz` return `ready` on-instance; both ALB target groups are healthy and both host rules are normal forwarding. Portal build metadata reports clean commit `357e2ad9` with no false dirty marker.
+- Published-workflow intake completion rejected the controlled missing signature with zero writes, created one coherent valid result, replayed it without duplicate work, and removed DB/object/Cognito fixtures.
+- Controlled real-MySQL acceptance proved one replayable client-import run/identity claim under competing connections, one durable delivery claim plus reasoned replay with no legacy fan-out, one exactly-once allocation transfer, and full rollback on insufficient authority. Every fixture cleaned to zero.
+- Rollback-only payment acceptance passed without email/provider dispatch. Finance email routing is `false`, all 14 configured region mappings were preserved, Intacct has no runtime row, and historical packet `29` remained unchanged.
+- Manual Intake selection, Case/Payment Workspace scope, PTMA retirement/Hub authorization, AI partial parameters/unchanged `.env`, and the local 18-check Intacct drift guard passed. This remains a PATH/mock drift check, not Sage certification.
+- No TEST reset, dataset/workflow promotion, real email, provider call, historical repair, Terraform, PROD database, PROD AWS resource, or PROD application was touched.
