@@ -864,11 +864,25 @@ function remoteRunner() {
     try {
       await page.goto(`${config.localBaseUrl}${routePath}`, { waitUntil: 'domcontentloaded' });
       await dismissTutorialPromptIfPresent(page);
-      const found = await page.waitForFunction(candidates => {
-        const body = document.body?.innerText || '';
-        return candidates.find(text => body.includes(text)) || false;
-      }, { timeout: 60_000 }, expectedTexts).then(handle => handle.jsonValue());
-      pass(`browser route: ${label}`, { routePath, found });
+      try {
+        const found = await page.waitForFunction(candidates => {
+          const body = document.body?.innerText || '';
+          return candidates.find(text => body.includes(text)) || false;
+        }, { timeout: 60_000 }, expectedTexts).then(handle => handle.jsonValue());
+        pass(`browser route: ${label}`, { routePath, found });
+      } catch (error) {
+        const screenshot = `/tmp/two-step-review-route-failure-${config.stamp}-${String(label).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.png`;
+        await page.screenshot({ path: screenshot, fullPage: true }).catch(() => {});
+        const pageText = await page.evaluate(() => document.body?.innerText?.slice(0, 1200) || '').catch(() => '');
+        fail(`browser route: ${label}`, {
+          routePath,
+          url: page.url(),
+          expectedTexts,
+          pageText,
+          screenshot,
+          error: error.message || String(error),
+        });
+      }
     } finally {
       await page.close().catch(() => {});
     }
@@ -1667,14 +1681,19 @@ function remoteRunner() {
       filters.push("(CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.caseId')) AS UNSIGNED) = ? OR CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.case_id')) AS UNSIGNED) = ?)");
       params.push(caseId, caseId);
     }
-    const [rows] = await query(
-      `SELECT id, event_key, title, audience_type, audience_role, audience_staff_profile_id, metadata
-         FROM iset_internal_notification
-        WHERE ${filters.join(' AND ')}
-        ORDER BY id DESC
-        LIMIT 5`,
-      params
-    );
+    let rows = [];
+    for (let attempt = 0; attempt < 31; attempt += 1) {
+      [rows] = await query(
+        `SELECT id, event_key, title, audience_type, audience_role, audience_staff_profile_id, metadata
+           FROM iset_internal_notification
+          WHERE ${filters.join(' AND ')}
+          ORDER BY id DESC
+          LIMIT 5`,
+        params
+      );
+      if (rows.length) break;
+      if (attempt < 30) await delay(1000);
+    }
     const audienceLabel = audienceRole || `staff ${audienceStaffProfileId}`;
     expect(`notification ${eventKey} routed to ${audienceLabel}`, rows.length > 0, {
       caseId,

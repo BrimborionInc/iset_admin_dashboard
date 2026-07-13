@@ -66,6 +66,23 @@ describe('release qualification contract', () => {
     expect(check.cleanup).toMatch(/zero-residue/i);
   });
 
+  test('live TEST fixture smokes bound hangs, clean in finally, and wait for durable notifications', () => {
+    const applicantSmoke = fs.readFileSync(
+      path.resolve(__dirname, '..', 'scripts', 'applicant-scope-guard-test-smoke.js'),
+      'utf8'
+    );
+    expect(applicantSmoke).toContain('Timed out reading HTTP response body');
+    expect(applicantSmoke).toMatch(/finally \{\s+if \(!config\.keepFixture && seeded\)/u);
+
+    const twoStepSmoke = fs.readFileSync(
+      path.resolve(__dirname, '..', 'scripts', 'two-step-review-test-smoke.js'),
+      'utf8'
+    );
+    expect(twoStepSmoke).toContain('for (let attempt = 0; attempt < 31; attempt += 1)');
+    expect(twoStepSmoke).toContain('two-step-review-route-failure-');
+    expect(twoStepSmoke).toContain('pageText');
+  });
+
   test('shared and schema changes expand to dependent cross-application domains', () => {
     const resolved = resolveDomains(inventory, {
       admin: ['src/lib/adminRuntimeSchemaContract.js'],

@@ -45,7 +45,7 @@ The JSON inventory is executable project memory. Every changed file must match a
 | Admin application and role journeys | Admin aggregate, compiled bundle, 12 deterministic browser journeys, deployed Coordinator/Regional Manager/Decision Maker smoke |
 | Portal application and applicant scope | Portal aggregate and composition tests, deployed intake completion/retry/files smoke, two-applicant browser/API ownership smoke |
 | Shared runtime and API composition | Both aggregate suites, injected full Express-stack tests, exact shared-tree provenance, deployed cross-app journeys |
-| Schema and readiness/request parity | Canonical migration plan, exact admin and portal readiness contracts on real MySQL, authenticated `staff_profiles` hydration using the same exported column list, deployed `/readyz`, zero pending/failed migrations |
+| Schema and readiness/request parity | Canonical migration plan, exact admin and portal readiness contracts on real MySQL, authenticated `staff_profiles` hydration using the same exported column list, deployed `/readyz`, zero pending migrations and zero unresolved failures for current canonical checksums |
 | Identity, authentication, authorization | Unit/composition authorization suites, disposable Cognito role journeys, strict real-token wrong-role/cross-surface/wrong-owner denials with no skipped checks |
 | Frontend network and state failures | Compiled admin browser suite covering loading, error, empty, stale-response, retry, network-idle, route, queue, workspace, assessment, and intervention behavior |
 | Runtime configuration and intake publish | Declared `dataset:*` and `workflow:*` operations, source plan guard, deployed workflow completion against the published schema, TEST external-routing assertions |
@@ -218,7 +218,7 @@ The acceptance gate proves:
 - every healthy ASG instance is SSM-online; local admin and portal `/readyz` return `ready`;
 - deployed admin authenticated-staff contract is the same five-column readiness contract and artifact provenance matches the qualified candidate;
 - admin and portal PM2 processes are online with live PIDs and required DB env is present; portal runtime DDL is disabled;
-- canonical TEST migration plan has zero pending and zero failed migrations;
+- canonical TEST migration plan has zero pending migrations and zero failed attempts for current canonical checksums; historical failures for obsolete checksums remain visible as audit evidence but are non-blocking only when the current checksum has succeeded;
 - no stale, dead-letter, ambiguous, or uncertain event deliveries; Finance email and Intacct are disabled; maintenance announcement count is zero;
 - deployed Coordinator, Regional Manager, Decision Maker, intake completion/retry/generated files, applicant ownership, cross-surface, wrong-role, wrong-owner, Finance, document, message, and payment rollback journeys pass;
 - all disposable Cognito, DB, notification, document, and S3 fixtures report zero residue;
@@ -267,6 +267,7 @@ Follow the PROD warning/fallback/restore-point/normal-routing smoke sequence in 
 
 - Do not delete or edit failed evidence. Its checksum intentionally makes edits detectable.
 - A missing credential, expired token, unavailable browser, unreachable DEV MySQL, AWS denial, absent fixture, disabled script, or missing rollback artifact is `unavailable`/failed and therefore `NO-GO`.
+- An authenticated request that does not finish is a failed journey even if `/readyz` is green. Live smoke HTTP response bodies must have bounded timeouts, and fixture cleanup must run in `finally` so a hung or failed journey cannot strand TEST identities/data.
 - Do not convert a required check to optional during a release. Change the reviewed inventory in a separate code change, add replacement evidence, and rerun DEV.
 - Fix product/test infrastructure, clean fixtures, or obtain the missing approved account; then rerun the complete affected stage against the unchanged candidate.
 - If source, migrations, inventory, operations, runtime payload, or release ID changes, start again at DEV qualification.

@@ -581,31 +581,37 @@ function remoteRunner() {
     progress('remote runner starting');
     connection = await mysql.createConnection(dbConfig());
     progress('db connected');
-    await seedFixture();
-    seeded = true;
-    progress('fixture seeded');
-    await runApiChecks();
-    progress('api checks complete');
-    if (config.runBrowser) {
-      await runBrowserChecks();
-      progress('browser checks complete');
-    } else {
-      skip('browser dashboard/messages smoke skipped by operator option');
-      progress('browser checks skipped');
+    try {
+      await seedFixture();
+      seeded = true;
+      progress('fixture seeded');
+      await runApiChecks();
+      progress('api checks complete');
+      if (config.runBrowser) {
+        await runBrowserChecks();
+        progress('browser checks complete');
+      } else {
+        skip('browser dashboard/messages smoke skipped by operator option');
+        progress('browser checks skipped');
+      }
+      if (config.runPrivacyDenials) {
+        await runPrivacyDenialChecks();
+        progress('privacy denial checks complete');
+      }
+      if (config.keepFixture) {
+        result.cleanup = 'kept';
+        progress('fixture kept');
+      }
+    } finally {
+      if (!config.keepFixture && seeded) {
+        await cleanupFixture();
+        progress('fixture cleaned up');
+      }
+      if (connection) {
+        await connection.end();
+        progress('db connection closed');
+      }
     }
-    if (config.runPrivacyDenials) {
-      await runPrivacyDenialChecks();
-      progress('privacy denial checks complete');
-    }
-    if (!config.keepFixture) {
-      await cleanupFixture();
-      progress('fixture cleaned up');
-    } else {
-      result.cleanup = 'kept';
-      progress('fixture kept');
-    }
-    await connection.end();
-    progress('db connection closed');
   }
 
   function progress(message) {
@@ -1080,6 +1086,8 @@ function remoteRunner() {
     await query('DELETE FROM user WHERE email IN (?, ?, ?)', emails);
   }
 
+  const responseTimeouts = new WeakMap();
+
   async function fetchImpl(url, options = {}) {
     const timeoutMs = options.timeoutMs || 30000;
     const requestOptions = { ...options };
@@ -1088,16 +1096,37 @@ function remoteRunner() {
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     requestOptions.signal = requestOptions.signal || controller.signal;
     try {
-      if (typeof fetch === 'function') return await fetch(url, requestOptions);
-      const nodeFetch = portalRequire('node-fetch');
-      return await nodeFetch(url, requestOptions);
-    } finally {
+      const response = typeof fetch === 'function'
+        ? await fetch(url, requestOptions)
+        : await portalRequire('node-fetch')(url, requestOptions);
+      responseTimeouts.set(response, { controller, timer });
+      return response;
+    } catch (error) {
       clearTimeout(timer);
+      throw error;
+    }
+  }
+
+  async function readTimedResponse(response, reader, timeoutMs = 30000) {
+    let bodyTimer = null;
+    const timeout = new Promise((_, reject) => {
+      bodyTimer = setTimeout(() => reject(new Error(`Timed out reading HTTP response body after ${timeoutMs}ms`)), timeoutMs);
+    });
+    const requestTimeout = responseTimeouts.get(response);
+    try {
+      return await Promise.race([reader(), timeout]);
+    } catch (error) {
+      requestTimeout?.controller?.abort();
+      throw error;
+    } finally {
+      clearTimeout(bodyTimer);
+      clearTimeout(requestTimeout?.timer);
+      responseTimeouts.delete(response);
     }
   }
 
   async function responseBody(response) {
-    const text = await response.text();
+    const text = await readTimedResponse(response, () => response.text());
     try {
       return { text, json: text ? JSON.parse(text) : null };
     } catch (_) {
@@ -1512,12 +1541,12 @@ function remoteRunner() {
 
   async function readResponseBuffer(response) {
     if (typeof response.arrayBuffer === 'function') {
-      return Buffer.from(await response.arrayBuffer());
+      return Buffer.from(await readTimedResponse(response, () => response.arrayBuffer()));
     }
     if (typeof response.buffer === 'function') {
-      return response.buffer();
+      return readTimedResponse(response, () => response.buffer());
     }
-    return Buffer.from(await response.text(), 'utf8');
+    return Buffer.from(await readTimedResponse(response, () => response.text()), 'utf8');
   }
 
   async function waitForBodyText(page, pattern) {

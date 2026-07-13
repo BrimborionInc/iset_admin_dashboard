@@ -60,6 +60,23 @@ function assertNoMigrationChecksumDrift(migrations, appliedRows) {
   return true;
 }
 
+function classifyMigrationFailures(migrations, appliedRows) {
+  const canonicalKeys = new Set((migrations || []).map(migration => `${migration.file}|${migration.checksum}`));
+  const successfulKeys = new Set((appliedRows || [])
+    .filter(row => Number(row.success) === 1)
+    .map(row => `${row.filename}|${row.checksum}`));
+  const failed = (appliedRows || []).filter(row => Number(row.success) !== 1);
+  const unresolved = failed.filter(row => {
+    const key = `${row.filename}|${row.checksum}`;
+    return canonicalKeys.has(key) && !successfulKeys.has(key);
+  });
+  const unresolvedSet = new Set(unresolved);
+  return {
+    unresolved,
+    historical: failed.filter(row => !unresolvedSet.has(row)),
+  };
+}
+
 function assertMigrationApplySucceeded(result, options = {}) {
   const context = options.context || 'Schema migration apply';
   if (
@@ -179,13 +196,17 @@ async function planPendingSharedSchemaMigrations(pool, options = {}) {
       .map(row => [`${row.filename}|${row.checksum}`, row])
   );
   const pending = migrations.filter(migration => !successfulAppliedMap.has(`${migration.file}|${migration.checksum}`));
+  const failures = classifyMigrationFailures(migrations, appliedRows);
 
   return {
     trackingTable,
     migrationsDir,
     totalFilesystemMigrations: migrations.length,
     appliedCount: appliedRows.filter(row => Number(row.success) === 1).length,
-    failureCount: appliedRows.filter(row => Number(row.success) !== 1).length,
+    failureCount: failures.unresolved.length,
+    failures: failures.unresolved,
+    historicalFailureCount: failures.historical.length,
+    historicalFailures: failures.historical,
     pendingCount: pending.length,
     applied: appliedRows,
     pending,
@@ -365,6 +386,7 @@ module.exports = {
   SchemaMigrationApplyError,
   assertNoMigrationChecksumDrift,
   assertMigrationApplySucceeded,
+  classifyMigrationFailures,
   ensureTrackingTable,
   fetchAppliedMigrationRows,
   getSharedSchemaInventory,

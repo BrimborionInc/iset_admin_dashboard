@@ -14,6 +14,7 @@ const {
   applyPendingSharedSchemaMigrations,
   assertMigrationApplySucceeded,
   assertNoMigrationChecksumDrift,
+  classifyMigrationFailures,
 } = require('../src/lib/sharedSchemaMigrationRunner');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -332,6 +333,9 @@ function summarizePlanForJson(plan) {
     totalFilesystemMigrations: plan.totalFilesystemMigrations,
     appliedCount: plan.appliedCount,
     failureCount: plan.failureCount,
+    failures: plan.failures || [],
+    historicalFailureCount: plan.historicalFailureCount || 0,
+    historicalFailures: plan.historicalFailures || [],
     pendingCount: plan.pendingCount,
     applied: plan.applied,
     pending: summarizePendingMigrations(plan.pending),
@@ -458,6 +462,7 @@ function planPendingRemoteSharedSchemaMigrations(remoteConfig, options = {}) {
       .map(row => [`${row.filename}|${row.checksum}`, row])
   );
   const pending = migrations.filter(migration => !successfulAppliedMap.has(`${migration.file}|${migration.checksum}`));
+  const failures = classifyMigrationFailures(migrations, appliedRows);
 
   return {
     trackingTable,
@@ -468,7 +473,10 @@ function planPendingRemoteSharedSchemaMigrations(remoteConfig, options = {}) {
     region: remoteConfig.region,
     totalFilesystemMigrations: migrations.length,
     appliedCount: appliedRows.filter(row => Number(row.success) === 1).length,
-    failureCount: appliedRows.filter(row => Number(row.success) !== 1).length,
+    failureCount: failures.unresolved.length,
+    failures: failures.unresolved,
+    historicalFailureCount: failures.historical.length,
+    historicalFailures: failures.historical,
     pendingCount: pending.length,
     applied: appliedRows,
     pending,

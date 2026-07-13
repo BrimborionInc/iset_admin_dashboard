@@ -7,6 +7,7 @@ const {
   applyPendingSharedSchemaMigrations,
   assertMigrationApplySucceeded,
   assertNoMigrationChecksumDrift,
+  classifyMigrationFailures,
   planPendingSharedSchemaMigrations,
 } = require('../src/lib/sharedSchemaMigrationRunner');
 
@@ -98,6 +99,27 @@ describe('schema migration failure contract', () => {
       { file: '001_applied.sql', checksum: 'old-checksum' },
       { file: '002_forward_fix.sql', checksum: 'new-checksum' },
     ], applied)).toBe(true);
+  });
+
+  test('historical failed checksums remain visible without blocking a successful canonical migration', () => {
+    const migrations = [{ file: '001_applied.sql', checksum: 'current-checksum' }];
+    const applied = [
+      { filename: '001_applied.sql', checksum: 'old-failed-checksum', success: 0 },
+      { filename: '001_applied.sql', checksum: 'current-checksum', success: 1 },
+    ];
+    expect(classifyMigrationFailures(migrations, applied)).toEqual({
+      unresolved: [],
+      historical: [applied[0]],
+    });
+  });
+
+  test('a failed attempt for the current canonical checksum remains blocking', () => {
+    const migrations = [{ file: '001_pending.sql', checksum: 'current-checksum' }];
+    const failed = { filename: '001_pending.sql', checksum: 'current-checksum', success: 0 };
+    expect(classifyMigrationFailures(migrations, [failed])).toEqual({
+      unresolved: [failed],
+      historical: [],
+    });
   });
 
   test('a clean replay plan matches a long-lived ledger and accepts only a forward filename', async () => {
