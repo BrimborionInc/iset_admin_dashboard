@@ -537,7 +537,7 @@ async function clickButtonByText(page, text) {
 }
 
 async function clickWorkingAreaCard(page, text) {
-  const point = await page.evaluate((label) => {
+  return page.evaluate((label) => {
     const cards = Array.from(document.querySelectorAll('.stage-card, [class*="stage-card"]'));
     let target = cards.find(card => (card.textContent || '').includes(label));
     if (!target) {
@@ -547,16 +547,10 @@ async function clickWorkingAreaCard(page, text) {
     }
     if (!target && cards.length >= 3) target = cards[2];
     if (!target) return null;
-    const rect = target.getBoundingClientRect();
-    if (!rect.width || !rect.height) return null;
-    return {
-      x: rect.left + Math.min(Math.max(rect.width / 2, 12), rect.width - 12),
-      y: rect.top + Math.min(Math.max(rect.height / 2, 12), rect.height - 12),
-    };
+    const card = target.closest?.('.stage-card, [class*="stage-card"]') || target;
+    card.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    return true;
   }, text);
-  if (!point) return false;
-  await page.mouse.click(point.x, point.y);
-  return true;
 }
 
 async function clickLibraryButton(page, text) {
