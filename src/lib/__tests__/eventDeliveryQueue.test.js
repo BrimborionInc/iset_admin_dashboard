@@ -218,11 +218,17 @@ describe('durable event delivery and reminder lifecycle', () => {
     const migration = fs.readFileSync(path.resolve(process.cwd(), 'sql/migrations/20260711_0003_add_durable_event_delivery.sql'), 'utf8');
     const admin = fs.readFileSync(path.resolve(process.cwd(), 'isetadminserver.js'), 'utf8');
     const portal = fs.readFileSync(path.resolve(process.cwd(), '../ISET-intake/server.js'), 'utf8');
+    const portalSchemaReadiness = fs.readFileSync(
+      path.resolve(process.cwd(), '../ISET-intake/src/services/schemaReadiness.js'),
+      'utf8'
+    );
     expect(migration).toContain('UNIQUE KEY uq_event_delivery_audience_channel (event_id, channel, audience_key)');
     expect(migration).toContain('PRIMARY KEY (reminder_id, lifecycle_generation, event_type)');
     expect(migration).toContain('replayed_by_staff_profile_id');
     expect(admin).toContain("assertRuntimeTableReady(pool, 'iset_event_delivery'");
-    expect(portal).toContain("assertRuntimeTableReady(pool, 'iset_event_delivery'");
+    expect(portal).toContain('await assertPortalRuntimeSchemaReady(pool)');
+    expect(portalSchemaReadiness).toContain("['iset_event_delivery', ['event_id', 'channel', 'audience_key', 'status']]");
+    expect(portalSchemaReadiness).toContain('await assertRuntimeTableReady(connection, table, columns)');
     expect(admin).toContain("workerScope: 'admin'");
     expect(portal).toContain("workerScope: 'portal'");
   });
