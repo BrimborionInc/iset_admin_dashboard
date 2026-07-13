@@ -84,6 +84,7 @@ describe('release admission', () => {
     expect(source).toContain('writeStagingReleaseProvenance');
     expect(source).toContain('.path-release-provenance.json');
     expect(source).toContain('qualificationEvidenceId');
+    expect(source).toContain("'privacy-route-denial-smoke.js'");
   });
 
   test('immutable staging and a complete descriptor precede a production refresh', () => {

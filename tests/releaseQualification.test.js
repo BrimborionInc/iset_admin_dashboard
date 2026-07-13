@@ -56,6 +56,16 @@ describe('release qualification contract', () => {
     ]));
   });
 
+  test('TEST strict denials provision disposable identities without manual token variables', () => {
+    const check = inventory.checks['test-live-privacy-denials'];
+    expect(check.command).toEqual(expect.arrayContaining([
+      'scripts/applicant-scope-guard-test-smoke.js',
+      '--privacy-denials',
+    ]));
+    expect(check.requiredEnv).toBeUndefined();
+    expect(check.cleanup).toMatch(/zero-residue/i);
+  });
+
   test('shared and schema changes expand to dependent cross-application domains', () => {
     const resolved = resolveDomains(inventory, {
       admin: ['src/lib/adminRuntimeSchemaContract.js'],

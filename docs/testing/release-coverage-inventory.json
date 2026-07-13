@@ -238,23 +238,10 @@
     "test-live-privacy-denials": {
       "stage": "test",
       "cwd": "admin",
-      "command": ["env", "OPENROUTER_API_KEY=deployed-configured", "node", "scripts/privacy-route-denial-smoke.js", "--require-live", "--json", "--admin-base", "https://nwac-console-test.awentech.ca", "--portal-base", "https://nwac-public-test.awentech.ca"],
-      "requiredEnv": [
-        "PRIVACY_DENIAL_NON_ADMIN_STAFF_TOKEN",
-        "PRIVACY_DENIAL_FINANCE_OR_ADMIN_TOKEN",
-        "PRIVACY_DENIAL_CASEWORK_PAYMENTS_TOKEN",
-        "PRIVACY_DENIAL_APPLICANT_A_TOKEN",
-        "PRIVACY_DENIAL_APPLICANT_B_TOKEN",
-        "PRIVACY_DENIAL_PORTAL_DOCUMENT_ID",
-        "PRIVACY_DENIAL_PORTAL_MESSAGE_ID",
-        "PRIVACY_DENIAL_ADMIN_CASE_ID",
-        "PRIVACY_DENIAL_ADMIN_APPLICATION_ID",
-        "PRIVACY_DENIAL_ADMIN_DOCUMENT_ID",
-        "PRIVACY_DENIAL_PAYMENT_PACKET_ID"
-      ],
-      "description": "Strict real-token wrong-role/wrong-owner denial checks; skips are release blockers.",
-      "effects": "Read-only authenticated TEST requests against approved synthetic fixtures.",
-      "cleanup": "Fixture owner is responsible for documented removal after acceptance."
+      "command": ["node", "scripts/applicant-scope-guard-test-smoke.js", "--profile", "nwac-test", "--region", "ca-central-1", "--privacy-denials", "--skip-browser", "--json"],
+      "description": "Autonomously provision disposable real Cognito staff/applicant identities and relational fixtures, then run strict wrong-role/wrong-owner denials with no skips.",
+      "effects": "Creates disposable TEST Cognito, staff/applicant, case/application, document, message and payment fixtures; makes authenticated requests only; no real email or provider call.",
+      "cleanup": "Mandatory Cognito and database cleanup with zero-residue assertion; ephemeral tokens are never emitted into qualification evidence or logs."
     },
     "test-payment-rollback": {
       "stage": "test",

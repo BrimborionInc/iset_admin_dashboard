@@ -155,7 +155,7 @@ Approval of investigation or local DEV work is not approval of this TEST mutatio
 - AWS profile `nwac-test` resolving to account `124355655255`, with SSM, ASG/EC2 describe, test artifact S3, TEST Cognito, and the existing TEST SQL helper access.
 - Disposable staff identities created by the two-step smoke for Coordinator, Regional Manager, and Decision Maker/NWAC Administrator behavior. System Administrator remains technical support behavior, not the business approver.
 - Disposable applicant identities and relational/object fixtures created by the intake and applicant-scope scripts.
-- Pre-provisioned approved synthetic bearer tokens and positive numeric fixture IDs for every `PRIVACY_DENIAL_*` variable listed in the machine inventory. Tokens must be valid for the acceptance window and must never be committed or written into evidence logs.
+- The strict-denial smoke provisions its own approved disposable Coordinator, Decision Maker, and two applicant Cognito identities plus scoped relational fixtures. Ephemeral tokens are never emitted into qualification evidence or logs, and every Cognito/database residue counter must return zero. Manually supplied `PRIVACY_DENIAL_*` values are not a release prerequisite.
 
 ### Safe external boundary
 
@@ -196,7 +196,7 @@ The TEST deployment records the prior retained timestamped admin and portal arti
 
 ## Phase 3 — deployed TEST acceptance
 
-Export the strict synthetic token/fixture variables in the operator shell, then run:
+Run the qualifier directly; it provisions and removes strict-denial identities and fixtures inside the bounded acceptance checks:
 
 ```bash
 npm run release:qualify -- run \

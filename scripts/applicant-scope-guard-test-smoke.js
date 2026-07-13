@@ -11,6 +11,7 @@ const DEFAULT_PROFILE = 'nwac-test';
 const DEFAULT_REGION = 'ca-central-1';
 const DEFAULT_BUCKET = 'nwac-test-artifacts';
 const DEFAULT_PORTAL_ENV = path.resolve(__dirname, '..', '..', 'ISET-intake', '.env.test');
+const DEFAULT_ADMIN_ENV = path.resolve(__dirname, '..', '.env.test');
 const DEFAULT_PUBLIC_API_ORIGIN = 'https://nwac-public-test.awentech.ca';
 const DEFAULT_LOCAL_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -21,8 +22,10 @@ function parseArgs(argv) {
     bucket: process.env.APPLICANT_SCOPE_SMOKE_BUCKET || DEFAULT_BUCKET,
     instanceId: process.env.APPLICANT_SCOPE_SMOKE_INSTANCE_ID || '',
     portalEnv: process.env.APPLICANT_SCOPE_SMOKE_PORTAL_ENV || DEFAULT_PORTAL_ENV,
+    adminEnv: process.env.APPLICANT_SCOPE_SMOKE_ADMIN_ENV || DEFAULT_ADMIN_ENV,
     keepFixture: false,
     skipBrowser: false,
+    privacyDenials: false,
     json: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -32,8 +35,10 @@ function parseArgs(argv) {
     else if (token === '--bucket') args.bucket = argv[++index];
     else if (token === '--instance-id') args.instanceId = argv[++index];
     else if (token === '--portal-env') args.portalEnv = argv[++index];
+    else if (token === '--admin-env') args.adminEnv = argv[++index];
     else if (token === '--keep-fixture') args.keepFixture = true;
     else if (token === '--skip-browser') args.skipBrowser = true;
+    else if (token === '--privacy-denials') args.privacyDenials = true;
     else if (token === '--json') args.json = true;
     else if (token === '--help' || token === '-h') {
       usage();
@@ -59,7 +64,9 @@ function usage() {
     '  --region REGION    AWS region. Default: ca-central-1.',
     '  --bucket NAME      Temporary S3 bucket. Default: nwac-test-artifacts.',
     '  --portal-env PATH  Portal .env.test used for applicant pool values.',
+    '  --admin-env PATH   Admin .env.test used for staff pool values.',
     '  --skip-browser     Run API/data checks only.',
+    '  --privacy-denials  Provision staff identities and run strict live denials before cleanup.',
     '  --keep-fixture     Keep DB fixture and Cognito users for inspection.',
     '  --json             Emit JSON summary.',
   ].join('\n'));
@@ -192,6 +199,47 @@ function createCognitoUser({ email, password, givenName, familyName, poolId }, o
   return sub;
 }
 
+function createStaffCognitoUser({ email, password, givenName, familyName, poolId, groupName }, options) {
+  const sub = createCognitoUser({ email, password, givenName, familyName, poolId }, options);
+  aws([
+    'cognito-idp',
+    'admin-add-user-to-group',
+    '--user-pool-id',
+    poolId,
+    '--username',
+    email,
+    '--group-name',
+    groupName,
+  ], options);
+  return sub;
+}
+
+function authenticateStaffUser({ email, password, poolId, clientId }, options) {
+  const flows = [
+    ['admin-initiate-auth', 'ADMIN_USER_PASSWORD_AUTH', ['--user-pool-id', poolId]],
+    ['initiate-auth', 'USER_PASSWORD_AUTH', []],
+  ];
+  const errors = [];
+  for (const [command, flow, extraArgs] of flows) {
+    try {
+      const response = awsJson([
+        'cognito-idp', command, ...extraArgs,
+        '--client-id', clientId,
+        '--auth-flow', flow,
+        '--auth-parameters', `USERNAME=${email},PASSWORD=${password}`,
+      ], options);
+      const auth = response?.AuthenticationResult;
+      if (response?.ChallengeName || !auth?.IdToken || !auth?.AccessToken) {
+        throw new Error(`Cognito authentication did not return tokens${response?.ChallengeName ? ` (${response.ChallengeName})` : ''}`);
+      }
+      return { idToken: auth.IdToken, accessToken: auth.AccessToken };
+    } catch (error) {
+      errors.push(String(error.stderr || error.message || error).split('\n')[0]);
+    }
+  }
+  throw new Error(`Unable to authenticate TEST staff user ${email}: ${errors.join('; ')}`);
+}
+
 function deleteCognitoUser({ email, poolId }, options) {
   try {
     aws([
@@ -321,6 +369,16 @@ async function main() {
     portalEnv.COGNITO_USER_POOL_ID;
   if (!poolId) throw new Error('COGNITO_USER_POOL_ID not found in portal env.');
 
+  let staffPoolId = '';
+  let staffClientId = '';
+  if (options.privacyDenials) {
+    if (!fs.existsSync(options.adminEnv)) throw new Error(`Admin env file not found: ${options.adminEnv}`);
+    const adminEnv = readEnvFile(options.adminEnv);
+    staffPoolId = adminEnv.COGNITO_STAFF_USER_POOL_ID || adminEnv.COGNITO_USER_POOL_ID || '';
+    staffClientId = adminEnv.COGNITO_STAFF_CLIENT_ID || adminEnv.COGNITO_CLIENT_ID || adminEnv.REACT_APP_COGNITO_CLIENT_ID || '';
+    if (!staffPoolId || !staffClientId) throw new Error('Staff Cognito pool/client not found in admin env.');
+  }
+
   const suffix = randomSuffix();
   const stamp = `scope-${Date.now()}-${suffix}`;
   const applicantA = {
@@ -337,6 +395,26 @@ async function main() {
     givenName: 'Scope',
     familyName: `Wrong ${suffix}`,
   };
+  const staffUsers = options.privacyDenials ? [
+    {
+      key: 'coordinator',
+      email: `codex.portal.scope.${suffix}.coord@example.com`,
+      password: randomPassword(),
+      givenName: 'Scope',
+      familyName: `Coordinator ${suffix}`,
+      role: 'ISET Coordinator',
+      groupName: 'ISET_Coordinator',
+    },
+    {
+      key: 'decisionMaker',
+      email: `codex.portal.scope.${suffix}.decision@example.com`,
+      password: randomPassword(),
+      givenName: 'Scope',
+      familyName: `Decision ${suffix}`,
+      role: 'NWAC Administrator',
+      groupName: 'NWAC_Administrator',
+    },
+  ] : [];
   const createdUsers = [];
   let remoteKey = null;
   let result = null;
@@ -351,6 +429,12 @@ async function main() {
     createdUsers.push(applicantA);
     applicantB.sub = createCognitoUser({ ...applicantB, poolId }, options);
     createdUsers.push(applicantB);
+    for (const user of staffUsers) {
+      user.poolId = staffPoolId;
+      user.sub = createStaffCognitoUser({ ...user, poolId: staffPoolId }, options);
+      user.session = authenticateStaffUser({ ...user, poolId: staffPoolId, clientId: staffClientId }, options);
+      createdUsers.push(user);
+    }
 
     remoteKey = `ssm-scripts/applicant-scope-smoke-${stamp}.js`;
     const remoteScript = `(${remoteRunner.toString()})();\n`;
@@ -372,6 +456,14 @@ async function main() {
         `APPLICANT_B_SUB=${shellQuote(applicantB.sub)}`,
         `KEEP_FIXTURE=${options.keepFixture ? '1' : '0'}`,
         `RUN_BROWSER=${options.skipBrowser ? '0' : '1'}`,
+        `RUN_PRIVACY_DENIALS=${options.privacyDenials ? '1' : '0'}`,
+        `PRIVACY_STAFF_USERS_JSON=${shellQuote(JSON.stringify(staffUsers.map(user => ({
+          key: user.key,
+          email: user.email,
+          sub: user.sub,
+          role: user.role,
+          session: user.session,
+        }))))}`,
         `PORTAL_LOCAL_BASE_URL=${shellQuote(DEFAULT_LOCAL_BASE_URL)}`,
         `PUBLIC_API_ORIGIN=${shellQuote(DEFAULT_PUBLIC_API_ORIGIN)}`,
         `node ${shellQuote(remotePath)}`,
@@ -403,7 +495,7 @@ async function main() {
     if (remoteKey) deleteRemoteScript({ key: remoteKey }, options);
     if (!options.keepFixture) {
       for (const user of createdUsers.reverse()) {
-        deleteCognitoUser({ email: user.email, poolId }, options);
+        deleteCognitoUser({ email: user.email, poolId: user.poolId || poolId }, options);
       }
     }
   }
@@ -419,6 +511,7 @@ function remoteRunner() {
   const fs = require('fs');
   const path = require('path');
   const { createRequire } = require('module');
+  const { spawnSync } = require('child_process');
   const portalRequire = createRequire('/opt/nwac/portal/package.json');
   const mysql = portalRequire('mysql2/promise');
 
@@ -442,6 +535,8 @@ function remoteRunner() {
     stamp: requiredEnv('FIXTURE_STAMP'),
     keepFixture: process.env.KEEP_FIXTURE === '1',
     runBrowser: process.env.RUN_BROWSER !== '0',
+    runPrivacyDenials: process.env.RUN_PRIVACY_DENIALS === '1',
+    privacyStaffUsers: JSON.parse(process.env.PRIVACY_STAFF_USERS_JSON || '[]'),
     localBaseUrl: stripTrailingSlash(process.env.PORTAL_LOCAL_BASE_URL || 'http://127.0.0.1:5000'),
     publicApiOrigin: stripTrailingSlash(process.env.PUBLIC_API_ORIGIN || 'https://nwac-public-test.awentech.ca'),
     applicantA: {
@@ -497,6 +592,10 @@ function remoteRunner() {
     } else {
       skip('browser dashboard/messages smoke skipped by operator option');
       progress('browser checks skipped');
+    }
+    if (config.runPrivacyDenials) {
+      await runPrivacyDenialChecks();
+      progress('privacy denial checks complete');
     }
     if (!config.keepFixture) {
       await cleanupFixture();
@@ -590,6 +689,32 @@ function remoteRunner() {
       fixture.subjectA = `Scope guard rightful message ${suffix}`;
       fixture.subjectB = `Scope guard stale message ${suffix}`;
 
+      const [regionRows] = await query('SELECT region_id FROM canada_region ORDER BY region_id ASC LIMIT 2');
+      if (!Array.isArray(regionRows) || regionRows.length < 2) throw new Error('TEST requires two canada_region rows for out-of-scope denial fixtures');
+      fixture.staffRegionId = Number(regionRows[0].region_id);
+      fixture.fixtureRegionId = Number(regionRows[1].region_id);
+      fixture.privacyStaff = {};
+      for (const user of config.privacyStaffUsers) {
+        const displayName = `${user.role} Privacy ${suffix}`;
+        const staffUserId = await insert(
+          `INSERT INTO user (name, email, cognito_sub, email_verified, suspended, preferred_language)
+           VALUES (?, ?, ?, 1, 0, 'en')`,
+          [displayName, user.email, user.sub]
+        );
+        const staffProfileId = await insert(
+          `INSERT INTO staff_profiles
+             (cognito_sub, email, name, display_name, primary_role, status, region_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'active', ?, NOW(), NOW())`,
+          [user.sub, user.email, displayName, displayName, user.role, fixture.staffRegionId]
+        );
+        await query(
+          `INSERT INTO staff_region (staff_profile_id, region_id) VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE updated_at = NOW()`,
+          [staffProfileId, fixture.staffRegionId]
+        );
+        fixture.privacyStaff[user.key] = { staffUserId, staffProfileId, email: user.email };
+      }
+
       fixture.userA = await insert(
         `INSERT INTO user (name, email, cognito_sub, email_verified, suspended, preferred_language)
          VALUES (?, ?, ?, 1, 0, 'en')`,
@@ -625,9 +750,9 @@ function remoteRunner() {
       );
       fixture.caseA = await insert(
         `INSERT INTO iset_case
-           (case_number, client_id, assigned_staff_profile_id, status, lifecycle_status, stage, opened_at, case_context_json)
-         VALUES (?, ?, ?, 'active', 'active', 'scope_guard_smoke', NOW(), CAST(? AS JSON))`,
-        [fixture.caseNumber, fixture.clientA, fixture.staffProfile, json({ ...fixture.marker, applicant: 'A' })]
+           (case_number, client_id, assigned_staff_profile_id, status, lifecycle_status, stage, portfolio_region_id, opened_at, case_context_json)
+         VALUES (?, ?, ?, 'active', 'active', 'scope_guard_smoke', ?, NOW(), CAST(? AS JSON))`,
+        [fixture.caseNumber, fixture.clientA, fixture.staffProfile, fixture.fixtureRegionId, json({ ...fixture.marker, applicant: 'A' })]
       );
       progress('seed clients and case complete');
 
@@ -702,6 +827,27 @@ function remoteRunner() {
       );
       progress('seed message items complete');
 
+      fixture.portalDocument = await insert(
+        `INSERT INTO iset_application_file
+           (user_id, file_path, original_filename, document_type, status, virus_scan_status, detected_mime, scan_notes)
+         VALUES (?, ?, ?, 'privacy_denial_smoke', 'clean', 'clean', 'text/plain', 'TEST privacy denial fixture')`,
+        [fixture.userA, `privacy-denial-test/${config.stamp}/portal-document.txt`, `privacy-denial-${suffix}.txt`]
+      );
+      fixture.adminDocument = await insert(
+        `INSERT INTO iset_document
+           (user_id, applicant_user_id, client_id, application_id, case_id, source, file_name, file_path, mime_type, label, metadata, status, document_category, visibility)
+         VALUES (?, ?, ?, ?, ?, 'manual_upload', ?, ?, 'application/pdf', 'TEST privacy denial fixture', CAST(? AS JSON), 'active', 'privacy_denial_smoke', 'internal')`,
+        [fixture.staffUser, fixture.userA, fixture.clientA, fixture.applicationA, fixture.caseA,
+          `privacy-denial-${suffix}.pdf`, `privacy-denial-test/${config.stamp}/admin-document.pdf`, json(fixture.marker)]
+      );
+      fixture.paymentPacket = await insert(
+        `INSERT INTO payment_packet
+           (case_id, client_id, reporting_unit, status, requester_user_id, notes_internal, metadata)
+         VALUES (?, ?, 'privacy-denial-smoke', 'draft', ?, 'TEST privacy denial fixture', CAST(? AS JSON))`,
+        [fixture.caseA, fixture.clientA, fixture.staffUser, json(fixture.marker)]
+      );
+      progress('seed strict denial fixtures complete');
+
       const signingSchema = {
         meta: { fixture: fixture.marker, title: 'Scope guard acknowledgement' },
         steps: [
@@ -753,6 +899,9 @@ function remoteRunner() {
         signingA: fixture.signingA,
         signingB: fixture.signingB,
         intervention: fixture.intervention,
+        portalDocument: fixture.portalDocument,
+        adminDocument: fixture.adminDocument,
+        paymentPacket: fixture.paymentPacket,
       };
       pass('TEST synthetic wrong-applicant fixture seeded', result.fixtureIds);
     } catch (error) {
@@ -776,9 +925,31 @@ function remoteRunner() {
       } else {
         await cleanupByMarkerAndEmail({ emails, markerLike });
       }
+      const allEmails = [...emails, ...config.privacyStaffUsers.map(user => user.email)];
+      const emailPlaceholders = allEmails.map(() => '?').join(',');
+      const [residueRows] = await query(
+        `SELECT
+           (SELECT COUNT(*) FROM user WHERE email IN (${emailPlaceholders})) AS user_rows,
+           (SELECT COUNT(*) FROM staff_profiles WHERE email IN (${emailPlaceholders})) AS staff_rows,
+           (SELECT COUNT(*) FROM iset_case WHERE case_context_json IS NOT NULL AND CAST(case_context_json AS CHAR) LIKE ?) AS case_rows,
+           (SELECT COUNT(*) FROM iset_application_file WHERE file_path LIKE ?) AS portal_document_rows,
+           (SELECT COUNT(*) FROM iset_document WHERE file_path LIKE ?) AS admin_document_rows,
+           (SELECT COUNT(*) FROM payment_packet WHERE CAST(COALESCE(metadata, JSON_OBJECT()) AS CHAR) LIKE ?) AS payment_rows`,
+        [
+          ...allEmails,
+          ...allEmails,
+          markerLike,
+          `privacy-denial-test/${config.stamp}/%`,
+          `privacy-denial-test/${config.stamp}/%`,
+          markerLike,
+        ]
+      );
+      const residue = residueRows?.[0] || {};
+      const nonZeroResidue = Object.fromEntries(Object.entries(residue).filter(([, value]) => Number(value) !== 0));
+      if (Object.keys(nonZeroResidue).length) throw new Error(`TEST fixture residue remains: ${JSON.stringify(nonZeroResidue)}`);
       if (!options.quiet) {
         result.cleanup = 'deleted';
-        pass('TEST synthetic fixture cleaned up');
+        pass('TEST synthetic fixture cleaned up with zero residue', residue);
       }
       progress('cleanup complete');
     } catch (error) {
@@ -791,9 +962,15 @@ function remoteRunner() {
   }
 
   async function cleanupByFixtureIds() {
-    const userIds = [fixture.userA, fixture.userB, fixture.staffUser].filter(Boolean);
+    const privacyStaffRows = Object.values(fixture.privacyStaff || {});
+    const userIds = [fixture.userA, fixture.userB, fixture.staffUser, ...privacyStaffRows.map(row => row.staffUserId)].filter(Boolean);
+    const privacyStaffProfileIds = privacyStaffRows.map(row => row.staffProfileId).filter(Boolean);
     const messageIds = [fixture.messageA, fixture.messageB].filter(Boolean);
     const signingIds = [fixture.signingA, fixture.signingB].filter(Boolean);
+    progress('cleanup exact strict denial fixtures');
+    if (fixture.paymentPacket) await query('DELETE FROM payment_packet WHERE id = ?', [fixture.paymentPacket]);
+    if (fixture.adminDocument) await query('DELETE FROM iset_document WHERE id = ?', [fixture.adminDocument]);
+    if (fixture.portalDocument) await query('DELETE FROM iset_application_file WHERE id = ?', [fixture.portalDocument]);
     progress('cleanup exact signing links');
     if (messageIds.length || signingIds.length) {
       await query(
@@ -840,6 +1017,10 @@ function remoteRunner() {
       await query(`DELETE FROM client WHERE id IN (${clientIds.map(() => '?').join(',')})`, clientIds);
     }
     progress('cleanup exact staff profile');
+    if (privacyStaffProfileIds.length) {
+      await query(`DELETE FROM staff_region WHERE staff_profile_id IN (${privacyStaffProfileIds.map(() => '?').join(',')})`, privacyStaffProfileIds);
+      await query(`DELETE FROM staff_profiles WHERE id IN (${privacyStaffProfileIds.map(() => '?').join(',')})`, privacyStaffProfileIds);
+    }
     if (fixture.staffProfile) await query('DELETE FROM staff_profiles WHERE id = ?', [fixture.staffProfile]);
     progress('cleanup exact user dependents');
     if (userIds.length) {
@@ -854,6 +1035,7 @@ function remoteRunner() {
   }
 
   async function cleanupByMarkerAndEmail({ emails, markerLike }) {
+    const privacyEmails = config.privacyStaffUsers.map(user => user.email);
     progress('cleanup fallback signing links');
     await query('DELETE FROM message_signing_request WHERE signing_request_id IN (SELECT id FROM signing_request WHERE created_by_user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?)))', emails);
     await query('DELETE FROM message_signing_request WHERE message_id IN (SELECT id FROM messages WHERE subject IN (?, ?))', [fixture.subjectA || '', fixture.subjectB || '']);
@@ -868,6 +1050,9 @@ function remoteRunner() {
       ...emails,
     ]);
     progress('cleanup fallback app/case rows');
+    await query("DELETE FROM payment_packet WHERE CAST(COALESCE(metadata, JSON_OBJECT()) AS CHAR) LIKE ?", [markerLike]);
+    await query("DELETE FROM iset_document WHERE CAST(COALESCE(metadata, JSON_OBJECT()) AS CHAR) LIKE ? OR file_path LIKE ?", [markerLike, `privacy-denial-test/${config.stamp}/%`]);
+    await query('DELETE FROM iset_application_file WHERE file_path LIKE ?', [`privacy-denial-test/${config.stamp}/%`]);
     await query('DELETE FROM iset_case_intervention WHERE CAST(metadata_json AS CHAR) LIKE ?', [markerLike]);
     await query('DELETE FROM iset_application WHERE CAST(payload_json AS CHAR) LIKE ?', [markerLike]);
     await query('DELETE FROM iset_application_submission WHERE CAST(intake_payload AS CHAR) LIKE ?', [markerLike]);
@@ -883,6 +1068,12 @@ function remoteRunner() {
       fixture.staffEmail || `codex.portal.scope.${fixture.suffix}.staff@example.com`,
       fixture.staffSub || `scope-staff-${fixture.suffix}`,
     ]);
+    if (privacyEmails.length) {
+      const placeholders = privacyEmails.map(() => '?').join(',');
+      await query(`DELETE FROM staff_region WHERE staff_profile_id IN (SELECT id FROM staff_profiles WHERE email IN (${placeholders}))`, privacyEmails);
+      await query(`DELETE FROM staff_profiles WHERE email IN (${placeholders})`, privacyEmails);
+      await query(`DELETE FROM user WHERE email IN (${placeholders})`, privacyEmails);
+    }
     await query('DELETE FROM input_json_state WHERE user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', emails);
     await query('DELETE FROM iset_application_draft_dynamic WHERE user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', emails);
     await query('DELETE FROM pending_uploads WHERE user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', emails);
@@ -1105,6 +1296,71 @@ function remoteRunner() {
     expect('wrong applicant cannot open stale signing request detail', signingBDetail.status === 404, {
       status: signingBDetail.status,
     });
+  }
+
+  function cookieToken(session, name) {
+    const prefix = `${name}=`;
+    const part = String(session?.cookieHeader || '').split(/;\s*/u).find(value => value.startsWith(prefix));
+    return part ? decodeURIComponent(part.slice(prefix.length)) : '';
+  }
+
+  async function runPrivacyDenialChecks() {
+    const coordinator = config.privacyStaffUsers.find(user => user.key === 'coordinator');
+    const decisionMaker = config.privacyStaffUsers.find(user => user.key === 'decisionMaker');
+    const applicantAToken = cookieToken(fixture.sessionA, 'iset_id');
+    const applicantBToken = cookieToken(fixture.sessionB, 'iset_id');
+    if (!coordinator?.session?.idToken || !decisionMaker?.session?.idToken || !applicantAToken || !applicantBToken) {
+      fail('strict live privacy denials have complete real Cognito tokens');
+      return;
+    }
+    const script = '/opt/nwac/admin-dashboard/scripts/privacy-route-denial-smoke.js';
+    const child = spawnSync(process.execPath, [
+      script,
+      '--require-live',
+      '--json',
+      '--admin-base', 'http://127.0.0.1:5001',
+      '--portal-base', 'http://127.0.0.1:5000',
+    ], {
+      cwd: '/opt/nwac/admin-dashboard',
+      encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024,
+      env: {
+        ...process.env,
+        OPENROUTER_API_KEY: 'deployed-configured',
+        PRIVACY_DENIAL_NON_ADMIN_STAFF_TOKEN: coordinator.session.idToken,
+        PRIVACY_DENIAL_FINANCE_OR_ADMIN_TOKEN: decisionMaker.session.idToken,
+        PRIVACY_DENIAL_CASEWORK_PAYMENTS_TOKEN: coordinator.session.idToken,
+        PRIVACY_DENIAL_APPLICANT_A_TOKEN: applicantAToken,
+        PRIVACY_DENIAL_APPLICANT_B_TOKEN: applicantBToken,
+        PRIVACY_DENIAL_PORTAL_DOCUMENT_ID: String(fixture.portalDocument),
+        PRIVACY_DENIAL_PORTAL_MESSAGE_ID: String(fixture.messageA),
+        PRIVACY_DENIAL_ADMIN_CASE_ID: String(fixture.caseA),
+        PRIVACY_DENIAL_ADMIN_APPLICATION_ID: String(fixture.applicationA),
+        PRIVACY_DENIAL_ADMIN_DOCUMENT_ID: String(fixture.adminDocument),
+        PRIVACY_DENIAL_PAYMENT_PACKET_ID: String(fixture.paymentPacket),
+      },
+    });
+    let denialResult = null;
+    try {
+      denialResult = JSON.parse(String(child.stdout || '').trim());
+    } catch (_) {
+      fail('strict live privacy denials emitted parseable evidence', {
+        status: child.status,
+        stderr: String(child.stderr || '').slice(0, 1000),
+      });
+      return;
+    }
+    for (const check of denialResult.results || []) {
+      const details = { detail: check.detail || null };
+      if (check.status === 'PASS') pass(`privacy denial: ${check.name}`, details);
+      else if (check.status === 'SKIP') fail(`privacy denial unavailable: ${check.name}`, details);
+      else fail(`privacy denial: ${check.name}`, details);
+    }
+    expect(
+      'strict live privacy denial suite completed with no failure or skip',
+      child.status === 0 && denialResult.summary?.fail === 0 && denialResult.summary?.skip === 0,
+      { status: child.status, summary: denialResult.summary || null, stderr: String(child.stderr || '').slice(0, 1000) }
+    );
   }
 
   function redactContext(context) {
