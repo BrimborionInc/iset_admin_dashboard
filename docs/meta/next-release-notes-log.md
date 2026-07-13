@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-07-13 | Release 20260713-admin-schema-readiness-hotfix | Fix/Reliability | Admin console sign-in | Fixed a schema-readiness error that made signed-in admin console requests return 503 after the engineering-audit release. | The hotfix aligns the pre-traffic readiness check with the exact staff-profile columns used at runtime; it changes no data or staff permissions.
 - 2026-07-12 | Release 20260713-engineering-audit-prod | Fix/Reliability | Payments, budgets, and Intacct integration safety | Payment evidence and screens stay in the correct case scope, competing budget transfers apply once, and external payment handoffs retain a durable recoverable outcome instead of risking duplicate sends. | Sage-style success responses now require a stable external ID. Payment routing remains disabled; the release does not activate Finance email or Intacct.
 - 2026-07-12 | Release 20260713-engineering-audit-prod | Fix/Workflow Studio and Administration | Intake options, test-data cleanup, and legacy PTMA management | Intake component options are now explicitly static-only, test-data cleanup preserves client-account event integrity, and the unused PTMA management surface is removed. | NWAC Hub Management remains available to System Administrators through a separate Hub-only contract; the physical legacy-named table is retained.
 - 2026-07-11 | Release 20260713-engineering-audit-prod | Fix/Reliability | AI configuration | AI model, parameter, and fallback settings now persist consistently across admin, public portal, restarts, and instance replacement. | Parameter/fallback buttons send valid JSON; partial saves preserve other values; ordinary staff cannot bypass the approved model policy.
@@ -464,10 +465,15 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Fixed a problem that prevented signed-in staff from using the admin console after the latest release.
 - PATH now keeps case, payment, applicant, and notification work tied to the correct record while making retries and overlapping background work safer.
 - Public portal signing, staff-assisted intake, client imports, budget transfers, and external payment handoffs now have stronger duplicate and partial-failure protection.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260713-admin-schema-readiness-hotfix
+
+- Fixed a schema-readiness error that caused signed-in admin console requests to return 503.
 
 #### Release 20260713-engineering-audit-prod
 
@@ -485,22 +491,21 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Client, case, submission, and application records are saved together, preventing a transient failure from leaving a partial submitted application.
 - Safe retries return the existing completed result instead of creating duplicate application records or repeating generated documents and notifications.
 
-#### Release 20260710-conflict-disposition-notes-prod
-
-- Resolving a declared conflict now requires notes and records a `cleared` disposition without rewriting the original declaration.
-- Conflict-related reassignment now records a separate `reassigned` disposition and supports optional reviewer notes.
-- Both outcomes create a human-readable audit event and send the declaring staff member a direct notification using the applicant's name.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
+- Correction d'un probleme qui empechait le personnel connecte d'utiliser la console d'administration apres la derniere version.
 - PATH conserve maintenant le travail lie aux cas, paiements, demandeurs et notifications dans le bon dossier, tout en rendant plus securitaires les nouvelles tentatives et les taches d'arriere-plan simultanees.
 - La signature du portail public, l'admission assistee, l'importation de clients, les transferts budgetaires et les transferts de paiement externes offrent maintenant une meilleure protection contre les doublons et les echecs partiels.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260713-admin-schema-readiness-hotfix
+
+- Correction d'une erreur de preparation du schema qui faisait retourner une erreur 503 aux requetes de la console d'administration apres la connexion.
 
 #### Release 20260713-engineering-audit-prod
 
@@ -517,12 +522,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - La soumission finale reverifie maintenant chaque reponse et signature obligatoire du parcours d'admission applicable.
 - Les dossiers client, cas, soumission et demande sont enregistres ensemble afin qu'une erreur temporaire ne laisse pas une demande soumise partiellement.
 - Une nouvelle tentative securitaire retourne le resultat deja termine au lieu de creer des dossiers en double ou de repeter les documents et notifications generes.
-
-#### Release 20260710-conflict-disposition-notes-prod
-
-- La resolution d'un conflit declare exige maintenant des notes et consigne une decision `cleared` sans modifier la declaration originale.
-- La reaffectation liee a un conflit consigne maintenant une decision distincte `reassigned` et accepte des notes de revision facultatives.
-- Les deux resultats creent un evenement d'audit lisible et envoient une notification directe au membre du personnel qui a declare le conflit, en utilisant le nom du demandeur.
 
 ### Problemes connus (brouillon - FR)
 

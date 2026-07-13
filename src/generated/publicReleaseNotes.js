@@ -1,7 +1,7 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-07-13T07:44:32.764Z",
-  "releaseId": "20260713-engineering-audit-prod",
-  "releaseLabel": "Release 20260713-engineering-audit-prod",
+  "generatedAt": "2026-07-13T10:43:23.429Z",
+  "releaseId": "20260713-admin-schema-readiness-hotfix",
+  "releaseLabel": "Release 20260713-admin-schema-readiness-hotfix",
   "releaseDateEn": "13th July 2026",
   "releaseDateFr": "13 juillet 2026",
   "en": {
@@ -9,10 +9,17 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "What changed",
     "features": [
+      "Fixed a problem that prevented signed-in staff from using the admin console after the latest release.",
       "PATH now keeps case, payment, applicant, and notification work tied to the correct record while making retries and overlapping background work safer.",
       "Public portal signing, staff-assisted intake, client imports, budget transfers, and external payment handoffs now have stronger duplicate and partial-failure protection."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260713-admin-schema-readiness-hotfix",
+        "items": [
+          "Fixed a schema-readiness error that caused signed-in admin console requests to return 503."
+        ]
+      },
       {
         "title": "Release 20260713-engineering-audit-prod",
         "items": [
@@ -32,14 +39,6 @@ const publicReleaseNotes = {
           "Client, case, submission, and application records are saved together, preventing a transient failure from leaving a partial submitted application.",
           "Safe retries return the existing completed result instead of creating duplicate application records or repeating generated documents and notifications."
         ]
-      },
-      {
-        "title": "Release 20260710-conflict-disposition-notes-prod",
-        "items": [
-          "Resolving a declared conflict now requires notes and records a `cleared` disposition without rewriting the original declaration.",
-          "Conflict-related reassignment now records a separate `reassigned` disposition and supports optional reviewer notes.",
-          "Both outcomes create a human-readable audit event and send the declaring staff member a direct notification using the applicant's name."
-        ]
       }
     ],
     "knownIssuesHeading": "Known Bugs",
@@ -52,10 +51,17 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
+      "Correction d'un probleme qui empechait le personnel connecte d'utiliser la console d'administration apres la derniere version.",
       "PATH conserve maintenant le travail lie aux cas, paiements, demandeurs et notifications dans le bon dossier, tout en rendant plus securitaires les nouvelles tentatives et les taches d'arriere-plan simultanees.",
       "La signature du portail public, l'admission assistee, l'importation de clients, les transferts budgetaires et les transferts de paiement externes offrent maintenant une meilleure protection contre les doublons et les echecs partiels."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260713-admin-schema-readiness-hotfix",
+        "items": [
+          "Correction d'une erreur de preparation du schema qui faisait retourner une erreur 503 aux requetes de la console d'administration apres la connexion."
+        ]
+      },
       {
         "title": "Release 20260713-engineering-audit-prod",
         "items": [
@@ -74,14 +80,6 @@ const publicReleaseNotes = {
           "La soumission finale reverifie maintenant chaque reponse et signature obligatoire du parcours d'admission applicable.",
           "Les dossiers client, cas, soumission et demande sont enregistres ensemble afin qu'une erreur temporaire ne laisse pas une demande soumise partiellement.",
           "Une nouvelle tentative securitaire retourne le resultat deja termine au lieu de creer des dossiers en double ou de repeter les documents et notifications generes."
-        ]
-      },
-      {
-        "title": "Release 20260710-conflict-disposition-notes-prod",
-        "items": [
-          "La resolution d'un conflit declare exige maintenant des notes et consigne une decision `cleared` sans modifier la declaration originale.",
-          "La reaffectation liee a un conflit consigne maintenant une decision distincte `reassigned` et accepte des notes de revision facultatives.",
-          "Les deux resultats creent un evenement d'audit lisible et envoient une notification directe au membre du personnel qui a declare le conflit, en utilisant le nom du demandeur."
         ]
       }
     ],

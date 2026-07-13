@@ -25139,6 +25139,13 @@ function writeIfChanged(file, content) {
 const app = express();
 const port = process.env.PORT || 5001; // Use port from .env
 const buildDir = path.join(__dirname, 'build');
+const STAFF_PROFILE_RUNTIME_COLUMNS = [
+  'id',
+  'cognito_sub',
+  'email',
+  'primary_role',
+  'region_id',
+];
 
 // Lightweight health check for ALB
 app.get('/healthz', (_req, res) => {
@@ -25147,7 +25154,7 @@ app.get('/healthz', (_req, res) => {
 app.get('/readyz', async (_req, res) => {
   try {
     if (!pool) throw new Error('database_pool_unavailable');
-    await assertRuntimeTableReady(pool, 'staff_profiles', ['id', 'cognito_sub', 'region_id']);
+    await assertRuntimeTableReady(pool, 'staff_profiles', STAFF_PROFILE_RUNTIME_COLUMNS);
     await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
     await assertRuntimeTableReady(pool, 'iset_application_version', ['id', 'application_id', 'version', 'payload_json']);
     await assertRuntimeTableReady(pool, 'message_item', ['message_id', 'owner_user_id', 'folder', 'purged_at']);
@@ -25733,9 +25740,7 @@ async function staffProfileMiddleware(req, res, next) {
     const { sub, email, role } = req.auth;
     const authRegionId = Number(req.auth?.regionId);
     const persistedRegionId = Number.isInteger(authRegionId) && authRegionId > 0 ? authRegionId : null;
-    await assertRuntimeTableReady(pool, 'staff_profiles', [
-      'id', 'cognito_sub', 'email', 'primary_role', 'region_id', 'last_seen_at', 'created_at',
-    ]);
+    await assertRuntimeTableReady(pool, 'staff_profiles', STAFF_PROFILE_RUNTIME_COLUMNS);
     // Ensure non-null email if schema has NOT NULL constraint (fallback to synthetic)
     const derivedEmail = email || req.auth?.claims?.email || req.auth?.claims?.Email || null;
     const safeEmail = derivedEmail || (sub ? `${sub}@placeholder.local` : 'unknown@placeholder.local');

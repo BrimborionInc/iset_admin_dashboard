@@ -110,6 +110,12 @@ describe('complete admin Express stack', () => {
     expect(auth.status).toBe(200);
     expect(auth.body.auth).toMatchObject({ subjectType: 'staff', role: 'System Administrator' });
 
+    const staffProfileProbe = fakePool.queries.find(({ sql }) => (
+      sql.includes('FROM `staff_profiles` LIMIT 0')
+    ));
+    expect(staffProfileProbe?.sql).toContain('`id`, `cognito_sub`, `email`, `primary_role`, `region_id`');
+    expect(staffProfileProbe?.sql).not.toContain('`last_seen_at`');
+
     const retired = await requestJson(server, '/api/users/123');
     expect(retired).toMatchObject({
       status: 410,
