@@ -2,9 +2,11 @@
 
 Status: UAT prompts/checklists and testing reference material.
 
-Last Updated: 2026-05-28
+Last Updated: 2026-07-13
 
 These docs support manual/UAT validation. They do not replace automated tests, route smokes, database smokes, or live environment checks required by `docs/AGENTS.md`.
+
+Release qualification is controlled by `../ops/deployments/release-qualification-runbook.md` and the machine-readable `release-coverage-inventory.json`. The inventory maps changed code, shared dependencies, and declared data/config operations to mandatory DEV and TEST evidence; unknown or unavailable coverage is a release blocker.
 
 When touching testing docs, include the environment, date, and scope the checklist applies to.
 

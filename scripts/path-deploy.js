@@ -16,6 +16,11 @@ const {
   validatePrebuiltBuild,
   writeBuildManifest,
 } = require('./lib/releaseAdmission');
+const {
+  sha256Files,
+  sha256Json,
+  validateQualificationEvidence,
+} = require('../src/lib/releaseQualification');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const PORTAL_ROOT = path.resolve(REPO_ROOT, '..', 'ISET-intake');
@@ -27,7 +32,9 @@ const ADMIN_SUPPORT_SCRIPT_FILES = [
   'application-assessment-backfill.js',
   'application-assessment-context-backfill.js',
   'application-assessment-option-b-smoke.js',
+  'payments-workflow-smoke.js',
 ];
+const RELEASE_QUALIFICATION_INVENTORY = path.join(REPO_ROOT, 'docs', 'testing', 'release-coverage-inventory.json');
 
 const ENVIRONMENTS = {
   test: {
@@ -63,10 +70,10 @@ function usage() {
     '',
     'Examples:',
     '  node scripts/path-deploy.js plan --env test --skip-data',
-    '  node scripts/path-deploy.js --env test --skip-data --release-id <release-id>',
-    '  node scripts/path-deploy.js --env test --refresh-test-db --skip-data --release-id <release-id> --yes',
-    '  node scripts/path-deploy.js run --env prod --skip-data --release-id <release-id> --yes',
-    '  node scripts/path-deploy.js run --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --yes  # explicit runtime/config promotion only',
+    '  node scripts/path-deploy.js --env test --skip-data --release-id <release-id> --qualification-evidence <DEV-GO.json>',
+    '  node scripts/path-deploy.js --env test --refresh-test-db --skip-data --release-id <release-id> --qualification-evidence <DEV-GO.json> --yes',
+    '  node scripts/path-deploy.js run --env prod --skip-data --release-id <release-id> --qualification-evidence <TEST-GO.json> --yes',
+    '  node scripts/path-deploy.js run --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --qualification-evidence <TEST-GO.json> --yes  # explicit runtime/config promotion only',
     '',
     'Options:',
     '  --env NAME             Target environment: test or prod',
@@ -88,6 +95,7 @@ function usage() {
     '  --compatibility-only   PROD recovery: update live *-latest.zip artifacts without immutable release objects',
     '  --allow-dirty          Permit a dirty PROD app source tree when paired with --dirty-reason',
     '  --dirty-reason TEXT    Required explanation when overriding the PROD dirty-source guard',
+    '  --qualification-evidence PATH  Required GO evidence: DEV for TEST, TEST for PROD',
     '  --yes                  Required for prod run',
     '  --json                 Emit machine-readable JSON',
     '  --help                 Show this help',
@@ -123,6 +131,7 @@ function parseArgs(argv) {
     compatibilityOnly: false,
     allowDirty: false,
     dirtyReason: null,
+    qualificationEvidence: null,
     yes: false,
     json: false,
   };
@@ -168,6 +177,8 @@ function parseArgs(argv) {
       args.allowDirty = true;
     } else if (token === '--dirty-reason') {
       args.dirtyReason = argv[++index];
+    } else if (token === '--qualification-evidence') {
+      args.qualificationEvidence = path.resolve(argv[++index] || '');
     } else if (token === '--yes') {
       args.yes = true;
     } else if (token === '--json') {
@@ -813,6 +824,24 @@ function copyAdminSupportScripts(stagingPath) {
   return copied;
 }
 
+function writeStagingReleaseProvenance(stagingPath, { releaseId, environment, component, qualification }) {
+  const provenance = {
+    schemaVersion: 1,
+    releaseId,
+    environment,
+    component,
+    qualificationEvidenceId: qualification?.evidenceId || null,
+    source: qualification?.candidate?.source || {},
+    generatedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(
+    path.join(stagingPath, '.path-release-provenance.json'),
+    `${JSON.stringify(provenance, null, 2)}\n`,
+    'utf8'
+  );
+  return provenance;
+}
+
 function createZipFromDirectory(sourceDir, destinationZip) {
   return new Promise((resolve, reject) => {
     fs.mkdirSync(path.dirname(destinationZip), { recursive: true });
@@ -841,6 +870,24 @@ function sanitizeSsmOutput(value) {
 
 function uploadArtifactToS3(archivePath, bucket, key, envConfig) {
   runAwsNoOutput(['s3', 'cp', archivePath, `s3://${bucket}/${key}`], envConfig);
+}
+
+function findLatestS3Artifact(bucket, prefix, envConfig) {
+  const response = runAwsJson([
+    's3api',
+    'list-objects-v2',
+    '--bucket', bucket,
+    '--prefix', prefix.endsWith('/') ? prefix : `${prefix}/`,
+  ], envConfig);
+  const latest = (response.Contents || [])
+    .filter(item => item.Key && Number(item.Size) > 0)
+    .sort((left, right) => Date.parse(right.LastModified || 0) - Date.parse(left.LastModified || 0))[0];
+  return latest ? {
+    uri: `s3://${bucket}/${latest.Key}`,
+    key: latest.Key,
+    bytes: Number(latest.Size),
+    lastModified: latest.LastModified,
+  } : null;
 }
 
 function uploadProdArtifactPair({
@@ -993,6 +1040,7 @@ function buildAdminTestRemoteCommands(bucket, s3Key, region, stagedDirectories) 
     'cp "$TMPDIR/isetadminserver.js" /opt/nwac/admin-dashboard/isetadminserver.js',
     'cp "$TMPDIR/package.json" /opt/nwac/admin-dashboard/package.json',
     'cp "$TMPDIR/package-lock.json" /opt/nwac/admin-dashboard/package-lock.json',
+    'cp "$TMPDIR/.path-release-provenance.json" /opt/nwac/admin-dashboard/.path-release-provenance.json',
     'cp "$TMPDIR/.env.test" /home/ec2-user/admin-dashboard/.env',
     'cp "$TMPDIR/.env.test" /opt/nwac/admin-dashboard/.env',
     'cp "$TMPDIR/.env.test" /opt/nwac/admin-dashboard/.env.test',
@@ -1128,6 +1176,7 @@ function buildPortalTestRemoteCommands(bucket, s3Key, region) {
     'if [ -f "$TMPDIR/server.js" ]; then cp "$TMPDIR/server.js" /opt/nwac/portal/server.js; fi',
     'if [ -f "$TMPDIR/package.json" ]; then cp "$TMPDIR/package.json" /opt/nwac/portal/package.json; fi',
     'if [ -f "$TMPDIR/package-lock.json" ]; then cp "$TMPDIR/package-lock.json" /opt/nwac/portal/package-lock.json; fi',
+    'if [ -f "$TMPDIR/.path-release-provenance.json" ]; then cp "$TMPDIR/.path-release-provenance.json" /opt/nwac/portal/.path-release-provenance.json; fi',
     'if [ -f "$TMPDIR/.env.test" ]; then cp "$TMPDIR/.env.test" /opt/nwac/portal/.env.test; fi',
     'if [ -f "$TMPDIR/.env" ]; then cp "$TMPDIR/.env" /opt/nwac/portal/.env; fi',
     'if [ -f "$TMPDIR/migrationRunner.js" ]; then cp "$TMPDIR/migrationRunner.js" /opt/nwac/portal/migrationRunner.js; fi',
@@ -1188,11 +1237,12 @@ function buildPortalTestRemoteCommands(bucket, s3Key, region) {
   ];
 }
 
-async function deployAdminToTestNative(args, envConfig, releaseId) {
+async function deployAdminToTestNative(args, envConfig, releaseId, releaseContext = {}) {
   const bucket = 'nwac-test-artifacts';
   const keyPrefix = 'admin-dashboard';
   const autoScalingGroup = 'nwac-test-asg';
   const timestamp = formatDeployTimestamp();
+  const rollbackArtifact = findLatestS3Artifact(bucket, keyPrefix, envConfig);
   let tempRoot = null;
 
   const buildPath = prepareAdminFrontendBuild(args, envConfig, releaseId);
@@ -1227,6 +1277,12 @@ async function deployAdminToTestNative(args, envConfig, releaseId) {
     if (copyDirectoryIfExists(SHARED_ROOT, path.join(stagingPath, 'shared')) && !stagedDirectories.includes('shared')) {
       stagedDirectories.push('shared');
     }
+    writeStagingReleaseProvenance(stagingPath, {
+      releaseId,
+      environment: envConfig.name,
+      component: 'admin',
+      qualification: releaseContext.qualification,
+    });
 
     const archiveName = `admin-dashboard-${timestamp}.zip`;
     const archivePath = path.join(tempRoot, archiveName);
@@ -1253,6 +1309,7 @@ async function deployAdminToTestNative(args, envConfig, releaseId) {
 
     return {
       artifact: `s3://${bucket}/${s3Key}`,
+      rollbackArtifact,
       archiveBytes: archive.bytes,
       instances: commandResults,
     };
@@ -1263,11 +1320,12 @@ async function deployAdminToTestNative(args, envConfig, releaseId) {
   }
 }
 
-async function deployPortalToTestNative(args, envConfig, releaseId) {
+async function deployPortalToTestNative(args, envConfig, releaseId, releaseContext = {}) {
   const bucket = 'nwac-test-artifacts';
   const keyPrefix = 'portal';
   const autoScalingGroup = 'nwac-test-asg';
   const timestamp = formatDeployTimestamp();
+  const rollbackArtifact = findLatestS3Artifact(bucket, keyPrefix, envConfig);
   let tempRoot = null;
   const buildPath = preparePortalFrontendBuild(args, envConfig, releaseId);
   const resolvedBuildOutputDir = path.relative(PORTAL_ROOT, buildPath);
@@ -1304,6 +1362,12 @@ async function deployPortalToTestNative(args, envConfig, releaseId) {
       copyFileIfExists(path.join(PORTAL_ROOT, file), path.join(stagingPath, file));
     });
     copyFileIfExists(path.join(stagingPath, '.env.test'), path.join(stagingPath, '.env'));
+    writeStagingReleaseProvenance(stagingPath, {
+      releaseId,
+      environment: envConfig.name,
+      component: 'portal',
+      qualification: releaseContext.qualification,
+    });
 
     const archiveName = `portal-${timestamp}.zip`;
     const archivePath = path.join(tempRoot, archiveName);
@@ -1330,6 +1394,7 @@ async function deployPortalToTestNative(args, envConfig, releaseId) {
 
     return {
       artifact: `s3://${bucket}/${s3Key}`,
+      rollbackArtifact,
       archiveBytes: archive.bytes,
       instances: commandResults,
     };
@@ -1340,7 +1405,7 @@ async function deployPortalToTestNative(args, envConfig, releaseId) {
   }
 }
 
-async function deploySharedToProdNative(args, envConfig, releaseId) {
+async function deploySharedToProdNative(args, envConfig, releaseId, releaseContext = {}) {
   const keyPrefix = 'shared';
   const archiveName = 'shared-latest.zip';
   let tempRoot = null;
@@ -1354,6 +1419,12 @@ async function deploySharedToProdNative(args, envConfig, releaseId) {
     const stagingPath = path.join(tempRoot, 'staging');
     fs.mkdirSync(stagingPath, { recursive: true });
     copyDirectoryIfExists(SHARED_ROOT, path.join(stagingPath, 'shared'));
+    writeStagingReleaseProvenance(stagingPath, {
+      releaseId,
+      environment: envConfig.name,
+      component: 'shared',
+      qualification: releaseContext.qualification,
+    });
 
     const archivePath = path.join(tempRoot, archiveName);
     await createZipFromDirectory(stagingPath, archivePath);
@@ -1373,7 +1444,7 @@ async function deploySharedToProdNative(args, envConfig, releaseId) {
   }
 }
 
-async function deployAdminToProdNative(args, envConfig, releaseId) {
+async function deployAdminToProdNative(args, envConfig, releaseId, releaseContext = {}) {
   const keyPrefix = 'admin';
   const archiveName = 'admin-dashboard-latest.zip';
   let tempRoot = null;
@@ -1403,6 +1474,12 @@ async function deployAdminToProdNative(args, envConfig, releaseId) {
     });
     copyAdminSupportScripts(stagingPath);
     copyDirectoryIfExists(SHARED_ROOT, path.join(stagingPath, 'shared'));
+    writeStagingReleaseProvenance(stagingPath, {
+      releaseId,
+      environment: envConfig.name,
+      component: 'admin',
+      qualification: releaseContext.qualification,
+    });
 
     const archivePath = path.join(tempRoot, archiveName);
     await createZipFromDirectory(stagingPath, archivePath);
@@ -1422,7 +1499,7 @@ async function deployAdminToProdNative(args, envConfig, releaseId) {
   }
 }
 
-async function deployPortalToProdNative(args, envConfig, releaseId) {
+async function deployPortalToProdNative(args, envConfig, releaseId, releaseContext = {}) {
   const keyPrefix = 'portal';
   const archiveName = 'portal-latest.zip';
   let tempRoot = null;
@@ -1466,6 +1543,12 @@ async function deployPortalToProdNative(args, envConfig, releaseId) {
       'sesMailer.js',
     ].forEach(file => {
       copyFileIfExists(path.join(PORTAL_ROOT, file), path.join(stagingPath, file));
+    });
+    writeStagingReleaseProvenance(stagingPath, {
+      releaseId,
+      environment: envConfig.name,
+      component: 'portal',
+      qualification: releaseContext.qualification,
     });
 
     const archivePath = path.join(tempRoot, archiveName);
@@ -1553,13 +1636,13 @@ async function deployProdApplicationsNative(args, envConfig, appPlan, releaseId,
   };
 
   if (appPlan.deployShared) {
-    result.artifacts.shared = await deploySharedToProdNative(args, envConfig, releaseId);
+    result.artifacts.shared = await deploySharedToProdNative(args, envConfig, releaseId, releaseContext);
   }
   if (appPlan.deployAdmin) {
-    result.artifacts.admin = await deployAdminToProdNative(args, envConfig, releaseId);
+    result.artifacts.admin = await deployAdminToProdNative(args, envConfig, releaseId, releaseContext);
   }
   if (appPlan.deployPortal) {
-    result.artifacts.portal = await deployPortalToProdNative(args, envConfig, releaseId);
+    result.artifacts.portal = await deployPortalToProdNative(args, envConfig, releaseId, releaseContext);
   }
   const descriptorComponents = ['shared', 'admin', 'portal'];
   if (args.compatibilityOnly) {
@@ -1708,10 +1791,10 @@ async function deployApplications(args, envConfig, appPlan, releaseId, releaseCo
       artifacts: {},
     };
     if (appPlan.deployAdmin) {
-      result.artifacts.admin = await deployAdminToTestNative(args, envConfig, releaseId);
+      result.artifacts.admin = await deployAdminToTestNative(args, envConfig, releaseId, releaseContext);
     }
     if (appPlan.deployPortal) {
-      result.artifacts.portal = await deployPortalToTestNative(args, envConfig, releaseId);
+      result.artifacts.portal = await deployPortalToTestNative(args, envConfig, releaseId, releaseContext);
     }
     return result;
   }
@@ -1822,6 +1905,70 @@ function buildRepoState() {
   };
 }
 
+function canonicalSchemaFingerprint() {
+  const migrationsRoot = path.join(REPO_ROOT, 'sql', 'migrations');
+  const files = fs.readdirSync(migrationsRoot)
+    .filter(filename => filename.endsWith('.sql'))
+    .sort();
+  return sha256Files(migrationsRoot, files);
+}
+
+function qualificationSourceFromRepoState(repoState) {
+  return {
+    admin: repoState.adminDashboard,
+    portal: repoState.portal,
+    shared: repoState.shared,
+  };
+}
+
+function requiredQualificationOperations(args) {
+  const operations = [];
+  if (args.refreshTestDb) operations.push('test-db-refresh');
+  if (!args.skipData && args.dataset) operations.push(`dataset:${args.dataset}`);
+  if (!args.skipData && args.workflowId) operations.push(`workflow:${args.workflowId}`);
+  return operations;
+}
+
+function admitReleaseQualification(args, envConfig, plan, repoState) {
+  if (!args.qualificationEvidence) {
+    throw new Error('Release run requires --qualification-evidence. A health check or preflight suite alone cannot authorize deployment.');
+  }
+  if (!fs.existsSync(args.qualificationEvidence)) {
+    throw new Error(`Qualification evidence not found: ${args.qualificationEvidence}`);
+  }
+  const evidence = JSON.parse(fs.readFileSync(args.qualificationEvidence, 'utf8'));
+  const inventory = JSON.parse(fs.readFileSync(RELEASE_QUALIFICATION_INVENTORY, 'utf8'));
+  const expectedStage = envConfig.name === 'prod' ? 'test' : 'dev';
+  const requiredComponents = ['admin', 'portal', 'shared'];
+  const errors = validateQualificationEvidence({
+    evidence,
+    expectedStage,
+    currentSource: qualificationSourceFromRepoState(repoState),
+    inventorySha256: sha256Json(inventory),
+    schemaSha256: canonicalSchemaFingerprint(),
+    requiredComponents,
+  });
+  if (evidence.releaseId !== plan.releaseId) {
+    errors.push(`qualification release ID ${evidence.releaseId || 'missing'} does not match deploy release ID ${plan.releaseId}`);
+  }
+  const declaredOperations = new Set(evidence.operations || []);
+  requiredQualificationOperations(args).forEach(operation => {
+    if (!declaredOperations.has(operation)) errors.push(`qualification did not declare required operation ${operation}`);
+  });
+  if (errors.length) throw new Error(`Release qualification rejected: ${errors.join('; ')}`);
+  return {
+    path: args.qualificationEvidence,
+    stage: evidence.stage,
+    decision: evidence.decision,
+    evidenceId: evidence.evidenceId,
+    releaseId: evidence.releaseId,
+    expiresAt: evidence.expiresAt,
+    domains: evidence.domains,
+    operations: evidence.operations || [],
+    candidate: evidence.candidate,
+  };
+}
+
 function repoPathForKey(key) {
   if (key === 'adminDashboard') return REPO_ROOT;
   if (key === 'portal') return PORTAL_ROOT;
@@ -1829,31 +1976,53 @@ function repoPathForKey(key) {
   throw new Error(`Unknown preflight repository key: ${key}`);
 }
 
+function snapshotGeneratedBuildMetadata() {
+  return [
+    path.join(REPO_ROOT, 'src', 'generated', 'buildInfo.js'),
+    path.join(REPO_ROOT, 'src', 'generated', 'publicReleaseNotes.js'),
+    path.join(PORTAL_ROOT, 'src', 'generated', 'buildInfo.js'),
+  ].map(filename => ({
+    filename,
+    content: fs.existsSync(filename) ? fs.readFileSync(filename) : null,
+  }));
+}
+
+function restoreGeneratedBuildMetadata(snapshots) {
+  (snapshots || []).forEach(snapshot => {
+    if (snapshot.content === null) fs.rmSync(snapshot.filename, { force: true });
+    else fs.writeFileSync(snapshot.filename, snapshot.content);
+  });
+}
+
 function runReleasePreflight(args, envConfig, appPlan, releaseId, initialRepoState) {
-  const needsBoth = Boolean(appPlan.deployShared);
-  if (appPlan.deployAdmin || needsBoth) prepareAdminFrontendBuild(args, envConfig, releaseId);
-  if (appPlan.deployPortal || needsBoth) preparePortalFrontendBuild(args, envConfig, releaseId);
-  args.preflightBuilds = true;
-  const admittedRepoState = buildRepoState();
+  const snapshots = snapshotGeneratedBuildMetadata();
   const checks = buildPreflightPlan(appPlan);
   const results = [];
-  for (const check of checks) {
-    const startedAt = new Date().toISOString();
-    runCommand(check.command, check.args, { cwd: repoPathForKey(check.repo) });
-    const finishedAt = new Date().toISOString();
-    results.push({
-      ...check,
-      status: 'successful',
-      startedAt,
-      finishedAt,
-      durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
-    });
+  try {
+    const needsBoth = Boolean(appPlan.deployShared);
+    if (appPlan.deployAdmin || needsBoth) prepareAdminFrontendBuild(args, envConfig, releaseId);
+    if (appPlan.deployPortal || needsBoth) preparePortalFrontendBuild(args, envConfig, releaseId);
+    args.preflightBuilds = true;
+    for (const check of checks) {
+      const startedAt = new Date().toISOString();
+      runCommand(check.command, check.args, { cwd: repoPathForKey(check.repo) });
+      const finishedAt = new Date().toISOString();
+      results.push({
+        ...check,
+        status: 'successful',
+        startedAt,
+        finishedAt,
+        durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
+      });
+    }
+  } finally {
+    restoreGeneratedBuildMetadata(snapshots);
   }
   const finalRepoState = buildRepoState();
   const sourceRepoKeys = new Set(checks.map(check => check.repo));
   buildProdAppSourceRepoKeys(appPlan).forEach(key => sourceRepoKeys.add(key));
   sourceRepoKeys.forEach(key => {
-    const before = admittedRepoState[key];
+    const before = initialRepoState[key];
     const after = finalRepoState[key];
     if (!before || !after || before.gitHead !== after.gitHead || before.treeFingerprint !== after.treeFingerprint) {
       throw new Error(`Release preflight source changed while checks were running: ${key}`);
@@ -1867,9 +2036,9 @@ function runReleasePreflight(args, envConfig, appPlan, releaseId, initialRepoSta
       gitDirty: Boolean(initialRepoState[key]?.gitDirty),
     }])),
     source: Object.fromEntries(Array.from(sourceRepoKeys).map(key => [key, {
-      gitHead: admittedRepoState[key]?.gitHead || null,
-      treeFingerprint: admittedRepoState[key]?.treeFingerprint || null,
-      gitDirty: Boolean(admittedRepoState[key]?.gitDirty),
+      gitHead: finalRepoState[key]?.gitHead || null,
+      treeFingerprint: finalRepoState[key]?.treeFingerprint || null,
+      gitDirty: Boolean(finalRepoState[key]?.gitDirty),
     }])),
     checks: results,
   };
@@ -2019,6 +2188,13 @@ async function handleRun(args, envConfig, identity) {
     manifest.sourceControl = assertProdDeploySourceState(args, envConfig, plan.app, manifest.repos);
     writeManifest(manifestPath, manifest);
 
+    manifest.qualification = await runStep(
+      manifest,
+      manifestPath,
+      'release.qualification',
+      async () => admitReleaseQualification(args, envConfig, plan, manifest.repos)
+    );
+
     if (plan.app.deployShared || plan.app.deployAdmin || plan.app.deployPortal) {
       manifest.preflight = await runStep(
         manifest,
@@ -2064,7 +2240,11 @@ async function handleRun(args, envConfig, identity) {
         envConfig,
         plan.app,
         plan.releaseId,
-        { repos: manifest.preflight?.source || manifest.repos, preflight: manifest.preflight }
+        {
+          repos: manifest.preflight?.source || manifest.repos,
+          preflight: manifest.preflight,
+          qualification: manifest.qualification,
+        }
       ));
       manifest.appApply = appResult;
     }

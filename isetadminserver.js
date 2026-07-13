@@ -83,7 +83,11 @@ const {
 } = require('./src/lib/backloadParticipantDetailsSeeding');
 const { normaliseIlmpEducationLevelCode } = require('./src/lib/ilmpEducationMapping');
 const { runStartupSharedSchemaMigrations } = require('./src/lib/sharedSchemaMigrationRunner');
-const { SchemaReadinessError, assertEnumValueReady, assertRuntimeTableReady } = require('./src/lib/schemaReadiness');
+const { SchemaReadinessError, assertRuntimeTableReady } = require('./src/lib/schemaReadiness');
+const {
+  STAFF_PROFILE_RUNTIME_COLUMNS,
+  assertAdminRuntimeSchemaReady,
+} = require('./src/lib/adminRuntimeSchemaContract');
 const {
   buildRegionalManagerCaseAccessSql,
   getCaseAccessError,
@@ -25139,14 +25143,6 @@ function writeIfChanged(file, content) {
 const app = express();
 const port = process.env.PORT || 5001; // Use port from .env
 const buildDir = path.join(__dirname, 'build');
-const STAFF_PROFILE_RUNTIME_COLUMNS = [
-  'id',
-  'cognito_sub',
-  'email',
-  'primary_role',
-  'region_id',
-];
-
 // Lightweight health check for ALB
 app.get('/healthz', (_req, res) => {
   res.status(200).json({ status: 'ok' });
@@ -25154,27 +25150,7 @@ app.get('/healthz', (_req, res) => {
 app.get('/readyz', async (_req, res) => {
   try {
     if (!pool) throw new Error('database_pool_unavailable');
-    await assertRuntimeTableReady(pool, 'staff_profiles', STAFF_PROFILE_RUNTIME_COLUMNS);
-    await assertRuntimeTableReady(pool, 'iset_runtime_config', ['scope', 'k', 'v', 'updated_at']);
-    await assertRuntimeTableReady(pool, 'iset_application_version', ['id', 'application_id', 'version', 'payload_json']);
-    await assertRuntimeTableReady(pool, 'message_item', ['message_id', 'owner_user_id', 'folder', 'purged_at']);
-    await assertRuntimeTableReady(pool, 'staff_tutorial_progress', ['staff_profile_id', 'tutorial_id', 'status']);
-    await assertRuntimeTableReady(pool, 'admin_ai_guidance_entry', ['slug', 'guidance_text']);
-    await assertRuntimeTableReady(pool, 'admin_ai_guidance_example', ['guidance_slug', 'question_text', 'answer_text']);
-    await assertRuntimeTableReady(pool, 'client_file_import_run', ['request_hash', 'status', 'result_json']);
-    await assertRuntimeTableReady(pool, 'client_file_import_identity_claim', ['identity_key', 'client_id']);
-    await assertRuntimeTableReady(pool, 'iset_event_entry', ['id', 'notification_delivery_mode']);
-    await assertRuntimeTableReady(pool, 'iset_event_delivery', ['event_id', 'channel', 'audience_key', 'status']);
-    await assertRuntimeTableReady(pool, 'iset_case_reminder', ['id', 'lifecycle_generation']);
-    await assertRuntimeTableReady(pool, 'iset_reminder_lifecycle_event', ['reminder_id', 'lifecycle_generation', 'event_type', 'status']);
-    await assertRuntimeTableReady(pool, 'ptma', ['id', 'type', 'iset_full_name']);
-    await assertRuntimeTableReady(pool, 'payment_submission_attempt', [
-      'payment_packet_id',
-      'submission_key',
-      'status',
-      'lease_expires_at',
-    ]);
-    await assertEnumValueReady(pool, 'esdc_participant_submission_history', 'event_type', 'prepared');
+    await assertAdminRuntimeSchemaReady(pool);
     return res.status(200).json({ status: 'ready' });
   } catch (error) {
     return res.status(503).json({
@@ -25747,7 +25723,11 @@ async function staffProfileMiddleware(req, res, next) {
     await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role,region_id) VALUES (?,?,?,?)
       ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role), region_id=COALESCE(VALUES(region_id), region_id)`,
       [sub, safeEmail, role || null, persistedRegionId]);
-    const [rows] = await pool.query('SELECT id, cognito_sub, email, primary_role, region_id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [sub]);
+    const staffProfileSelectColumns = STAFF_PROFILE_RUNTIME_COLUMNS.map(column => `\`${column}\``).join(', ');
+    const [rows] = await pool.query(
+      `SELECT ${staffProfileSelectColumns} FROM staff_profiles WHERE cognito_sub=? LIMIT 1`,
+      [sub]
+    );
     if (rows && rows[0]) {
       req.staffProfile = rows[0];
       const numericStaffId = Number(rows[0].id);

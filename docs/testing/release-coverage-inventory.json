@@ -1,0 +1,429 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Machine-readable change-to-evidence map for PATH release qualification.",
+  "repositories": {
+    "admin": "../admin-dashboard",
+    "portal": "../ISET-intake",
+    "shared": "../shared",
+    "intacctMock": "../intacct-mock-service"
+  },
+  "operationRules": [
+    {
+      "pattern": "^dataset:(intake-runtime-publish|workflow-authoring|intake-release)$",
+      "domains": ["intake-cross-application", "runtime-config"]
+    },
+    {
+      "pattern": "^workflow:[1-9][0-9]*$",
+      "domains": ["intake-cross-application", "runtime-config"]
+    },
+    {
+      "pattern": "^test-db-refresh$",
+      "domains": ["schema-readiness", "auth-identity", "runtime-config", "files-messages-signing"]
+    }
+  ],
+  "alwaysRequired": {
+    "dev": [
+      "inventory-contract",
+      "admin-aggregate",
+      "portal-aggregate",
+      "admin-lint",
+      "portal-lint",
+      "privacy-route-static",
+      "schema-plan-dev",
+      "real-mysql-contract",
+      "admin-build",
+      "portal-build",
+      "admin-browser-suite",
+      "privacy-erm-db",
+      "payment-db-rollback",
+      "intacct-local-contract",
+      "ai-guidance-contract",
+      "candidate-source-stability"
+    ],
+    "test": [
+      "test-deployment-provenance",
+      "test-rollback-readiness",
+      "test-target-health",
+      "test-runtime-postflight",
+      "test-two-step-role-journeys",
+      "test-intake-completion",
+      "test-applicant-scope-browser",
+      "test-live-privacy-denials",
+      "test-payment-rollback",
+      "test-maintenance-cleanup",
+      "candidate-source-stability"
+    ]
+  },
+  "checks": {
+    "inventory-contract": {
+      "stage": "dev",
+      "type": "internal",
+      "description": "Validate this inventory, domain dependencies, source coverage, and command references.",
+      "effects": "Read-only source inspection.",
+      "cleanup": "None."
+    },
+    "candidate-source-stability": {
+      "stage": "both",
+      "type": "sourceStability",
+      "description": "Re-fingerprint admin, portal, and shared after all checks and reject any test/build source mutation.",
+      "effects": "Read-only final source inspection.",
+      "cleanup": "None; a changed tree is a blocker and must be restored intentionally before rerun."
+    },
+    "admin-aggregate": {
+      "stage": "dev",
+      "cwd": "admin",
+      "command": ["npm", "test"],
+      "description": "All maintained admin frontend, backend, authorization, composition, concurrency, and tooling suites.",
+      "effects": "No environment mutation; test-only injected dependencies.",
+      "cleanup": "Automated test teardown."
+    },
+    "portal-aggregate": {
+      "stage": "dev",
+      "cwd": "portal",
+      "command": ["npm", "test"],
+      "description": "All maintained portal frontend, auth, notification, route, signing, and full-stack suites.",
+      "effects": "No environment mutation; test-only injected dependencies.",
+      "cleanup": "Automated test teardown."
+    },
+    "admin-lint": {
+      "stage": "dev",
+      "cwd": "admin",
+      "command": ["npm", "run", "lint", "--", "--quiet"],
+      "description": "Admin frontend lint contract.",
+      "effects": "Read-only.",
+      "cleanup": "None."
+    },
+    "portal-lint": {
+      "stage": "dev",
+      "cwd": "portal",
+      "command": ["npm", "run", "lint", "--", "--quiet"],
+      "description": "Portal frontend lint contract.",
+      "effects": "Read-only.",
+      "cleanup": "None."
+    },
+    "privacy-route-static": {
+      "stage": "dev",
+      "cwd": "admin",
+      "command": ["npm", "run", "smoke:privacy-routes"],
+      "description": "Route-aware static object-scope tripwire with deliberate-removal self-tests.",
+      "effects": "Read-only.",
+      "cleanup": "None."
+    },
+    "schema-plan-dev": {
+      "stage": "dev",
+      "cwd": "admin",
+      "command": ["npm", "run", "db:migrate:plan", "--", "--target-env", "dev"],
+      "description": "Canonical migration ledger/checksum plan against real DEV MySQL.",
+      "effects": "Read-only database plan.",
+      "cleanup": "None."
+    },
+    "real-mysql-contract": {
+      "stage": "dev",
+      "cwd": "admin",
+      "command": ["node", "scripts/real-mysql-release-contract.js", "--target-env", "dev", "--json"],
+      "description": "Real MySQL readiness, authenticated staff hydration, import claim, worker-delivery persistence, rollback, and residue proof.",
+      "effects": "Creates synthetic rows inside one DEV transaction and rolls it back.",
+      "cleanup": "Mandatory zero-row residue assertion after rollback."
+    },
+    "admin-build": {
+      "stage": "dev",
+      "cwd": "admin",
+      "command": ["node", "scripts/release-build-contract.js", "--admin"],
+      "description": "Compile the current admin TEST-target bundle into an isolated temporary directory.",
+      "effects": "Local temporary build only.",
+      "cleanup": "Restores generated build metadata and removes temporary build output."
+    },
+    "portal-build": {
+      "stage": "dev",
+      "cwd": "admin",
+      "command": ["node", "scripts/release-build-contract.js", "--portal"],
+      "description": "Compile the current portal TEST-target bundle into an isolated temporary directory.",
+      "effects": "Local temporary build only.",
+      "cleanup": "Restores generated build metadata and removes temporary build output."
+    },
+    "admin-browser-suite": {
+      "stage": "dev",
+      "cwd": "admin",
+      "command": ["node", "scripts/release-browser-smoke-suite.js", "--json"],
+      "description": "Real compiled admin bundle: shell, queues, intake authoring, workspace, assessment, intervention, network-idle, failure, and role/state assertions.",
+      "effects": "Local deterministic browser traffic with intercepted APIs; no database or external send.",
+      "cleanup": "Closes browser/server, restores build metadata, and removes temporary build output."
+    },
+    "privacy-erm-db": {
+      "stage": "dev",
+      "cwd": "admin",
+      "command": ["npx", "env-cmd", "-f", ".env", "node", "scripts/privacy-erm-smoke.js", "--json"],
+      "description": "Read-only real-DEV relational integrity and privacy constraint checks.",
+      "effects": "Read-only DEV database queries.",
+      "cleanup": "None."
+    },
+    "payment-db-rollback": {
+      "stage": "dev",
+      "cwd": "admin",
+      "command": ["npm", "run", "payments:workflow:smoke"],
+      "description": "Real MySQL payment/evidence/communication/follow-up transaction fixture.",
+      "effects": "Synthetic DEV payment fixture inside one transaction; no provider or email call.",
+      "cleanup": "Mandatory rollback and zero-residue assertion."
+    },
+    "intacct-local-contract": {
+      "stage": "dev",
+      "cwd": "admin",
+      "command": ["npm", "run", "audit:intacct-contract"],
+      "description": "PATH/local-mock drift guard; explicitly not Sage certification.",
+      "effects": "Read-only local source inspection.",
+      "cleanup": "None."
+    },
+    "ai-guidance-contract": {
+      "stage": "dev",
+      "cwd": "admin",
+      "command": ["npm", "run", "ai:eval:check"],
+      "description": "Admin AI high-risk guidance fixture shape contract; no external model call.",
+      "effects": "Read-only; no OpenRouter call.",
+      "cleanup": "None."
+    },
+    "test-deployment-provenance": {
+      "stage": "test",
+      "type": "deploymentEvidence",
+      "description": "Require a successful TEST deploy manifest whose source, schema and release match the DEV-qualified candidate.",
+      "effects": "Read-only local evidence validation.",
+      "cleanup": "None."
+    },
+    "test-rollback-readiness": {
+      "stage": "test",
+      "type": "rollbackEvidence",
+      "description": "Require each deployed TEST app to record a distinct retained prior artifact before replacement.",
+      "effects": "Read-only deployment-manifest validation; artifact discovery occurred before deploy upload.",
+      "cleanup": "None. Retain both candidate and rollback artifacts until PROD authorization expires."
+    },
+    "test-target-health": {
+      "stage": "test",
+      "cwd": "admin",
+      "command": ["npm", "run", "path:deploy:smoke", "--", "--env", "test"],
+      "description": "Every registered TEST admin/portal target is healthy under normal ALB forwarding.",
+      "effects": "Read-only AWS/ALB queries.",
+      "cleanup": "None."
+    },
+    "test-runtime-postflight": {
+      "stage": "test",
+      "cwd": "admin",
+      "command": ["node", "scripts/path-test-runtime-postflight.js", "--json"],
+      "description": "On-instance admin/portal readiness, authenticated-contract source, PM2, migration, worker, runtime-config, external-routing, and recent-error proof.",
+      "effects": "Read-only AWS SSM and TEST database queries.",
+      "cleanup": "No persistent remote runner; SSM command history is retained as operational evidence."
+    },
+    "test-two-step-role-journeys": {
+      "stage": "test",
+      "cwd": "admin",
+      "command": ["node", "scripts/two-step-review-test-smoke.js", "--profile", "nwac-test", "--region", "ca-central-1", "--json"],
+      "description": "Deployed browser/API role journeys for Coordinator, Regional Manager and Decision Maker across assessment/proposal/revision workflows.",
+      "effects": "Creates disposable TEST Cognito, DB, document, notification and object-store fixtures; no real email.",
+      "cleanup": "Script must prove zero Cognito, DB, notification, document and object residue."
+    },
+    "test-intake-completion": {
+      "stage": "test",
+      "cwd": "admin",
+      "command": ["node", "scripts/r1-intake-completion-test-smoke.js", "--profile", "nwac-test", "--region", "ca-central-1", "--json"],
+      "description": "Published-workflow validation, completion transaction, retry/idempotency, generated files, and cleanup on deployed TEST.",
+      "effects": "Creates disposable TEST applicant/Cognito/DB/object fixtures; no real email.",
+      "cleanup": "Script must prove zero DB, Cognito and object residue."
+    },
+    "test-applicant-scope-browser": {
+      "stage": "test",
+      "cwd": "admin",
+      "command": ["node", "scripts/applicant-scope-guard-test-smoke.js", "--profile", "nwac-test", "--region", "ca-central-1", "--json"],
+      "description": "Deployed portal browser/API rightful-vs-wrong-applicant access and safe summary behavior.",
+      "effects": "Creates disposable TEST Cognito and relational fixtures; no real email.",
+      "cleanup": "Script must prove Cognito and database fixture removal."
+    },
+    "test-live-privacy-denials": {
+      "stage": "test",
+      "cwd": "admin",
+      "command": ["env", "OPENROUTER_API_KEY=deployed-configured", "node", "scripts/privacy-route-denial-smoke.js", "--require-live", "--json", "--admin-base", "https://nwac-console-test.awentech.ca", "--portal-base", "https://nwac-public-test.awentech.ca"],
+      "requiredEnv": [
+        "PRIVACY_DENIAL_NON_ADMIN_STAFF_TOKEN",
+        "PRIVACY_DENIAL_FINANCE_OR_ADMIN_TOKEN",
+        "PRIVACY_DENIAL_CASEWORK_PAYMENTS_TOKEN",
+        "PRIVACY_DENIAL_APPLICANT_A_TOKEN",
+        "PRIVACY_DENIAL_APPLICANT_B_TOKEN",
+        "PRIVACY_DENIAL_PORTAL_DOCUMENT_ID",
+        "PRIVACY_DENIAL_PORTAL_MESSAGE_ID",
+        "PRIVACY_DENIAL_ADMIN_CASE_ID",
+        "PRIVACY_DENIAL_ADMIN_APPLICATION_ID",
+        "PRIVACY_DENIAL_ADMIN_DOCUMENT_ID",
+        "PRIVACY_DENIAL_PAYMENT_PACKET_ID"
+      ],
+      "description": "Strict real-token wrong-role/wrong-owner denial checks; skips are release blockers.",
+      "effects": "Read-only authenticated TEST requests against approved synthetic fixtures.",
+      "cleanup": "Fixture owner is responsible for documented removal after acceptance."
+    },
+    "test-payment-rollback": {
+      "stage": "test",
+      "cwd": "admin",
+      "command": ["node", "scripts/path-test-runtime-postflight.js", "--payment-rollback", "--json"],
+      "description": "Run the deployed rollback-only payment fixture with email/provider routing disabled.",
+      "effects": "Synthetic TEST transaction only; no email or provider call.",
+      "cleanup": "Mandatory rollback and zero-residue assertion."
+    },
+    "test-maintenance-cleanup": {
+      "stage": "test",
+      "cwd": "admin",
+      "command": ["node", "scripts/path-test-runtime-postflight.js", "--maintenance-only", "--json"],
+      "description": "Prove TEST warning/fallback are clear and both host rules use normal forwarding.",
+      "effects": "Read-only AWS/TEST configuration inspection.",
+      "cleanup": "None."
+    }
+  },
+  "domains": [
+    {
+      "id": "operations-provenance",
+      "description": "Build, package, migration, maintenance, rollback and deployment control plane.",
+      "matches": {
+        "admin": ["^(scripts/(path-|write-build|local-dev|release|real-mysql)|src/lib/releaseQualification|tests/(releaseAdmission|releaseQualification)|scripts/bootstrap/|infra/|package(-lock)?\\.json$|docs/ops/)"],
+        "portal": ["^(scripts/(write-build|deploy)|package(-lock)?\\.json$)"],
+        "shared": ["^(AGENTS\\.md|package(-lock)?\\.json$)"]
+      },
+      "dependsOn": ["schema-readiness", "runtime-config"],
+      "devChecks": [],
+      "testChecks": []
+    },
+    {
+      "id": "schema-readiness",
+      "description": "Canonical migrations, runtime schema assertions and readiness/request parity.",
+      "matches": {
+        "admin": ["^(sql/migrations/|src/lib/(schemaReadiness|adminRuntimeSchemaContract)|src/lib/sharedSchemaMigrationRunner|isetadminserver\\.js$|tests/schema)"],
+        "portal": ["^(src/services/schemaReadiness|routes/__tests__/schemaReadiness|server\\.js$)"],
+        "shared": ["\\.js$"]
+      },
+      "dependsOn": [],
+      "devChecks": ["privacy-erm-db"],
+      "testChecks": []
+    },
+    {
+      "id": "auth-identity",
+      "description": "Cognito authentication, staff/applicant identity domains, role authorization and object scope.",
+      "matches": {
+        "admin": ["^(src/(auth|middleware|routes/admin/users)|src/lib/(applicantAccount|identity)|scripts/(privacy|applicant-scope)|isetadminserver\\.js$)"],
+        "portal": ["^(auth/|src/(context/Auth|components/Auth|__tests__/Auth)|routes/__tests__/applicant|server\\.js$)"],
+        "shared": ["(actor|identity|notificationDispatcher)"]
+      },
+      "dependsOn": ["schema-readiness"],
+      "devChecks": ["privacy-erm-db"],
+      "testChecks": ["test-live-privacy-denials"]
+    },
+    {
+      "id": "admin-user-journeys",
+      "description": "Admin frontend route, state, network, queue and workspace behavior.",
+      "matches": {
+        "admin": ["^src/(?!server/|lib/|middleware/).+\\.(js|jsx|css)$", "^scripts/.+browser-smoke\\.js$"]
+      },
+      "dependsOn": [],
+      "devChecks": ["admin-browser-suite"],
+      "testChecks": []
+    },
+    {
+      "id": "portal-user-journeys",
+      "description": "Public portal shell, renderer, draft, signing and applicant-facing network behavior.",
+      "matches": {
+        "portal": ["^(src/|routes/|server\\.js$)"]
+      },
+      "dependsOn": ["auth-identity"],
+      "devChecks": [],
+      "testChecks": []
+    },
+    {
+      "id": "application-review-workflows",
+      "description": "Application assessment, action plan and intervention review state machines and artifacts.",
+      "matches": {
+        "admin": ["(Assessment|assessment|reviewWorkflow|Intervention|intervention|actionPlan|two-step-review|isetadminserver\\.js$)"],
+        "shared": ["(review|event|notification)"]
+      },
+      "dependsOn": ["notifications-workers", "files-messages-signing"],
+      "devChecks": ["admin-browser-suite"],
+      "testChecks": []
+    },
+    {
+      "id": "intake-cross-application",
+      "description": "Intake authoring, published runtime, portal renderer, completion and admin manual intake.",
+      "matches": {
+        "admin": ["(intake|workflow|step|component|publish|ManualApplication|isetadminserver\\.js$)"],
+        "portal": ["(intake|DynamicTest|renderer|workflow|draft|server\\.js$)"]
+      },
+      "dependsOn": ["portal-user-journeys", "files-messages-signing"],
+      "devChecks": ["admin-browser-suite"],
+      "testChecks": []
+    },
+    {
+      "id": "runtime-config",
+      "description": "Durable runtime/publish configuration, feature flags, AI precedence and environment boundaries.",
+      "matches": {
+        "admin": ["(runtime.?config|path-data-sync|write-build-info|isetadminserver\\.js$)"],
+        "portal": ["(runtime.?config|workflowSchema|server\\.js$)"],
+        "shared": ["(runtimeConfig|serviceAnnouncement)"]
+      },
+      "dependsOn": [],
+      "devChecks": ["ai-guidance-contract"],
+      "testChecks": []
+    },
+    {
+      "id": "notifications-workers",
+      "description": "Events, reminders, queues, retry/dead-letter handling, notifications and background process startup.",
+      "matches": {
+        "admin": ["(notification|event|reminder|worker|poll|isetadminserver\\.js$)"],
+        "portal": ["(notification|event|reminder|server\\.js$)"],
+        "shared": ["^(events/|serviceAnnouncement)"]
+      },
+      "dependsOn": ["schema-readiness", "runtime-config"],
+      "devChecks": [],
+      "testChecks": []
+    },
+    {
+      "id": "files-messages-signing",
+      "description": "Object storage, uploads, documents, generated files, secure messages and signing completion.",
+      "matches": {
+        "admin": ["(document|upload|file|message|signing|storage|pdf|isetadminserver\\.js$)"],
+        "portal": ["(document|upload|file|message|signing|storage|pdf|server\\.js$)"],
+        "shared": ["(storage|financialOverview|notificationDispatcher|events)"]
+      },
+      "dependsOn": ["auth-identity", "notifications-workers"],
+      "devChecks": ["privacy-erm-db"],
+      "testChecks": ["test-live-privacy-denials"]
+    },
+    {
+      "id": "finance-payments",
+      "description": "Payment packets, allocations, evidence, Finance handoff, follow-up and reconciliation.",
+      "matches": {
+        "admin": ["(payment|finance|allocation|budget|intacct|isetadminserver\\.js$)"],
+        "shared": ["(event|notification)"]
+      },
+      "dependsOn": ["files-messages-signing", "external-integrations"],
+      "devChecks": ["payment-db-rollback"],
+      "testChecks": ["test-payment-rollback"]
+    },
+    {
+      "id": "external-integrations",
+      "description": "Sage Intacct, SES, S3, Cognito and external AI contracts with safe substitutes or controlled proof.",
+      "matches": {
+        "admin": ["(intacct|openrouter|cognito|ses|s3|storage|Puppeteer|isetadminserver\\.js$)"],
+        "portal": ["(openrouter|cognito|ses|s3|storage|server\\.js$)"],
+        "shared": ["(ai/|notification|storage|events)"] ,
+        "intacctMock": [".*"]
+      },
+      "dependsOn": ["runtime-config"],
+      "devChecks": ["intacct-local-contract"],
+      "testChecks": []
+    },
+    {
+      "id": "documentation-only",
+      "description": "Persistent project memory and runbook changes that do not alter a deployable surface.",
+      "matches": {
+        "admin": ["^docs/"],
+        "portal": ["^docs/"],
+        "shared": ["\\.md$"],
+        "intacctMock": ["\\.md$"]
+      },
+      "dependsOn": [],
+      "devChecks": [],
+      "testChecks": []
+    }
+  ]
+}

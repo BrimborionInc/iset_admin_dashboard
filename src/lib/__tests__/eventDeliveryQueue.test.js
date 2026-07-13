@@ -217,6 +217,10 @@ describe('durable event delivery and reminder lifecycle', () => {
   test('the additive schema and both applications enforce the delivery readiness boundary', () => {
     const migration = fs.readFileSync(path.resolve(process.cwd(), 'sql/migrations/20260711_0003_add_durable_event_delivery.sql'), 'utf8');
     const admin = fs.readFileSync(path.resolve(process.cwd(), 'isetadminserver.js'), 'utf8');
+    const adminSchemaReadiness = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/lib/adminRuntimeSchemaContract.js'),
+      'utf8'
+    );
     const portal = fs.readFileSync(path.resolve(process.cwd(), '../ISET-intake/server.js'), 'utf8');
     const portalSchemaReadiness = fs.readFileSync(
       path.resolve(process.cwd(), '../ISET-intake/src/services/schemaReadiness.js'),
@@ -225,7 +229,9 @@ describe('durable event delivery and reminder lifecycle', () => {
     expect(migration).toContain('UNIQUE KEY uq_event_delivery_audience_channel (event_id, channel, audience_key)');
     expect(migration).toContain('PRIMARY KEY (reminder_id, lifecycle_generation, event_type)');
     expect(migration).toContain('replayed_by_staff_profile_id');
-    expect(admin).toContain("assertRuntimeTableReady(pool, 'iset_event_delivery'");
+    expect(admin).toContain('await assertAdminRuntimeSchemaReady(pool)');
+    expect(adminSchemaReadiness).toContain("['iset_event_delivery', ['event_id', 'channel', 'audience_key', 'status']]");
+    expect(adminSchemaReadiness).toContain('await assertRuntimeTableReady(connection, table, columns)');
     expect(portal).toContain('await assertPortalRuntimeSchemaReady(pool)');
     expect(portalSchemaReadiness).toContain("['iset_event_delivery', ['event_id', 'channel', 'audience_key', 'status']]");
     expect(portalSchemaReadiness).toContain('await assertRuntimeTableReady(connection, table, columns)');

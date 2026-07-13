@@ -67,14 +67,23 @@ describe('release admission', () => {
     ]);
   });
 
-  test('the orchestrator consumes preflight before every mutation boundary', () => {
+  test('the orchestrator consumes qualification and preflight before every mutation boundary', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'path-deploy.js'), 'utf8');
     const runStart = source.indexOf('async function handleRun');
+    const qualification = source.indexOf("'release.qualification'", runStart);
     const preflight = source.indexOf("'release.preflight'", runStart);
-    expect(preflight).toBeGreaterThan(runStart);
+    expect(qualification).toBeGreaterThan(runStart);
+    expect(preflight).toBeGreaterThan(qualification);
     ['db.restore-point', 'test-db.refresh', 'schema.apply', 'data.apply', 'app.deploy'].forEach(step => {
       expect(source.indexOf(`'${step}'`, runStart)).toBeGreaterThan(preflight);
     });
+  });
+
+  test('TEST and PROD artifact staging writes release qualification provenance', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'path-deploy.js'), 'utf8');
+    expect(source).toContain('writeStagingReleaseProvenance');
+    expect(source).toContain('.path-release-provenance.json');
+    expect(source).toContain('qualificationEvidenceId');
   });
 
   test('immutable staging and a complete descriptor precede a production refresh', () => {

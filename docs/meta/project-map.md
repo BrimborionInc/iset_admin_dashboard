@@ -2,7 +2,7 @@
 
 Purpose: living agent-facing reference of repo structure, core modules, and cross-cutting concerns. Verify behavior against code before treating this map as proof.
 
-Last reviewed for documentation cleanup: 2026-04-29.
+Last reviewed: 2026-07-13 after release-qualification control-plane additions.
 
 ## Top-Level Directories
 - `src/`: React application source (Cloudscape + custom authoring tools).
@@ -11,6 +11,9 @@ Last reviewed for documentation cleanup: 2026-04-29.
 - `apps/`: Secondary app/package workspace material where present.
 - `docs/`: Agent-facing project memory plus source/reference artifacts.
 - `scripts/`: Build, deploy, migration, smoke-test, data-sync, and repair utilities.
+- `scripts/path-release-qualify.js`: Machine release planner/runner/validator; emits checksum-bound DEV or TEST GO/NO-GO evidence from `docs/testing/release-coverage-inventory.json`.
+- `scripts/real-mysql-release-contract.js`, `scripts/release-build-contract.js`, and `scripts/release-browser-smoke-suite.js`: local real-database, isolated-build, and compiled-browser qualification gates.
+- `scripts/path-test-runtime-postflight.js`: read-only deployed TEST provenance, readiness/request parity, process/config/worker, external-routing, and maintenance acceptance; optional payment rollback fixture.
 - `scripts/check-doc-links.py`: Read-only local Markdown reference checker for both admin `docs/` and sibling portal `../ISET-intake/docs`.
 - `templates/`: Nunjucks / HTML templates used in workflow/document preview (if any shared with portal).
 - `blocksteps/`: JSON + Nunjucks definitions for workflow steps (authoring assets).
@@ -178,6 +181,8 @@ Portal Runtime (ISET-intake) Integration (summary):
 - `docs/ops/README.md`: Directory gate for deployment, environment, migration, and infrastructure runbooks.
 - `docs/ops/agent-operational-access.md`: Codex/WSL DB access, TEST SQL, PROD start/stop, and AWS profile notes moved out of the agent entry point.
 - `docs/ops/deployments/deployment-quick-guide.md`: Shortest current TEST/PROD deployment command guide.
+- `docs/ops/deployments/release-qualification-runbook.md`: Authoritative DEV/TEST evidence and hard PROD authorization runbook.
+- `docs/testing/release-coverage-inventory.json`: Executable change/dependency/operation-to-required-check inventory.
 - `docs/ops/deployments/path-deploy-orchestrator.md`: Current deployment control-plane reference for schema/data/app rollout and smoke checks.
 - `docs/ops/environments/prod-env-guide.md`: PROD environment snapshot; verify live AWS state before operations.
 - `../ISET-intake/docs/system/ops/prod-portal-deployment.md`: Portal-specific PROD deployment pointer that links back to the admin orchestrator docs.

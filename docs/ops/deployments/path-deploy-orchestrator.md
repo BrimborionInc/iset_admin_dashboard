@@ -1,7 +1,7 @@
 # PATH Deploy Orchestrator
 
 Status: current deployment control-plane reference.
-Last reviewed: 2026-07-13 after adding an explicit compatibility-only recovery for pre-EA-028 PROD bootstrap; command names checked against current `package.json`.
+Last reviewed: 2026-07-13 after adding enforced DEV/TEST release qualification and artifact provenance; command names checked against current `package.json`.
 
 Start with the short operator runbook in `docs/ops/deployments/deployment-quick-guide.md` if you just need the normal commands.
 
@@ -21,6 +21,8 @@ cd /home/bill/ISET/admin-dashboard
 ```
 
 The orchestrator packages the WSL working tree for TEST and PROD app deploys. If `/mnt/x/ISET` still exists, treat it as stale/archive-only unless a task explicitly asks to inspect it.
+
+`release-qualification-runbook.md` is the authorization authority. The orchestrator refuses every TEST/PROD run without `--qualification-evidence`: TEST requires DEV GO and PROD requires TEST GO for the exact release/source/schema/operation inventory. Its narrower packaging preflight and smoke steps are defense in depth, not qualification.
 
 For PROD app deploys, the orchestrator refuses dirty packaged source trees before any restore point, artifact upload, ASG refresh, schema/data step, or smoke step runs. The guard checks the admin repo when deploying the admin artifact, the portal repo when deploying the portal artifact, and the sibling `shared` repo whenever admin, portal, or shared artifacts package it. A dirty-source exception requires `--allow-dirty --dirty-reason "<specific approved reason>"` and must have Bill's explicit approval in the current thread.
 
@@ -58,13 +60,13 @@ npm run path:deploy:plan -- --env test --skip-data
 Run a TEST deployment:
 
 ```bash
-npm run path:deploy -- --env test --skip-data --release-id <release-id>
+npm run path:deploy -- --env test --skip-data --release-id <release-id> --qualification-evidence <DEV-GO.json>
 ```
 
 Run a TEST deployment that also rebuilds TEST from the current DEV baseline first:
 
 ```bash
-npm run path:deploy -- --env test --refresh-test-db --skip-data --release-id <release-id> --yes
+npm run path:deploy -- --env test --refresh-test-db --skip-data --release-id <release-id> --qualification-evidence <DEV-GO.json> --yes
 ```
 
 Plan a PROD deployment:
@@ -76,7 +78,7 @@ npm run path:deploy:plan -- --env prod --skip-data
 Run a PROD deployment:
 
 ```bash
-npm run path:deploy -- --env prod --skip-data --release-id <release-id> --yes
+npm run path:deploy -- --env prod --skip-data --release-id <release-id> --qualification-evidence <TEST-GO.json> --yes
 ```
 
 If immutable release-object upload is blocked but the live bootstrap still consumes the

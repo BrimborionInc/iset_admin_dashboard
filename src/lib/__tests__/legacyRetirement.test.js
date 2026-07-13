@@ -36,12 +36,14 @@ describe('R6b dormant and compatibility cleanup', () => {
     const navigation = read('src/layouts/SideNavigation.js');
     const matrix = read('src/widgets/AccessControlMatrix.jsx');
     const hubRouter = read('src/routes/hubRoutes.js');
+    const schemaContract = read('src/lib/adminRuntimeSchemaContract.js');
     for (const source of [server, routes, navigation, matrix]) {
       expect(source).not.toContain('/api/ptmas');
       expect(source).not.toContain('/ptma-management');
     }
     expect(server).toContain("app.use('/api/hubs', createHubRouter({ pool }))");
-    expect(server).toContain("assertRuntimeTableReady(pool, 'ptma', ['id', 'type', 'iset_full_name'])");
+    expect(server).toContain('assertAdminRuntimeSchemaReady(pool)');
+    expect(schemaContract).toContain("['ptma', ['id', 'type', 'iset_full_name']]");
     expect(routes).toContain('path="/modify-hub/:id"');
     expect(hubRouter).toContain("type = 'Hub'");
     expect(fs.existsSync(path.join(root, 'src/pages/manageLocations.js'))).toBe(false);

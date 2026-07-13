@@ -1,9 +1,11 @@
 # PATH Deployment Quick Guide
 
 Status: current primary operator guide for normal TEST/PROD PATH deploys.
-Last reviewed: 2026-07-11 after engineering-audit R4a release-admission hardening; command names checked against current `package.json`.
+Last reviewed: 2026-07-13 after comprehensive release qualification became mandatory; command names checked against current `package.json`.
 
 This is the shortest operator guide for normal PATH deployments.
+
+Qualification authority lives in `release-qualification-runbook.md`. Every mutating TEST command now needs `--qualification-evidence <DEV-GO.json>` and every mutating PROD command needs `--qualification-evidence <TEST-GO.json>`. Command fragments below that focus on deploy scope do not override that requirement; the CLI rejects an omitted, expired, mismatched, failed, skipped, or unavailable qualification.
 
 Work from:
 
@@ -20,7 +22,7 @@ When Bill starts a new Codex thread for deploy work, the agent must first:
 - Read `docs/AGENTS.md`, this quick guide, `docs/ops/deployments/prod-deployment-guide.md`, `docs/ops/deployments/path-deploy-orchestrator.md`, and `docs/ops/deployments/data-promotion-catalog.md`.
 - Run `git status --short` from `/home/bill/ISET/admin-dashboard`, `git -C ../ISET-intake status --short`, and `git -C ../shared status --short`, then state that the deploy artifact packages the current WSL working trees, not only staged files.
 - For PROD app deploys, the deploy orchestrator now fails dirty source trees before mutation. Commit, stash, or isolate the admin/portal/shared source before deploy; use `--allow-dirty --dirty-reason "<specific approved reason>"` only for an explicitly approved emergency exception.
-- Every app deploy now runs a scope-aware `release.preflight` before restore points, TEST reset, schema/data mutation, packaging, upload, or refresh. It runs the selected app aggregates and lint plus the privacy-route smoke, binds the evidence to exact Git heads/working-tree fingerprints, and stops if a check fails or the tree changes. Do not treat later health checks as a substitute.
+- Every deploy run now consumes machine-generated `release.qualification` before `release.preflight` and every mutation boundary. TEST requires DEV GO; PROD requires deployed TEST GO. The evidence covers both apps, shared runtime, real MySQL, compiled journeys, configuration, workers, external substitutes, provenance, rollback, cleanup, and deployed acceptance. Do not treat the smaller packaging preflight or later health checks as a substitute.
 - `--skip-build` requires `build/path-build-manifest.json` for the exact target, release ID, clean Git commit, and untampered build tree. Generate it with `npm run build:manifest` only after building the exact prebuilt release; an older TEST/PROD build cannot be relabelled during deploy.
 - PROD normal-routing smoke uses public `/readyz` for admin and portal so missing canonical runtime schema fails with `503`; use local `/healthz` only to diagnose whether a replacement process has started while ALB routing/fallback is still in transition.
 - `/home/bill/ISET/shared` should be a local Git repo. If it is missing or not a repo, stop and restore/recreate it before deploy unless Bill explicitly approves an emergency exception with marker/checksum verification.
@@ -46,7 +48,7 @@ When Bill starts a new Codex thread for deploy work, the agent must first:
 - For major workflow changes, apply `docs/ops/deployments/major-workflow-release-management.md` before TEST/PROD release. The release must be driven by the business-state contract, not by isolated bug symptoms: roles, states, queues, editability, generated artifacts, notifications, data repair, feedback reconciliation, and owner communication must all be accounted for.
 - Under `What changed`, maintain three expandable release-package groups for the three most recent release packages. Add the new release as the first `#### Release ...` group in `What Changed Packages (draft - EN)` and `Lots de changements (brouillon - FR)`, keep only the two next-most-recent groups below it, and remove the oldest fourth group.
 - Keep the flat `What's New (draft bullets - EN)` and `Nouveautes (brouillon - FR)` fallback sections focused on the newest release package. `Known Bugs` and `What's Coming` can be empty only when there is nothing accurate to publish.
-- Release-note preflight is not satisfied by raw dated entries near the top of `next-release-notes-log.md`. The visible landing-page content comes from the draft sections at the bottom. Before deploy, the first English and French package groups must represent the release being deployed, preferably with the exact heading `#### Release <release-id>`, the flat `What's New` / `Nouveautes` fallback bullets must describe that same newest package, and every user-visible `Release TBD` or otherwise unreleased item intended for the deploy must be either represented in that package or deliberately deferred.
+- Release-note preflight is not satisfied by raw dated entries near the top of `docs/meta/next-release-notes-log.md`. The visible landing-page content comes from the draft sections at the bottom. Before deploy, the first English and French package groups must represent the release being deployed, preferably with the exact heading `#### Release <release-id>`, the flat `What's New` / `Nouveautes` fallback bullets must describe that same newest package, and every user-visible `Release TBD` or otherwise unreleased item intended for the deploy must be either represented in that package or deliberately deferred.
 - Before deploy, generate or inspect `src/generated/publicReleaseNotes.js` and confirm that it contains `featurePackages` for the three current release packages, does not expose `Earlier changes`, and has today's/current release package as the first `featurePackages[0]` entry in both languages. A generated file stamped with the new release ID but showing an older package title first is a failed preflight; stop and fix the draft release notes before running `path:deploy`.
 - For fixes that affect audit, auth, support diagnostics, retention, messaging scope, document scope, payment scope, or any other schema-backed operational evidence, verify the deployed DB schema and the writer code before relying on the table. A table existing is not enough; run a focused preflight that proves the writer uses real columns, does not silently swallow failures, and creates/updates at least one safe TEST row or has an equivalent automated test. For PROD investigations, state any evidence gaps plainly instead of implying a broken/empty audit table proves no activity happened.
 - In the current Codex sandbox, `nwac-prod` is the standard role-backed prod operator profile. `default` is only the bootstrap IAM user and direct prod resource calls through it are expected to fail.
@@ -70,7 +72,7 @@ When Bill starts a new Codex thread for deploy work, the agent must first:
 ### 1. Deploy current code to TEST
 
 ```bash
-npm run path:deploy -- --env test --skip-data --release-id <release-id>
+npm run path:deploy -- --env test --skip-data --release-id <release-id> --qualification-evidence <DEV-GO.json>
 ```
 
 Use this when:
@@ -113,7 +115,7 @@ Use that admin-only shortcut only when the change is truly confined to the admin
 ### 2. Reset TEST from the current DEV baseline, then deploy
 
 ```bash
-npm run path:deploy -- --env test --refresh-test-db --skip-data --release-id <release-id> --yes
+npm run path:deploy -- --env test --refresh-test-db --skip-data --release-id <release-id> --qualification-evidence <DEV-GO.json> --yes
 ```
 
 Use this when:
@@ -144,7 +146,7 @@ For a normal app rollout, use the maintenance sequence so smoke runs after norma
 npm run path:maintenance -- set --env prod --surfaces all --start-in 5m --expected-duration 15m --yes
 # wait through the warning window
 npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
-npm run path:deploy -- --env prod --skip-data --release-id <release-id> --skip-smoke --yes
+npm run path:deploy -- --env prod --skip-data --release-id <release-id> --qualification-evidence <TEST-GO.json> --skip-smoke --yes
 npm run path:maintenance:fallback -- clear --env prod --surfaces all --yes
 npm run path:deploy:smoke -- --env prod
 npm run path:maintenance -- clear --env prod --surfaces all --yes

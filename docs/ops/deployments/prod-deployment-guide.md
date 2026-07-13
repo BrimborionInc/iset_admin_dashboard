@@ -1,9 +1,9 @@
 # Prod Deployment Guide
 
 Status: current WSL-native PROD deployment guide. Verify live AWS state before any mutating command.
-Last reviewed: 2026-07-13 after the coordinated engineering-audit PROD release.
+Last reviewed: 2026-07-13 after enforced deployed-TEST qualification became a prerequisite for PROD.
 
-For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
+For authorization, start with `docs/ops/deployments/release-qualification-runbook.md`; use `deployment-quick-guide.md` for shorter mechanics only. PROD mutation requires an unexpired exact-source `TEST GO` file passed as `--qualification-evidence`.
 
 This guide records the PROD safety sequence. The active app artifact rollout is WSL-native through `scripts/path-deploy.js`; do not use stale Windows checkout paths as a deployment source.
 
@@ -48,7 +48,7 @@ Planned maintenance sequence:
 npm run path:maintenance -- set --env prod --surfaces all --start-in 5m --expected-duration 15m --yes
 # wait through the warning window
 npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
-npm run path:deploy -- --env prod --skip-data --release-id <release-id> --skip-smoke --yes
+npm run path:deploy -- --env prod --skip-data --release-id <release-id> --qualification-evidence <TEST-GO.json> --skip-smoke --yes
 npm run path:maintenance:fallback -- clear --env prod --surfaces all --yes
 npm run path:deploy:smoke -- --env prod
 npm run path:maintenance -- clear --env prod --surfaces all --yes
