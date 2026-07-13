@@ -4,9 +4,9 @@ Purpose: define the minimum coherent release boundary for the completed `GPT56-2
 
 Audience: release operator and future Codex threads.
 
-Status: accepted in TEST on 2026-07-12; PROD remains separately unauthorized.
+Status: accepted in TEST on 2026-07-12 and deployed/verified in PROD on 2026-07-13.
 
-Last Updated: 2026-07-12
+Last Updated: 2026-07-13
 
 ## Decision
 
@@ -86,6 +86,17 @@ Use one all-surface warning/five-minute notice/ALB fallback/release/normal-routi
 1. `EA-028`: rehearse immutable release-descriptor consumption and rollback in TEST, then seek PROD infrastructure authority. This is not required for the application fixes to run and must not be smuggled into their release.
 2. Payment/Intacct activation: resolve business roles and follow-up decisions, obtain current Sage contract/sandbox evidence, run the full TEST payment workflow, and then seek explicit PROD routing/send authority.
 3. Historical review/repair inventories: signing duplicates, ambiguous provenance/contact notes, client-import identity collisions, event-delivery reconciliation, and payment attempts remain read-only review queues until a specific repair is approved.
+
+## PROD Acceptance Evidence
+
+PROD release `20260713-engineering-audit-prod` is accepted. Schema evidence is in manifest `tmp/path-deploy/prod/20260713-engineering-audit-prod--2026-07-13T07-28-40-680Z.json`; the successful compatibility app rollout is `tmp/path-deploy/prod/20260713-engineering-audit-prod--2026-07-13T07-44-31-980Z.json`.
+
+- Restore point `path-prod-20260713-engineering-audit-prod-20260713072840` reached `available`, and all five canonical migrations succeeded with the exact TEST-accepted checksums. The subsequent direct PROD plan reported zero pending migrations.
+- Exact-tree admission passed admin 65/267 + 17/71, portal 15/68 + 6/53, quiet lint for both apps, and all 71 privacy-route checks. Deployed production build identity is admin `dfdffaf2`, portal `ed5cf535`, and shared `cf6bfe9`.
+- The reduced role rejected the new immutable `releases/*` prefix before any app artifact or instance refresh. Because live bootstrap still consumes compatibility keys and `EA-028` activation was excluded, the explicit `--compatibility-only` recovery updated the three established artifacts without claiming an immutable descriptor. This IAM/bootstrap prerequisite remains in `EA-028`.
+- ASG refresh `10564246-3957-4041-839a-20abd71a2442` completed on `i-083b523da57303a8a`; local health command `75d2382c-f59f-44f3-9aeb-f939c20f448e`, source command `84c1c7a5-6ac3-4e9b-9161-715005768874`, and all three public `/readyz` checks passed.
+- SQL command `2d08f5f4-1181-4c7f-b8e7-569d3faf2fda` verified all five ledger rows, zero queued event backlog, zero payment submission attempts, Finance email routing disabled, and Intacct disabled in email mode. No historical repair or synthetic workflow/payment activity was performed.
+- The ALB fallback and in-app warning are clear; all host rules are normal forwarding and final maintenance command `e8848426-20da-41de-b5ab-753a75899831` returned zero announcement rows.
 
 ## Current Local Evidence
 
