@@ -1,9 +1,9 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-07-12T13:18:31.092Z",
-  "releaseId": "20260712-engineering-audit-test",
-  "releaseLabel": "Release 20260712-engineering-audit-test",
-  "releaseDateEn": "12th July 2026",
-  "releaseDateFr": "12 juillet 2026",
+  "generatedAt": "2026-07-13T07:14:09.207Z",
+  "releaseId": "20260713-engineering-audit-prod",
+  "releaseLabel": "Release 20260713-engineering-audit-prod",
+  "releaseDateEn": "13th July 2026",
+  "releaseDateFr": "13 juillet 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",
@@ -14,7 +14,7 @@ const publicReleaseNotes = {
     ],
     "featurePackages": [
       {
-        "title": "Release 20260712-engineering-audit-test",
+        "title": "Release 20260713-engineering-audit-prod",
         "items": [
           "Moving between cases, applications, or payment filters now hides the previous record immediately and prevents older responses or selections from acting on the new workspace.",
           "Public portal screens require an applicant account, prior intake answers stay on the server, and message/signing lists return only the information they display.",
@@ -22,7 +22,7 @@ const publicReleaseNotes = {
           "Reminder and notification delivery can recover from known temporary failures, while uncertain email outcomes are held for System Administrator review rather than blindly resent.",
           "AI model, parameter, and fallback settings now use one durable configuration across admin, portal, restarts, and instance replacement.",
           "Intake component choices are explicitly static-only, the unused PTMA administration surface is retired, and NWAC Hub Management remains available to System Administrators.",
-          "Payment evidence and follow-up actions remain inside their packet/case scope; Finance email and Intacct routing remain disabled for this release rehearsal."
+          "Payment evidence and follow-up actions remain inside their packet/case scope; Finance email and Intacct routing remain disabled for this release."
         ]
       },
       {
@@ -57,7 +57,7 @@ const publicReleaseNotes = {
     ],
     "featurePackages": [
       {
-        "title": "Release 20260712-engineering-audit-test",
+        "title": "Release 20260713-engineering-audit-prod",
         "items": [
           "Le passage entre les cas, demandes ou filtres de paiement masque immediatement l'ancien dossier et empeche les anciennes reponses ou selections d'agir dans le nouvel espace de travail.",
           "Les ecrans du portail public exigent un compte demandeur, les reponses d'admission precedentes restent sur le serveur et les listes de messages et de signatures retournent seulement les renseignements affiches.",
@@ -65,7 +65,7 @@ const publicReleaseNotes = {
           "La livraison des rappels et notifications peut reprendre apres un echec temporaire connu; les resultats de courriel incertains sont conserves pour examen par un administrateur systeme plutot que renvoyes automatiquement.",
           "Les modeles, parametres et solutions de repli de l'IA utilisent maintenant une configuration durable commune a l'administration, au portail, aux redemarrages et au remplacement d'instance.",
           "Les choix de composants d'admission sont maintenant explicitement statiques, l'ancienne administration PTMA inutilisee est retiree et la gestion des carrefours NWAC demeure offerte aux administrateurs systeme.",
-          "Les preuves et suivis de paiement restent limites a leur dossier de paiement et a leur cas; le routage des courriels Finance et d'Intacct demeure desactive pendant cette repetition."
+          "Les preuves et suivis de paiement restent limites a leur dossier de paiement et a leur cas; le routage des courriels Finance et d'Intacct demeure desactive pour cette version."
         ]
       },
       {
