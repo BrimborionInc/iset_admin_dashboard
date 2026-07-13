@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-07-13 | Release 20260713-prod-incident-requalification | Fix/Reliability | Applicant portal messages and supports | Fixed a portal error that could prevent signed-in applicants from opening messages or support activities after the engineering-audit release. | The emergency portal-only patch passed authenticated TEST journeys and changed no schema, data, configuration, staff permissions, or external-service settings.
 - 2026-07-13 | Release 20260713-admin-schema-readiness-hotfix | Fix/Reliability | Admin console sign-in | Fixed a schema-readiness error that made signed-in admin console requests return 503 after the engineering-audit release. | The hotfix aligns the pre-traffic readiness check with the exact staff-profile columns used at runtime; it changes no data or staff permissions.
 - 2026-07-12 | Release 20260713-engineering-audit-prod | Fix/Reliability | Payments, budgets, and Intacct integration safety | Payment evidence and screens stay in the correct case scope, competing budget transfers apply once, and external payment handoffs retain a durable recoverable outcome instead of risking duplicate sends. | Sage-style success responses now require a stable external ID. Payment routing remains disabled; the release does not activate Finance email or Intacct.
 - 2026-07-12 | Release 20260713-engineering-audit-prod | Fix/Workflow Studio and Administration | Intake options, test-data cleanup, and legacy PTMA management | Intake component options are now explicitly static-only, test-data cleanup preserves client-account event integrity, and the unused PTMA management surface is removed. | NWAC Hub Management remains available to System Administrators through a separate Hub-only contract; the physical legacy-named table is retained.
@@ -465,11 +466,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Fixed a problem that could prevent signed-in applicants from opening messages or support activities.
 - Fixed a problem that prevented signed-in staff from using the admin console after the latest release.
 - PATH now keeps case, payment, applicant, and notification work tied to the correct record while making retries and overlapping background work safer.
 - Public portal signing, staff-assisted intake, client imports, budget transfers, and external payment handoffs now have stronger duplicate and partial-failure protection.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260713-prod-incident-requalification
+
+- Fixed a portal error that could prevent signed-in applicants from opening messages or support activities.
 
 #### Release 20260713-admin-schema-readiness-hotfix
 
@@ -485,23 +491,22 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Intake component choices are explicitly static-only, the unused PTMA administration surface is retired, and NWAC Hub Management remains available to System Administrators.
 - Payment evidence and follow-up actions remain inside their packet/case scope; Finance email and Intacct routing remain disabled for this release.
 
-#### Release 20260710-r1-intake-completion-prod
-
-- Final application submission now rechecks every required answer and signature on the applicant's applicable intake path.
-- Client, case, submission, and application records are saved together, preventing a transient failure from leaving a partial submitted application.
-- Safe retries return the existing completed result instead of creating duplicate application records or repeating generated documents and notifications.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
+- Correction d'un probleme qui pouvait empecher les demandeurs connectes d'ouvrir leurs messages ou activites de soutien.
 - Correction d'un probleme qui empechait le personnel connecte d'utiliser la console d'administration apres la derniere version.
 - PATH conserve maintenant le travail lie aux cas, paiements, demandeurs et notifications dans le bon dossier, tout en rendant plus securitaires les nouvelles tentatives et les taches d'arriere-plan simultanees.
 - La signature du portail public, l'admission assistee, l'importation de clients, les transferts budgetaires et les transferts de paiement externes offrent maintenant une meilleure protection contre les doublons et les echecs partiels.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260713-prod-incident-requalification
+
+- Correction d'une erreur du portail qui pouvait empecher les demandeurs connectes d'ouvrir leurs messages ou activites de soutien.
 
 #### Release 20260713-admin-schema-readiness-hotfix
 
@@ -516,12 +521,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les modeles, parametres et solutions de repli de l'IA utilisent maintenant une configuration durable commune a l'administration, au portail, aux redemarrages et au remplacement d'instance.
 - Les choix de composants d'admission sont maintenant explicitement statiques, l'ancienne administration PTMA inutilisee est retiree et la gestion des carrefours NWAC demeure offerte aux administrateurs systeme.
 - Les preuves et suivis de paiement restent limites a leur dossier de paiement et a leur cas; le routage des courriels Finance et d'Intacct demeure desactive pour cette version.
-
-#### Release 20260710-r1-intake-completion-prod
-
-- La soumission finale reverifie maintenant chaque reponse et signature obligatoire du parcours d'admission applicable.
-- Les dossiers client, cas, soumission et demande sont enregistres ensemble afin qu'une erreur temporaire ne laisse pas une demande soumise partiellement.
-- Une nouvelle tentative securitaire retourne le resultat deja termine au lieu de creer des dossiers en double ou de repeter les documents et notifications generes.
 
 ### Problemes connus (brouillon - FR)
 
