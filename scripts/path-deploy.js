@@ -85,6 +85,7 @@ function usage() {
     '  --skip-shared          Do not upload shared for prod',
     '  --skip-build           Pass through to the app deploy scripts',
     '  --skip-smoke           Skip post-deploy health checks',
+    '  --compatibility-only   PROD recovery: update live *-latest.zip artifacts without immutable release objects',
     '  --allow-dirty          Permit a dirty PROD app source tree when paired with --dirty-reason',
     '  --dirty-reason TEXT    Required explanation when overriding the PROD dirty-source guard',
     '  --yes                  Required for prod run',
@@ -119,6 +120,7 @@ function parseArgs(argv) {
     skipShared: false,
     skipBuild: false,
     skipSmoke: false,
+    compatibilityOnly: false,
     allowDirty: false,
     dirtyReason: null,
     yes: false,
@@ -160,6 +162,8 @@ function parseArgs(argv) {
       args.skipBuild = true;
     } else if (token === '--skip-smoke') {
       args.skipSmoke = true;
+    } else if (token === '--compatibility-only') {
+      args.compatibilityOnly = true;
     } else if (token === '--allow-dirty') {
       args.allowDirty = true;
     } else if (token === '--dirty-reason') {
@@ -601,6 +605,7 @@ function buildAppPlan(args, envConfig) {
     deployPortal,
     refreshProd,
     skipBuild: args.skipBuild,
+    artifactMode: args.compatibilityOnly ? 'compatibility-only' : 'immutable-and-compatibility',
   };
 }
 
@@ -838,16 +843,32 @@ function uploadArtifactToS3(archivePath, bucket, key, envConfig) {
   runAwsNoOutput(['s3', 'cp', archivePath, `s3://${bucket}/${key}`], envConfig);
 }
 
-function uploadProdArtifactPair({ archivePath, component, releaseId, compatibilityKey, envConfig }) {
+function uploadProdArtifactPair({
+  archivePath,
+  component,
+  releaseId,
+  compatibilityKey,
+  envConfig,
+  compatibilityOnly = false,
+}) {
   const immutable = buildImmutableArtifactRecord({ component, releaseId, archivePath });
-  console.log(`Staging immutable ${component} artifact at s3://${PROD_ARTIFACT_BUCKET}/${immutable.key}...`);
-  uploadArtifactToS3(archivePath, PROD_ARTIFACT_BUCKET, immutable.key, envConfig);
+  if (compatibilityOnly) {
+    console.warn(
+      `Compatibility-only recovery: not staging immutable ${component} artifact at ` +
+      `s3://${PROD_ARTIFACT_BUCKET}/${immutable.key}.`
+    );
+  } else {
+    console.log(`Staging immutable ${component} artifact at s3://${PROD_ARTIFACT_BUCKET}/${immutable.key}...`);
+    uploadArtifactToS3(archivePath, PROD_ARTIFACT_BUCKET, immutable.key, envConfig);
+  }
   console.log(`Updating compatibility artifact at s3://${PROD_ARTIFACT_BUCKET}/${compatibilityKey}...`);
   uploadArtifactToS3(archivePath, PROD_ARTIFACT_BUCKET, compatibilityKey, envConfig);
   return {
     artifact: `s3://${PROD_ARTIFACT_BUCKET}/${compatibilityKey}`,
-    immutableArtifact: `s3://${PROD_ARTIFACT_BUCKET}/${immutable.key}`,
-    immutableKey: immutable.key,
+    immutableArtifact: compatibilityOnly ? null : `s3://${PROD_ARTIFACT_BUCKET}/${immutable.key}`,
+    immutableKey: compatibilityOnly ? null : immutable.key,
+    plannedImmutableKey: immutable.key,
+    compatibilityOnly,
     sha256: immutable.sha256,
     archiveBytes: immutable.bytes,
   };
@@ -1343,6 +1364,7 @@ async function deploySharedToProdNative(args, envConfig, releaseId) {
       releaseId,
       compatibilityKey: s3Key,
       envConfig,
+      compatibilityOnly: args.compatibilityOnly,
     });
   } finally {
     if (tempRoot) {
@@ -1391,6 +1413,7 @@ async function deployAdminToProdNative(args, envConfig, releaseId) {
       releaseId,
       compatibilityKey: s3Key,
       envConfig,
+      compatibilityOnly: args.compatibilityOnly,
     });
   } finally {
     if (tempRoot) {
@@ -1454,6 +1477,7 @@ async function deployPortalToProdNative(args, envConfig, releaseId) {
       releaseId,
       compatibilityKey: s3Key,
       envConfig,
+      compatibilityOnly: args.compatibilityOnly,
     });
   } finally {
     if (tempRoot) {
@@ -1538,7 +1562,12 @@ async function deployProdApplicationsNative(args, envConfig, appPlan, releaseId,
     result.artifacts.portal = await deployPortalToProdNative(args, envConfig, releaseId);
   }
   const descriptorComponents = ['shared', 'admin', 'portal'];
-  if (descriptorComponents.every(component => result.artifacts[component])) {
+  if (args.compatibilityOnly) {
+    result.releaseDescriptor = {
+      skipped: true,
+      reason: 'compatibility-only-operator-recovery',
+    };
+  } else if (descriptorComponents.every(component => result.artifacts[component])) {
     const descriptor = createReleaseDescriptor({
       releaseId,
       environment: envConfig.name,
@@ -2104,6 +2133,10 @@ async function main() {
 
   if (!args.env) {
     throw new Error('--env is required');
+  }
+
+  if (args.compatibilityOnly && args.env !== 'prod') {
+    throw new Error('--compatibility-only is a PROD recovery option');
   }
 
   const envConfig = getEnvironmentConfig(args);

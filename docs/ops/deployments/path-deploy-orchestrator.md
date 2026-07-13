@@ -1,7 +1,7 @@
 # PATH Deploy Orchestrator
 
 Status: current deployment control-plane reference.
-Last reviewed: 2026-07-11 after engineering-audit R4a release-admission hardening; command names checked against current `package.json`.
+Last reviewed: 2026-07-13 after adding an explicit compatibility-only recovery for pre-EA-028 PROD bootstrap; command names checked against current `package.json`.
 
 Start with the short operator runbook in `docs/ops/deployments/deployment-quick-guide.md` if you just need the normal commands.
 
@@ -78,6 +78,14 @@ Run a PROD deployment:
 ```bash
 npm run path:deploy -- --env prod --skip-data --release-id <release-id> --yes
 ```
+
+If immutable release-object upload is blocked but the live bootstrap still consumes the
+three compatibility artifacts, an explicitly reviewed recovery may use
+`--compatibility-only`. This skips immutable objects and the release descriptor, records
+that downgrade in the manifest, updates only the established `*-latest.zip` objects, and
+continues the normal waited ASG refresh. Do not use it silently or after descriptor-based
+bootstrap activation; preserve the failed-run evidence and backfill immutable release
+objects before that future activation.
 
 Do not run the PROD command until Bill has explicitly approved the PROD deployment in the current thread. `--yes` is the command-line safety gate; it is not a substitute for that approval.
 
