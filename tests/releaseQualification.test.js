@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const {
   createEvidenceId,
@@ -10,6 +11,7 @@ const {
   validateInventory,
   validateQualificationEvidence,
 } = require('../src/lib/releaseQualification');
+const { runtimeCommands } = require('../scripts/path-test-runtime-postflight');
 
 const inventory = JSON.parse(fs.readFileSync(
   path.resolve(__dirname, '..', 'docs', 'testing', 'release-coverage-inventory.json'),
@@ -73,6 +75,8 @@ describe('release qualification contract', () => {
     );
     expect(applicantSmoke).toContain('Timed out reading HTTP response body');
     expect(applicantSmoke).toMatch(/finally \{\s+if \(!config\.keepFixture && seeded\)/u);
+    expect(applicantSmoke).toContain("cookieToken(fixture.sessionA, 'iset_access')");
+    expect(applicantSmoke).toContain("cookieToken(fixture.sessionB, 'iset_access')");
 
     const twoStepSmoke = fs.readFileSync(
       path.resolve(__dirname, '..', 'scripts', 'two-step-review-test-smoke.js'),
@@ -81,6 +85,24 @@ describe('release qualification contract', () => {
     expect(twoStepSmoke).toContain('for (let attempt = 0; attempt < 31; attempt += 1)');
     expect(twoStepSmoke).toContain('two-step-review-route-failure-');
     expect(twoStepSmoke).toContain('pageText');
+  });
+
+  test('TEST runtime shell probes preserve their inline JavaScript quoting', () => {
+    const commands = runtimeCommands({
+      releaseId: 'release-1',
+      deployedComponents: ['admin', 'portal'],
+      fingerprints: { admin: 'a', portal: 'p', shared: 's' },
+    }, false);
+    const readyCommand = commands.find(command => command.includes('127.0.0.1:5001/readyz'))
+      .replace('curl -fsS http://127.0.0.1:5001/readyz', `printf '{"status":"ready"}'`);
+    expect(spawnSync('bash', ['-lc', readyCommand], { encoding: 'utf8' }).status).toBe(0);
+
+    const processCommand = commands.find(command => command.startsWith('pm2 jlist'))
+      .replace('pm2 jlist', `printf '[{"name":"nwac-admin","pid":1,"pm2_env":{"status":"online","restart_time":0}},{"name":"nwac-portal","pid":2,"pm2_env":{"status":"online","restart_time":0}}]'`);
+    const processProbe = spawnSync('bash', ['-lc', processCommand], { encoding: 'utf8' });
+    expect(processProbe.status).toBe(0);
+    expect(processProbe.stdout).toContain('PROCESS_NWAC_ADMIN=online');
+    expect(processProbe.stdout).toContain('PROCESS_NWAC_PORTAL=online');
   });
 
   test('shared and schema changes expand to dependent cross-application domains', () => {

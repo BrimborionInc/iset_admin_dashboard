@@ -156,6 +156,7 @@ Approval of investigation or local DEV work is not approval of this TEST mutatio
 - Disposable staff identities created by the two-step smoke for Coordinator, Regional Manager, and Decision Maker/NWAC Administrator behavior. System Administrator remains technical support behavior, not the business approver.
 - Disposable applicant identities and relational/object fixtures created by the intake and applicant-scope scripts.
 - The strict-denial smoke provisions its own approved disposable Coordinator, Decision Maker, and two applicant Cognito identities plus scoped relational fixtures. Ephemeral tokens are never emitted into qualification evidence or logs, and every Cognito/database residue counter must return zero. Manually supplied `PRIVACY_DENIAL_*` values are not a release prerequisite.
+- Portal bearer-token denial probes must use the disposable users' Cognito access tokens (`iset_access`), not ID tokens; an authentication failure does not prove a wrong-owner authorization denial.
 
 ### Safe external boundary
 

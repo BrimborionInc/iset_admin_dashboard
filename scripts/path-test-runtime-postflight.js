@@ -169,13 +169,13 @@ function runtimeCommands(candidate, paymentRollback) {
   const expected = JSON.stringify(candidate);
   const commands = [
     'set -euo pipefail',
-    'test "$(curl -fsS http://127.0.0.1:5001/readyz | node -e "let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>process.stdout.write(JSON.parse(s).status||\"\"))")" = ready',
-    'test "$(curl -fsS http://127.0.0.1:5000/readyz | node -e "let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>process.stdout.write(JSON.parse(s).status||\"\"))")" = ready',
+    `test "$(curl -fsS http://127.0.0.1:5001/readyz | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).status||""))')" = ready`,
+    `test "$(curl -fsS http://127.0.0.1:5000/readyz | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).status||""))')" = ready`,
     `EXPECTED_CANDIDATE='${expected.replace(/'/gu, `'\\''`)}' node -e "const fs=require('fs'); const e=JSON.parse(process.env.EXPECTED_CANDIDATE); const paths={admin:'/opt/nwac/admin-dashboard/.path-release-provenance.json',portal:'/opt/nwac/portal/.path-release-provenance.json'}; for(const [component,p] of Object.entries(paths)){const v=JSON.parse(fs.readFileSync(p,'utf8')); if(v.component!==component) throw new Error(component+' provenance component mismatch'); if(e.deployedComponents.includes(component)&&v.releaseId!==e.releaseId) throw new Error(component+' release id mismatch'); for(const repo of ['admin','portal','shared']) if(v.source?.[repo]?.treeFingerprint!==e.fingerprints[repo]) throw new Error(component+' '+repo+' source mismatch');} console.log('PROVENANCE=passed');"`,
     'node -e "const c=require(\'/opt/nwac/admin-dashboard/src/lib/adminRuntimeSchemaContract\'); const expected=[\'id\',\'cognito_sub\',\'email\',\'primary_role\',\'region_id\']; if(JSON.stringify(c.STAFF_PROFILE_RUNTIME_COLUMNS)!==JSON.stringify(expected)) throw new Error(\'admin authenticated contract drift\'); console.log(\'AUTH_SCHEMA_PARITY=passed\');"',
     'node -e "const fs=require(\'fs\'); const dotenv=require(\'/opt/nwac/admin-dashboard/node_modules/dotenv\'); const pairs=[[\'/opt/nwac/admin-dashboard/.env\',[\'DB_HOST\',\'DB_USER\',\'DB_NAME\',\'AWS_REGION\',\'COGNITO_STAFF_USER_POOL_ID\',\'COGNITO_STAFF_CLIENT_ID\',\'UPLOAD_DRIVER\',\'OBJECT_BUCKET\',\'OBJECT_REGION\',\'OPENROUTER_API_KEY\']],[\'/opt/nwac/portal/.env\',[\'DB_HOST\',\'DB_USER\',\'DB_NAME\',\'COGNITO_REGION\',\'COGNITO_USER_POOL_ID\',\'COGNITO_PORTAL_CLIENT_ID\',\'COGNITO_TRUSTED_POOLS\',\'UPLOAD_DRIVER\',\'OBJECT_BUCKET\',\'OBJECT_REGION\',\'OPENROUTER_API_KEY\']]]; for(const [p,keys] of pairs){const env=dotenv.parse(fs.readFileSync(p)); for(const key of keys) if(!env[key]) throw new Error(p+\' missing \'+key);} const portal=dotenv.parse(fs.readFileSync(\'/opt/nwac/portal/.env\')); if(String(portal.AUTO_MIGRATE).toLowerCase()!==\'false\') throw new Error(\'portal AUTO_MIGRATE must be false\'); console.log(\'RUNTIME_CONFIG=passed\');"',
     'export HOME=/root PM2_HOME=/root/.pm2',
-    'pm2 jlist | node -e "let s=\"\"; process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{const rows=JSON.parse(s); for(const name of [\"nwac-admin\",\"nwac-portal\"]){const row=rows.find(v=>v.name===name); if(!row||row.pm2_env?.status!==\"online\"||Number(row.pid)<=0) throw new Error(name+\" is not online\"); console.log(\"PROCESS_\"+name.toUpperCase().replace(/-/g,\"_\")+\"=online;restarts=\"+Number(row.pm2_env?.restart_time||0));}})"',
+    `pm2 jlist | node -e 'let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{const rows=JSON.parse(s); for(const name of ["nwac-admin","nwac-portal"]){const row=rows.find(v=>v.name===name); if(!row||row.pm2_env?.status!=="online"||Number(row.pid)<=0) throw new Error(name+" is not online"); console.log("PROCESS_"+name.toUpperCase().replace(/-/g,"_")+"=online;restarts="+Number(row.pm2_env?.restart_time||0));}})'`,
   ];
   if (paymentRollback) {
     commands.push('cd /opt/nwac/admin-dashboard && node scripts/payments-workflow-smoke.js --json');
@@ -264,9 +264,13 @@ function main() {
   console.log(args.json ? JSON.stringify(result, null, 2) : `TEST runtime postflight: PASS (${instances.length} instance(s))`);
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`TEST runtime postflight: FAIL (${error.message || error})`);
-  process.exitCode = 1;
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`TEST runtime postflight: FAIL (${error.message || error})`);
+    process.exitCode = 1;
+  }
 }
+
+module.exports = { runtimeCommands };

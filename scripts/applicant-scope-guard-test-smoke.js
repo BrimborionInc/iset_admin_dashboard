@@ -1336,8 +1336,8 @@ function remoteRunner() {
   async function runPrivacyDenialChecks() {
     const coordinator = config.privacyStaffUsers.find(user => user.key === 'coordinator');
     const decisionMaker = config.privacyStaffUsers.find(user => user.key === 'decisionMaker');
-    const applicantAToken = cookieToken(fixture.sessionA, 'iset_id');
-    const applicantBToken = cookieToken(fixture.sessionB, 'iset_id');
+    const applicantAToken = cookieToken(fixture.sessionA, 'iset_access');
+    const applicantBToken = cookieToken(fixture.sessionB, 'iset_access');
     if (!coordinator?.session?.idToken || !decisionMaker?.session?.idToken || !applicantAToken || !applicantBToken) {
       fail('strict live privacy denials have complete real Cognito tokens');
       return;
