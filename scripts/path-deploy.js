@@ -730,11 +730,21 @@ function prepareAdminFrontendBuild(args, envConfig, releaseId) {
 
 function preparePortalFrontendBuild(args, envConfig, releaseId) {
   const buildOutputDir = envConfig.name === 'test' ? 'build-test' : 'build';
-  const buildPath = path.join(PORTAL_ROOT, buildOutputDir);
+  const shouldBuildIsolatedTestOutput = envConfig.name === 'test' && !args.skipBuild;
+  const isolatedBuildKey = crypto.createHash('sha256')
+    .update(String(releaseId || 'unlabelled-release'))
+    .digest('hex')
+    .slice(0, 16);
+  const buildPath = args.portalBuildPath || (shouldBuildIsolatedTestOutput
+    ? path.join(REPO_ROOT, 'tmp', 'path-deploy-builds', isolatedBuildKey, 'portal')
+    : path.join(PORTAL_ROOT, buildOutputDir));
   const expectedBuildTarget = envConfig.name === 'prod' ? 'production' : 'test';
+  if (shouldBuildIsolatedTestOutput) {
+    args.portalBuildPath = buildPath;
+    args.portalBuildCleanupRoot = path.dirname(buildPath);
+  }
   if (!args.skipBuild && !args.preflightBuilds) {
-    removePath(path.join(PORTAL_ROOT, 'build'));
-    removePath(path.join(PORTAL_ROOT, 'build-test'));
+    removePath(buildPath);
     if (envConfig.name === 'test') {
       runCommand(process.execPath, [path.join(PORTAL_ROOT, 'scripts', 'write-build-info.js'), '--build-target', 'test'], {
         cwd: PORTAL_ROOT,
@@ -742,7 +752,7 @@ function preparePortalFrontendBuild(args, envConfig, releaseId) {
       });
       runCommand('npx', ['env-cmd', '-f', '.env.test', 'craco', 'build'], {
         cwd: PORTAL_ROOT,
-        env: { ...process.env, BUILD_PATH: buildOutputDir, PATH_DEPLOY_ENV: 'test', PATH_RELEASE_ID: releaseId || '' },
+        env: { ...process.env, BUILD_PATH: buildPath, PATH_DEPLOY_ENV: 'test', PATH_RELEASE_ID: releaseId || '' },
       });
     } else {
       runCommand('npm', ['run', 'build:production'], {
@@ -1329,15 +1339,14 @@ async function deployPortalToTestNative(args, envConfig, releaseId, releaseConte
   const rollbackArtifact = findLatestS3Artifact(bucket, keyPrefix, envConfig);
   let tempRoot = null;
   const buildPath = preparePortalFrontendBuild(args, envConfig, releaseId);
-  const resolvedBuildOutputDir = path.relative(PORTAL_ROOT, buildPath);
 
   try {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-deploy-'));
     const stagingPath = path.join(tempRoot, 'staging');
     fs.mkdirSync(stagingPath, { recursive: true });
 
+    copyDirectoryIfExists(buildPath, path.join(stagingPath, 'build'));
     [
-      [resolvedBuildOutputDir, 'build'],
       ['db', 'db'],
       ['notifications', 'notifications'],
       ['src', 'src'],
@@ -2047,6 +2056,19 @@ function runReleasePreflight(args, envConfig, appPlan, releaseId, initialRepoSta
   return evidence;
 }
 
+function cleanupPreparedBuilds(args) {
+  const allowedRoot = path.join(REPO_ROOT, 'tmp', 'path-deploy-builds');
+  const cleanupRoot = args.portalBuildCleanupRoot && path.resolve(args.portalBuildCleanupRoot);
+  if (!cleanupRoot) return;
+  const relative = path.relative(allowedRoot, cleanupRoot);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`Refusing to clean prepared build outside '${allowedRoot}': ${cleanupRoot}`);
+  }
+  removePath(cleanupRoot);
+  args.portalBuildPath = null;
+  args.portalBuildCleanupRoot = null;
+}
+
 function buildProdAppSourceRepoKeys(appPlan) {
   const keys = new Set();
   if (appPlan.deployAdmin) {
@@ -2280,6 +2302,8 @@ async function handleRun(args, envConfig, identity) {
     manifest.error = serializeError(error);
     writeManifest(manifestPath, manifest);
     throw new Error(`${error.message}\nManifest: ${manifestPath}`);
+  } finally {
+    cleanupPreparedBuilds(args);
   }
 }
 

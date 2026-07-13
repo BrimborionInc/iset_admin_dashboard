@@ -87,6 +87,24 @@ describe('release admission', () => {
     expect(source).toContain("'privacy-route-denial-smoke.js'");
   });
 
+  test('TEST portal preflight builds outside tracked portal output and cleans it after the run', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'path-deploy.js'), 'utf8');
+    const prepareStart = source.indexOf('function preparePortalFrontendBuild');
+    const prepareEnd = source.indexOf('function joinS3Key', prepareStart);
+    const prepareSource = source.slice(prepareStart, prepareEnd);
+    expect(prepareSource).toContain("path.join(REPO_ROOT, 'tmp', 'path-deploy-builds'");
+    expect(prepareSource).toContain('BUILD_PATH: buildPath');
+    expect(prepareSource).not.toContain("removePath(path.join(PORTAL_ROOT, 'build-test'))");
+
+    const deployStart = source.indexOf('async function deployPortalToTestNative');
+    const deployEnd = source.indexOf('async function deploySharedToProdNative', deployStart);
+    expect(source.slice(deployStart, deployEnd)).toContain("copyDirectoryIfExists(buildPath, path.join(stagingPath, 'build'))");
+
+    const runStart = source.indexOf('async function handleRun');
+    const runEnd = source.indexOf('async function handleSmoke', runStart);
+    expect(source.slice(runStart, runEnd)).toContain('finally {\n    cleanupPreparedBuilds(args);');
+  });
+
   test('immutable staging and a complete descriptor precede a production refresh', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'path-deploy.js'), 'utf8');
     const deployStart = source.indexOf('async function deployProdApplicationsNative');

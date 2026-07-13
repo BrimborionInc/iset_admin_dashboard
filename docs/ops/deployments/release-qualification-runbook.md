@@ -175,7 +175,7 @@ For the normal coupled release, estimate 10–20 minutes of TEST maintenance/res
 4. Run the exact deployment plan and confirm no undeclared dataset/config work appears.
 5. Deploy with DEV evidence.
 6. Clear fallback so target groups can return healthy.
-7. Keep the warning until TEST qualification finishes.
+7. After both target groups are healthy under normal forwarding, clear the warning before TEST qualification so the acceptance gate can prove there is no residual maintenance state.
 
 ```bash
 npm run path:maintenance -- set --env test --surfaces all --start-in 5m \
@@ -188,11 +188,14 @@ npm run path:deploy -- --env test --skip-data --release-id <release-id> \
   --qualification-evidence tmp/release-qualification/dev/<release-id>.json
 
 npm run path:maintenance:fallback -- clear --env test --surfaces all
+npm run path:maintenance -- clear --env test --surfaces all
 ```
 
 For an approved dataset or TEST reset, include the exact previously qualified flags. `path:deploy` rejects a dataset/workflow/reset operation absent from DEV evidence. Capture the successful deploy manifest path printed by the command.
 
 The TEST deployment records the prior retained timestamped admin and portal artifacts before uploading the candidate. Missing prior rollback artifacts block TEST acceptance. First adoption of artifact provenance should deploy both applications so both roots receive `.path-release-provenance.json`.
+
+TEST portal preflight builds use an ignored release-scoped directory under `tmp/path-deploy-builds/`, not the portal repo's tracked `build-test/` tree. The same isolated output is packaged if preflight passes and is removed in the deploy command's final cleanup on success or failure. A preflight build must never make its own source fingerprint fail or leave generated portal output dirty.
 
 ## Phase 3 — deployed TEST acceptance
 
@@ -231,10 +234,9 @@ npm run release:qualify -- validate \
   --evidence tmp/release-qualification/test/<release-id>.json
 ```
 
-After `TEST GO`, clear the warning and rerun the maintenance-only check if any cleanup command was needed:
+After `TEST GO`, rerun the maintenance-only check if any cleanup command was needed after the main acceptance run:
 
 ```bash
-npm run path:maintenance -- clear --env test --surfaces all
 npm run release:test:postflight -- --maintenance-only --json
 ```
 
@@ -269,6 +271,7 @@ Follow the PROD warning/fallback/restore-point/normal-routing smoke sequence in 
 - Fix product/test infrastructure, clean fixtures, or obtain the missing approved account; then rerun the complete affected stage against the unchanged candidate.
 - If source, migrations, inventory, operations, runtime payload, or release ID changes, start again at DEV qualification.
 - Keep maintenance active while deployed TEST is unhealthy. If recovery requires redeploying a prior TEST artifact, record that action and generate a new DEV/deployment/TEST chain before PROD consideration.
+- If preflight fails before artifact upload or deployment and the existing TEST applications remain healthy, restore normal forwarding and clear the warning immediately; repair locally, regenerate exact-source DEV evidence, and schedule a fresh maintenance window before retrying.
 
 ## July 13 systemic failure closure
 
