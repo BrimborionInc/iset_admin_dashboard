@@ -1,5 +1,5 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-07-13T10:43:23.429Z",
+  "generatedAt": "2026-07-13T10:43:58.951Z",
   "releaseId": "20260713-admin-schema-readiness-hotfix",
   "releaseLabel": "Release 20260713-admin-schema-readiness-hotfix",
   "releaseDateEn": "13th July 2026",
