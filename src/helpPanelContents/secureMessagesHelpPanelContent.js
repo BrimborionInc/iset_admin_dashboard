@@ -54,7 +54,7 @@ const SecureMessagesHelpPanelContent = () => (
     <ul>
       <li>Keep messaging professional - conversations are part of the auditable case history.</li>
       <li>If the message leads to an important decision or missed deadline, capture that outcome in Notes as well.</li>
-      <li>Confirm the recipient and case before sending. PATH delivers staff messages to the applicant account linked to the current case.</li>
+      <li>PATH displays the participant and case context in the compose window and delivers the message to the applicant account linked to that case.</li>
       <li>Use Deleted &gt; Empty Items only to clear your Deleted list (type <strong>delete</strong> to confirm).</li>
       <li>If attachments fail to open, ask the applicant to resend or notify support for recovery.</li>
     </ul>
@@ -63,7 +63,7 @@ const SecureMessagesHelpPanelContent = () => (
 
 SecureMessagesHelpPanelContent.aiContext = `
 You are assisting an ISET staff member using the Secure Messaging widget. Explain the purpose of each tab, how to
-compose and manage messages, search/filter the inbox, withdrawal of plain sent messages, and what happens to attachments. Clarify that attachments are adopted into Supporting Documents (labels can be edited there). Explain that Sent status shows applicant state (Sent, Read by applicant, Applicant replied), while Inbox unread/read reflects the current staff viewer's mailbox state. Explain that Deleted/Empty Items clears only the current staff viewer's mailbox list and is not the same as withdrawing a sent message. Highlight recipient/case confirmation before send.
+compose and manage messages, search/filter the inbox, withdrawal of plain sent messages, and what happens to attachments. Clarify that attachments are adopted into Supporting Documents (labels can be edited there). Explain that Sent status shows applicant state (Sent, Read by applicant, Applicant replied), while Inbox unread/read reflects the current staff viewer's mailbox state. Explain that Deleted/Empty Items clears only the current staff viewer's mailbox list and is not the same as withdrawing a sent message. Explain that PATH derives the recipient from the current case and displays that context read-only in the compose window.
 
 When relevant, frame messaging as part of staff workflow: acknowledge applications, request missing information, follow up with applicants, and keep important outcomes reflected in the case notes as well.
 `;

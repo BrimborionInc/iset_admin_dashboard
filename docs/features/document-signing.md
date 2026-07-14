@@ -1,6 +1,6 @@
 Purpose: Define the cross-app document signing capability so case managers can send participant-facing intake workflows (authored in the intake workflow studio) for review and signature, reusing the intake renderer and `signature-ack`.
 Audience: Product, engineering, security, ops.
-Last Updated: 2026-04-26
+Last Updated: 2026-07-13
 
 ## Goals
 - Case managers send intake workflows (single-step or mini-workflow) for signature from the admin dashboard with status tracking and audit history.
@@ -57,6 +57,8 @@ Last Updated: 2026-04-26
 ## Rendering + UX notes
 - Reuse the intake `signature-ack` renderer; do not fork. Keep labels/action/clear buttons, status text, handwriting font, and required flag behavior.
 - Mini-workflow support: multi-step, branching (e.g., EFT vs Wire), validation, and file uploads (e.g., void cheque) work as in intake.
+- Client Monthly Attendance Report: workflow `54` (`consent-cm-prefill`, `document_type='attendance_form'`) pre-fills the participant name and, when available, the selected intervention's institution/program. Those values remain editable. The participant selects a reporting month and either declares full attendance or records up to four absence date/reason pairs, uploads supporting `medical_documentation`, and signs. Absence dates must belong to the reporting month; any optional row used must contain both fields.
+- Attendance-report completion validates the participant-owned upload server-side before claiming the signature. A filename or unowned/unscanned object reference cannot satisfy the supporting-document requirement. The signed PDF uses a dedicated letter-size layout based on the NWAC source form: compact instructions, attendance details and marked status choice, a four-row date/reason/supporting-document table, declaration, and electronic signature panel. It is stored as the canonical `attendance_form` document, while supporting uploads are materialized separately into application/case document scope.
 - Participant read-only fields: prefilled by case manager; participant can edit only the designated remaining fields.
 - The instance is read-only after signing. Once signed, lock fields and show a success state plus a download link.
 - Allow save/return before signing (persist partial view state and audit view events).
@@ -74,6 +76,7 @@ Last Updated: 2026-04-26
 
 ## Example patterns to support
 - EFT/Wire payment form: branch on EFT vs Wire; conditional required fields; required file upload (void cheque) when EFT.
+- Client Monthly Attendance Report: branch on full attendance vs absences; editable participant/program prefill where available; reporting-month validation; supporting-document upload and signature.
 - Single-step consent: static text + single signature with timestamp.
 - Case-manager-prepped agreement: case manager fills program, dates, funding tables (amounts, totals), and living allowance table; participant reviews read-only values, signs. Allow multiple `signature-ack` fields (client, case manager) with defined order.
 

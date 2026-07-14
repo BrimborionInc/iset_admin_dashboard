@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-07-13 | Release 20260713-client-monthly-attendance-final-test | Workflow/Documents | Client Monthly Attendance Report | Case managers can attach a digital monthly attendance report to a secure message for the participant to complete and sign. | PATH can pre-fill editable participant, institution, and program details; absence reports use progressively added rows, require same-month dates and participant-owned supporting evidence, and generate an NWAC-style signed PDF. Promoted to TEST for formal UAT; French business/legal copy review remains required before PROD.
 - 2026-07-13 | Release 20260713-prod-incident-requalification | Fix/Reliability | Applicant portal messages and supports | Fixed a portal error that could prevent signed-in applicants from opening messages or support activities after the engineering-audit release. | The emergency portal-only patch passed authenticated TEST journeys and changed no schema, data, configuration, staff permissions, or external-service settings.
 - 2026-07-13 | Release 20260713-admin-schema-readiness-hotfix | Fix/Reliability | Admin console sign-in | Fixed a schema-readiness error that made signed-in admin console requests return 503 after the engineering-audit release. | The hotfix aligns the pre-traffic readiness check with the exact staff-profile columns used at runtime; it changes no data or staff permissions.
 - 2026-07-12 | Release 20260713-engineering-audit-prod | Fix/Reliability | Payments, budgets, and Intacct integration safety | Payment evidence and screens stay in the correct case scope, competing budget transfers apply once, and external payment handoffs retain a durable recoverable outcome instead of risking duplicate sends. | Sage-style success responses now require a stable external ID. Payment routing remains disabled; the release does not activate Finance email or Intacct.
@@ -466,12 +467,17 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Fixed a problem that could prevent signed-in applicants from opening messages or support activities.
-- Fixed a problem that prevented signed-in staff from using the admin console after the latest release.
-- PATH now keeps case, payment, applicant, and notification work tied to the correct record while making retries and overlapping background work safer.
-- Public portal signing, staff-assisted intake, client imports, budget transfers, and external payment handoffs now have stronger duplicate and partial-failure protection.
+- Case managers can now send a Client Monthly Attendance Report as a secure-message digital form for the participant to complete and sign.
+- Absence dates stay within the selected reporting month, supporting evidence is attached securely, and the completed report is saved as an NWAC-style PDF.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260713-client-monthly-attendance-final-test
+
+- Added the Client Monthly Attendance Report to the digital forms that case managers can attach to secure messages.
+- PATH pre-fills available participant, institution, and program details while keeping them editable for correction.
+- Participants report absences through progressively added rows, with date pickers restricted to the selected reporting month and supporting documentation required when absences are reported.
+- Completed reports use the NWAC form layout, including a proper absence table and the participant's electronic signature.
 
 #### Release 20260713-prod-incident-requalification
 
@@ -481,28 +487,23 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Fixed a schema-readiness error that caused signed-in admin console requests to return 503.
 
-#### Release 20260713-engineering-audit-prod
-
-- Moving between cases, applications, or payment filters now hides the previous record immediately and prevents older responses or selections from acting on the new workspace.
-- Public portal screens require an applicant account, prior intake answers stay on the server, and message/signing lists return only the information they display.
-- Repeated signing, client-import, budget-allocation, notification, and payment-handoff work now converges safely instead of creating duplicate or uncertain actions.
-- Reminder and notification delivery can recover from known temporary failures, while uncertain email outcomes are held for System Administrator review rather than blindly resent.
-- AI model, parameter, and fallback settings now use one durable configuration across admin, portal, restarts, and instance replacement.
-- Intake component choices are explicitly static-only, the unused PTMA administration surface is retired, and NWAC Hub Management remains available to System Administrators.
-- Payment evidence and follow-up actions remain inside their packet/case scope; Finance email and Intacct routing remain disabled for this release.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Correction d'un probleme qui pouvait empecher les demandeurs connectes d'ouvrir leurs messages ou activites de soutien.
-- Correction d'un probleme qui empechait le personnel connecte d'utiliser la console d'administration apres la derniere version.
-- PATH conserve maintenant le travail lie aux cas, paiements, demandeurs et notifications dans le bon dossier, tout en rendant plus securitaires les nouvelles tentatives et les taches d'arriere-plan simultanees.
-- La signature du portail public, l'admission assistee, l'importation de clients, les transferts budgetaires et les transferts de paiement externes offrent maintenant une meilleure protection contre les doublons et les echecs partiels.
+- Les gestionnaires de cas peuvent maintenant envoyer le Rapport mensuel de presence du client comme formulaire numerique par messagerie securisee afin que la participante ou le participant le remplisse et le signe.
+- Les dates d'absence restent dans le mois de declaration selectionne, les pieces justificatives sont jointes de facon securisee et le rapport rempli est enregistre comme PDF au format de l'AFAC.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260713-client-monthly-attendance-final-test
+
+- Ajout du Rapport mensuel de presence du client aux formulaires numeriques que les gestionnaires de cas peuvent joindre aux messages securises.
+- PATH pre-remplit les renseignements disponibles sur la participante ou le participant, l'etablissement et le programme, tout en permettant de les corriger.
+- Les absences sont saisies dans des rangees ajoutees au besoin; les calendriers sont limites au mois de declaration selectionne et une piece justificative est requise lorsque des absences sont declarees.
+- Le rapport rempli reprend la presentation du formulaire de l'AFAC, y compris un tableau des absences et la signature electronique de la participante ou du participant.
 
 #### Release 20260713-prod-incident-requalification
 
@@ -511,16 +512,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 #### Release 20260713-admin-schema-readiness-hotfix
 
 - Correction d'une erreur de preparation du schema qui faisait retourner une erreur 503 aux requetes de la console d'administration apres la connexion.
-
-#### Release 20260713-engineering-audit-prod
-
-- Le passage entre les cas, demandes ou filtres de paiement masque immediatement l'ancien dossier et empeche les anciennes reponses ou selections d'agir dans le nouvel espace de travail.
-- Les ecrans du portail public exigent un compte demandeur, les reponses d'admission precedentes restent sur le serveur et les listes de messages et de signatures retournent seulement les renseignements affiches.
-- Les nouvelles tentatives de signature, d'importation de clients, d'affectation budgetaire, de notification et de transfert de paiement convergent maintenant de facon securitaire au lieu de creer des actions en double ou incertaines.
-- La livraison des rappels et notifications peut reprendre apres un echec temporaire connu; les resultats de courriel incertains sont conserves pour examen par un administrateur systeme plutot que renvoyes automatiquement.
-- Les modeles, parametres et solutions de repli de l'IA utilisent maintenant une configuration durable commune a l'administration, au portail, aux redemarrages et au remplacement d'instance.
-- Les choix de composants d'admission sont maintenant explicitement statiques, l'ancienne administration PTMA inutilisee est retiree et la gestion des carrefours NWAC demeure offerte aux administrateurs systeme.
-- Les preuves et suivis de paiement restent limites a leur dossier de paiement et a leur cas; le routage des courriels Finance et d'Intacct demeure desactive pour cette version.
 
 ### Problemes connus (brouillon - FR)
 

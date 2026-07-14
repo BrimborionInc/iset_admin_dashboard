@@ -114,6 +114,11 @@ const {
   dispatchInternalNotifications,
   dispatchAssignmentNotificationEmails,
 } = require('../shared/events/notificationDispatcher');
+const {
+  ATTENDANCE_REPORT_DOCUMENT_TYPE,
+  applyAttendanceReportInitialValues,
+  buildAttendanceReportInitialValues,
+} = require('../shared/attendanceReport');
 const nunjucks = require("nunjucks");
 let pool; // Initialized after DB config loads
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
@@ -63898,6 +63903,33 @@ const handlePostCaseSecureMessage = async (req, res) => {
     const needsFundingOverviewPrefill = attachmentRows.some(
       row => row.workflow_type === 'consent-cm-prefill' && row.document_type === 'financial_overview'
     );
+    const needsAttendanceReportPrefill = attachmentRows.some(
+      row => row.workflow_type === 'consent-cm-prefill' && row.document_type === ATTENDANCE_REPORT_DOCUMENT_TYPE
+    );
+    let attendanceReportInitialValues = null;
+    if (needsAttendanceReportPrefill) {
+      let attendanceIntervention = null;
+      if (requestedInterventionId) {
+        const [[interventionRow]] = await pool.query(
+          `SELECT id, metadata_json
+             FROM iset_case_intervention
+            WHERE id = ?
+              AND case_id = ?
+            LIMIT 1`,
+          [requestedInterventionId, caseId]
+        );
+        attendanceIntervention = interventionRow || null;
+      }
+      const attendanceAssessment = await fetchApplicationAssessmentRow(pool, {
+        caseId,
+        applicationId: caseRow?.application_id || null,
+      });
+      attendanceReportInitialValues = buildAttendanceReportInitialValues({
+        applicantName: contextApplicantName || caseRow?.applicant_name || '',
+        intervention: attendanceIntervention,
+        assessment: attendanceAssessment,
+      });
+    }
     const fundingOverviewAttachmentSpec = attachmentSpecs.find(spec => {
       const row = attachmentRows.find(candidate => Number(candidate.id) === Number(spec?.workflow_id));
       return row?.workflow_type === 'consent-cm-prefill' && row?.document_type === 'financial_overview';
@@ -64425,6 +64457,14 @@ const handlePostCaseSecureMessage = async (req, res) => {
               initialValues: editableFinancialOverviewSchema.initialValues || {}
             }
           };
+        }
+        if (
+          resolvedSchema &&
+          attendanceReportInitialValues &&
+          wf.workflow_type === 'consent-cm-prefill' &&
+          wf.document_type === ATTENDANCE_REPORT_DOCUMENT_TYPE
+        ) {
+          resolvedSchema = applyAttendanceReportInitialValues(resolvedSchema, attendanceReportInitialValues);
         }
         if (resolvedSchema && cfaDraft && wf.document_type === 'funding_agreement') {
           resolvedSchema = {

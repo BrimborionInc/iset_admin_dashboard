@@ -1053,7 +1053,35 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  console.error(err?.stack || err?.message || err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(err => {
+    console.error(err?.stack || err?.message || err);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  DEV_AWS_ACCOUNT_ID,
+  asJson,
+  assert,
+  assertDevAwsAccount,
+  awsConfigFromEnv,
+  cleanupFixture,
+  clickByText,
+  createCognitoUser,
+  createFixtureRows,
+  deleteObjectQuietly,
+  ensureLocalChromeLibraryPath,
+  findChromeExecutable,
+  getJson,
+  loginAdminViaHostedUi,
+  makePassword,
+  makeSuffix,
+  mysqlConfig,
+  parseEnvFile,
+  portalPasswordLogin,
+  screenshot,
+  setPortalCookies,
+  typeInto,
+  waitForText,
+};

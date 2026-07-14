@@ -79,6 +79,24 @@ function pickBestI18n(values = []) {
   return fallback;
 }
 
+function normalizeRepeatableConfig(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const group = String(raw.group || '').trim();
+  const index = Number(raw.index);
+  if (!group || !Number.isInteger(index) || index < 1) return undefined;
+  const minItems = Math.max(1, Number.isInteger(Number(raw.minItems)) ? Number(raw.minItems) : 1);
+  const requestedMax = Number.isInteger(Number(raw.maxItems)) ? Number(raw.maxItems) : index;
+  const maxItems = Math.max(minItems, requestedMax, index);
+  return {
+    group,
+    index,
+    minItems,
+    maxItems,
+    addLabel: toI18nObject(raw.addLabel, 'Add another'),
+    removeLabel: toI18nObject(raw.removeLabel, 'Remove'),
+  };
+}
+
 function deepMerge(a, b) {
   if (Array.isArray(a) || Array.isArray(b)) return b ?? a;
   if (a && typeof a === 'object' && b && typeof b === 'object') {
@@ -488,6 +506,8 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         required: !!(props?.validation && typeof props.validation === 'object' ? props.validation.required : props?.required),
         storageKey: chosenKey || id,
       };
+      const repeatable = normalizeRepeatableConfig(props?.repeatable);
+      if (repeatable) component.repeatable = repeatable;
       // Preserve author-specified default value for defaultable fields so runtime can prefill (e.g., {data_key})
       if (['input','textarea','character-count'].includes(normalisedType)) {
         const rawVal = props?.value;
@@ -510,6 +530,12 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
       }
       if (tplType === 'input') {
         if (props?.type) component.inputType = props.type;
+        if (props?.min != null && String(props.min).trim()) component.min = String(props.min).trim();
+        if (props?.max != null && String(props.max).trim()) component.max = String(props.max).trim();
+        if (props?.dateBounds && typeof props.dateBounds === 'object' && !Array.isArray(props.dateBounds)) {
+          const monthField = String(props.dateBounds.monthField || '').trim();
+          if (monthField) component.dateBounds = { monthField };
+        }
         if (props?.autocomplete) component.autocomplete = props.autocomplete;
         if (props?.inputmode || props?.inputMode) component.inputMode = props.inputmode || props.inputMode;
         if (props?.pattern) component.pattern = props.pattern;

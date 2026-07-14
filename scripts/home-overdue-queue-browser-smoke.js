@@ -395,12 +395,8 @@ async function clickWorkQueueBucket(page, label) {
     if (radioCandidates.length) {
       const candidate = radioCandidates[0];
       candidate.element.scrollIntoView({ block: 'center', inline: 'nearest' });
-      const inputRect = candidate.input.getBoundingClientRect();
-      if (inputRect.width > 0 && inputRect.height > 0) {
-        return { x: inputRect.left + inputRect.width / 2, y: inputRect.top + inputRect.height / 2, text: candidate.text };
-      }
-      const rect = candidate.element.getBoundingClientRect();
-      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, text: candidate.text };
+      candidate.input.click();
+      return { clicked: true, text: candidate.text };
     }
     const elements = Array.from(document.querySelectorAll('[role="option"], [role="listitem"], li, article, div'));
     const candidates = elements
@@ -419,14 +415,14 @@ async function clickWorkQueueBucket(page, label) {
     if (!target) return null;
     const clickable = target.closest?.('[role="option"], [role="button"], button, label') || target;
     clickable.scrollIntoView({ block: 'center', inline: 'nearest' });
-    const rect = clickable.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, text: normalize(clickable.textContent) };
+    clickable.click();
+    return { clicked: true, text: normalize(clickable.textContent) };
   }, label);
   if (!point) {
     await clickVisibleText(page, label);
     return;
   }
-  await page.mouse.click(point.x, point.y);
+  if (!point.clicked) await page.mouse.click(point.x, point.y);
 }
 
 async function waitForBodyText(page, text, timeoutMs = 15000) {

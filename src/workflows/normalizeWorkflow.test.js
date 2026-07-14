@@ -49,6 +49,14 @@ function makePool() {
           label: { text: { en: 'What training or employment goal would you like the NWAC ISET Program to support?', fr: 'Quel objectif souhaitez-vous?' } },
           rows: 5,
           maxlength: 500,
+          repeatable: {
+            group: 'example-goals',
+            index: 1,
+            minItems: 1,
+            maxItems: 3,
+            addLabel: { en: 'Add another goal', fr: 'Ajouter un autre objectif' },
+            removeLabel: { en: 'Remove this goal', fr: 'Supprimer cet objectif' },
+          },
         }),
         props_overrides: JSON.stringify({}),
       },
@@ -80,6 +88,7 @@ function makePool() {
           name: 'other-barrier',
           type: 'text',
           label: { text: { en: 'Other challenge (please specify)', fr: 'Autre défi' } },
+          dateBounds: { monthField: 'reporting-month' },
         }),
         props_overrides: JSON.stringify({}),
       },
@@ -234,10 +243,22 @@ describe('buildWorkflowSchema branching source keys', () => {
     const longTermGoal = employmentStep.components.find((component) => component.storageKey === 'long-term-goal');
     const barriers = employmentStep.components.find((component) => component.storageKey === 'barriers');
     const targetProgram = employmentStep.components.find((component) => component.storageKey === 'target-program');
+    const otherBarrier = barriers.options
+      .find(option => option.value === 'other')
+      ?.children?.find(component => component.storageKey === 'other-barrier');
 
     expect(longTermGoal.type).toBe('character-count');
+    expect(longTermGoal.repeatable).toEqual({
+      group: 'example-goals',
+      index: 1,
+      minItems: 1,
+      maxItems: 3,
+      addLabel: { en: 'Add another goal', fr: 'Ajouter un autre objectif' },
+      removeLabel: { en: 'Remove this goal', fr: 'Supprimer cet objectif' },
+    });
     expect(barriers.type).toBe('checkboxes');
     expect(targetProgram.type).toBe('radio');
+    expect(otherBarrier.dateBounds).toEqual({ monthField: 'reporting-month' });
   });
 });
 

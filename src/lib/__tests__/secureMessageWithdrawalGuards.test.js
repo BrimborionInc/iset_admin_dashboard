@@ -26,14 +26,13 @@ describe('secure message withdrawal safeguards', () => {
     expect(source).toContain('can_withdraw: baseCanWithdraw ? 1 : 0');
   });
 
-  test('staff compose locks the routed recipient display and requires confirmation', () => {
+  test('staff compose locks the routed recipient display without a redundant confirmation gate', () => {
     const source = readSource('src/widgets/SecureMessageComposePanel.jsx');
 
-    expect(source).toContain('const [recipientConfirmed, setRecipientConfirmed] = useState(false)');
-    expect(source).toContain('Confirm the recipient and case before sending.');
-    expect(source).toContain('!recipientConfirmed');
     expect(source).toContain('readOnly');
-    expect(source).toContain('I have checked the recipient and case.');
+    expect(source).toContain("overflowX: 'hidden'");
+    expect(source).not.toContain('recipientConfirmed');
+    expect(source).not.toContain('I have checked the recipient and case.');
   });
 
   test('staff messaging UI exposes withdrawal separately from local deleted-items cleanup', () => {

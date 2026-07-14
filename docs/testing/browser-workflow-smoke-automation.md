@@ -219,6 +219,13 @@ The submitted-assessment EI correction fix has a focused DEV end-to-end smoke:
 
 This smoke creates disposable DEV Cognito staff users for a Regional Manager and ISET Coordinator, seeds a synthetic Nunavut application assessment with an active EI verification document and active two-step review row, authenticates with real Cognito bearer tokens, checks the local backend route through `/api/locks/application/:id` and `PUT /api/cases/:id`, drives the local React Application Assessment widget with Puppeteer, and then removes Cognito users plus DB fixture rows. Coverage includes RM post-submission EI correction before dependencies, the browser dropdown remaining enabled for the RM, the browser sending a real EI correction PUT, ISET Coordinator denial, and RM dependency blocking once an action plan exists. Direct Cognito password auth is not currently usable with the DEV client/IAM shape, so the smoke falls back to the Hosted UI login path used by staff browsers.
 
+The Client Monthly Attendance Report has a focused real-DEV end-to-end smoke:
+
+- Script: `scripts/monthly-attendance-report-dev-smoke.js`
+- NPM alias: `npm run smoke:monthly-attendance-report:dev`
+
+The smoke verifies both env files resolve to the DEV AWS account, creates disposable real Cognito staff/applicant identities and a selected-intervention fixture, sends workflow `54` through the secure-message API, checks editable participant/institution/program prefill, proves malformed direct signing is rejected, completes the absence branch in the real portal, uploads participant-owned `medical_documentation`, signs, and downloads the generated PDF. It then proves signed-payload/document idempotency and removes Cognito, MySQL, and MinIO fixture residue. Evidence is written under `tmp/monthly-attendance-report-dev-smoke/`.
+
 The Case Workspace Intervention Assessment recall path has a focused local browser smoke:
 
 - Script: `scripts/intervention-assessment-recall-browser-smoke.js`

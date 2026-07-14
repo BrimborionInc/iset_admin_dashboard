@@ -367,7 +367,7 @@
       "id": "files-messages-signing",
       "description": "Object storage, uploads, documents, generated files, secure messages and signing completion.",
       "matches": {
-        "admin": ["(document|upload|file|message|signing|storage|pdf|isetadminserver\\.js$)"],
+        "admin": ["(document|Document|upload|Upload|file|File|message|Message|signing|Signing|attendance|Attendance|storage|Storage|pdf|PDF|isetadminserver\\.js$)"],
         "portal": ["(document|upload|file|message|signing|storage|pdf|server\\.js$)"],
         "shared": ["(storage|financialOverview|notificationDispatcher|events)"]
       },
@@ -379,7 +379,7 @@
       "id": "finance-payments",
       "description": "Payment packets, allocations, evidence, Finance handoff, follow-up and reconciliation.",
       "matches": {
-        "admin": ["(payment|finance|allocation|budget|intacct|isetadminserver\\.js$)"],
+        "admin": ["(payment|Payment|finance|Finance|financial|Financial|allocation|Allocation|budget|Budget|intacct|Intacct|isetadminserver\\.js$)"],
         "shared": ["(event|notification)"]
       },
       "dependsOn": ["files-messages-signing", "external-integrations"],

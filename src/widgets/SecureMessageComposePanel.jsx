@@ -127,7 +127,6 @@ const SecureMessageComposePanel = ({
   const [workflowsError, setWorkflowsError] = useState(null);
   const [selectedWorkflowIds, setSelectedWorkflowIds] = useState([]);
   const [financialOverviewMode, setFinancialOverviewMode] = useState('prefill');
-  const [recipientConfirmed, setRecipientConfirmed] = useState(false);
 
   const buildComposeContext = useCallback(
     (detail = {}) => {
@@ -203,7 +202,6 @@ const SecureMessageComposePanel = ({
     setComposeError(null);
     setSelectedWorkflowIds([]);
     setFinancialOverviewMode('prefill');
-    setRecipientConfirmed(false);
   }, [applicantName, currentStaffName]);
 
   const confirmReplaceComposeDraft = useCallback(
@@ -276,7 +274,6 @@ const SecureMessageComposePanel = ({
       setComposeFromName(nextContext.fromName);
       setSelectedWorkflowIds([]);
       setFinancialOverviewMode('prefill');
-      setRecipientConfirmed(false);
       setComposeError(null);
       setComposeCloseNotice(null);
       loadWorkflows();
@@ -409,10 +406,6 @@ const SecureMessageComposePanel = ({
       setComposeError('"To" and "From" names are required.');
       return;
     }
-    if (!recipientConfirmed) {
-      setComposeError('Confirm the recipient and case before sending.');
-      return;
-    }
     setComposeSending(true);
     setComposeError(null);
     try {
@@ -538,8 +531,7 @@ const SecureMessageComposePanel = ({
                   !composeSubject.trim() ||
                   !composeBody.trim() ||
                   !composeToName.trim() ||
-                  !composeFromName.trim() ||
-                  !recipientConfirmed
+                  !composeFromName.trim()
                 }
               >
                 Send
@@ -563,6 +555,7 @@ const SecureMessageComposePanel = ({
             style={{
               maxHeight: 'min(640px, calc(100vh - 12rem))',
               overflowY: 'auto',
+              overflowX: 'hidden',
               paddingRight: '0.5rem'
             }}
           >
@@ -674,13 +667,6 @@ const SecureMessageComposePanel = ({
                 disabled={composeSending}
               >
                 Mark as urgent
-              </Checkbox>
-              <Checkbox
-                checked={recipientConfirmed}
-                onChange={({ detail }) => setRecipientConfirmed(detail.checked)}
-                disabled={composeSending}
-              >
-                I have checked the recipient and case.
               </Checkbox>
               {composeError ? <Box color="text-status-critical">{composeError}</Box> : null}
             </SpaceBetween>
