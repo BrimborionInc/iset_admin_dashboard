@@ -1,7 +1,7 @@
 # Test Environment Deployment Notes
 
 Status: current TEST deployment notes. Prefer `deployment-quick-guide.md` for the shortest operator commands.
-Last reviewed: 2026-07-12 after the coordinated engineering-audit TEST rehearsal.
+Last reviewed: 2026-07-13 after the committed Client Monthly Attendance Report rehearsal.
 
 For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
 
@@ -51,6 +51,8 @@ npm run path:deploy:plan -- --env test --skip-data
 ```
 
 ## Recent deploy evidence
+
+- 2026-07-13/14 UTC: Committed admin `f91762a`, portal `e445d20`, and shared `e8dc303` were qualified and deployed to TEST as release `20260714-client-monthly-attendance-prod`; only workflow `54` authoring configuration was synced (3 steps, 18 components, 2 routes, 2 route options). DEV evidence `ad5c54ac4c00517e5b42776e69abe12d2256ade18c54809c09e89e5a28301a1c` passed all 16 mandatory checks. Admin artifact `s3://nwac-test-artifacts/admin-dashboard/admin-dashboard-20260713-213143.zip` retained `admin-dashboard-20260713-203301.zip`; portal artifact `s3://nwac-test-artifacts/portal/portal-20260713-213326.zip` retained `portal-20260713-203443.zip`. Deployed TEST evidence `1d17381034197d42d91f0fa135e972ac4ddce9429e5011f077b9da8c1efb3445` passed all 11 mandatory checks with normal forwarding and zero cleanup residue. Manifest: `/home/bill/ISET/admin-dashboard/tmp/path-deploy/test/20260714-client-monthly-attendance-prod--2026-07-14T01-27-43-440Z.json`.
 
 - 2026-07-13: Admin-only TEST recovery release `20260713-admin-schema-readiness-hotfix` restored authenticated admin APIs after confirming TEST had the same canonical `staff_profiles` shape as PROD and therefore the same R4b `last_seen_at` assertion failure. The run followed the TEST-specific warning/fallback/in-place SSM path and used `npm run build:test`; schema, data, TEST DB refresh, shared, portal, runtime configuration, and PROD were excluded. Admission passed 338 tests, quiet lint, and 72 privacy-route checks. Artifact `s3://nwac-test-artifacts/admin-dashboard/admin-dashboard-20260713-070255.zip` installed on `i-052566d75e0214d00` through SSM command `7d99ab9f-29fb-4b08-b08a-c0daa21c9d48`. Final target-group smoke was healthy; source/readiness/log command `2f93ac7b-3475-4ac7-a480-36c2052e7ec7` confirmed release id, `buildTarget=test`, the shared runtime-column contract, local readiness, and no recent schema errors; SQL command `277d928c-aa97-429f-863b-9acc4c5191a8` proved the exact five-column query. Fallback returned to normal forwarding and maintenance command `180d5a8b-d310-4e08-9169-5d17f47580fe` confirmed zero announcement rows. Manifest: `/home/bill/ISET/admin-dashboard/tmp/path-deploy/test/20260713-admin-schema-readiness-hotfix--2026-07-13T11-00-34-994Z.json`.
 

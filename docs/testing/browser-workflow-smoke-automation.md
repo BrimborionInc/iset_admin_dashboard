@@ -226,6 +226,8 @@ The Client Monthly Attendance Report has a focused real-DEV end-to-end smoke:
 
 The smoke verifies both env files resolve to the DEV AWS account, creates disposable real Cognito staff/applicant identities and a selected-intervention fixture, sends workflow `54` through the secure-message API, checks editable participant/institution/program prefill, proves malformed direct signing is rejected, completes the absence branch in the real portal, uploads participant-owned `medical_documentation`, signs, and downloads the generated PDF. It then proves signed-payload/document idempotency and removes Cognito, MySQL, and MinIO fixture residue. Evidence is written under `tmp/monthly-attendance-report-dev-smoke/`.
 
+The exact content tree received a focused deployed TEST run under SSM command `9a02c39e-0486-4772-ba76-0ea6dda53336`, covering same-month date bounds, progressive absence rows, synthetic supporting evidence, signing, the one-page NWAC-style PDF, idempotency, and zero fixture residue. After the same content was committed, release `20260714-client-monthly-attendance-prod` repeated the complete generic TEST acceptance gate and reached `GO`; no functional source content changed between the focused run and the committed rehearsal, as shown by identical admin/portal/shared tree fingerprints.
+
 The Case Workspace Intervention Assessment recall path has a focused local browser smoke:
 
 - Script: `scripts/intervention-assessment-recall-browser-smoke.js`
