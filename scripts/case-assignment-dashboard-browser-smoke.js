@@ -77,11 +77,11 @@ function fakeJwt() {
   return [
     base64UrlEncode({ alg: 'none', typ: 'JWT' }),
     base64UrlEncode({
-      sub: 'smoke-admin-sub',
-      email: 'smoke.admin@example.invalid',
-      name: 'Smoke Admin',
-      role: 'System Administrator',
-      'cognito:groups': ['System_Administrator'],
+      sub: 'smoke-rm-sub',
+      email: 'smoke.rm@example.invalid',
+      name: 'Smoke Regional Manager',
+      role: 'Regional Manager',
+      'cognito:groups': ['Regional_Manager'],
       iat: now,
       exp: now + 3600,
     }),
@@ -289,19 +289,19 @@ async function installApiStubs(page, apiCalls) {
     if (url.pathname === '/api/auth/me') {
       request.respond(jsonResponse({
         auth: {
-          sub: 'smoke-admin-sub',
-          email: 'smoke.admin@example.invalid',
-          name: 'Smoke Admin',
-          role: 'System Administrator',
-          groups: ['System_Administrator'],
+          sub: 'smoke-rm-sub',
+          email: 'smoke.rm@example.invalid',
+          name: 'Smoke Regional Manager',
+          role: 'Regional Manager',
+          groups: ['Regional_Manager'],
           staffProfileId: 1,
           regionIds: [1],
         },
         profile: {
           id: 1,
-          email: 'smoke.admin@example.invalid',
-          name: 'Smoke Admin',
-          role: 'System Administrator',
+          email: 'smoke.rm@example.invalid',
+          name: 'Smoke Regional Manager',
+          role: 'Regional Manager',
           region_id: 1,
           region_ids: [1],
         },
@@ -338,8 +338,9 @@ async function installApiStubs(page, apiCalls) {
 
     if (url.pathname === '/api/staff/assignable') {
       request.respond(jsonResponse([
-        { id: 1, display_name: 'Smoke Admin', email: 'smoke.admin@example.invalid', role: 'System Administrator', region_id: 1 },
-        { id: 2, display_name: 'Case Worker', email: 'case.worker@example.invalid', role: 'ISET Coordinator', region_id: 1 },
+        { id: 1, display_name: 'Smoke Regional Manager', email: 'smoke.rm@example.invalid', role: 'Regional Manager', region_id: 1, status: 'active' },
+        { id: 2, display_name: 'Local Case Worker', email: 'case.worker@example.invalid', role: 'ISET Coordinator', region_id: 1, status: 'active' },
+        { id: 99, display_name: 'Derry Cross Region', email: 'derry@example.invalid', role: 'Regional Manager', region_id: 11, status: 'active' },
       ]));
       return;
     }
@@ -409,6 +410,26 @@ async function clickButtonByText(page, text) {
     button.click();
     return true;
   }, text);
+}
+
+async function clickLastVisibleListboxButton(page) {
+  const point = await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll('button[aria-haspopup="listbox"]'))
+      .filter(button => {
+        const rect = button.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+    const button = buttons[buttons.length - 1];
+    if (!button) return null;
+    const rect = button.getBoundingClientRect();
+    return {
+      x: rect.left + Math.max(4, Math.min(rect.width / 2, rect.width - 4)),
+      y: rect.top + Math.max(4, Math.min(rect.height / 2, rect.height - 4)),
+    };
+  });
+  if (!point) return false;
+  await page.mouse.click(point.x, point.y);
+  return true;
 }
 
 async function clickTableHeader(page, headerText) {
@@ -540,6 +561,68 @@ async function main() {
     failures.push({ type: 'assertion', message: 'SLA table header was not updated to Target', initialAssertions });
   }
 
+  let regionalManagerTargetAssertions = null;
+  const clickedReassign = await clickButtonByText(page, 'Reassign');
+  if (!clickedReassign) {
+    failures.push({ type: 'assertion', message: 'Regional Manager could not open the reassignment modal' });
+  } else {
+    await page.waitForFunction(() => (document.body?.innerText || '').includes('Select Assignee'));
+    const clickedAssigneeSelect = await clickLastVisibleListboxButton(page);
+    if (!clickedAssigneeSelect) {
+      const visibleButtons = await page.evaluate(() => Array.from(document.querySelectorAll('button'))
+        .filter(button => {
+          const rect = button.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        })
+        .map(button => button.textContent.trim())
+        .filter(Boolean));
+      failures.push({
+        type: 'assertion',
+        message: 'Could not open the reassignment target selector',
+        visibleButtons,
+      });
+    } else {
+      const targetListOpened = await page.waitForFunction(
+        () => (document.body?.innerText || '').includes('Derry Cross Region'),
+        { timeout: 5000 }
+      ).then(() => true).catch(() => false);
+      regionalManagerTargetAssertions = await page.evaluate(() => {
+        const text = document.body?.innerText || '';
+        return {
+          hasCrossRegionRegionalManager: text.includes('Derry Cross Region') && text.includes('Regional Manager'),
+          hasLocalCoordinator: text.includes('Local Case Worker') && text.includes('ISET Coordinator'),
+          listboxCount: document.querySelectorAll('[role="listbox"]').length,
+          visibleAriaControls: Array.from(document.querySelectorAll('[aria-haspopup]'))
+            .filter(element => {
+              const rect = element.getBoundingClientRect();
+              return rect.width > 0 && rect.height > 0;
+            })
+            .map(element => ({
+              tag: element.tagName,
+              hasPopup: element.getAttribute('aria-haspopup'),
+              text: element.textContent.trim(),
+            })),
+        };
+      });
+      if (!targetListOpened) {
+        failures.push({
+          type: 'assertion',
+          message: 'Reassignment target selector did not open',
+          regionalManagerTargetAssertions,
+        });
+      }
+      if (!regionalManagerTargetAssertions.hasCrossRegionRegionalManager || !regionalManagerTargetAssertions.hasLocalCoordinator) {
+        failures.push({
+          type: 'assertion',
+          message: 'Regional Manager assignment targets did not include the full cross-region assignable pool',
+          regionalManagerTargetAssertions,
+        });
+      }
+      await page.keyboard.press('Escape');
+    }
+    await clickButtonByText(page, 'Cancel');
+  }
+
   const sortedBefore = apiCalls.length;
   const clickedApplicant = await clickTableHeader(page, 'Applicant');
   if (!clickedApplicant) {
@@ -619,6 +702,7 @@ async function main() {
     bucketCall,
     initialAssertions,
     immediateSearchAssertions,
+    regionalManagerTargetAssertions,
   };
   if (failures.length) {
     console.error(JSON.stringify({ ...result, failures }, null, 2));

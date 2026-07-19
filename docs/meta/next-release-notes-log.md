@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-07-19 | Release TBD | Fix/Casework | Regional Manager reassignment | Regional Managers can reassign an accessible client file to any active staff member, including staff outside their own region. | The change preserves existing case-access controls while removing the target-region restriction that prevented reassignment to another Regional Manager.
 - 2026-07-13 | Release 20260714-client-monthly-attendance-prod | Workflow/Documents | Client Monthly Attendance Report | Case managers can attach a digital monthly attendance report to a secure message for the participant to complete and sign. | PATH can pre-fill editable participant, institution, and program details; absence reports use progressively added rows, require same-month dates and participant-owned supporting evidence, and generate an NWAC-style signed PDF. Committed-source qualification, repeated TEST acceptance, and PROD deployment completed on 2026-07-13/14 UTC.
 - 2026-07-13 | Release 20260713-prod-incident-requalification | Fix/Reliability | Applicant portal messages and supports | Fixed a portal error that could prevent signed-in applicants from opening messages or support activities after the engineering-audit release. | The emergency portal-only patch passed authenticated TEST journeys and changed no schema, data, configuration, staff permissions, or external-service settings.
 - 2026-07-13 | Release 20260713-admin-schema-readiness-hotfix | Fix/Reliability | Admin console sign-in | Fixed a schema-readiness error that made signed-in admin console requests return 503 after the engineering-audit release. | The hotfix aligns the pre-traffic readiness check with the exact staff-profile columns used at runtime; it changes no data or staff permissions.
@@ -467,10 +468,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Regional Managers can reassign an accessible client file to any active casework staff member, including staff outside their own region.
 - Case managers can now send a Client Monthly Attendance Report as a secure-message digital form for the participant to complete and sign.
 - Absence dates stay within the selected reporting month, supporting evidence is attached securely, and the completed report is saved as an NWAC-style PDF.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260719-rm-cross-region-reassignment
+
+- Regional Managers can now reassign a client file they can access to any active casework staff member, regardless of the assignee's region.
+- Existing client-file access rules remain unchanged, and inactive staff cannot be selected as assignees.
 
 #### Release 20260713-client-monthly-attendance-final-test
 
@@ -483,20 +490,22 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Fixed a portal error that could prevent signed-in applicants from opening messages or support activities.
 
-#### Release 20260713-admin-schema-readiness-hotfix
-
-- Fixed a schema-readiness error that caused signed-in admin console requests to return 503.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
+- Les gestionnaires regionaux peuvent reattribuer un dossier client accessible a toute personne active affectee au travail de cas, meme si elle se trouve dans une autre region.
 - Les gestionnaires de cas peuvent maintenant envoyer le Rapport mensuel de presence du client comme formulaire numerique par messagerie securisee afin que la participante ou le participant le remplisse et le signe.
 - Les dates d'absence restent dans le mois de declaration selectionne, les pieces justificatives sont jointes de facon securisee et le rapport rempli est enregistre comme PDF au format de l'AFAC.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260719-rm-cross-region-reassignment
+
+- Les gestionnaires regionaux peuvent maintenant reattribuer un dossier client auquel ils ont acces a toute personne active affectee au travail de cas, quelle que soit la region de cette personne.
+- Les regles existantes d'acces aux dossiers clients restent inchangees et les membres du personnel inactifs ne peuvent pas etre selectionnes.
 
 #### Release 20260713-client-monthly-attendance-final-test
 
@@ -508,10 +517,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 #### Release 20260713-prod-incident-requalification
 
 - Correction d'une erreur du portail qui pouvait empecher les demandeurs connectes d'ouvrir leurs messages ou activites de soutien.
-
-#### Release 20260713-admin-schema-readiness-hotfix
-
-- Correction d'une erreur de preparation du schema qui faisait retourner une erreur 503 aux requetes de la console d'administration apres la connexion.
 
 ### Problemes connus (brouillon - FR)
 

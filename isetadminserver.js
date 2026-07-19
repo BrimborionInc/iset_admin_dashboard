@@ -93,6 +93,7 @@ const {
   getCaseAccessError,
   getRegionalManagerCaseAccessError,
 } = require('./src/lib/caseAccess');
+const { ensureCanAssignCase } = require('./src/lib/caseAssignmentPolicy');
 const { createHubRouter } = require('./src/routes/hubRoutes');
 const {
   extractIntacctRestCollection,
@@ -19470,16 +19471,6 @@ async function resolveFinanceRouteActorUserId(req, runner = pool) {
   return resolveRequestActorUserId(req, null, runner);
 }
 
-const ASSIGN_ROLE_ALLOWLIST = new Set([
-  'System Administrator',
-  'NWAC Administrator',
-  'Regional Manager',
-]);
-
-const ASSIGN_FORBIDDEN_ROLES = new Set([
-  'ISET Coordinator',
-]);
-
 function getRequesterIdentity(req) {
   const role = inferUserRole(req);
   const staffProfileId = resolveActiveStaffProfileId(req);
@@ -20588,13 +20579,14 @@ function normaliseStaffProfileRow(row) {
     email: row.email || null,
     role: row.primary_role || null,
     regionId: row.region_id || null,
+    status: row.status || null,
   };
 }
 
 async function fetchStaffProfileById(staffId) {
   if (!Number.isFinite(staffId)) return null;
   const [[row]] = await pool.query(
-    'SELECT id, display_name, name, email, primary_role, region_id FROM staff_profiles WHERE id = ? LIMIT 1',
+    'SELECT id, display_name, name, email, primary_role, region_id, status FROM staff_profiles WHERE id = ? LIMIT 1',
     [staffId]
   );
   return normaliseStaffProfileRow(row);
@@ -20605,7 +20597,7 @@ async function fetchStaffProfileBySub(sub) {
   const trimmed = sub.trim();
   if (!trimmed) return null;
   const [[row]] = await pool.query(
-    'SELECT id, display_name, name, email, primary_role, region_id FROM staff_profiles WHERE cognito_sub = ? LIMIT 1',
+    'SELECT id, display_name, name, email, primary_role, region_id, status FROM staff_profiles WHERE cognito_sub = ? LIMIT 1',
     [trimmed]
   );
   return normaliseStaffProfileRow(row);
@@ -20616,7 +20608,7 @@ async function fetchStaffProfileByEmail(email) {
   const trimmed = email.trim();
   if (!trimmed) return null;
   const [[row]] = await pool.query(
-    'SELECT id, display_name, name, email, primary_role, region_id FROM staff_profiles WHERE LOWER(email) = LOWER(?) LIMIT 1',
+    'SELECT id, display_name, name, email, primary_role, region_id, status FROM staff_profiles WHERE LOWER(email) = LOWER(?) LIMIT 1',
     [trimmed]
   );
   return normaliseStaffProfileRow(row);
@@ -20665,26 +20657,6 @@ async function fetchTrackingIdForCase(applicationId, caseId) {
     }
   }
   return caseId ? `CASE-${caseId}` : null;
-}
-
-function ensureCanAssignCase(identity, targetStaff) {
-  const { role, regionId, regionIds } = identity || {};
-  if (ASSIGN_FORBIDDEN_ROLES.has(role)) {
-    return false;
-  }
-  if (ASSIGN_ROLE_ALLOWLIST.has(role || '')) {
-    if (role === 'Regional Manager' || role === 'Regional_Manager' || role === 'Regional_Manager') {
-      const allowedRegions = Array.isArray(regionIds) && regionIds.length
-        ? regionIds
-        : (Number.isFinite(regionId) ? [Number(regionId)] : []);
-      if (!allowedRegions.length) return false;
-      if (targetStaff && targetStaff.regionId && !allowedRegions.includes(Number(targetStaff.regionId))) {
-        return false;
-      }
-    }
-    return true;
-  }
-  return false;
 }
 
 async function persistCaseAssignment(caseId, assignedStaffProfileId) {
@@ -29003,15 +28975,15 @@ async function ensureStaffProfile(pool, cognitoSub, email, roleLabel, legacyKey,
 
     let targetId = null;
     if (subKey) {
-      const [[bySub]] = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [subKey]);
+      const [[bySub]] = await pool.query('SELECT id, status FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [subKey]);
       if (bySub && bySub.id) targetId = bySub.id;
     }
     if (!targetId && legacy) {
-      const [[byLegacy]] = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [legacy]);
+      const [[byLegacy]] = await pool.query('SELECT id, status FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [legacy]);
       if (byLegacy && byLegacy.id) targetId = byLegacy.id;
     }
     if (!targetId && email) {
-      const [[byEmail]] = await pool.query('SELECT id FROM staff_profiles WHERE email=? LIMIT 1', [email]);
+      const [[byEmail]] = await pool.query('SELECT id, status FROM staff_profiles WHERE email=? LIMIT 1', [email]);
       if (byEmail && byEmail.id) targetId = byEmail.id;
     }
 
@@ -29042,7 +29014,8 @@ async function ensureStaffProfile(pool, cognitoSub, email, roleLabel, legacyKey,
           }
         }
       }
-      return targetId;
+      const [[targetRow]] = await pool.query('SELECT status FROM staff_profiles WHERE id=? LIMIT 1', [targetId]);
+      return targetRow?.status === 'active' ? targetId : null;
     }
 
     if (!finalSub && !email) return null;
@@ -29062,8 +29035,8 @@ async function ensureStaffProfile(pool, cognitoSub, email, roleLabel, legacyKey,
       await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role) VALUES (?,?,?)
         ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role)`, [insertKey, insertEmail, roleLabel || null]);
     }
-    const [[finalRow]] = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [insertKey]);
-    return finalRow && finalRow.id ? finalRow.id : null;
+    const [[finalRow]] = await pool.query('SELECT id, status FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [insertKey]);
+    return finalRow?.id && finalRow.status === 'active' ? finalRow.id : null;
   } catch (err) {
     console.warn('[staff-assignable] ensureStaffProfile error:', err.message);
     return null;
@@ -29080,6 +29053,7 @@ async function fetchAssignableFromCognito(pool) {
         const resp = await client.send(new ListUsersInGroupCommand({ UserPoolId: COGNITO_POOL_ID, GroupName: groupName, Limit: 60, NextToken: nextToken }));
         const users = resp.Users || [];
         for (const user of users) {
+          if (user?.Enabled === false) continue;
           const username = user?.Username;
           if (!username) continue;
           if (seen.has(username)) continue;
@@ -29095,7 +29069,8 @@ async function fetchAssignableFromCognito(pool) {
             email,
             role: ASSIGNABLE_GROUP_LABEL.get(groupName) || groupName,
             display_name: displayName,
-            region_id: null
+            region_id: null,
+            status: 'active',
           });
         }
         nextToken = resp.NextToken;
@@ -29148,6 +29123,7 @@ app.get('/api/staff/assignable', async (req, res) => {
       `SELECT id, cognito_sub, email, primary_role AS role, email AS display_name, region_id
          FROM staff_profiles
         WHERE primary_role IN (${roles.map(()=>'?').join(',')})
+          AND status = 'active'
         ORDER BY primary_role, email`, roles);
     rows.forEach(r => {
       addStaff({
@@ -29156,6 +29132,7 @@ app.get('/api/staff/assignable', async (req, res) => {
         role: r.role,
         display_name: r.display_name,
         region_id: r.region_id ?? null,
+        status: 'active',
       });
     });
 
@@ -29229,7 +29206,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     let assignId = null;
     let targetStaff = null;
     if (assignee_id) {
-      const [[staff]] = await pool.query('SELECT id, display_name AS name, email, region_id AS regionId FROM staff_profiles WHERE id=? LIMIT 1', [assignee_id]);
+      const [[staff]] = await pool.query('SELECT id, display_name AS name, email, region_id AS regionId, status FROM staff_profiles WHERE id=? LIMIT 1', [assignee_id]);
       if (!staff) return res.status(400).json({ error: 'staff_not_found' });
       targetStaff = staff;
       assignId = staff.id;
@@ -29328,7 +29305,7 @@ app.post('/api/cases/:id/conflicts/revoke', async (req, res) => {
 
     const identity = getRequesterIdentity(req);
     const [[targetStaff]] = await pool.query(
-      'SELECT id, display_name AS name, display_name, email, region_id AS regionId FROM staff_profiles WHERE id=? LIMIT 1',
+      'SELECT id, display_name AS name, display_name, email, region_id AS regionId, status FROM staff_profiles WHERE id=? LIMIT 1',
       [assigneeId]
     );
     if (!targetStaff) return res.status(400).json({ error: 'staff_not_found' });

@@ -2,8 +2,10 @@
 
 Purpose: Capture the design decisions, rules, and implementation notes for Case Workspace quick actions.
 Audience: Caseworking feature owners, frontend engineers, and QA.
-Last Updated: 2026-05-03
+Last Updated: 2026-07-19
 Status: Complete for current behavior; future backload-scope consideration open
+
+Release contract for the 2026-07-19 Regional Manager target-scope change: `docs/planning/rm-cross-region-reassignment-release.md`.
 
 ## Scope
 Define a master list of quick actions for the Case Workspace header and map each action to role + case status rules, including actions that reconfigure the Cloudscape board layout.
@@ -37,7 +39,7 @@ Display/conversation roles (Cognito group names are inconsistent; map to these l
 - Assign / reassign visibility and scope:
   - System Administrator: can assign/reassign to any user.
   - Program Administrator: can assign/reassign to any user except System Administrators.
-  - Regional Manager: can assign/reassign only to users in their region (including themselves).
+  - Regional Manager: can assign/reassign an accessible case to any active staff member in the assignable pool, regardless of the target's region. This does not widen the RM's access to source cases.
   - ISET Coordinator: does not see the action.
 - Assign / reassign status gating: available for all statuses except `archived` (archived locks the case).
 - Assign / reassign should emit an event per the events catalog/emitter.

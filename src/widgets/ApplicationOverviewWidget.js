@@ -350,8 +350,6 @@ const ApplicationOverviewWidget = ({
     displayName: currentUserName,
     email: currentUserEmail,
     role: currentUserRole,
-    regionId: currentUserRegionId,
-    regionIds: currentUserRegionIds,
   } = useCurrentUser();
   const userRole = currentUserRole || '';
   const canonicalRole = toCanonicalRole(userRole || '');
@@ -1080,11 +1078,7 @@ const ApplicationOverviewWidget = ({
           return staffRole !== 'System Administrator';
         }
         if (isRegionalManagerRole) {
-          const staffRegion = Number(staff?.region_id ?? staff?.regionId ?? null);
-          const userRegions = Array.isArray(currentUserRegionIds) && currentUserRegionIds.length
-            ? currentUserRegionIds.map(Number).filter(Number.isFinite)
-            : (Number.isFinite(Number(currentUserRegionId)) ? [Number(currentUserRegionId)] : []);
-          return Number.isFinite(staffRegion) && userRegions.length && userRegions.includes(staffRegion);
+          return true;
         }
         return false;
       });
@@ -1128,8 +1122,6 @@ const ApplicationOverviewWidget = ({
     caseData?.owner?.staffProfileId,
     caseData?.owner?.staff_profile_id,
     caseData?.owner?.id,
-    currentUserRegionId,
-    currentUserRegionIds,
     isProgramAdminRole,
     isRegionalManagerRole,
     isSystemAdminRole,

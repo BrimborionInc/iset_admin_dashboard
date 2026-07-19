@@ -290,25 +290,13 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel, metadata = {
   const [autoAssignStatus, setAutoAssignStatus] = useState({ loading: true, enabled: null, error: null, rules: [] });
   const {
     userId: currentUserIdRaw,
-    staffProfileId: currentStaffProfileIdRaw,
     displayName: currentUserName,
     role: currentUserRole,
-    regionId: currentUserRegionId,
-    regionIds: currentUserRegionIds,
   } = useCurrentUser();
   const currentUserId = currentUserIdRaw ? String(currentUserIdRaw) : null;
-  const currentStaffProfileId = currentStaffProfileIdRaw ? String(currentStaffProfileIdRaw) : null;
   const userRole = currentUserRole || '';
   const normalizedUserRole = userRole.trim();
   const locationSearch = location?.search || '';
-  const normalizedRegionIds = useMemo(() => {
-    if (Array.isArray(currentUserRegionIds) && currentUserRegionIds.length) {
-      return Array.from(new Set(currentUserRegionIds.map(Number).filter(Number.isFinite)));
-    }
-    const parsed = currentUserRegionId != null ? Number(currentUserRegionId) : NaN;
-    return Number.isFinite(parsed) ? [parsed] : [];
-  }, [currentUserRegionIds, currentUserRegionId]);
-
   const clearRouteFilters = useCallback(() => {
     const params = new URLSearchParams(locationSearch);
     let changed = false;
@@ -371,13 +359,9 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel, metadata = {
 
   const isStaffVisible = useCallback((staff) => {
     if (!staff) return false;
-    if (normalizedUserRole === 'Regional Manager') {
-      if (currentStaffProfileId && String(staff.id) === String(currentStaffProfileId)) return true;
-      const staffRegion = staff.region_id != null ? Number(staff.region_id) : (staff.regionId != null ? Number(staff.regionId) : null);
-      return normalizedRegionIds.length && Number.isFinite(staffRegion) && normalizedRegionIds.includes(staffRegion);
-    }
+    if (normalizedUserRole === 'Regional Manager') return true;
     return true;
-  }, [normalizedUserRole, normalizedRegionIds, currentStaffProfileId]);
+  }, [normalizedUserRole]);
 
   const filteredAssignableStaff = useMemo(() => {
     return Array.isArray(assignableStaff)
