@@ -332,20 +332,19 @@ async function clickVisibleText(page, text) {
 }
 
 async function clickRowAction(page, rowText, actionText) {
-  const point = await page.evaluate((expectedRow, expectedAction) => {
+  const clicked = await page.evaluate((expectedRow, expectedAction) => {
     const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
     const rows = Array.from(document.querySelectorAll('tr, [role="row"]'));
     const row = rows.find(candidate => normalize(candidate.textContent).includes(expectedRow));
-    if (!row) return null;
+    if (!row) return false;
     const action = Array.from(row.querySelectorAll('button, a, [role="button"]'))
       .find(candidate => normalize(candidate.textContent) === expectedAction);
-    if (!action) return null;
+    if (!action) return false;
     action.scrollIntoView({ block: 'center', inline: 'nearest' });
-    const rect = action.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    action.click();
+    return true;
   }, rowText, actionText);
-  if (!point) throw new Error(`Could not find ${actionText} action for row ${rowText}`);
-  await page.mouse.click(point.x, point.y);
+  if (!clicked) throw new Error(`Could not find ${actionText} action for row ${rowText}`);
 }
 
 async function clickModalButton(page, buttonText) {

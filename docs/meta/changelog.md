@@ -3,6 +3,7 @@
 Format: YYYY-MM-DD - Category: Short description
 
 ## 2026-07-19
+- Fix/Release Qualification/Local: The first RM reassignment DEV qualification correctly retained `NO-GO` after the compiled home Overdue/conflict journey found the intended conflict-row `Resolve` control but its physical centre-coordinate click did not open the modal after the board reflowed. The harness now activates the specifically matched row action directly, matching the deterministic control-selection pattern used elsewhere. The failed evidence is retained; a fresh complete DEV qualification is required against the new source fingerprint before TEST.
 - Fix/Case Assignment/DEV (feedback #160): Regional Managers can now assign or reassign a case they are authorized to access to any active staff member in the assignable pool, including another Regional Manager or an ISET Coordinator outside their own region. The shared backend target guard, Manage ISET Applications modal, Application Overview quick action, and conflict-driven reassignment now use that target policy while existing source-case access rules remain unchanged. Disabled Cognito users and inactive staff profiles are excluded/rejected. Focused policy/case-access tests, lint, syntax checks, diff validation, and the local case-assignment browser smoke pass. TEST qualification and deployment are deliberately deferred until the 2026-07-19 PROD feedback-review batch is complete.
 
 ## 2026-07-13

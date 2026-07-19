@@ -474,7 +474,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What Changed Packages (draft - EN)
 
-#### Release 20260719-rm-cross-region-reassignment
+#### Release 20260719-rm-cross-region-reassignment-r2
 
 - Regional Managers can now reassign a client file they can access to any active casework staff member, regardless of the assignee's region.
 - Existing client-file access rules remain unchanged, and inactive staff cannot be selected as assignees.
@@ -502,7 +502,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Lots de changements (brouillon - FR)
 
-#### Release 20260719-rm-cross-region-reassignment
+#### Release 20260719-rm-cross-region-reassignment-r2
 
 - Les gestionnaires regionaux peuvent maintenant reattribuer un dossier client auquel ils ont acces a toute personne active affectee au travail de cas, quelle que soit la region de cette personne.
 - Les regles existantes d'acces aux dossiers clients restent inchangees et les membres du personnel inactifs ne peuvent pas etre selectionnes.
