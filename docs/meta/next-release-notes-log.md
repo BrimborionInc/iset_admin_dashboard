@@ -469,12 +469,11 @@ Landing-page release-notes model: the build now generates the landing-page notes
 ### What's New (draft bullets - EN)
 
 - Regional Managers can reassign an accessible client file to any active casework staff member, including staff outside their own region.
-- Case managers can now send a Client Monthly Attendance Report as a secure-message digital form for the participant to complete and sign.
-- Absence dates stay within the selected reporting month, supporting evidence is attached securely, and the completed report is saved as an NWAC-style PDF.
+- Existing client-file access rules remain unchanged, and inactive staff cannot be selected as assignees.
 
 ### What Changed Packages (draft - EN)
 
-#### Release 20260719-rm-cross-region-reassignment-r2
+#### Release 20260719-rm-cross-region-reassignment-r3
 
 - Regional Managers can now reassign a client file they can access to any active casework staff member, regardless of the assignee's region.
 - Existing client-file access rules remain unchanged, and inactive staff cannot be selected as assignees.
@@ -497,12 +496,11 @@ Landing-page release-notes model: the build now generates the landing-page notes
 ### Nouveautes (brouillon - FR)
 
 - Les gestionnaires regionaux peuvent reattribuer un dossier client accessible a toute personne active affectee au travail de cas, meme si elle se trouve dans une autre region.
-- Les gestionnaires de cas peuvent maintenant envoyer le Rapport mensuel de presence du client comme formulaire numerique par messagerie securisee afin que la participante ou le participant le remplisse et le signe.
-- Les dates d'absence restent dans le mois de declaration selectionne, les pieces justificatives sont jointes de facon securisee et le rapport rempli est enregistre comme PDF au format de l'AFAC.
+- Les regles existantes d'acces aux dossiers clients restent inchangees et les membres du personnel inactifs ne peuvent pas etre selectionnes.
 
 ### Lots de changements (brouillon - FR)
 
-#### Release 20260719-rm-cross-region-reassignment-r2
+#### Release 20260719-rm-cross-region-reassignment-r3
 
 - Les gestionnaires regionaux peuvent maintenant reattribuer un dossier client auquel ils ont acces a toute personne active affectee au travail de cas, quelle que soit la region de cette personne.
 - Les regles existantes d'acces aux dossiers clients restent inchangees et les membres du personnel inactifs ne peuvent pas etre selectionnes.
