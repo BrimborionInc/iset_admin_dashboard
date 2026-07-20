@@ -96,6 +96,8 @@ Pass criteria:
 
 Any source change after qualification—including committing a previously dirty file—invalidates the tree fingerprint and requires a new run.
 
+Known qualification-granularity gap (recorded 2026-07-20): the current evidence schema and deploy admission compare one whole-tree fingerprint, so even a release-note-only correction forces complete DEV qualification, another TEST deployment, and complete deployed TEST acceptance. That is intentionally still the enforced behavior until the tooling changes, but it is stricter than the risk warrants when the runtime code, dependencies, migrations, inventory, operations, and generated application behavior are otherwise unchanged. The required follow-up is a machine-enforced non-runtime-drift path that positively allowlists release-note/documentation inputs, regenerates and validates the affected bundle/content, proves every runtime fingerprint is unchanged, issues new auditable evidence for the corrected artifact, and rejects any mixed or uncertain drift. Do not bypass exact-source admission manually before that narrower path exists.
+
 ## Phase 1 — local DEV qualification
 
 Run the resolved mandatory suite. This uses local resources and real DEV MySQL only. It must not use TEST or PROD credentials.

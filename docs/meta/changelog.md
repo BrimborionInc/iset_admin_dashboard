@@ -2,6 +2,10 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-07-20
+- Ops/PROD/Release: Deployed `20260719-rm-cross-region-reassignment-r3` as clean shared + admin + portal with no schema, data, workflow, runtime-config, restore-point, or provider operation. Exact-source TEST evidence was `GO`; immutable artifacts staged; ASG refresh `1b9eaeb3-7900-4f37-b29a-f6d2df43bd19` completed on `i-025f0c9390a64f53a`; all three public `/readyz` checks, deployed provenance, targeted RM assignment policy, normal forwarding, and zero maintenance rows passed. Feedback #160 is resolved.
+- Ops/Release Process: Recorded the qualification-granularity gap exposed by the `r2` to `r3` release-note-only correction. Current exact-tree admission remains enforced until tooling provides a machine-checked non-runtime-drift path, but the intended policy is focused bundle/content revalidation when runtime code, dependencies, migrations, operations, and generated behavior are proven unchanged.
+
 ## 2026-07-19
 - Fix/Release Notes/Local: PROD preflight stopped before maintenance because the flat English/French landing-page fallback mixed the RM reassignment package with two older Client Monthly Attendance Report bullets. The fallback now describes only the newest RM package, and the corrected source requires a fresh `r3` DEV/TEST qualification chain before PROD.
 - Fix/Release Qualification/Local: The first RM reassignment DEV qualification correctly retained `NO-GO` after the compiled home Overdue/conflict journey found the intended conflict-row `Resolve` control but its physical centre-coordinate click did not open the modal after the board reflowed. The harness now activates the specifically matched row action directly, matching the deterministic control-selection pattern used elsewhere. The failed evidence is retained; a fresh complete DEV qualification is required against the new source fingerprint before TEST.

@@ -1,8 +1,8 @@
 # Regional Manager Cross-Region Reassignment Release Contract
 
 Purpose: Control the release that allows Regional Managers to choose any active case-assignment target while preserving their existing access to source cases.
-Last Updated: 2026-07-19
-Status: DEV implementation complete; TEST qualification and deployment pending
+Last Updated: 2026-07-20
+Status: Deployed and verified in TEST and PROD on 2026-07-20; feedback #160 resolved
 
 ## Scope
 
@@ -32,4 +32,12 @@ Status: DEV implementation complete; TEST qualification and deployment pending
 - Required local evidence: assignment-policy and case-access tests; admin/portal aggregates and lint; isolated builds; compiled admin journeys including the RM cross-region assignment selector and network-idle assertion; real DEV MySQL and all other mandatory qualification gates.
 - Required TEST evidence: exact deployed provenance and rollback artifacts; normal routing/readiness; role/applicant/cross-app/strict-denial/cleanup gates; deployed admin source contains and executes the cross-region RM policy; assignable staff remains active-only.
 - Rollback: redeploy the retained prior TEST admin/portal/shared artifacts. No database rollback is required.
-- Feedback: PROD report #160 remains `planned` until deployment and targeted live recheck. Reports #161 and #162 are closed support/by-design items and are not part of this code release.
+- Feedback closeout rule: PROD report #160 was to remain `planned` until deployment and targeted live recheck; it moved to `resolved` only after both passed. Reports #161 and #162 are closed support/by-design items and were not part of this code release.
+
+## Deployment Result
+
+- Final release: `20260719-rm-cross-region-reassignment-r3`; admin `c33c376`, portal `4b8135d`, shared `e8dc303`.
+- TEST evidence: `0ba9213e745ed2acd815703a3209f1b449a6b27e5c67dc2e55b06fc5d1eee471` (`GO`).
+- PROD ASG refresh: `1b9eaeb3-7900-4f37-b29a-f6d2df43bd19`; replacement instance `i-025f0c9390a64f53a`.
+- Normal-routing readiness passed for the admin console and both applicant portal hostnames. Deployed provenance and targeted policy execution passed; maintenance state returned to normal with zero announcement rows.
+- Feedback #160 moved from `planned` to `resolved`. Reports #161 and #162 remain closed support/by-design items.
