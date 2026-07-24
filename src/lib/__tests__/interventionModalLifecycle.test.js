@@ -72,6 +72,18 @@ describe("intervention and action plan modal lifecycle persistence", () => {
     expect(contextSource).not.toContain("potId: payload.potId || payload.fundingStream || null");
   });
 
+  test("editing an intervention resolves Paid from independently from its parent plan", () => {
+    const modalSource = readRepoFile("src/pages/Caseworking/caseWorkspace/modals/InterventionModal.jsx");
+
+    expect(modalSource).toContain("resolveInterventionPostingContextForForm({");
+    expect(modalSource).toContain("mode,");
+    expect(modalSource).toContain("intervention,");
+    expect(modalSource).toContain("plan,");
+    expect(modalSource).not.toContain(
+      "draft.postingContext = plan?.postingContext || plan?.posting_context || draft.postingContext"
+    );
+  });
+
   test("close intervention modal requires explicit outcome selection", () => {
     const modalSource = readRepoFile("src/pages/Caseworking/caseWorkspace/modals/InterventionModal.jsx");
 

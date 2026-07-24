@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-07-13
+Last Updated: 2026-07-23
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-07-23 | Release 20260723-end-of-day-r4 | Fix/Casework | Existing intervention Paid from | Existing interventions now reopen with their own saved Internal/NWAC or External/PTMA `Paid from` value instead of being reset to the parent Action Plan's value. | New interventions still inherit the parent Action Plan as their starting value; no existing intervention data repair is required.
+- 2026-07-22 | Release 20260723-end-of-day-r4 | Fix/Approvals | Intervention revisions | Intervention revisions with a blank review-level EI value prefill it from the same parent Action Plan's structured EI claimant category. | This covers manually imported/backloaded revision files; new intervention proposals still require a fresh EI selection, and the Decision Maker can review or change the prefilled value before submitting the decision.
 - 2026-07-19 | Release TBD | Fix/Casework | Regional Manager reassignment | Regional Managers can reassign an accessible client file to any active staff member, including staff outside their own region. | The change preserves existing case-access controls while removing the target-region restriction that prevented reassignment to another Regional Manager.
 - 2026-07-13 | Release 20260714-client-monthly-attendance-prod | Workflow/Documents | Client Monthly Attendance Report | Case managers can attach a digital monthly attendance report to a secure message for the participant to complete and sign. | PATH can pre-fill editable participant, institution, and program details; absence reports use progressively added rows, require same-month dates and participant-owned supporting evidence, and generate an NWAC-style signed PDF. Committed-source qualification, repeated TEST acceptance, and PROD deployment completed on 2026-07-13/14 UTC.
 - 2026-07-13 | Release 20260713-prod-incident-requalification | Fix/Reliability | Applicant portal messages and supports | Fixed a portal error that could prevent signed-in applicants from opening messages or support activities after the engineering-audit release. | The emergency portal-only patch passed authenticated TEST journeys and changed no schema, data, configuration, staff permissions, or external-service settings.
@@ -468,10 +470,15 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Regional Managers can reassign an accessible client file to any active casework staff member, including staff outside their own region.
-- Existing client-file access rules remain unchanged, and inactive staff cannot be selected as assignees.
+- Existing interventions now reopen with their own saved Internal/NWAC or External/PTMA `Paid from` value.
+- Intervention revisions with a blank review-level EI value now prefill it from the same Action Plan for Decision Maker review.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260723-end-of-day-r4
+
+- Existing interventions now preserve their own saved `Paid from` value when reopened for editing; new interventions still inherit the parent Action Plan as their starting value.
+- Intervention revisions with a blank review-level EI value now prefill it from the same Action Plan's structured EI claimant category. New proposals still require a fresh EI selection.
 
 #### Release 20260719-rm-cross-region-reassignment-r3
 
@@ -485,20 +492,21 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Participants report absences through progressively added rows, with date pickers restricted to the selected reporting month and supporting documentation required when absences are reported.
 - Completed reports use the NWAC form layout, including a proper absence table and the participant's electronic signature.
 
-#### Release 20260713-prod-incident-requalification
-
-- Fixed a portal error that could prevent signed-in applicants from opening messages or support activities.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Les gestionnaires regionaux peuvent reattribuer un dossier client accessible a toute personne active affectee au travail de cas, meme si elle se trouve dans une autre region.
-- Les regles existantes d'acces aux dossiers clients restent inchangees et les membres du personnel inactifs ne peuvent pas etre selectionnes.
+- Les interventions existantes conservent maintenant leur valeur enregistree « Paye par » Interne/AFAC ou Externe/PTMA lorsqu'elles sont rouvertes.
+- Pour une revision d'intervention sans valeur d'AE au niveau de l'examen, PATH reprend maintenant la valeur du meme plan d'action afin que la personne decisionnaire puisse la verifier.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260723-end-of-day-r4
+
+- Les interventions existantes conservent maintenant leur propre valeur enregistree « Paye par » lorsqu'elles sont rouvertes pour modification; les nouvelles interventions reprennent toujours la valeur initiale du plan d'action parent.
+- Pour une revision d'intervention sans valeur d'AE au niveau de l'examen, PATH reprend maintenant la categorie structuree de prestataire d'AE du meme plan d'action. Les nouvelles propositions exigent toujours une nouvelle selection.
 
 #### Release 20260719-rm-cross-region-reassignment-r3
 
@@ -511,10 +519,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - PATH pre-remplit les renseignements disponibles sur la participante ou le participant, l'etablissement et le programme, tout en permettant de les corriger.
 - Les absences sont saisies dans des rangees ajoutees au besoin; les calendriers sont limites au mois de declaration selectionne et une piece justificative est requise lorsque des absences sont declarees.
 - Le rapport rempli reprend la presentation du formulaire de l'AFAC, y compris un tableau des absences et la signature electronique de la participante ou du participant.
-
-#### Release 20260713-prod-incident-requalification
-
-- Correction d'une erreur du portail qui pouvait empecher les demandeurs connectes d'ouvrir leurs messages ou activites de soutien.
 
 ### Problemes connus (brouillon - FR)
 

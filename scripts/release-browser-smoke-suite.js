@@ -22,6 +22,7 @@ const SMOKES = Object.freeze([
   ['application-overview', 'application-overview-docs-requested-browser-smoke.js'],
   ['application-workspace', 'application-workspace-dashboard-browser-smoke.js'],
   ['application-assessment', 'application-assessment-workflow-browser-smoke.js'],
+  ['intervention-posting-context', 'intervention-posting-context-browser-smoke.js'],
   ['intervention-recall', 'intervention-assessment-recall-browser-smoke.js'],
   ['intervention-workflow', 'intervention-assessment-workflow-browser-smoke.js'],
 ]);

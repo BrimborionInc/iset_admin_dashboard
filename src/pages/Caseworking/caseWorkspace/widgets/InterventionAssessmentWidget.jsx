@@ -42,6 +42,7 @@ import {
   requiresExternalPartnerForInterventionCode as requiresExternalPartnerForCode,
   requiresNocForInterventionCode as requiresNocForCode,
 } from "../../../../utils/interventionCodeRules.js";
+import { resolveInterventionReviewEiEligibility } from "../../../../utils/interventionEiEligibility.js";
 import styles from "./InterventionAssessmentWidget.module.css";
 
 const BARRIER_OPTIONS = [
@@ -4198,9 +4199,16 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       const normalizedOtherFunding = normalizeOtherFundingDetails(
         metadata.otherFundingDetails || fallbackOtherFundingDetails
       );
+      const draftActionPlanId = draft.actionPlanId ? String(draft.actionPlanId) : String(form.actionPlanId || "");
+      const draftActionPlan = plans.find(plan => String(plan?.id || "") === draftActionPlanId) || null;
+      const fallbackEiEligibility = resolveInterventionReviewEiEligibility({
+        reviewEiStatus: review.eiStatus,
+        actionPlanEiClaimant: draftActionPlan?.eiClaimant,
+        allowActionPlanFallback: Boolean(revision),
+      });
       const hydratedForm = {
         ...defaultFormState,
-        actionPlanId: draft.actionPlanId ? String(draft.actionPlanId) : form.actionPlanId,
+        actionPlanId: draftActionPlanId,
         rationale: metadata.rationale || draft.notes || "",
         otherFundingInvolved: normalizedOtherFunding.involved,
         otherFundingSources: normalizedOtherFunding.sources,
@@ -4210,7 +4218,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         childcareFunding: metadata.childcareFunding || "",
         barriers: mappedBarriers,
         proposedInterventions: nextProposed,
-        eiVerificationStatus: review.eiStatus || "",
+        eiVerificationStatus: fallbackEiEligibility,
         eiVerificationNotes: review.eiNotes || "",
         decisionOutcome: review.decision || (approvalLetterFollowUp.eligible ? "approved" : ""),
         decisionNotes: review.decisionNotes || "",
@@ -4219,6 +4227,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       const nextForm = storedDraft && hasMeaningfulDraft(storedDraft)
         ? mergeStoredDraft(hydratedForm, storedDraft)
         : hydratedForm;
+      if (!String(nextForm.eiVerificationStatus || "").trim() && fallbackEiEligibility) {
+        nextForm.eiVerificationStatus = fallbackEiEligibility;
+      }
       setForm(nextForm);
       initialFormRef.current = nextForm;
       if (draft.actionPlanId && typeof setSelectedActionPlanId === "function") {

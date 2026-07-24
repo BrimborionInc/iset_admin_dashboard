@@ -242,6 +242,20 @@ The Case Workspace Intervention Assessment two-step workflow has a deeper local 
 
 This smoke loads the real local React bundle at `http://localhost:3001/cases/1?entry=approval&approvalType=intervention&interventionId=101&planId=10`, injects deterministic Coordinator, Regional Manager, and NWAC Administrator sessions, and stubs proposal/revision API responses. It covers RM draft new-proposal submit, RM draft revision submit, RM return to submitter, RM submit to final decision, Decision Maker review with the RM note visible and Shelley-threshold warning present for high-value requests, Decision Maker-requested changes returning to RM, RM forwarding notes to the submitter, submitter-visible Decision Maker/RM notes, revision final-decision review, and approved proposal/revision communication deep links that expose the approval/funding-revision letter follow-up controls. The stubbed submit/review endpoints call `src/lib/reviewWorkflow.js` so the browser smoke fails when the role/workflow/stage transition matrix would reject the action.
 
+## Existing Intervention Paid From Reference
+
+The Case Workspace existing-intervention editor has a focused compiled-browser smoke:
+
+- Script: `scripts/intervention-posting-context-browser-smoke.js`
+- Release-suite ID: `intervention-posting-context`
+
+The smoke loads `/cases/1` as a Regional Manager with a deterministic internal
+intervention under an external action plan. It verifies that `Paid from` remains
+`Internal (NWAC)` when the intervention is viewed and edited, that the PATCH
+request preserves `postingContext=internal`, and that the refreshed intervention
+reopens with the same saved value. It also checks that Case Workspace API traffic
+settles after the save and reopen sequence.
+
 ## Automation Backlog
 
 Future high-risk workflow releases should prefer adding a small, owned smoke script with the same shape:

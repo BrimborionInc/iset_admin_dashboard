@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-06-19
+Last Updated: 2026-07-23
 
 ## How to use
 
@@ -32,6 +32,23 @@ For each indexed thread/topic, keep:
 - `Status`: whether the note is current, partial, incomplete-title, or superseded
 
 ## Indexed Topics
+
+### nForm vanilla project-template extraction
+
+- Codex task title: exact original task title not preserved
+- Topic: Reactivated extraction of vanilla nForm infrastructure from PATH as a standalone project template.
+- Keywords: `nForm`, `vanilla platform`, `project template`, `extract PATH`, `remove ISET`, `VAC`, `single tenant`, `AWS retained`, `monorepo`, `nform-extraction-plan`
+- When to open: the user asks to resume nForm extraction, asks what was decided about template versus configurable platform, asks how far extraction progressed, or starts a new product from nForm.
+- Primary docs:
+  - `docs/planning/nform-extraction-plan.md`
+  - `docs/planning/nform-scope.md`
+  - `docs/planning/nform-dependency-map.md`
+  - `docs/planning/nform-v1-schema-and-extension-contract.md`
+  - `docs/planning/nform-copy-manifest.md`
+  - `docs/planning/nform-copy-manifest.json`
+  - `docs/meta/changelog.md`
+- Status: active implementation as of 2026-07-23; incomplete-title. Standalone local repository `/home/bill/nForm` has committed scaffold/schema (`65d4906`), canonical component/intake contracts (`c3eba1d`), and the tested staff-authoring domain service (`ecf4a3d`); all current checks pass. The next boundary is its MySQL/HTTP adapter, then staff editor UI. No remote, AWS resource, or runnable application exists yet.
+- Notes: nForm v1 is an empty, self-contained, single-tenant-per-deployment project template retaining AWS/Cognito/S3/SES and generic authentication/users, codeless forms/intake journeys, permissions, notifications, documents, events/audit, dashboard/workspace composition, API, and administration infrastructure. Its defining capability is codeless staff-portal intake-wizard drafting, preview, versioning, validation, publication, and rollback for policy makers, using constrained platform-approved components rather than code changes. Publication governance can allow direct publishing or require separate author/reviewer/publisher permissions. Codeless workflow stops at the intake journey and submission; generic staff review stages, tasks, cases, and work queues are not core. Core includes a neutral submissions registry and submission storage/search/export/audit/retention/integration plumbing. Downstream bookings, registrations, payments, requests, and domain processes are solution-owned. It excludes PATH/ISET/NWAC solution behavior and all imposed business entities such as clients, cases, applications, and appointments. Staff and public portals are permanent first-class core surfaces backed by generic internal-operator and external-user identity populations. Public workflows can be anonymous or sign-in-required through per-workflow configuration. Both portals, shared code, and migrations belong in one repository. VAC is the first downstream validation project, not the definition of core. Initial bootstrap may provision only `bill@sillery.co.uk` as System Administrator through environment/deployment configuration. `System Administrator` is the sole built-in role; all business roles and permissions are solution-defined. Codex now leads the dependency/coupling audit and should consult Bill only for genuine product ambiguities.
 
 ### PROD NAT gateway consolidation
 

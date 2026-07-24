@@ -1,7 +1,7 @@
 # Intervention Assessment & Approvals Plan (Draft)
 Status: Draft (design in progress)  
 Owners: Casework / Admin Dashboard  
-Last updated: 2026-06-16
+Last updated: 2026-07-22
 
 ## Purpose
 Document the target workflow for proposing, reviewing, approving, and running interventions within the existing Case Workspace. Keep queues aligned to current widgets (Action Plans + Interventions) instead of inventing parallel queue UIs.
@@ -94,6 +94,8 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - Application assessment: EI eligibility is required before assessment completion/submission (current behavior).
 - New intervention proposal (Case Workspace): Case Manager completes and submits the assessment first; the proposal enters the RM/NWAC approval queue. EI eligibility/verification is performed or confirmed during the approval step, not before submission, to avoid a two-step preflight handoff.
 - Implication: do not reuse the application gating that blocks submission on missing EI eligibility. Adjust validation so CM can submit a proposal without pre-verified EI, while the approval step requires the EI check/result + docs to finalize `approved`.
+- Revision fallback (2026-07-22): when a submitted intervention revision has no review-level EI value, the final-review form may prefill from the same parent Action Plan's structured `EIClaimant` code (`1` = EI Active Claim, `2` = EI Reach Back, `3` = CRF). This fallback applies only to revisions of an existing intervention; new intervention proposals still require an explicit fresh selection. The Decision Maker can review or change the prefilled value before submitting the decision.
+- PROD repair (2026-07-22): manually imported Case `41` / Solana Henderson had action plan `23` with `EIClaimant=2`, but pending revision intervention `301` and compatibility proposal `363` had blank review EI metadata. Guarded repair `sql/ops/prod-solana-intervention-ei-apply-20260722.sql` set both pending copies to `EI Reach Back`, recorded case data-repair event `247`, and deliberately left review workflow `40` at `nwac_review` with no final decision so Shelley retains the approval action.
 
 ## Data Model Notes (design, not implemented)
 - Single `status` column includes both pre-approval states (`draft`, `submitted`, `in_review`, `changes_requested`, `approved`, `rejected`) and execution states (`in_progress`, `suspended`, `completed`, `cancelled`).
@@ -160,7 +162,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - Wizard sequencing: keep EI verification (and decision) steps hidden in draft; only append them after status transitions to submitted so the final draft step remains “Review and submit”.
 - Interventions table status: display compound status for submitted items reflecting EI verification based on the EI status field (not document presence). If any EI status value is set (same ESDC options: CRF / EI Active Claim / EI Reach Back), treat as “EI verified”; otherwise show “EI unverified”. Missing documents are handled separately in the checklist.
 - EI status edits: EI status is editable until approval, then locked because it drives the funding stream/action plan.
-- EI status entry: require explicit selection for every intervention (no auto-fill on upload); the workflow assumes a fresh ESDC lookup per intervention.
+- EI status entry: require explicit selection for every new intervention proposal (no auto-fill on upload). A revision of an existing intervention may prefill a blank review value from the same parent Action Plan's structured EI claimant code; the Decision Maker must still review the value before submitting the decision.
 - Decision step actions: relabel the Step 8 action to “Submit Decision” (distinct from the board-level “Save Progress”). Submitting runs validation; “Approve” is blocked until EI status + submitted-state checklist are complete, while other outcomes can proceed.
 - Generic uploads: allow uploads even when no submission is selected; extend “Edit document details” to manually associate/reassociate application-scoped documents to applications and action-plan scoped documents to action plans/interventions (client/payment packet types are not assignable). Reassociation is allowed for any user with edit access.
 - Duplicate-to action: add a “Duplicate to…” control so users can copy a submission-scoped document to a new application or intervention while retaining the original association; prefill label/type from the source with optional edits.

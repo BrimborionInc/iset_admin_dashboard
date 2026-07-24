@@ -1,0 +1,615 @@
+{
+  "version": 1,
+  "updatedAt": "2026-07-23",
+  "status": "active",
+  "sourceRoots": {
+    "admin": "/home/bill/ISET/admin-dashboard",
+    "portal": "/home/bill/ISET/ISET-intake",
+    "shared": "/home/bill/ISET/shared"
+  },
+  "targetRoot": "nform",
+  "entries": [
+    {
+      "sourceRepo": "admin",
+      "source": "package.json",
+      "classification": "split",
+      "target": "package.json + apps/staff-portal/package.json + apps/api/package.json",
+      "reason": "Dependency evidence is useful, but the current package mixes two runtimes, PATH tooling, and a sibling portal file dependency."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "isetadminserver.js",
+      "classification": "rewrite",
+      "target": "apps/api/src/**",
+      "reason": "The monolith contains authoring APIs but is inseparable from PATH routes, roles, schema, jobs, and integrations."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "apps/web/**",
+      "classification": "drop",
+      "target": null,
+      "reason": "Inactive experimental frontend; the active staff build uses root src through react-scripts."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "demos-main/**",
+      "classification": "drop",
+      "target": null,
+      "reason": "Demo content is excluded from the empty project template."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/auth/apiClient.js",
+      "classification": "split",
+      "target": "packages/auth/src/operatorApiClient.js",
+      "reason": "Authenticated request behavior is reusable after PATH URL/session assumptions are removed."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/auth/cognito.js",
+      "classification": "split",
+      "target": "packages/auth/src/operatorCognito.js",
+      "reason": "Retain Cognito mechanics with environment-driven generic naming."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/context/AuthContext.js",
+      "classification": "split",
+      "target": "apps/staff-portal/src/auth/OperatorAuthContext.jsx",
+      "reason": "Retain staff session lifecycle without PATH role semantics."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/context/RoleMatrixContext.js",
+      "classification": "rewrite",
+      "target": "packages/auth/src/permissions/**",
+      "reason": "Permission loading is core; PATH canonical roles and route matrices are not."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/middleware/authn.js",
+      "classification": "split",
+      "target": "packages/auth/src/server/operatorAuthentication.js",
+      "reason": "Retain token verification and fail-closed behavior with generic operator identity lookup."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/middleware/authz.js",
+      "classification": "rewrite",
+      "target": "packages/auth/src/server/requirePermission.js",
+      "reason": "Replace role-name branching with permission checks."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/middleware/requireSystemAdministrator.js",
+      "classification": "keep",
+      "target": "packages/auth/src/server/requireSystemAdministrator.js",
+      "reason": "System Administrator remains the sole built-in platform role; implementation still requires generic identity integration and tests."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/pages/manageIntakeSteps.js",
+      "classification": "split",
+      "target": "apps/staff-portal/src/features/intakes/steps/StepLibraryPage.jsx",
+      "reason": "Reusable board/editor composition with PATH naming and browser-local layout behavior to review."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/pages/modifyIntakeStep.js",
+      "classification": "split",
+      "target": "apps/staff-portal/src/features/intakes/steps/StepEditorPage.jsx",
+      "reason": "Central codeless editor mixed with current API shapes and solution-era compatibility branches."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/pages/manageWorkflows.js",
+      "classification": "split",
+      "target": "apps/staff-portal/src/features/intakes/definitions/IntakeDefinitionsPage.jsx",
+      "reason": "Core authoring surface; rename workflow terminology where it implies downstream business process."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/pages/modifyWorkflow.js",
+      "classification": "split",
+      "target": "apps/staff-portal/src/features/intakes/definitions/IntakeDefinitionEditorPage.jsx",
+      "reason": "Graph editing is reusable after PATH workflow types, document links, and publish assumptions are removed."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/components/ModifyWorkflowEditor.js",
+      "classification": "split",
+      "target": "packages/intake-authoring/src/IntakeGraphEditor.jsx",
+      "reason": "Reusable graph editing contract."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/widgets/IntakeStepLibraryWidget.js",
+      "classification": "split",
+      "target": "packages/intake-authoring/src/StepLibrary.jsx",
+      "reason": "Reusable after default ISET/demo groups are removed."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/widgets/IntakeStepTableWidget.js",
+      "classification": "split",
+      "target": "packages/intake-authoring/src/StepTable.jsx",
+      "reason": "Reusable list/search/edit behavior."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/widgets/StepPropertiesWidget.js",
+      "classification": "split",
+      "target": "packages/intake-authoring/src/StepProperties.jsx",
+      "reason": "Reusable property editing after API/schema normalization."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/widgets/WorkflowListWidget.js",
+      "classification": "split",
+      "target": "packages/intake-authoring/src/IntakeDefinitionList.jsx",
+      "reason": "Reusable list CRUD with generic intake naming."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/widgets/WorkflowCanvasWidget.js",
+      "classification": "keep",
+      "target": "packages/intake-authoring/src/IntakeGraphCanvas.jsx",
+      "reason": "Mostly generic visualization/layout logic; rename and add contract tests."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/widgets/WorkflowPropertiesWidget.js",
+      "classification": "rewrite",
+      "target": "packages/intake-authoring/src/IntakeProperties.jsx",
+      "reason": "UI hardcodes main-intake, consent, case-manager prefill, document types, and direct publish."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/widgets/WorkflowPreviewWidget.js",
+      "classification": "split",
+      "target": "packages/intake-authoring/src/IntakePreview.jsx",
+      "reason": "Preview is core but must use the same renderer contract as the public portal."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/widgets/WorkflowRuntimeSchemaWidget.js",
+      "classification": "split",
+      "target": "packages/intake-authoring/src/CompiledSchemaInspector.jsx",
+      "reason": "Useful authoring diagnostic after generic publication schema adoption."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/component-lib/**",
+      "classification": "split",
+      "target": "packages/component-library/**",
+      "reason": "Core component contracts are duplicated and contain PATH/document properties; consolidate into immutable versioned definitions."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/server/componentRenderRegistry.js",
+      "classification": "split",
+      "target": "packages/component-library/src/serverPreviewRegistry.js",
+      "reason": "Server preview mechanics are reusable only if driven by the shared component contract."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/portalRendererRegistry.js",
+      "classification": "rewrite",
+      "target": "packages/component-library/src/rendererContract.js",
+      "reason": "Replace manually synchronized renderer metadata with one contract consumed by staff preview and public runtime."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/workflows/normalizeWorkflow.js",
+      "classification": "split",
+      "target": "packages/intake-schema/src/compileIntake.js",
+      "reason": "Core normalization is valuable but queries iset_intake tables and carries compatibility behavior."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/workflows/validateComponents.js",
+      "classification": "split",
+      "target": "packages/intake-schema/src/validateIntake.js",
+      "reason": "Core validation must compile against consolidated component contracts."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/workflows/constants.js",
+      "classification": "rewrite",
+      "target": "packages/intake-schema/src/constants.js",
+      "reason": "Retain only intake schema/runtime constants; remove PATH workflow types."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/routes/AppRoutes.js",
+      "classification": "rewrite",
+      "target": "apps/staff-portal/src/routes.jsx",
+      "reason": "Current route file imports nearly the entire PATH product and appointment demos."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/layouts/SideNavigation.js",
+      "classification": "rewrite",
+      "target": "apps/staff-portal/src/shell/SideNavigation.jsx",
+      "reason": "Shell mechanics are reusable; all current navigation, counts, and labels are PATH-driven."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/layouts/TopNavigation.js",
+      "classification": "split",
+      "target": "apps/staff-portal/src/shell/TopNavigation.jsx",
+      "reason": "Retain session/accessibility shell after branding and PATH controls are removed."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/pages/manageUsers.js",
+      "classification": "split",
+      "target": "apps/staff-portal/src/features/operators/OperatorManagementPage.jsx",
+      "reason": "Core operator administration with PATH role/profile fields removed."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/widgets/AccessControlMatrix.jsx",
+      "classification": "rewrite",
+      "target": "apps/staff-portal/src/features/access/RolePermissionPage.jsx",
+      "reason": "Replace PATH route-role matrix with solution-defined roles and platform permissions."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/pages/manageNotifications.js",
+      "classification": "split",
+      "target": "apps/staff-portal/src/features/notifications/**",
+      "reason": "Notification administration is core; event rows and audiences are PATH-specific."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/pages/templateEditorDashboard.js",
+      "classification": "split",
+      "target": "apps/staff-portal/src/features/notifications/TemplateEditorPage.jsx",
+      "reason": "Generic template editing after PATH templates are removed."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/pages/home/**",
+      "classification": "drop",
+      "target": null,
+      "reason": "Current home widgets and queues are PATH solution behavior; build a new empty platform home."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/pages/Caseworking/**",
+      "classification": "drop",
+      "target": null,
+      "reason": "PATH case-management solution."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/pages/finance/**",
+      "classification": "drop",
+      "target": null,
+      "reason": "PATH finance solution."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/pages/esdc/**",
+      "classification": "drop",
+      "target": null,
+      "reason": "ISET/ESDC reporting solution."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/pages/reporting/**",
+      "classification": "drop",
+      "target": null,
+      "reason": "Current report definitions and datasets are PATH-specific."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/pages/intake/ManualApplicationIntakePage.jsx",
+      "classification": "drop",
+      "target": null,
+      "reason": "Manual application creation presumes PATH clients/cases/applications."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/previews/bookAppointmentQ*.js",
+      "classification": "drop",
+      "target": null,
+      "reason": "Appointment demos belong neither to vanilla nForm nor the later VAC solution implementation."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "src/server/templates/pdf/**",
+      "classification": "drop",
+      "target": null,
+      "reason": "Current generated PDFs are PATH documents."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "scripts/publish-workflow.js",
+      "classification": "rewrite",
+      "target": "apps/api/src/services/publishIntake.js",
+      "reason": "Current script writes a sibling portal source file and one global runtime-config key."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "scripts/sync-portal-renderers.js",
+      "classification": "rewrite",
+      "target": "packages/component-library/tests/rendererConformance.test.js",
+      "reason": "Manual synchronization should become shared-package compilation and conformance testing."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "scripts/local-dev-launcher.js",
+      "classification": "split",
+      "target": "scripts/dev.js",
+      "reason": "Useful multi-service orchestration after PATH paths, ports, and environment names are generalized."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "scripts/path-*.js",
+      "classification": "split",
+      "target": "scripts/deploy/**",
+      "reason": "Retain proven release mechanics selectively; remove PATH data sync, business qualification, naming, and cross-repo packaging."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "scripts/*assessment*|scripts/*case*|scripts/*payment*|scripts/*esdc*|scripts/*privacy-erm*|scripts/prod-repair-*",
+      "classification": "drop",
+      "target": null,
+      "reason": "PATH solution tests, repairs, and operations."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "sql/migrations/** + db/migrations/**",
+      "classification": "drop",
+      "target": null,
+      "reason": "Do not replay PATH migration history; create a clean squashed platform baseline."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "infra/terraform/modules/**",
+      "classification": "split",
+      "target": "infra/terraform/modules/**",
+      "reason": "AWS modules are reusable after PATH/NWAC names, topology assumptions, and unrelated providers are removed."
+    },
+    {
+      "sourceRepo": "admin",
+      "source": "infra/terraform/environments/**",
+      "classification": "rewrite",
+      "target": "infra/terraform/environments/**",
+      "reason": "Create generic dev/test/prod examples with no live NWAC values or OpenRouter dependency."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "package.json",
+      "classification": "split",
+      "target": "apps/public-portal/package.json",
+      "reason": "Retain runtime dependencies after sibling admin scripts and PATH tooling are removed."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "server.js",
+      "classification": "rewrite",
+      "target": "apps/api/src/public/**",
+      "reason": "Public runtime routes are embedded in a large PATH portal monolith."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "auth/cognitoAuth.js + src/auth/**",
+      "classification": "split",
+      "target": "packages/auth/src/public/**",
+      "reason": "Retain public Cognito verification and session security with generic public identities."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/AuthContext.js + src/AuthGuard.js",
+      "classification": "split",
+      "target": "apps/public-portal/src/auth/**",
+      "reason": "Support authenticated journeys without making authentication global."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/App.js",
+      "classification": "rewrite",
+      "target": "apps/public-portal/src/App.jsx",
+      "reason": "Current routes are application, document, messaging, and PATH support surfaces."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/pages/DynamicTest.js",
+      "classification": "split",
+      "target": "packages/intake-runtime/src/IntakeRunner.jsx",
+      "reason": "Central reusable runtime with applicant/application wording and authenticated-only assumptions."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/renderer/renderers.js",
+      "classification": "split",
+      "target": "packages/component-library/src/publicRenderers/**",
+      "reason": "Reusable rendering implementation must be decomposed and bound to shared component versions."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/hooks/useWorkflowSchema.js",
+      "classification": "rewrite",
+      "target": "packages/intake-runtime/src/usePublishedIntake.js",
+      "reason": "Replace one global schema with route/slug-selected immutable publication retrieval."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/services/intakeWorkflowCompletionValidation.js",
+      "classification": "split",
+      "target": "packages/intake-schema/src/validateSubmission.js",
+      "reason": "Server validation against the published definition is core."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/services/intakeCompletionPayload.js",
+      "classification": "rewrite",
+      "target": "packages/intake-runtime/src/submissionPayload.js",
+      "reason": "Retain neutral response construction only; remove application semantics."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/services/runtimeConfig.js",
+      "classification": "split",
+      "target": "packages/intake-runtime/src/runtimeConfig.js",
+      "reason": "Generic runtime configuration with PATH keys removed."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/services/uploadConfigService.js",
+      "classification": "split",
+      "target": "packages/storage/src/uploadPolicy.js",
+      "reason": "Upload policy is core after PATH document-type behavior is removed."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/routes/intakeComplete.js",
+      "classification": "rewrite",
+      "target": "apps/api/src/public/completeSubmission.js",
+      "reason": "Current transaction creates client, case, application, assignments, PATH events, and signed forms."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/pages/userDashboard.js + src/components/ApplicationCard.js",
+      "classification": "drop",
+      "target": null,
+      "reason": "PATH application lifecycle; authenticated users may instead receive a generic submissions/drafts account page built new."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/pages/SubmissionDetails.js + src/pages/SubmissionConfirmation*.js",
+      "classification": "split",
+      "target": "apps/public-portal/src/features/submissions/**",
+      "reason": "Receipt/detail presentation is reusable after PATH status/application fields are removed."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/pages/Messages.js + src/pages/ComposeMessage.js + src/pages/MessageDetails.js",
+      "classification": "drop",
+      "target": null,
+      "reason": "Current secure messaging is tied to PATH case/application ownership and is not an nForm v1 core capability."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/intakeFormSchema.json + src/intakeFormSchema.meta.json",
+      "classification": "drop",
+      "target": null,
+      "reason": "Generated published ISET content must not enter the empty template."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/isetFormConfig.js + src/jordanFormConfig.js",
+      "classification": "drop",
+      "target": null,
+      "reason": "Solution/demo configuration."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/pages/About.js + src/pages/Help.js + src/pages/Privacy.js + src/pages/Accessibility.js + src/pages/Cookies.js",
+      "classification": "rewrite",
+      "target": "apps/public-portal/src/pages/**",
+      "reason": "Retain required public shell/page roles with neutral configurable content and branding."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "src/components/Header.js + src/components/Footer.js + src/LanguageContext.js",
+      "classification": "split",
+      "target": "apps/public-portal/src/shell/**",
+      "reason": "Generic public shell/localization after PATH brand and navigation removal."
+    },
+    {
+      "sourceRepo": "portal",
+      "source": "routes/__tests__/intakeComplete.test.js + routes/__tests__/fullExpressStack.test.js + src/__tests__/intakeWorkflowCompletionValidation.test.js + src/__tests__/DynamicTest.runtime.test.js",
+      "classification": "split",
+      "target": "tests/intake-runtime/**",
+      "reason": "Retain behavioral test patterns and replace PATH fixtures/assertions with neutral contracts."
+    },
+    {
+      "sourceRepo": "shared",
+      "source": "storage/s3Provider.js",
+      "classification": "split",
+      "target": "packages/storage/src/s3Provider.js",
+      "reason": "AWS storage provider is core after PATH environment names and document assumptions are removed."
+    },
+    {
+      "sourceRepo": "shared",
+      "source": "events/emitter.js + events/deliveryQueue.js + events/service.js",
+      "classification": "split",
+      "target": "packages/events/src/**",
+      "reason": "Event/outbox mechanics are reusable; event schema and actor vocabulary require generalization."
+    },
+    {
+      "sourceRepo": "shared",
+      "source": "events/catalog.js + events/notificationDispatcher.js",
+      "classification": "rewrite",
+      "target": "packages/events/src/platformCatalog.js + packages/notifications/src/dispatcher.js",
+      "reason": "Current catalogs and dispatch branches are predominantly PATH business behavior."
+    },
+    {
+      "sourceRepo": "shared",
+      "source": "serviceAnnouncement.js",
+      "classification": "split",
+      "target": "packages/notifications/src/serviceAnnouncement.js",
+      "reason": "Generic platform maintenance/service messaging."
+    },
+    {
+      "sourceRepo": "shared",
+      "source": "applicantWatchlist.js + attendanceReport.js + financialOverview.js + templates/pdf/**",
+      "classification": "drop",
+      "target": null,
+      "reason": "PATH solution modules and documents."
+    },
+    {
+      "sourceRepo": "shared",
+      "source": "ai/runtimeConfig.js",
+      "classification": "drop",
+      "target": null,
+      "reason": "AI support is not part of the agreed nForm v1 core boundary."
+    },
+    {
+      "sourceRepo": null,
+      "source": null,
+      "classification": "new",
+      "target": "db/migrations/0001_nform_v1_baseline.sql",
+      "reason": "Clean platform schema defined by nform-v1-schema-and-extension-contract.md."
+    },
+    {
+      "sourceRepo": null,
+      "source": null,
+      "classification": "new",
+      "target": "apps/staff-portal/src/features/submissions/**",
+      "reason": "Neutral submissions registry does not exist in the PATH staff portal."
+    },
+    {
+      "sourceRepo": null,
+      "source": null,
+      "classification": "new",
+      "target": "apps/api/src/public/anonymousSession.js",
+      "reason": "Current public runtime requires authenticated applicant identity."
+    },
+    {
+      "sourceRepo": null,
+      "source": null,
+      "classification": "new",
+      "target": "apps/api/src/extensions/submissionExtension.js",
+      "reason": "Transaction-safe solution hook and durable post-commit outbox contract."
+    },
+    {
+      "sourceRepo": null,
+      "source": null,
+      "classification": "new",
+      "target": "packages/component-library/tests/rendererConformance.test.js",
+      "reason": "Prevent staff preview/public runtime drift across exact component versions."
+    },
+    {
+      "sourceRepo": null,
+      "source": null,
+      "classification": "new",
+      "target": "tests/acceptance/emptyPlatform.test.js",
+      "reason": "Prove clean boot, no seeded intake/demo data, author-publish-run-submit-registry lifecycle, and no domain-record creation."
+    }
+  ]
+}

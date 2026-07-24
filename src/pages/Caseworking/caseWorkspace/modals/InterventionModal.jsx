@@ -38,6 +38,7 @@ import {
   requiresExternalPartnerForInterventionCode as requiresExternalPartnerForCode,
   requiresNocForInterventionCode as requiresNocForCode,
 } from "../../../../utils/interventionCodeRules.js";
+import { resolveInterventionPostingContextForForm } from "../../../../utils/interventionPostingContext.js";
 
 const BASE_STATUS_OPTIONS = [
   { value: "approved", label: "Approved" },
@@ -402,8 +403,13 @@ const InterventionModal = ({
       // Inherit funding stream from plan (read-only) if provided.
       if (plan) {
         draft.fundingStream = inheritedFundingStream || "";
-        draft.postingContext = plan?.postingContext || plan?.posting_context || draft.postingContext;
       }
+      draft.postingContext = resolveInterventionPostingContextForForm({
+        mode,
+        intervention,
+        plan,
+        fallback: draft.postingContext,
+      });
       return draft;
     })();
 

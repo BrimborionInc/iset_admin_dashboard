@@ -42,7 +42,7 @@ The JSON inventory is executable project memory. Every changed file must match a
 
 | Release domain | Principal proof |
 | --- | --- |
-| Admin application and role journeys | Admin aggregate, compiled bundle, 12 deterministic browser journeys, deployed Coordinator/Regional Manager/Decision Maker smoke |
+| Admin application and role journeys | Admin aggregate, compiled bundle, 13 deterministic browser journeys, deployed Coordinator/Regional Manager/Decision Maker smoke |
 | Portal application and applicant scope | Portal aggregate and composition tests, deployed intake completion/retry/files smoke, two-applicant browser/API ownership smoke |
 | Shared runtime and API composition | Both aggregate suites, injected full Express-stack tests, exact shared-tree provenance, deployed cross-app journeys |
 | Schema and readiness/request parity | Canonical migration plan, exact admin and portal readiness contracts on real MySQL, authenticated `staff_profiles` hydration using the same exported column list, deployed `/readyz`, zero pending migrations and zero unresolved failures for current canonical checksums |
