@@ -22,7 +22,12 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
-- 2026-07-27 | Release 20260727-financial-overview-preservation | Fix/Application Assessment | Signed Financial Overview preservation | Submitting or resubmitting an Application Assessment no longer hides a signed or version-managed Financial Overview from Supporting Documents. | The assessment flow still replaces its own legacy unversioned budget snapshot when applicable; Financial Overview revisions continue through the explicit version/signing workflow.
+- 2026-07-27 | Release 20260727-regional-snapshot-financial-overview | Fix/Application Assessment | Signed Financial Overview preservation | Submitting or resubmitting an Application Assessment no longer hides a signed or version-managed Financial Overview from Supporting Documents. | The assessment flow still replaces its own legacy unversioned budget snapshot when applicable; Financial Overview revisions continue through the explicit version/signing workflow.
+- 2026-07-27 | Release TBD | Reporting/Local export | Regional Snapshot manual adjustments | The pre-deployment workbook generator can apply an explicit reviewed JSON overlay for manual intervention records that cannot yet be calculated from application-linked PATH data. | The current partial overlay covers 21 clients, leaves nine outstanding clients excluded and visibly disclosed, and does not update PROD data.
+- 2026-07-27 | Release 20260727-regional-snapshot-financial-overview | Fix/Reporting | Approved intervention proposals | An approved new-intervention proposal now makes its linked application an Approved Application in Regional Snapshot reporting, including while applicant documents are still awaited. | The application remains counted only once per reporting period; revisions do not create extra applications, and a current withdrawal or denial still takes precedence.
+- 2026-07-27 | Release 20260727-regional-snapshot-financial-overview | Fix/Reporting | Regional Snapshot draft funding | Original draft interventions with positive scheduled funding now count without waiting for activation, while pending draft revisions remain excluded to prevent cloned funding schedules from being counted twice. | Aligns Section C with NWAC's reporting meaning of approved-but-not-yet-activated funding.
+- 2026-07-27 | Release 20260727-regional-snapshot-financial-overview | Fix/Reporting | Regional Snapshot archived funding | Archived interventions and action plans no longer contribute current funded-client or funding totals merely because an older linked proposal remains approved. | Recorded intervention dates still contribute to Client Activity where required; ambiguous application lineage now fails closed and visible data-quality warnings identify source records needing correction.
+- 2026-07-27 | Release TBD | Fix/Data Integrity | Application-derived action plans | Restored the missing application provenance on 16 historical auto-created action plans so their interventions and approved funding are attributed to the correct application in reporting. | Fourteen auto-assessment plans used exact stored assessment/intervention identifier matches; two denied-reporting plans used their unique existing ESDC application links. No participant, case, funding, status, or document facts were changed.
 - 2026-07-23 | Release 20260723-end-of-day-r4 | Fix/Casework | Existing intervention Paid from | Existing interventions now reopen with their own saved Internal/NWAC or External/PTMA `Paid from` value instead of being reset to the parent Action Plan's value. | New interventions still inherit the parent Action Plan as their starting value; no existing intervention data repair is required.
 - 2026-07-22 | Release 20260723-end-of-day-r4 | Fix/Approvals | Intervention revisions | Intervention revisions with a blank review-level EI value prefill it from the same parent Action Plan's structured EI claimant category. | This covers manually imported/backloaded revision files; new intervention proposals still require a fresh EI selection, and the Decision Maker can review or change the prefilled value before submitting the decision.
 - 2026-07-19 | Release TBD | Fix/Casework | Regional Manager reassignment | Regional Managers can reassign an accessible client file to any active staff member, including staff outside their own region. | The change preserves existing case-access controls while removing the target-region restriction that prevented reassignment to another Regional Manager.
@@ -471,14 +476,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Regional Snapshot reports now assign application and funding totals to intervention start dates and scheduled funding due dates, including recurring funding that crosses reporting periods.
+- Regional Snapshot exports now reconcile application outcomes, show approved scheduled funding by CRF/EI, and identify source-data issues requiring review.
 - Signed and version-managed Financial Overviews now remain available when an Application Assessment is submitted again.
-- Existing interventions now reopen with their own saved Internal/NWAC or External/PTMA `Paid from` value.
-- Intervention revisions with a blank review-level EI value now prefill it from the same Action Plan for Decision Maker review.
 
 ### What Changed Packages (draft - EN)
 
-#### Release 20260727-financial-overview-preservation
+#### Release 20260727-regional-snapshot-financial-overview
 
+- Regional Snapshot application activity now follows intervention start dates and approved scheduled-funding dates, including recurring funding across reporting periods. Application outcomes reconcile to the same population.
+- Funded-client and CRF/EI totals now use the scheduled amounts belonging to the selected period, and the dashboard/export identify source-data issues that require review.
 - Submitting or resubmitting an Application Assessment no longer hides signed or version-managed Financial Overviews from Supporting Documents.
 - Financial Overview revisions continue through the dedicated version and participant-signature workflow.
 
@@ -498,14 +505,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
+- Les rapports d'instantane regional attribuent maintenant les demandes et le financement aux dates de debut des interventions et aux dates prevues de versement, y compris le financement recurrent qui chevauche plusieurs periodes.
+- Les exportations d'instantane regional rapprochent maintenant les resultats des demandes, presentent le financement approuve prevu par CRF/AE et signalent les problemes de donnees sources a examiner.
 - Les apercus financiers signes et geres par version restent maintenant disponibles lorsqu'une evaluation de demande est soumise de nouveau.
-- Les interventions existantes conservent maintenant leur valeur enregistree « Paye par » Interne/AFAC ou Externe/PTMA lorsqu'elles sont rouvertes.
-- Pour une revision d'intervention sans valeur d'AE au niveau de l'examen, PATH reprend maintenant la valeur du meme plan d'action afin que la personne decisionnaire puisse la verifier.
 
 ### Lots de changements (brouillon - FR)
 
-#### Release 20260727-financial-overview-preservation
+#### Release 20260727-regional-snapshot-financial-overview
 
+- L'activite des demandes dans l'instantane regional suit maintenant les dates de debut des interventions et les dates prevues du financement approuve, y compris le financement recurrent qui traverse plusieurs periodes. Les resultats des demandes se rapprochent avec la meme population.
+- Les totaux des clientes et clients finances et les montants CRF/AE utilisent maintenant les montants prevus dans la periode selectionnee; le tableau de bord et l'exportation signalent les problemes de donnees sources a examiner.
 - La soumission ou la nouvelle soumission d'une evaluation de demande ne masque plus les apercus financiers signes ou geres par version dans les documents justificatifs.
 - Les revisions d'un apercu financier continuent de suivre le processus distinct de gestion des versions et de signature de la participante ou du participant.
 

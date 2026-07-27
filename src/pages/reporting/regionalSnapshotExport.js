@@ -21,6 +21,7 @@ const safeNumber = value => {
 };
 
 const toNullableNumber = value => {
+  if (value === null || typeof value === "undefined" || value === "") return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 };
@@ -36,6 +37,11 @@ const formatCurrency = value =>
 const formatInteger = value => safeNumber(value).toLocaleString("en-CA");
 
 const formatPercent = value => `${safeNumber(value).toFixed(2)}%`;
+
+const formatNullableCurrency = value => {
+  const numeric = toNullableNumber(value);
+  return numeric === null ? "—" : formatCurrency(numeric);
+};
 
 const toExcelSheetName = value => {
   const sanitized = String(value || "Snapshot")
@@ -120,7 +126,7 @@ const buildAdminRows = report => [
 const buildKeyMetricRows = report => [
   {
     label: "Client Average Amount Funded",
-    value: formatCurrency(report?.derivedMetrics?.clientAverageAmountFunded),
+    value: formatNullableCurrency(report?.derivedMetrics?.clientAverageAmountFunded),
   },
   {
     label: "Admin Cost per Client",
@@ -321,6 +327,70 @@ const writeSummaryWorksheet = (worksheet, reports, meta = {}) => {
     cell.font = { name: "Aptos", size: 11, bold: true };
     cell.fill = SECTION_FILL;
     cell.border = BORDER_STYLE;
+  }
+
+  const issues = reports.flatMap(report =>
+    (Array.isArray(report?.dataQualityIssues) ? report.dataQualityIssues : []).map(issue => ({
+      region: issue?.region || report?.region?.code || report?.region?.name || "",
+      applicationReference: issue?.applicationReference || "",
+      caseReference: issue?.caseReference || "",
+      interventionReference: issue?.interventionReference || "",
+      issueType: issue?.issueType || "",
+      reportingEffect: issue?.reportingEffect || "",
+      remediation: issue?.remediation || "",
+    }))
+  );
+  const issueTitleRowIndex = totalRowIndex + 3;
+  worksheet.mergeCells(issueTitleRowIndex, 1, issueTitleRowIndex, 7);
+  const issueTitleCell = worksheet.getCell(issueTitleRowIndex, 1);
+  issueTitleCell.value = "Data Quality Issues";
+  issueTitleCell.fill = SECTION_FILL;
+  issueTitleCell.border = BORDER_STYLE;
+  issueTitleCell.font = { name: "Aptos", size: 11, bold: true };
+
+  const issueHeaders = [
+    "Region",
+    "Application",
+    "Case",
+    "Intervention",
+    "Issue Type",
+    "Reporting Effect / Fallback",
+    "Remediation",
+  ];
+  const issueHeaderRow = worksheet.getRow(issueTitleRowIndex + 1);
+  issueHeaders.forEach((header, index) => {
+    const cell = issueHeaderRow.getCell(index + 1);
+    cell.value = header;
+    cell.fill = SECTION_FILL;
+    cell.border = BORDER_STYLE;
+    cell.font = { name: "Aptos", size: 11, bold: true };
+  });
+  if (issues.length) {
+    issues.forEach((issue, issueIndex) => {
+      const row = worksheet.getRow(issueTitleRowIndex + 2 + issueIndex);
+      [
+        issue.region,
+        issue.applicationReference,
+        issue.caseReference,
+        issue.interventionReference,
+        String(issue.issueType).replace(/_/g, " "),
+        issue.reportingEffect,
+        issue.remediation,
+      ].forEach((value, index) => {
+        const cell = row.getCell(index + 1);
+        cell.value = value;
+        cell.border = BORDER_STYLE;
+        cell.font = { name: "Aptos", size: 11 };
+        cell.alignment = { vertical: "top", wrapText: true };
+      });
+    });
+  } else {
+    const emptyRowIndex = issueTitleRowIndex + 2;
+    worksheet.mergeCells(emptyRowIndex, 1, emptyRowIndex, 7);
+    const emptyCell = worksheet.getCell(emptyRowIndex, 1);
+    emptyCell.value = "No data quality issues identified for this reporting period.";
+    emptyCell.border = BORDER_STYLE;
+    emptyCell.font = { name: "Aptos", size: 11, color: { argb: TEXT_MUTED } };
   }
 
   [10, 11, 12, 13, 14, 15, 16, 17].forEach(index => {

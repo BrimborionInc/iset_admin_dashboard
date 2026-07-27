@@ -6,6 +6,124 @@ Last Updated: 2026-07-27
 
 Use this log for repairs that may be externally invisible to staff but should be available for later owner communication. Keep entries concise, evidence-based, and linked to the exact scripts or reports where possible. Do not use this file as approval to mutate PROD; follow the PROD repair rules in `docs/ops/agent-operational-access.md`.
 
+## 2026-07-27 - Solana Henderson Case 41 fiscal-period repair
+
+Status: PROD guarded data repair applied; database integrity and financial rollups verified.
+Amanda has not yet re-opened the repaired case in the deployed UI during this thread.
+
+Reason: Funding agreement `16535866` spans January 5 through June 19, 2026 and crosses
+fiscal year-end. Repeated partial handling left the January and April periods under one active
+plan, created a second draft plan with the wrong EI classification, left the April intervention
+in progress under the January plan with no amount, and retained an orphaned returned-revision
+workflow and generated assessment PDF after the revision itself was deleted.
+
+Repair applied:
+
+- Closed action plan `23` on March 31 with Amanda's confirmed result `Returned to school`;
+  result and future education remain code `8` (college / CEGEP / non-university diploma).
+- Preserved January-March intervention `32` as completed with actual `$900.00`, removed
+  April-June revision cost/date contamination from its metadata, and preserved its posted
+  historical finance transaction `12`.
+- Activated April 1 renewal action plan `143`, corrected it from EI Active Claim to
+  `EI Reach Back`, and retained agreement `16535866` and BC EI pot `2000000000086`.
+- Moved April-June intervention `311` to plan `143`; completed it June 19 with outcome
+  `Complete`, actual/planned historical amount `$3,077.21`, internal posting context, and the
+  evidence-backed `$2,177.21` residence plus `$900.00` living-allowance cost lines.
+- Created posted historical finance transaction `15` and independent ILMP submission `394`;
+  both plan submissions are intentionally `needs_review / pending` so the next ESDC validation
+  recomputes from the corrected plan boundaries.
+- Archived orphaned review workflow `40` as withdrawn and archived generated document `7312`.
+  The workflow events, Decision Maker change-request note, and document object remain preserved
+  as audit history.
+- Corrected Case `41` rollups to one closed plan, one active plan, zero open interventions, and
+  two completed interventions. Case status remains active.
+
+Evidence:
+
+- Preview:
+  `sql/ops/prod-solana-case41-fiscal-split-preview-20260727.sql`; initial READY command
+  `8c9a1c0c-3672-4034-b813-798e3727f875`.
+- Restore point:
+  `path-prod-solana-case41-pre-repair-20260727182903`, available at
+  `2026-07-27 18:31:48 UTC`.
+- The first apply command `451df5d8-763b-43e6-beaf-e9347da21fb8` stopped on an audit-table
+  collation comparison before any business update. Verification command
+  `23a273d8-86a9-4206-8d68-7687a56a9194` confirmed zero audit rows and unchanged plans,
+  interventions, workflow, document, finance, and ILMP state.
+- While the restore point was being created, unrelated finance transaction `14` added
+  `$7,150.00` under a different case/pot and correctly made preview command
+  `a2a039f9-3a1e-4ef4-8de1-60573fe923f3` return BLOCKED. Reconciliation command
+  `a028bfb1-1070-4b69-9b8e-bf587cf79f36` proved the independent transaction and exact root
+  rollup; no Solana row had changed.
+- Final READY preview command:
+  `706fa436-7a42-4718-9501-5a8eb4b53b26`.
+- Apply artifact:
+  `sql/ops/prod-solana-case41-fiscal-split-apply-20260727.sql`; SSM command
+  `7c552a3e-a33d-4cad-a74e-0d6c274b71e4` committed repair id
+  `prod-solana-case41-fiscal-split-20260727`, created finance transaction `15`, created ILMP
+  submission `394`, and returned `repair_postflight=PASS`.
+- Independent verification command `c553df9e-6ad1-4c18-985e-cf58926385e5` confirmed exact
+  plan/intervention/proposal relationships, cost-line total `$3,077.21`, Case 41 intervention
+  actuals equal posted finance total `$3,977.21`, all three pot rollups equal their posted
+  transaction subtrees, zero active deleted-revision documents, one active/one closed plan,
+  15 complete before/after audit snapshots, case event `266`, and no leftover repair procedure.
+- Emergency rollback artifact:
+  `sql/ops/prod-solana-case41-fiscal-split-rollback-20260727.sql`.
+
+Notification note:
+
+- Do not tell Amanda only that the database was changed. Ask her to reopen Solana's case and
+  confirm she sees the January-March plan closed, the April renewal active, and the April-June
+  intervention completed at `$3,077.21`. The database repair is verified, but that deployed
+  user journey was not authenticated and reproduced by Codex in this thread.
+
+## 2026-07-27 - Historical auto-assessment application-provenance backfill
+
+Status: PROD guarded data repair applied; reporting hardening remains pending DEV completion.
+
+Reason: Regional Snapshot verification found that 14 historical application-derived action plans
+had null `application_id` provenance. The plans and their 44 interventions existed normally in
+case files, but application-scoped reporting silently excluded them.
+
+Repair applied:
+
+- Restored `iset_case_action_plan.application_id` on 14 auto-assessment plans using exact stored
+  `proposedInterventionId` matches to one same-case application assessment.
+- Restored three null intervention-proposal application links and two null ESDC participant
+  submission application links belonging to those plans.
+- Inserted 14 `data_repair` case events. No intervention, funding, status, document, application,
+  assessment, or case facts changed.
+- A follow-up restored two historical denied-reporting plan links from their unique same-case ESDC
+  participant submissions and inserted two additional audit events.
+
+Evidence:
+
+- Preview artifact:
+  `sql/ops/prod-auto-assessment-lineage-backfill-preview-20260727.sql`; SSM command
+  `c0bc7559-fc16-4881-af52-adafd211cbf1`.
+- Apply artifact:
+  `sql/ops/prod-auto-assessment-lineage-backfill-apply-20260727.sql`; SSM command
+  `e879b57f-562d-4ff5-ab74-d1aea514556e`; exact updates were 14 plans, three proposals, two ESDC
+  submissions, and 14 audit events.
+- Postflight commands `b8dee464-ce87-4f9f-a6f2-00d13bad0931` and
+  `0005b3cd-0420-4d0e-8da5-86b4e90b9f3f` confirmed all 17 current auto-assessment plans are
+  linked, covering 53 interventions, with zero dependent proposal/ESDC conflicts.
+- Emergency rollback artifact:
+  `sql/ops/prod-auto-assessment-lineage-backfill-rollback-20260727.sql`.
+- Denied-reporting preview/apply/rollback artifacts:
+  `sql/ops/prod-denied-reporting-lineage-backfill-preview-20260727.sql`,
+  `sql/ops/prod-denied-reporting-lineage-backfill-apply-20260727.sql`, and
+  `sql/ops/prod-denied-reporting-lineage-backfill-rollback-20260727.sql`. Preview SSM command
+  `e339af10-886b-44d9-8fc9-1c94bc89632c`, apply command
+  `2bddf5cb-2fa9-4da8-9f17-3f94146bbb79`, and verification command
+  `8fb77d6c-861a-434f-bb58-5c314a574170` confirmed two exact updates and two audit events.
+
+Notification note:
+
+- This was a relational provenance repair with no change to approved business facts. Reporting
+  reviewers may need to know that regenerated figures now include approved interventions that
+  were already visible in the affected case files.
+
 ## 2026-07-27 - Feedback #166 Financial Overview recovery and v2 withdrawal
 
 Status: PROD record repair applied; prevention fix remains pending release.

@@ -7,6 +7,7 @@ import {
   ButtonDropdown,
   ColumnLayout,
   Container,
+  ExpandableSection,
   FormField,
   Header,
   Input,
@@ -17,6 +18,7 @@ import {
   Select,
   SpaceBetween,
   StatusIndicator,
+  Table,
   Textarea,
   Toggle,
 } from "@cloudscape-design/components";
@@ -44,6 +46,34 @@ const ROLE_ALIASES = {
 };
 
 const EDITOR_ROLES = new Set(["System Administrator", "NWAC Administrator"]);
+
+const DATA_QUALITY_COLUMN_DEFINITIONS = [
+  {
+    id: "application",
+    header: "Application / case",
+    cell: item => [item.applicationReference, item.caseReference].filter(Boolean).join(" · ") || "—",
+  },
+  {
+    id: "intervention",
+    header: "Intervention",
+    cell: item => item.interventionReference || "—",
+  },
+  {
+    id: "issue",
+    header: "Issue",
+    cell: item => String(item.issueType || "Data quality").replace(/_/g, " "),
+  },
+  {
+    id: "effect",
+    header: "Reporting effect",
+    cell: item => item.reportingEffect || "—",
+  },
+  {
+    id: "remediation",
+    header: "Remediation",
+    cell: item => item.remediation || "—",
+  },
+];
 
 const padDatePart = value => String(value).padStart(2, "0");
 
@@ -922,6 +952,9 @@ const RegionalSnapshotDashboard = () => {
   const snapshotSubtitle = report?.period
     ? `Reporting Period: ${report.period.start} - ${report.period.end}`
     : "Select a region and reporting period.";
+  const dataQualityIssues = Array.isArray(report?.dataQualityIssues)
+    ? report.dataQualityIssues
+    : [];
 
   return (
     <SpaceBetween size="l">
@@ -1074,6 +1107,24 @@ const RegionalSnapshotDashboard = () => {
                 </div>
               ) : null}
             </div>
+            {dataQualityIssues.length ? (
+              <Alert
+                type="warning"
+                header={`${formatInteger(dataQualityIssues.length)} data quality ${
+                  dataQualityIssues.length === 1 ? "issue affects" : "issues affect"
+                } this snapshot`}
+              >
+                <ExpandableSection headerText="Review reporting fallbacks">
+                  <Table
+                    variant="embedded"
+                    columnDefinitions={DATA_QUALITY_COLUMN_DEFINITIONS}
+                    items={dataQualityIssues}
+                    trackBy="id"
+                    empty={<Box color="text-body-secondary">No data quality issues.</Box>}
+                  />
+                </ExpandableSection>
+              </Alert>
+            ) : null}
           </SpaceBetween>
         )}
       </Container>

@@ -11,12 +11,14 @@ const RegionalSnapshotDashboardHelp = () => (
     <h3>What You Can Review</h3>
     <ul>
       <li>Region information and reporting period for the selected snapshot.</li>
-      <li>Application activity for applications submitted during the selected period, including approved applications, denied or withdrawn applications, and applications still pending a decision.</li>
-      <li>Approved CRF/EI funding and funded-client totals use the same approved-funding basis as Financial Reports.</li>
+      <li>Application activity assigned to the period by intervention start dates and scheduled approved-funding due dates. The application received date is used only when there is no dated intervention.</li>
+      <li>Approved, denied/ineligible/withdrawn/NC, and pending rows always partition the same Applications Received total using each application's current outcome.</li>
+      <li>CRF/EI funding is assigned to the period in which each positive approved funding occurrence is due. Recurring funding is split across its scheduled periods.</li>
       <li>Funded clients are shown with the funding metrics because they are a unique participant count, not an application-status bucket.</li>
       <li>Coordinator salary is pulled from the Salaries dashboard, with saved operating values shown beside it.</li>
       <li>Calculated totals and ratios based on the saved amounts and live funded-client count.</li>
       <li>Compliance flag and comments or recommendations for the selected reporting window.</li>
+      <li>Any reporting fallback or incomplete scheduling data in the selected period appears in an expandable data-quality warning.</li>
     </ul>
 
     <h3>Filters</h3>
@@ -39,12 +41,15 @@ RegionalSnapshotDashboardHelp.aiContext = `
 Regional Snapshot dashboard for management and Board-style regional reporting. Keep explanations concise and
 plain-language. Explain that the page combines live PATH counts with saved regional reporting inputs for the
 selected region and reporting period. Cover the region, period type, fiscal year, and period selectors. Explain
-that Client Activity is an application workflow breakdown for applications submitted during the selected period.
-Funded clients and CRF/EI funding use the same approved-funding and participant-home-province basis as Financial Reports. Coordinator
+that Client Activity assigns applications to periods using intervention start dates and scheduled positive
+approved-funding due dates, falling back to the received date only when no dated intervention exists. The current
+application outcome partitions Applications Received into approved, denied/ineligible/withdrawn/NC, and pending
+rows. Funded clients are unique participants with a positive approved funding occurrence due in the period.
+CRF/EI amounts allocate one-time and recurring approved funding occurrences to their scheduled due periods. Coordinator
 salary is a live value from the Salaries dashboard, while operating, compliance, and comments fields are saved
 report inputs that admins can edit. Note that totals and ratios are calculated automatically from the live and
-saved inputs and funded-client count. Do not describe funded clients as part of the Client Activity status
-breakdown because funded clients follow the Financial Reports approved-funding basis.
+saved inputs and funded-client count. Explain data-quality warnings as visible fallbacks that need correction.
+Do not describe funded clients as part of the Client Activity status breakdown.
 `;
 
 export default RegionalSnapshotDashboardHelp;

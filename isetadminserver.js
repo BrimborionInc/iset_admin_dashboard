@@ -112,6 +112,13 @@ const {
   resolveWatchColumn,
 } = require('./src/server/caseWatchRepository');
 const {
+  calculateRegionalSnapshotMetrics,
+  classifyApplicationOutcome,
+  isExplicitManualReportingRecord,
+  isRegionalSnapshotFundingEligible,
+  resolveReportingApplicationLineage,
+} = require('./src/server/regionalSnapshotMetrics');
+const {
   dispatchInternalNotifications,
   dispatchAssignmentNotificationEmails,
 } = require('../shared/events/notificationDispatcher');
@@ -31937,6 +31944,695 @@ function buildRegionalSnapshotProvinceFilter(regionCode) {
   return provinceCode && provinceCode !== 'XX' ? [provinceCode] : [];
 }
 
+const buildRegionalSnapshotProvince = row =>
+  normaliseString(row?.client_address_province) ||
+  normaliseString(row?.submission_address_province) ||
+  null;
+
+function readRegionalSnapshotCostLines(row) {
+  const metadata = safeJsonParse(row?.metadata_json, null) || {};
+  const payload = safeJsonParse(row?.payload_json, null) || {};
+  const snapshot = metadata?.snapshot && typeof metadata.snapshot === 'object'
+    ? metadata.snapshot
+    : {};
+  const candidates = [
+    metadata.costLines,
+    metadata.cost_lines,
+    snapshot.costLines,
+    payload.costLines,
+    payload.cost_lines,
+    payload?.intervention?.costLines,
+    payload?.intervention?.cost_lines,
+  ];
+  const rawCostLines = candidates.find(Array.isArray) || [];
+  return {
+    metadata,
+    rawCostLines,
+  };
+}
+
+function resolveRegionalSnapshotApprovedAmount(row, metadata) {
+  const candidates = [
+    row?.approved_amount,
+    row?.budget_amount,
+    row?.intervention_cost,
+    row?.proposed_cost,
+    metadata?.costTotal,
+    metadata?.cost,
+  ];
+  for (const candidate of candidates) {
+    const amount = parseCurrencyValue(candidate);
+    if (Number.isFinite(amount) && amount > 0) {
+      return Math.round(amount * 100) / 100;
+    }
+  }
+  return null;
+}
+
+function resolveRegionalSnapshotExplicitDueDate(rawLine) {
+  return toDateOnly(
+    rawLine?.paymentDueDate ??
+    rawLine?.payment_due_date ??
+    rawLine?.requestedPaymentDate ??
+    rawLine?.requested_payment_date ??
+    rawLine?.dueDate ??
+    rawLine?.due_date ??
+    rawLine?.payableDate ??
+    rawLine?.payable_date ??
+    null
+  );
+}
+
+function resolveRegionalSnapshotFundingSource(rawLine, row, metadata) {
+  const candidates = [
+    rawLine?.fundingSource,
+    rawLine?.funding_source,
+    rawLine?.fundingStream,
+    rawLine?.funding_stream,
+    row?.pot_funding_source,
+    row?.funding_stream_decision,
+    row?.plan_funding_stream,
+    metadata?.fundingStream,
+    metadata?.funding_stream,
+  ];
+  for (const candidate of candidates) {
+    const source = normalizeFundingSource(candidate);
+    if (source === 'CRF' || source === 'EI') return source;
+  }
+  return null;
+}
+
+function resolveRegionalSnapshotInterventionReference(row) {
+  const id = normalisePositiveInteger(row?.intervention_id ?? row?.id);
+  const proposalId = normalisePositiveInteger(row?.proposal_id);
+  if (id) return `Intervention ${id}`;
+  if (proposalId) return `Proposal ${proposalId}`;
+  return 'Intervention unavailable';
+}
+
+function buildRegionalSnapshotDataQualityIssue(row, application, issue) {
+  const applicationId = normalisePositiveInteger(
+    row?.resolved_application_id ??
+    row?.application_id ??
+    application?.id
+  );
+  return {
+    id: [
+      issue.issueType,
+      applicationId || 'no-application',
+      normalisePositiveInteger(row?.intervention_id ?? row?.id) ||
+        `proposal-${normalisePositiveInteger(row?.proposal_id) || 'unknown'}`,
+      issue.costLineIndex || 'intervention',
+    ].join(':'),
+    region:
+      application?.province ||
+      normaliseReportingProvinceCode(buildRegionalSnapshotProvince(row)) ||
+      'Unknown',
+    applicationReference:
+      application?.reference ||
+      (applicationId ? `Application ${applicationId}` : 'Application unavailable'),
+    caseReference:
+      normaliseString(row?.case_number) ||
+      (normalisePositiveInteger(row?.case_id) ? `Case ${row.case_id}` : 'Case unavailable'),
+    interventionReference: resolveRegionalSnapshotInterventionReference(row),
+    issueType: issue.issueType,
+    reportingEffect: issue.reportingEffect,
+    remediation: issue.remediation,
+    reportingDate: issue.reportingDate || null,
+    fallbackDate: issue.fallbackDate || null,
+    interventionStartDate: toDateOnly(row?.start_date) || null,
+    includeInEveryPeriod: Boolean(issue.includeInEveryPeriod),
+  };
+}
+
+function buildRegionalSnapshotInterventionFacts(
+  row,
+  application,
+  {
+    recurrencePolicyByType,
+    submissionTimingByType,
+  } = {}
+) {
+  const applicationId = normalisePositiveInteger(row?.resolved_application_id ?? row?.application_id);
+  if (!applicationId || !application) return null;
+  const clientId = normalisePositiveInteger(row?.client_id);
+  const startDate = toDateOnly(row?.start_date);
+  const { metadata, rawCostLines } = readRegionalSnapshotCostLines(row);
+  const normalizedLines = rawCostLines
+    .map((rawLine, index) => ({
+      rawLine,
+      normalized: normalizeProposedCostLine(rawLine),
+      index: index + 1,
+    }))
+    .filter(entry => entry.normalized);
+  const activityDates = [];
+  const fundingOccurrences = [];
+  const dataQualityIssues = [];
+  const state = resolveInterventionStateFields({
+    status: row?.status,
+    delivery_status: row?.delivery_status,
+    review_status: row?.proposal_review_status ?? row?.review_status,
+  });
+  const fundingEligible = isRegionalSnapshotFundingEligible({
+    effectiveStatus: state.effectiveStatus,
+    storedInterventionStatus: row?.status,
+    actionPlanStatus: row?.action_plan_status,
+    actionPlanArchivedAt: row?.action_plan_archived_at,
+    sourceInterventionId: row?.proposal_source_intervention_id,
+  });
+  let positiveLineCount = 0;
+
+  normalizedLines.forEach(({ rawLine, normalized, index }) => {
+    const amount = Number(normalized?.amount);
+    if (Number.isFinite(amount) && amount < 0) {
+      dataQualityIssues.push(
+        buildRegionalSnapshotDataQualityIssue(row, application, {
+          issueType: 'negative_funding_line',
+          costLineIndex: index,
+          reportingDate: resolveRegionalSnapshotExplicitDueDate(rawLine) || startDate,
+          reportingEffect: 'Excluded the negative line from funded-client and funding totals.',
+          remediation: 'Correct or remove the negative approved funding line.',
+        })
+      );
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    positiveLineCount += 1;
+
+    const explicitDueDate = resolveRegionalSnapshotExplicitDueDate(rawLine);
+    const paymentLines = buildAutoPaymentLinesFromCostLines({
+      interventionRow: {
+        ...row,
+        start_date: startDate,
+        end_date: toDateOnly(row?.end_date),
+      },
+      interventionMetadata: {
+        ...metadata,
+        costLines: [rawLine],
+      },
+      clientPayeeName: 'Client',
+      partnerName: null,
+      fallbackPayeeType: 'Client',
+      fallbackPayeeName: 'Client',
+      allowedPaymentTypes: null,
+      recurrencePolicyByType,
+    });
+    let scheduledOccurrences = paymentLines
+      .map((line, lineIndex) => ({
+        date:
+          paymentLines.length === 1 && explicitDueDate
+            ? explicitDueDate
+            : resolveReportingInterventionScheduledDate(line, row, submissionTimingByType),
+        amount: Number(line?.amount),
+        lineIndex,
+      }))
+      .filter(occurrence => Number.isFinite(occurrence.amount) && occurrence.amount > 0);
+
+    if (!scheduledOccurrences.length) {
+      scheduledOccurrences = [{ date: explicitDueDate || startDate, amount, lineIndex: 0 }];
+      dataQualityIssues.push(
+        buildRegionalSnapshotDataQualityIssue(row, application, {
+          issueType: 'unusable_funding_line_schedule',
+          costLineIndex: index,
+          fallbackDate: explicitDueDate || startDate,
+          includeInEveryPeriod: !explicitDueDate && !startDate,
+          reportingEffect: explicitDueDate || startDate
+            ? `Allocated the line's $${amount.toFixed(2)} to ${
+                explicitDueDate ? 'its explicit due date' : 'the intervention start date'
+              }.`
+            : `Could not allocate the line's $${amount.toFixed(2)} to a reporting period.`,
+          remediation: 'Correct the payment type or add a usable approved due-date schedule.',
+        })
+      );
+    }
+
+    const fundingSource = resolveRegionalSnapshotFundingSource(rawLine, row, metadata);
+    if (fundingEligible && !fundingSource) {
+      dataQualityIssues.push(
+        buildRegionalSnapshotDataQualityIssue(row, application, {
+          issueType: 'unknown_funding_source',
+          costLineIndex: index,
+          reportingDate: scheduledOccurrences.find(occurrence => occurrence.date)?.date || startDate,
+          includeInEveryPeriod: !scheduledOccurrences.some(occurrence => occurrence.date) && !startDate,
+          reportingEffect: 'Included the approved amount in CRF by default.',
+          remediation: 'Assign the approved funding line or intervention to CRF or EI.',
+        })
+      );
+    }
+
+    scheduledOccurrences.forEach(occurrence => {
+      if (occurrence.date) activityDates.push(occurrence.date);
+      if (!fundingEligible || !occurrence.date) return;
+      fundingOccurrences.push({
+        date: occurrence.date,
+        amount: Math.round(occurrence.amount * 100) / 100,
+        fundingSource: fundingSource || 'CRF',
+      });
+    });
+
+    if (scheduledOccurrences.some(occurrence => !occurrence.date)) {
+      dataQualityIssues.push(
+        buildRegionalSnapshotDataQualityIssue(row, application, {
+          issueType: 'missing_funding_due_date',
+          costLineIndex: index,
+          fallbackDate: startDate,
+          includeInEveryPeriod: !startDate,
+          reportingEffect: startDate
+            ? 'Allocated the approved line to the intervention start date.'
+            : 'Could not allocate the approved line to a reporting period.',
+          remediation: 'Add a due date or a valid intervention start date.',
+        })
+      );
+    }
+  });
+
+  if (!positiveLineCount) {
+    const approvedAmount = resolveRegionalSnapshotApprovedAmount(row, metadata);
+    if (Number.isFinite(approvedAmount) && approvedAmount > 0) {
+      if (startDate) activityDates.push(startDate);
+      if (fundingEligible && startDate) {
+        const fundingSource = resolveRegionalSnapshotFundingSource(null, row, metadata);
+        fundingOccurrences.push({
+          date: startDate,
+          amount: approvedAmount,
+          fundingSource: fundingSource || 'CRF',
+        });
+        if (!fundingSource) {
+          dataQualityIssues.push(
+            buildRegionalSnapshotDataQualityIssue(row, application, {
+              issueType: 'unknown_funding_source',
+              fallbackDate: startDate,
+              reportingEffect: 'Included the fallback approved amount in CRF by default.',
+              remediation: 'Assign the intervention to CRF or EI.',
+            })
+          );
+        }
+      }
+      if (fundingEligible) {
+        dataQualityIssues.push(
+          buildRegionalSnapshotDataQualityIssue(row, application, {
+            issueType: 'missing_approved_funding_lines',
+            fallbackDate: startDate,
+            includeInEveryPeriod: !startDate,
+            reportingEffect: startDate
+              ? `Allocated the intervention's $${approvedAmount.toFixed(2)} to its start date.`
+              : `Could not allocate the intervention's $${approvedAmount.toFixed(2)} to a reporting period.`,
+            remediation: 'Add the approved funding lines and their scheduled due dates.',
+          })
+        );
+      }
+    }
+  }
+
+  if (fundingEligible && positiveLineCount) {
+    const approvedAmount = resolveRegionalSnapshotApprovedAmount(row, metadata);
+    const costLineTotal = normalizedLines.reduce((total, entry) => {
+      const amount = Number(entry.normalized?.amount);
+      return Number.isFinite(amount) && amount > 0 ? total + amount : total;
+    }, 0);
+    if (
+      Number.isFinite(approvedAmount) &&
+      approvedAmount > 0 &&
+      Math.abs(approvedAmount - costLineTotal) >= 0.01
+    ) {
+      dataQualityIssues.push(
+        buildRegionalSnapshotDataQualityIssue(row, application, {
+          issueType: 'approved_amount_cost_line_mismatch',
+          fallbackDate: startDate,
+          reportingEffect:
+            `Used approved funding lines totalling $${costLineTotal.toFixed(2)}; ` +
+            `the intervention header shows $${approvedAmount.toFixed(2)}.`,
+          remediation: 'Reconcile the intervention approved amount with its approved funding lines.',
+        })
+      );
+    }
+  }
+
+  if (!activityDates.length && startDate) {
+    activityDates.push(startDate);
+  }
+
+  return {
+    id: normalisePositiveInteger(row?.intervention_id ?? row?.id) ||
+      `proposal-${normalisePositiveInteger(row?.proposal_id) || 'unknown'}`,
+    applicationId,
+    clientId,
+    startDate,
+    activityDates: Array.from(new Set(activityDates)),
+    approvedNewInterventionProposal:
+      (normaliseString(row?.proposal_review_status) || '').toLowerCase() === 'approved' &&
+      !normalisePositiveInteger(row?.proposal_source_intervention_id),
+    fundingOccurrences,
+    dataQualityIssues,
+  };
+}
+
+async function readRegionalSnapshotCalculatedMetrics(
+  {
+    regionCode,
+    periodStart,
+    periodEnd,
+    includeAuditDetails = false,
+  },
+  executor = pool
+) {
+  const fallback = {
+    liveMetrics: {
+      applicationsReceived: 0,
+      funded: 0,
+      fundedApplications: 0,
+      deniedIneligibleWithdrawn: 0,
+      pendingDecision: 0,
+    },
+    fundingMetrics: {
+      crfFundingAmount: 0,
+      eiFundingAmount: 0,
+      fundedClientCount: 0,
+      fundedInterventionCount: 0,
+    },
+    dataQualityIssues: [],
+    calculationNotes: {
+      applicationlessManualRecordsExcluded: true,
+    },
+  };
+  const runner = executor || pool;
+  if (!runner || typeof runner.query !== 'function') return fallback;
+  const clientProvinceExpr = `COALESCE(
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.province')), ''),
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.provinceCode')), ''),
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.province')), ''),
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.provinceCode')), '')
+  )`;
+
+  try {
+    const [[applicationRows], [interventionRows], [proposalRows], paymentTypeMapping] = await Promise.all([
+      runner.query(
+        `
+        SELECT
+          a.id,
+          a.case_id,
+          a.submission_id,
+          a.status,
+          a.decision_outcome,
+          s.submitted_at,
+          c.client_id,
+          c.case_number,
+          cl.first_name AS client_first_name,
+          cl.last_name AS client_last_name,
+          COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
+            s.reference_number
+          ) AS application_reference,
+          ${REPORTING_ADDRESS_PROVINCE_EXPR} AS submission_address_province,
+          ${clientProvinceExpr} AS client_address_province
+        FROM iset_application a
+        JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
+        LEFT JOIN client cl ON cl.id = c.client_id
+        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+        LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
+        `
+      ),
+      runner.query(
+        `
+        SELECT
+          ci.id AS intervention_id,
+          ci.case_id,
+          ci.action_plan_id,
+          ci.status,
+          ci.delivery_status,
+          ci.start_date,
+          ci.end_date,
+          ci.intervention_cost,
+          ci.budget_amount,
+          ci.approved_amount,
+          ci.funding_stream_decision,
+          ci.metadata_json,
+          c.client_id,
+          c.case_number,
+          ${clientProvinceExpr} AS client_address_province,
+          ap.application_id AS action_plan_application_id,
+          ap.status AS action_plan_status,
+          ap.archived_at AS action_plan_archived_at,
+          ap.metadata_json AS action_plan_metadata_json,
+          ap.funding_stream AS plan_funding_stream,
+          bp.funding_source AS pot_funding_source,
+          p.id AS proposal_id,
+          p.application_id AS proposal_application_id,
+          p.source_intervention_id AS proposal_source_intervention_id,
+          p.review_status AS proposal_review_status,
+          eps.application_id AS esdc_application_id,
+          plan_apps.unique_application_id AS unique_plan_proposal_application_id,
+          plan_apps.application_count AS plan_proposal_application_count,
+          COALESCE(p.application_id, ap.application_id) AS resolved_application_id
+        FROM iset_case_intervention ci
+        JOIN iset_case c ON c.id = ci.case_id
+        LEFT JOIN client cl ON cl.id = c.client_id
+        LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+        LEFT JOIN esdc_participant_submission eps ON eps.action_plan_id = ap.id
+        LEFT JOIN (
+          SELECT
+            action_plan_id,
+            COUNT(DISTINCT application_id) AS application_count,
+            CASE
+              WHEN COUNT(DISTINCT application_id) = 1 THEN MAX(application_id)
+              ELSE NULL
+            END AS unique_application_id
+          FROM iset_intervention_proposal
+          WHERE application_id IS NOT NULL
+          GROUP BY action_plan_id
+        ) plan_apps ON plan_apps.action_plan_id = ap.id
+        LEFT JOIN budget_pot bp
+          ON (
+            (ap.budget_pot REGEXP '^[0-9]+$' AND bp.id = CAST(ap.budget_pot AS UNSIGNED))
+            OR bp.code = ap.budget_pot
+          )
+        LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = ci.id
+        `
+      ),
+      runner.query(
+        `
+        SELECT
+          NULL AS intervention_id,
+          p.id AS proposal_id,
+          p.case_id,
+          p.action_plan_id,
+          p.review_status AS status,
+          NULL AS delivery_status,
+          p.start_date,
+          p.end_date,
+          p.proposed_cost,
+          NULL AS intervention_cost,
+          NULL AS budget_amount,
+          NULL AS approved_amount,
+          NULL AS funding_stream_decision,
+          p.payload_json,
+          p.metadata_json,
+          c.client_id,
+          c.case_number,
+          ${clientProvinceExpr} AS client_address_province,
+          ap.application_id AS action_plan_application_id,
+          ap.status AS action_plan_status,
+          ap.archived_at AS action_plan_archived_at,
+          ap.metadata_json AS action_plan_metadata_json,
+          ap.funding_stream AS plan_funding_stream,
+          bp.funding_source AS pot_funding_source,
+          p.application_id AS proposal_application_id,
+          p.source_intervention_id AS proposal_source_intervention_id,
+          eps.application_id AS esdc_application_id,
+          plan_apps.unique_application_id AS unique_plan_proposal_application_id,
+          plan_apps.application_count AS plan_proposal_application_count,
+          COALESCE(p.application_id, ap.application_id) AS resolved_application_id,
+          p.review_status AS proposal_review_status
+        FROM iset_intervention_proposal p
+        JOIN iset_case c ON c.id = p.case_id
+        LEFT JOIN client cl ON cl.id = c.client_id
+        LEFT JOIN iset_case_action_plan ap ON ap.id = p.action_plan_id
+        LEFT JOIN esdc_participant_submission eps ON eps.action_plan_id = ap.id
+        LEFT JOIN (
+          SELECT
+            action_plan_id,
+            COUNT(DISTINCT application_id) AS application_count,
+            CASE
+              WHEN COUNT(DISTINCT application_id) = 1 THEN MAX(application_id)
+              ELSE NULL
+            END AS unique_application_id
+          FROM iset_intervention_proposal
+          WHERE application_id IS NOT NULL
+          GROUP BY action_plan_id
+        ) plan_apps ON plan_apps.action_plan_id = ap.id
+        LEFT JOIN budget_pot bp
+          ON (
+            (ap.budget_pot REGEXP '^[0-9]+$' AND bp.id = CAST(ap.budget_pot AS UNSIGNED))
+            OR bp.code = ap.budget_pot
+          )
+        WHERE p.legacy_intervention_id IS NULL
+          AND p.source_intervention_id IS NULL
+          AND p.archived_at IS NULL
+        `
+      ),
+      readPaymentInterventionMapping(runner),
+    ]);
+
+    const provinceCodes = buildRegionalSnapshotProvinceFilter(regionCode);
+    const allApplications = (Array.isArray(applicationRows) ? applicationRows : [])
+      .map(row => ({
+        id: normalisePositiveInteger(row.id),
+        submissionId: normalisePositiveInteger(row.submission_id),
+        submittedAt: toDateOnly(row.submitted_at),
+        status: row.status,
+        decisionOutcome: row.decision_outcome,
+        clientId: normalisePositiveInteger(row.client_id),
+        caseId: normalisePositiveInteger(row.case_id),
+        caseReference: normaliseString(row.case_number) || null,
+        clientName: [normaliseString(row.client_first_name), normaliseString(row.client_last_name)]
+          .filter(Boolean)
+          .join(' '),
+        reference:
+          normaliseString(row.application_reference) ||
+          (normalisePositiveInteger(row.id) ? `Application ${row.id}` : null),
+        province: normaliseReportingProvinceCode(buildRegionalSnapshotProvince(row)),
+      }));
+    const allApplicationById = new Map(
+      allApplications
+        .filter(application => application.id)
+        .map(application => [application.id, application])
+    );
+    const applications = allApplications.filter(application =>
+      matchesReportingProvinceFilter(application.province, provinceCodes)
+    );
+    const applicationById = new Map(
+      applications
+        .filter(application => application.id)
+        .map(application => [application.id, application])
+    );
+    const recurrencePolicyByType = buildRecurrencePolicyByPaymentType(paymentTypeMapping);
+    const submissionTimingByType = buildSubmissionTimingByTypeLookup(paymentTypeMapping);
+    const normalizedInterventions = [];
+    const dataQualityIssues = [];
+    let excludedManualRecordCount = 0;
+    let unresolvedApplicationLineageCount = 0;
+
+    [...(interventionRows || []), ...(proposalRows || [])].forEach(row => {
+      const lineage = resolveReportingApplicationLineage({
+        actionPlanApplicationId: row?.action_plan_application_id,
+        proposalApplicationId: row?.proposal_application_id,
+        esdcApplicationId: row?.esdc_application_id,
+        uniquePlanProposalApplicationId: row?.unique_plan_proposal_application_id,
+        planProposalApplicationCount: row?.plan_proposal_application_count,
+      });
+      const applicationId = normalisePositiveInteger(lineage.applicationId);
+      const resolvedRow = {
+        ...row,
+        resolved_application_id: applicationId,
+      };
+      const application = allApplicationById.get(applicationId);
+      const rowCaseId = normalisePositiveInteger(row?.case_id);
+      const applicationCaseId = normalisePositiveInteger(application?.caseId);
+      const lineageCaseMismatch = Boolean(
+        application &&
+        rowCaseId &&
+        applicationCaseId &&
+        rowCaseId !== applicationCaseId
+      );
+      if (lineage.conflict || lineageCaseMismatch) {
+        const rowProvince = normaliseReportingProvinceCode(buildRegionalSnapshotProvince(row));
+        if (!matchesReportingProvinceFilter(rowProvince, provinceCodes)) return;
+        unresolvedApplicationLineageCount += 1;
+        dataQualityIssues.push(
+          buildRegionalSnapshotDataQualityIssue(resolvedRow, null, {
+            issueType: 'conflicting_application_lineage',
+            includeInEveryPeriod: true,
+            reportingEffect:
+              'Excluded this intervention because its authoritative application links conflict.',
+            remediation:
+              'Reconcile the action plan, proposal, and ESDC application links before issuing the report.',
+          })
+        );
+        return;
+      }
+      if (!application) {
+        const { metadata } = readRegionalSnapshotCostLines(row);
+        const payload = safeJsonParse(row?.payload_json, null) || {};
+        const actionPlanMetadata = safeJsonParse(row?.action_plan_metadata_json, null) || {};
+        if (isExplicitManualReportingRecord({ metadata, payload, actionPlanMetadata })) {
+          excludedManualRecordCount += 1;
+          return;
+        }
+        const rowProvince = normaliseReportingProvinceCode(buildRegionalSnapshotProvince(row));
+        if (!matchesReportingProvinceFilter(rowProvince, provinceCodes)) return;
+        unresolvedApplicationLineageCount += 1;
+        dataQualityIssues.push(
+          buildRegionalSnapshotDataQualityIssue(resolvedRow, null, {
+            issueType: 'missing_application_lineage',
+            includeInEveryPeriod: true,
+            reportingEffect:
+              'Excluded this non-manual intervention because PATH cannot attribute it to an application without guessing.',
+            remediation:
+              'Restore the action plan or proposal application link from authoritative provenance before issuing the report.',
+          })
+        );
+        return;
+      }
+      if (!matchesReportingProvinceFilter(application.province, provinceCodes)) return;
+      if (!normalisePositiveInteger(row?.action_plan_application_id)) {
+        dataQualityIssues.push(
+          buildRegionalSnapshotDataQualityIssue(resolvedRow, application, {
+            issueType: 'indirect_application_lineage',
+            reportingEffect:
+              'Used agreeing proposal or ESDC provenance because the action plan application link is missing.',
+            remediation:
+              'Backfill the action plan application link from the verified provenance.',
+          })
+        );
+      }
+      const facts = buildRegionalSnapshotInterventionFacts(resolvedRow, application, {
+        recurrencePolicyByType,
+        submissionTimingByType,
+      });
+      if (!facts) return;
+      normalizedInterventions.push(facts);
+      dataQualityIssues.push(...facts.dataQualityIssues);
+      if (
+        facts.fundingOccurrences.length &&
+        classifyApplicationOutcome(application) === 'denied'
+      ) {
+        dataQualityIssues.push(
+          buildRegionalSnapshotDataQualityIssue(resolvedRow, application, {
+            issueType: 'active_funding_on_denied_or_withdrawn_application',
+            reportingDate: facts.fundingOccurrences[0]?.date || null,
+            reportingEffect:
+              'Included the current approved funding schedule even though the application is denied or withdrawn.',
+            remediation:
+              'Confirm the funding remains approved or archive/cancel the superseded intervention schedule.',
+          })
+        );
+      }
+    });
+
+    const calculated = calculateRegionalSnapshotMetrics({
+      applications,
+      interventions: normalizedInterventions,
+      periodStart,
+      periodEnd,
+      dataQualityIssues,
+      includeAuditDetails,
+    });
+    return {
+      ...calculated,
+      calculationNotes: {
+        applicationlessManualRecordsExcluded: true,
+        excludedManualRecordCount,
+        unresolvedApplicationLineageCount,
+      },
+    };
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || isMissingColumnErrorLocal(err)) {
+      return fallback;
+    }
+    throw err;
+  }
+}
+
 function isRegionalSnapshotFundedApplication(row) {
   const decisionOutcome = normaliseApplicationDecisionOutcomeValue(row?.decision_outcome);
   if (decisionOutcome === 'approved') return true;
@@ -32092,6 +32788,7 @@ async function buildRegionalSnapshotPayload({
   fiscalYearStart,
   periodType,
   periodKey,
+  includeAuditDetails = false,
   executor = pool,
 }) {
   const period = buildRegionalSnapshotPeriodDefinition(fiscalYearStart, periodType, periodKey);
@@ -32105,7 +32802,7 @@ async function buildRegionalSnapshotPayload({
     error.statusCode = 404;
     throw error;
   }
-  const [snapshotRow, defaults, liveMetrics, fundingMetrics] = await Promise.all([
+  const [snapshotRow, defaults, calculatedMetrics] = await Promise.all([
     readRegionalSnapshotRow({
       regionId,
       periodType: period.periodType,
@@ -32113,18 +32810,15 @@ async function buildRegionalSnapshotPayload({
       periodEnd: period.end,
     }, executor),
     readRegionalSnapshotDefaults(regionId, executor),
-    readRegionalSnapshotLiveMetrics({
+    readRegionalSnapshotCalculatedMetrics({
       regionCode: regionRow.code,
       periodStart: period.start,
       periodEnd: period.end,
-    }, executor),
-    readRegionalSnapshotFundingMetrics({
-      regionCode: regionRow.code,
-      fiscalYearStart,
-      periodType: period.periodType,
-      periodKey: period.periodKey,
+      includeAuditDetails,
     }, executor),
   ]);
+  const liveMetrics = calculatedMetrics.liveMetrics;
+  const fundingMetrics = calculatedMetrics.fundingMetrics;
   const salaryMetrics = await readRegionalSnapshotSalaryMetrics(
     {
       regionCode: regionRow.code,
@@ -32166,6 +32860,12 @@ async function buildRegionalSnapshotPayload({
     period,
     liveMetrics: mergedLiveMetrics,
     fundingMetrics,
+    dataQualityIssues: calculatedMetrics.dataQualityIssues || [],
+    calculationNotes: calculatedMetrics.calculationNotes || {},
+    ...(includeAuditDetails ? { auditDetails: calculatedMetrics.auditDetails || {
+      approvedApplications: [],
+      fundedClients: [],
+    } } : {}),
     salaryMetrics,
     snapshot,
     derivedMetrics: buildRegionalSnapshotDerivedValues(snapshot, mergedLiveMetrics, fundingMetrics),
@@ -92850,6 +93550,7 @@ const adminRepairExports = {
   generateAndStoreInterventionAssessmentPdf,
   generateAndStoreRevisionAssessmentPdf,
   fetchInterventionWithCase,
+  buildRegionalSnapshotPayload,
   REVIEW_WORKFLOW_TYPES,
 };
 
