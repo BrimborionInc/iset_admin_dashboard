@@ -1301,6 +1301,9 @@ async function deployAdminToTestNative(args, envConfig, releaseId, releaseContex
     const s3Key = joinS3Key(keyPrefix, archiveName);
     console.log(`Uploading admin artifact to s3://${bucket}/${s3Key}...`);
     uploadArtifactToS3(archivePath, bucket, s3Key, envConfig);
+    const bootstrapCompatibilityKey = 'bootstrap/admin-dashboard-latest.zip';
+    console.log(`Updating TEST bootstrap artifact at s3://${bucket}/${bootstrapCompatibilityKey}...`);
+    uploadArtifactToS3(archivePath, bucket, bootstrapCompatibilityKey, envConfig);
 
     const instanceIds = discoverAsgInstances(autoScalingGroup, envConfig);
     console.log(`Admin TEST instances: ${instanceIds.join(', ')}`);
@@ -1320,6 +1323,7 @@ async function deployAdminToTestNative(args, envConfig, releaseId, releaseContex
 
     return {
       artifact: `s3://${bucket}/${s3Key}`,
+      bootstrapCompatibilityArtifact: `s3://${bucket}/${bootstrapCompatibilityKey}`,
       rollbackArtifact,
       archiveBytes: archive.bytes,
       instances: commandResults,
@@ -1385,6 +1389,9 @@ async function deployPortalToTestNative(args, envConfig, releaseId, releaseConte
     const s3Key = joinS3Key(keyPrefix, archiveName);
     console.log(`Uploading portal artifact to s3://${bucket}/${s3Key}...`);
     uploadArtifactToS3(archivePath, bucket, s3Key, envConfig);
+    const bootstrapCompatibilityKey = 'bootstrap/portal-latest.zip';
+    console.log(`Updating TEST bootstrap artifact at s3://${bucket}/${bootstrapCompatibilityKey}...`);
+    uploadArtifactToS3(archivePath, bucket, bootstrapCompatibilityKey, envConfig);
 
     const instanceIds = discoverAsgInstances(autoScalingGroup, envConfig);
     console.log(`Portal TEST instances: ${instanceIds.join(', ')}`);
@@ -1404,6 +1411,7 @@ async function deployPortalToTestNative(args, envConfig, releaseId, releaseConte
 
     return {
       artifact: `s3://${bucket}/${s3Key}`,
+      bootstrapCompatibilityArtifact: `s3://${bucket}/${bootstrapCompatibilityKey}`,
       rollbackArtifact,
       archiveBytes: archive.bytes,
       instances: commandResults,

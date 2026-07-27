@@ -26,8 +26,8 @@ PORTAL_ENV_PARAMETER="/nwac/test/portal/env"
 DB_SECRET_ID="${DB_SECRET_ID:-nwac-test-db-credentials}"
 
 # Pre-built artifacts (uploaded from workstation)
-ADMIN_ARTIFACT_S3_URI="s3://nwac-test-artifacts/admin/admin-dashboard-20251014-154334.zip"
-PORTAL_ARTIFACT_S3_URI="s3://nwac-test-artifacts/portal/portal-20251014-175639.zip"
+ADMIN_ARTIFACT_S3_URI="s3://nwac-test-artifacts/bootstrap/admin-dashboard-latest.zip"
+PORTAL_ARTIFACT_S3_URI="s3://nwac-test-artifacts/bootstrap/portal-latest.zip"
 SHARED_ARTIFACT_S3_URI="s3://nwac-test-artifacts/shared/shared-20251008155220.zip"
 
 ADMIN_ROOT="/opt/nwac/admin-dashboard"
@@ -36,6 +36,8 @@ SHARED_ROOT="/opt/nwac/shared"
 CONFIG_DUMP_DIR="/opt/nwac/config"
 
 AWS_REGION="${AWS_REGION:-ca-central-1}"
+NODE_VERSION="${NODE_VERSION:-20.20.2}"
+NODE_LINUX_X64_SHA256="${NODE_LINUX_X64_SHA256:-df770b2a6f130ed8627c9782c988fda9669fa23898329a61a871e32f965e007d}"
 
 log() {
   echo "[$(date --iso-8601=seconds)] $*"
@@ -63,9 +65,32 @@ retry() {
 ensure_packages() {
   log "Installing prerequisite packages..."
   sudo dnf update -y >/dev/null
-  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - >/dev/null
-  sudo dnf install -y nodejs awscli jq unzip >/dev/null
+
+  local node_archive node_install_dir npm_prefix
+  node_archive="$(mktemp --suffix=.tar.xz)"
+  node_install_dir="/usr/local/lib/nodejs/node-v${NODE_VERSION}-linux-x64"
+
+  if ! command -v node >/dev/null 2>&1 || [ "$(node -p 'process.versions.node.split(`.`)[0]')" -ne 20 ]; then
+    log "Installing verified Node.js ${NODE_VERSION} runtime..."
+    retry 5 5 curl -fsSL \
+      "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+      -o "$node_archive"
+    echo "${NODE_LINUX_X64_SHA256}  ${node_archive}" | sha256sum -c -
+    sudo mkdir -p /usr/local/lib/nodejs
+    sudo tar -xJf "$node_archive" -C /usr/local/lib/nodejs
+    sudo ln -sfn "${node_install_dir}/bin/node" /usr/local/bin/node
+    sudo ln -sfn "${node_install_dir}/bin/npm" /usr/local/bin/npm
+    sudo ln -sfn "${node_install_dir}/bin/npx" /usr/local/bin/npx
+    sudo ln -sfn "${node_install_dir}/bin/corepack" /usr/local/bin/corepack
+  fi
+  rm -f "$node_archive"
+
+  sudo dnf install -y awscli jq unzip >/dev/null
   sudo npm install -g pm2 >/dev/null
+  npm_prefix="$(npm prefix -g)"
+  sudo ln -sfn "${npm_prefix}/bin/pm2" /usr/local/bin/pm2
+  sudo ln -sfn "${npm_prefix}/bin/pm2-runtime" /usr/local/bin/pm2-runtime
+  sudo ln -sfn "${npm_prefix}/bin/pm2-dev" /usr/local/bin/pm2-dev
 }
 
 fetch_env_parameter() {
@@ -170,6 +195,11 @@ main() {
   download_artifact "$ADMIN_ARTIFACT_S3_URI" "$ADMIN_ROOT"
   download_artifact "$PORTAL_ARTIFACT_S3_URI" "$PORTAL_ROOT"
   download_shared "$SHARED_ARTIFACT_S3_URI" "$SHARED_ROOT"
+  if [ -d "$ADMIN_ROOT/shared" ]; then
+    log "Using the shared runtime bundled with the admin artifact..."
+    sudo rm -rf "$SHARED_ROOT"
+    sudo cp -R "$ADMIN_ROOT/shared" "$SHARED_ROOT"
+  fi
 
   render_env_file "$admin_env_json" "$ADMIN_ROOT/.env"
   render_env_file "$portal_env_json" "$PORTAL_ROOT/.env"

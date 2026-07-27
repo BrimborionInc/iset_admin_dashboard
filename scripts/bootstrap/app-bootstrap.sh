@@ -30,8 +30,8 @@ PORTAL_ENV_PARAMETER="${PORTAL_ENV_PARAMETER:-${PARAM_PREFIX}/portal/env}"
 DB_SECRET_ID="${DB_SECRET_ID:-${NAME_PREFIX}-db-credentials}"
 
 ARTIFACT_BUCKET="${ARTIFACT_BUCKET:-${NAME_PREFIX}-artifacts}"
-ADMIN_ARTIFACT_KEY="${ADMIN_ARTIFACT_KEY:-admin/admin-dashboard-20251008155202.zip}"
-PORTAL_ARTIFACT_KEY="${PORTAL_ARTIFACT_KEY:-portal/portal-20251008155228.zip}"
+ADMIN_ARTIFACT_KEY="${ADMIN_ARTIFACT_KEY:-bootstrap/admin-dashboard-latest.zip}"
+PORTAL_ARTIFACT_KEY="${PORTAL_ARTIFACT_KEY:-bootstrap/portal-latest.zip}"
 SHARED_ARTIFACT_KEY="${SHARED_ARTIFACT_KEY:-shared/shared-20251008155220.zip}"
 
 # Pre-built artifacts (uploaded from workstation)
@@ -45,7 +45,9 @@ SHARED_ROOT="/opt/nwac/shared"
 CONFIG_DUMP_DIR="/opt/nwac/config"
 
 AWS_REGION="${AWS_REGION:-ca-central-1}"
-RUNTIME_PACKAGES=(nodejs awscli jq unzip)
+NODE_VERSION="${NODE_VERSION:-20.20.2}"
+NODE_LINUX_X64_SHA256="${NODE_LINUX_X64_SHA256:-df770b2a6f130ed8627c9782c988fda9669fa23898329a61a871e32f965e007d}"
+RUNTIME_PACKAGES=(awscli jq unzip)
 PUPPETEER_SYSTEM_PACKAGES=(
   alsa-lib
   atk
@@ -94,9 +96,32 @@ retry() {
 ensure_packages() {
   log "Installing prerequisite packages..."
   sudo dnf update -y >/dev/null
-  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - >/dev/null
+
+  local node_archive node_install_dir npm_prefix
+  node_archive="$(mktemp --suffix=.tar.xz)"
+  node_install_dir="/usr/local/lib/nodejs/node-v${NODE_VERSION}-linux-x64"
+
+  if ! command -v node >/dev/null 2>&1 || [ "$(node -p 'process.versions.node.split(`.`)[0]')" -ne 20 ]; then
+    log "Installing verified Node.js ${NODE_VERSION} runtime..."
+    retry 5 5 curl -fsSL \
+      "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+      -o "$node_archive"
+    echo "${NODE_LINUX_X64_SHA256}  ${node_archive}" | sha256sum -c -
+    sudo mkdir -p /usr/local/lib/nodejs
+    sudo tar -xJf "$node_archive" -C /usr/local/lib/nodejs
+    sudo ln -sfn "${node_install_dir}/bin/node" /usr/local/bin/node
+    sudo ln -sfn "${node_install_dir}/bin/npm" /usr/local/bin/npm
+    sudo ln -sfn "${node_install_dir}/bin/npx" /usr/local/bin/npx
+    sudo ln -sfn "${node_install_dir}/bin/corepack" /usr/local/bin/corepack
+  fi
+  rm -f "$node_archive"
+
   sudo dnf install -y "${RUNTIME_PACKAGES[@]}" "${PUPPETEER_SYSTEM_PACKAGES[@]}" >/dev/null
   sudo npm install -g pm2 >/dev/null
+  npm_prefix="$(npm prefix -g)"
+  sudo ln -sfn "${npm_prefix}/bin/pm2" /usr/local/bin/pm2
+  sudo ln -sfn "${npm_prefix}/bin/pm2-runtime" /usr/local/bin/pm2-runtime
+  sudo ln -sfn "${npm_prefix}/bin/pm2-dev" /usr/local/bin/pm2-dev
 }
 
 validate_puppeteer_runtime() {
@@ -266,6 +291,11 @@ main() {
   download_artifact "$ADMIN_ARTIFACT_S3_URI" "$ADMIN_ROOT"
   download_artifact "$PORTAL_ARTIFACT_S3_URI" "$PORTAL_ROOT"
   download_shared "$SHARED_ARTIFACT_S3_URI" "$SHARED_ROOT"
+  if [ -d "$ADMIN_ROOT/shared" ]; then
+    log "Using the shared runtime bundled with the admin artifact..."
+    sudo rm -rf "$SHARED_ROOT"
+    sudo cp -R "$ADMIN_ROOT/shared" "$SHARED_ROOT"
+  fi
 
   log "Linking portal artifact so admin server can resolve ../ISET-intake/* modules..."
   sudo ln -sfn "$PORTAL_ROOT" "/opt/nwac/ISET-intake"
