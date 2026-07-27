@@ -2,9 +2,32 @@
 
 Purpose: track live PROD data repairs whose affected staff or business owners may need to be informed later.
 Audience: operations, product, support, and future AI-assisted maintenance threads.
-Last Updated: 2026-07-10
+Last Updated: 2026-07-27
 
 Use this log for repairs that may be externally invisible to staff but should be available for later owner communication. Keep entries concise, evidence-based, and linked to the exact scripts or reports where possible. Do not use this file as approval to mutate PROD; follow the PROD repair rules in `docs/ops/agent-operational-access.md`.
+
+## 2026-07-27 - Feedback #166 Financial Overview recovery and v2 withdrawal
+
+Status: PROD record repair applied; prevention fix remains pending release.
+
+Reason: Application Assessment resubmission archived Case `172`'s signed Financial Overview v1 as a side effect of replacing legacy assessment-generated documents. The signed July 6 v1 was restored. Emilie later confirmed that the new v2 request sent to Susa was unnecessary because the signed v1 had been found, while the separate Rent Assist supporting documentation is still required.
+
+Repair applied:
+
+- Restored signed Financial Overview v1 document `5539` to active status.
+- Withdrew Financial Overview version `18`, cancelled signing request `136`, archived unsigned v2 documents `7687` and `7688`, withdrew message `1924` from both mailboxes, redacted its send event, and cancelled automatic reminders `190` and `191`.
+- Left application `103` in `docs_requested` state because the Rent Assist supporting-document request remains outstanding.
+- Left feedback report `#166` `in_progress` pending prevention deployment and targeted live verification.
+
+Evidence:
+
+- Restore artifact: `sql/ops/prod-feedback-166-restore-signed-financial-overview-20260727.sql`; SQL-over-SSM command `e3f65102-4aa8-4d94-a430-0960ea7374f3`.
+- Withdrawal artifact: `sql/ops/prod-feedback-166-withdraw-financial-overview-v2-20260727.sql`; SQL-over-SSM command `67905274-29bd-40de-9898-0d0a586fdae2`.
+- Post-repair verification confirmed document `5539` active, version `18` withdrawn, request `136` cancelled, v2 documents archived, both message copies deleted, reminders cancelled, and application `103` still requesting documents.
+
+Notification note:
+
+- Emilie provided the business direction for this repair. Ardell will tell Susa that she does not need to re-sign the Financial Overview but must still provide the Rent Assist agreement/supporting documentation.
 
 ## 2026-07-10 - Feedback #35 systemic intake-completion prevention
 
