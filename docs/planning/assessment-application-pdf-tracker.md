@@ -30,7 +30,7 @@ Last Updated: 2026-01-04
 - Application PDF should surface in Supporting Documents like other uploaded files.
 - Financial overview PDF should surface in Supporting Documents like other uploaded files.
 - Generating a new application PDF should archive/replace any existing `application_form` document for the application.
-- Generating a new financial overview PDF should archive/replace any existing `financial_overview` document for the application.
+- Generating a new legacy assessment financial-overview PDF archives/replaces only prior unversioned assessment-generated `financial_overview` documents. It must not archive a version-managed, signing-request-linked, or signed Financial Overview.
 - Application PDF should include only application-form fields (no internal notes).
 - Financial overview PDF should include only the household finance fields (monthly budget snapshot).
 - Layout should emulate the paper application form; improvements are allowed.
@@ -59,7 +59,7 @@ Last Updated: 2026-01-04
 - Treat the application PDF as a supporting document.
 - Treat the financial overview PDF as a supporting document.
 - Replace (archive) any existing `application_form` document when generating a new one.
-- Replace (archive) any existing `financial_overview` document when generating a new one.
+- Replace (archive) only legacy unversioned assessment-generated `financial_overview` documents when generating a new one. Version-managed Financial Overviews follow the separate version/signing lifecycle and remain immutable history.
 - Use only application-form fields; follow the paper form layout with allowed refinements.
 - Use only application finance fields; render a dense monthly budget snapshot.
 - English-only PDF output.
@@ -111,4 +111,4 @@ Last Updated: 2026-01-04
 - Uses `application_form` document category and archives prior active application_form docs per application.
 - Added `tmp_financial_overview_template.html` and server-side financial overview PDF helpers (`generateFinancialOverviewPdfBuffer`, `buildFinancialOverviewPdfFields`, `storeFinancialOverviewPdfDocument`).
 - Wired financial overview PDF generation into assessment submission when status moves to `pending_approval`.
-- Uses `financial_overview` document category and archives prior active financial_overview docs per application.
+- Uses `financial_overview` document category and archives only replaceable legacy assessment-generated rows per application. If the case has a version-managed Financial Overview, assessment submission preserves that workflow and skips generation of a competing legacy overview.

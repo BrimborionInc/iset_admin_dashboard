@@ -14,6 +14,10 @@ const {
   PORTAL_RUNTIME_SCHEMA_REQUIREMENTS,
   assertPortalRuntimeSchemaReady,
 } = require('../../ISET-intake/src/services/schemaReadiness');
+const {
+  archiveReplaceableAssessmentFinancialOverviews,
+  shouldPreserveAssessmentFinancialOverview,
+} = require('../src/lib/financialOverviewDocumentPolicy');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 
@@ -75,6 +79,10 @@ async function runRollbackContracts(connection) {
   const importHash = crypto.createHash('sha256').update(`release-import-${suffix}`).digest('hex');
   const identityKey = `rq:${crypto.createHash('sha256').update(suffix).digest('hex')}`;
   const eventId = crypto.randomUUID();
+  const applicantEmail = `release-financial-overview-${suffix}@example.invalid`;
+  const caseNumber = `RQ-FO-${suffix.slice(0, 20)}`;
+  const protectedDocumentPath = `release-qualification/${suffix}/financial-overview-v1-signed.pdf`;
+  const replaceableDocumentPath = `release-qualification/${suffix}/financial-overview-legacy.pdf`;
   let transactionStarted = false;
 
   try {
@@ -137,6 +145,111 @@ async function runRollbackContracts(connection) {
       throw new Error('event_delivery_worker_contract_failed');
     }
 
+    const [applicantResult] = await connection.query(
+      `INSERT INTO user (name, email, preferred_language)
+       VALUES (?, ?, 'en')`,
+      [`Release Financial Overview ${suffix}`, applicantEmail]
+    );
+    const applicantUserId = applicantResult.insertId;
+    const [clientResult] = await connection.query(
+      `INSERT INTO client (first_name, last_name, applicant_account_email)
+       VALUES ('Release', ?, ?)`,
+      [`Financial-${suffix}`, applicantEmail]
+    );
+    const clientId = clientResult.insertId;
+    const [caseResult] = await connection.query(
+      `INSERT INTO iset_case (case_number, client_id, status)
+       VALUES (?, ?, 'intake')`,
+      [caseNumber, clientId]
+    );
+    const caseId = caseResult.insertId;
+    const [applicationResult] = await connection.query(
+      `INSERT INTO iset_application (submission_id, client_id, case_id, status)
+       VALUES (NULL, ?, ?, 'pending_approval')`,
+      [clientId, caseId]
+    );
+    const applicationId = applicationResult.insertId;
+    const [seriesResult] = await connection.query(
+      `INSERT INTO funding_overview_series (case_id, template_key)
+       VALUES (?, 'ISET_FUNDING_OVERVIEW_STANDARD')`,
+      [caseId]
+    );
+    const [versionResult] = await connection.query(
+      `INSERT INTO funding_overview_version
+         (series_id, version_number, status, signed_at, signed_by_participant_id,
+          snapshot_schema_version, metadata_json)
+       VALUES (?, 1, 'signed', NOW(), ?, '1', CAST('{}' AS JSON))`,
+      [seriesResult.insertId, applicantUserId]
+    );
+    const [protectedDocumentResult] = await connection.query(
+      `INSERT INTO iset_document
+         (applicant_user_id, client_id, application_id, case_id, source, file_name,
+          file_path, mime_type, label, metadata, status, document_category)
+       VALUES (?, ?, ?, ?, 'system_generated', 'financial-overview-v1-signed.pdf',
+               ?, 'application/pdf', 'Financial Overview v1 (signed)',
+               CAST(? AS JSON), 'active', 'financial_overview')`,
+      [
+        applicantUserId,
+        clientId,
+        applicationId,
+        caseId,
+        protectedDocumentPath,
+        JSON.stringify({ funding_overview_version_id: versionResult.insertId }),
+      ]
+    );
+    await connection.query(
+      `INSERT INTO funding_overview_version_documents
+         (funding_overview_version_id, document_type, document_id)
+       VALUES (?, 'signed', ?)`,
+      [versionResult.insertId, protectedDocumentResult.insertId]
+    );
+    const [replaceableDocumentResult] = await connection.query(
+      `INSERT INTO iset_document
+         (applicant_user_id, client_id, application_id, case_id, source, file_name,
+          file_path, mime_type, label, metadata, status, document_category)
+       VALUES (?, ?, ?, ?, 'system_generated', 'financial-overview-legacy.pdf',
+               ?, 'application/pdf', 'Financial overview/budget',
+               CAST(? AS JSON), 'active', 'financial_overview')`,
+      [
+        applicantUserId,
+        clientId,
+        applicationId,
+        caseId,
+        replaceableDocumentPath,
+        JSON.stringify({ document_type: 'financial_overview' }),
+      ]
+    );
+
+    const preserveVersionManaged = await shouldPreserveAssessmentFinancialOverview(connection, {
+      caseId,
+      explicitlyPreserve: false,
+    });
+    if (!preserveVersionManaged) {
+      throw new Error('financial_overview_version_preservation_contract_failed');
+    }
+    const archivedCount = await archiveReplaceableAssessmentFinancialOverviews(connection, {
+      applicationId,
+    });
+    if (archivedCount !== 1) {
+      throw new Error(`financial_overview_archive_scope_contract_failed:${archivedCount}`);
+    }
+    const [financialOverviewRows] = await connection.query(
+      `SELECT id, status
+         FROM iset_document
+        WHERE id IN (?, ?)
+        ORDER BY id`,
+      [protectedDocumentResult.insertId, replaceableDocumentResult.insertId]
+    );
+    const statusById = new Map(
+      (financialOverviewRows || []).map(row => [Number(row.id), row.status])
+    );
+    if (
+      statusById.get(Number(protectedDocumentResult.insertId)) !== 'active' ||
+      statusById.get(Number(replaceableDocumentResult.insertId)) !== 'archived'
+    ) {
+      throw new Error('financial_overview_document_status_contract_failed');
+    }
+
     await connection.rollback();
     transactionStarted = false;
   } catch (error) {
@@ -150,6 +263,13 @@ async function runRollbackContracts(connection) {
     identityClaims: await queryScalar(connection, 'SELECT COUNT(*) AS c FROM client_file_import_identity_claim WHERE identity_key = ?', [identityKey]),
     events: await queryScalar(connection, 'SELECT COUNT(*) AS c FROM iset_event_entry WHERE id = ?', [eventId]),
     deliveries: await queryScalar(connection, 'SELECT COUNT(*) AS c FROM iset_event_delivery WHERE event_id = ?', [eventId]),
+    financialOverviewUsers: await queryScalar(connection, 'SELECT COUNT(*) AS c FROM user WHERE email = ?', [applicantEmail]),
+    financialOverviewCases: await queryScalar(connection, 'SELECT COUNT(*) AS c FROM iset_case WHERE case_number = ?', [caseNumber]),
+    financialOverviewDocuments: await queryScalar(
+      connection,
+      'SELECT COUNT(*) AS c FROM iset_document WHERE file_path IN (?, ?)',
+      [protectedDocumentPath, replaceableDocumentPath]
+    ),
   };
   if (Object.values(residue).some(value => value !== 0)) {
     throw new Error(`release_contract_cleanup_incomplete:${JSON.stringify(residue)}`);
@@ -185,6 +305,7 @@ async function main() {
         authenticatedStaffHydration: true,
         importClaimPersistence: true,
         eventDeliveryPersistence: true,
+        financialOverviewVersionPreservation: true,
       },
       requirementCounts: {
         admin: require('../src/lib/adminRuntimeSchemaContract').ADMIN_RUNTIME_SCHEMA_REQUIREMENTS.length,

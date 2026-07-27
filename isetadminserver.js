@@ -170,6 +170,10 @@ const {
 const {
   buildReviewWorkflowCaseNoteBody,
 } = require('./src/lib/reviewWorkflowCaseNotes');
+const {
+  archiveReplaceableAssessmentFinancialOverviews,
+  shouldPreserveAssessmentFinancialOverview,
+} = require('./src/lib/financialOverviewDocumentPolicy');
 
 // Increase default listener cap to avoid noisy warnings when wiring shared buses.
 events.EventEmitter.defaultMaxListeners = 20;
@@ -3115,14 +3119,9 @@ async function storeFinancialOverviewPdfDocument({
     throw new Error('path_resolution_failed');
   }
 
-  await runner.query(
-    `UPDATE iset_document
-        SET status = 'archived', updated_at = NOW()
-      WHERE application_id = ?
-        AND document_category = ?
-        AND status = 'active'`,
-    [applicationId, documentType]
-  );
+  await archiveReplaceableAssessmentFinancialOverviews(runner, {
+    applicationId,
+  });
 
   const metadata = JSON.stringify({ label, document_type: documentType });
   const insertPayload = [
@@ -90033,12 +90032,15 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         body.preserveExistingApplicationFormDocument,
         false
       );
-      const preserveExistingFinancialOverview = parseBooleanFlag(
-        body.assessment_preserve_existing_financial_overview ??
-        body.preserveExistingFinancialOverview ??
-        body.preserveExistingFinancialOverviewDocument,
-        false
-      );
+      const preserveExistingFinancialOverview = await shouldPreserveAssessmentFinancialOverview(conn, {
+        caseId,
+        explicitlyPreserve: parseBooleanFlag(
+          body.assessment_preserve_existing_financial_overview ??
+          body.preserveExistingFinancialOverview ??
+          body.preserveExistingFinancialOverviewDocument,
+          false
+        ),
+      });
 
       const applicantContext = await fetchAssessmentApplicantContext({
         applicationId: documentCaseRow.application_id,
@@ -90752,12 +90754,15 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       body.preserveExistingApplicationFormDocument,
       false
     );
-    const preserveExistingFinancialOverview = parseBooleanFlag(
-      body.assessment_preserve_existing_financial_overview ??
-      body.preserveExistingFinancialOverview ??
-      body.preserveExistingFinancialOverviewDocument,
-      false
-    );
+    const preserveExistingFinancialOverview = await shouldPreserveAssessmentFinancialOverview(pool, {
+      caseId,
+      explicitlyPreserve: parseBooleanFlag(
+        body.assessment_preserve_existing_financial_overview ??
+        body.preserveExistingFinancialOverview ??
+        body.preserveExistingFinancialOverviewDocument,
+        false
+      ),
+    });
     const assessmentHasApplicationId = Boolean(normalisePositiveInteger(caseRow?.application_id));
     const shouldGenerateAssessmentPdf =
       assessmentSubmitted &&

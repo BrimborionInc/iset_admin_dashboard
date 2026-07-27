@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-07-23
+Last Updated: 2026-07-27
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-07-27 | Release 20260727-financial-overview-preservation | Fix/Application Assessment | Signed Financial Overview preservation | Submitting or resubmitting an Application Assessment no longer hides a signed or version-managed Financial Overview from Supporting Documents. | The assessment flow still replaces its own legacy unversioned budget snapshot when applicable; Financial Overview revisions continue through the explicit version/signing workflow.
 - 2026-07-23 | Release 20260723-end-of-day-r4 | Fix/Casework | Existing intervention Paid from | Existing interventions now reopen with their own saved Internal/NWAC or External/PTMA `Paid from` value instead of being reset to the parent Action Plan's value. | New interventions still inherit the parent Action Plan as their starting value; no existing intervention data repair is required.
 - 2026-07-22 | Release 20260723-end-of-day-r4 | Fix/Approvals | Intervention revisions | Intervention revisions with a blank review-level EI value prefill it from the same parent Action Plan's structured EI claimant category. | This covers manually imported/backloaded revision files; new intervention proposals still require a fresh EI selection, and the Decision Maker can review or change the prefilled value before submitting the decision.
 - 2026-07-19 | Release TBD | Fix/Casework | Regional Manager reassignment | Regional Managers can reassign an accessible client file to any active staff member, including staff outside their own region. | The change preserves existing case-access controls while removing the target-region restriction that prevented reassignment to another Regional Manager.
@@ -470,10 +471,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Signed and version-managed Financial Overviews now remain available when an Application Assessment is submitted again.
 - Existing interventions now reopen with their own saved Internal/NWAC or External/PTMA `Paid from` value.
 - Intervention revisions with a blank review-level EI value now prefill it from the same Action Plan for Decision Maker review.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260727-financial-overview-preservation
+
+- Submitting or resubmitting an Application Assessment no longer hides signed or version-managed Financial Overviews from Supporting Documents.
+- Financial Overview revisions continue through the dedicated version and participant-signature workflow.
 
 #### Release 20260723-end-of-day-r4
 
@@ -485,23 +492,22 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Regional Managers can now reassign a client file they can access to any active casework staff member, regardless of the assignee's region.
 - Existing client-file access rules remain unchanged, and inactive staff cannot be selected as assignees.
 
-#### Release 20260713-client-monthly-attendance-final-test
-
-- Added the Client Monthly Attendance Report to the digital forms that case managers can attach to secure messages.
-- PATH pre-fills available participant, institution, and program details while keeping them editable for correction.
-- Participants report absences through progressively added rows, with date pickers restricted to the selected reporting month and supporting documentation required when absences are reported.
-- Completed reports use the NWAC form layout, including a proper absence table and the participant's electronic signature.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
+- Les apercus financiers signes et geres par version restent maintenant disponibles lorsqu'une evaluation de demande est soumise de nouveau.
 - Les interventions existantes conservent maintenant leur valeur enregistree « Paye par » Interne/AFAC ou Externe/PTMA lorsqu'elles sont rouvertes.
 - Pour une revision d'intervention sans valeur d'AE au niveau de l'examen, PATH reprend maintenant la valeur du meme plan d'action afin que la personne decisionnaire puisse la verifier.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260727-financial-overview-preservation
+
+- La soumission ou la nouvelle soumission d'une evaluation de demande ne masque plus les apercus financiers signes ou geres par version dans les documents justificatifs.
+- Les revisions d'un apercu financier continuent de suivre le processus distinct de gestion des versions et de signature de la participante ou du participant.
 
 #### Release 20260723-end-of-day-r4
 
@@ -512,13 +518,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Les gestionnaires regionaux peuvent maintenant reattribuer un dossier client auquel ils ont acces a toute personne active affectee au travail de cas, quelle que soit la region de cette personne.
 - Les regles existantes d'acces aux dossiers clients restent inchangees et les membres du personnel inactifs ne peuvent pas etre selectionnes.
-
-#### Release 20260713-client-monthly-attendance-final-test
-
-- Ajout du Rapport mensuel de presence du client aux formulaires numeriques que les gestionnaires de cas peuvent joindre aux messages securises.
-- PATH pre-remplit les renseignements disponibles sur la participante ou le participant, l'etablissement et le programme, tout en permettant de les corriger.
-- Les absences sont saisies dans des rangees ajoutees au besoin; les calendriers sont limites au mois de declaration selectionne et une piece justificative est requise lorsque des absences sont declarees.
-- Le rapport rempli reprend la presentation du formulaire de l'AFAC, y compris un tableau des absences et la signature electronique de la participante ou du participant.
 
 ### Problemes connus (brouillon - FR)
 
