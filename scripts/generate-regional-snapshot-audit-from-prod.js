@@ -1,21 +1,48 @@
 #!/usr/bin/env node
 
+const fs = require('fs');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const {
   createExecutor,
   extractProdData,
+  applyManualAdjustments,
 } = require('./generate-regional-snapshot-from-prod');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-const OUTPUT_PATH = path.join(
+const DEFAULT_OUTPUT_PATH = path.join(
   REPO_ROOT,
   'docs/data/temp/regional-snapshot-approved-applications-funded-clients-fy-2026-27.xlsx'
 );
-const SNAPSHOT_PATH = path.join(
+const DEFAULT_SNAPSHOT_PATH = path.join(
   REPO_ROOT,
   'docs/data/temp/regional-snapshot-all-regions-fy-2026-27-new-rules-2026-07-27.xlsx'
 );
+
+function parseArgs(argv) {
+  const result = {
+    output: DEFAULT_OUTPUT_PATH,
+    snapshot: DEFAULT_SNAPSHOT_PATH,
+    manualAdjustments: null,
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === '--output') result.output = path.resolve(argv[++index]);
+    else if (token === '--snapshot') result.snapshot = path.resolve(argv[++index]);
+    else if (token === '--manual-adjustments') {
+      result.manualAdjustments = path.resolve(argv[++index]);
+    } else if (token === '--help' || token === '-h') {
+      process.stdout.write(
+        'Usage: node scripts/generate-regional-snapshot-audit-from-prod.js ' +
+        '[--output PATH] [--snapshot PATH] [--manual-adjustments PATH]\n'
+      );
+      process.exit(0);
+    } else {
+      throw new Error(`Unknown argument: ${token}`);
+    }
+  }
+  return result;
+}
 
 const BORDER = {
   top: { style: 'thin', color: { argb: 'FFD5D9E0' } },
@@ -134,7 +161,7 @@ function writeProvinceSheet(worksheet, report) {
     'Case',
     'Client',
     'Client ID',
-    'Reporting Date(s)',
+    'Reporting Date(s) / Manual Basis',
     'Funded This Period?',
     'CRF Funding',
     'EI Funding',
@@ -174,7 +201,7 @@ function writeProvinceSheet(worksheet, report) {
     worksheet,
     fundedTitleRow,
     `Funded Clients (${fundedClients.length})`,
-    8
+    9
   );
   const fundedHeaderRow = fundedTitleRow + 1;
   [
@@ -186,6 +213,7 @@ function writeProvinceSheet(worksheet, report) {
     'CRF Funding',
     'EI Funding',
     'Total Funding',
+    'Manual Adjustment Basis',
   ].forEach((header, index) => {
     worksheet.getCell(fundedHeaderRow, index + 1).value = header;
   });
@@ -203,6 +231,7 @@ function writeProvinceSheet(worksheet, report) {
         entry.crfFundingAmount,
         entry.eiFundingAmount,
         entry.totalFundingAmount,
+        entry.manualAdjustmentBasis || '',
       ];
       applyDataRow(row);
       [6, 7, 8].forEach(column => {
@@ -210,14 +239,110 @@ function writeProvinceSheet(worksheet, report) {
       });
     });
   } else {
-    writeEmptyRow(worksheet, fundedStartRow, 8, 'No funded clients contribute to this period.');
+    writeEmptyRow(worksheet, fundedStartRow, 9, 'No funded clients contribute to this period.');
   }
   autoFit(worksheet);
 }
 
-async function verifyAgainstSnapshotWorkbook(reports) {
+function normalizeClientName(value) {
+  return String(value || '').trim().toLocaleLowerCase('en-CA');
+}
+
+function applyManualAuditAdjustments(reports, payload) {
+  const reportsByRegion = new Map(
+    reports.map(report => [String(report.region.code).toUpperCase(), report])
+  );
+  const adjustments = Array.isArray(payload?.adjustments) ? payload.adjustments : [];
+
+  adjustments.forEach(adjustment => {
+    const regionCode = String(adjustment.region || '').trim().toUpperCase();
+    const report = reportsByRegion.get(regionCode);
+    if (!report) throw new Error(`Manual audit adjustment has unknown region ${regionCode}.`);
+
+    const names = [adjustment.client, ...(adjustment.aliases || [])]
+      .map(normalizeClientName)
+      .filter(Boolean);
+    const matchesClient = entry => names.includes(normalizeClientName(entry.clientName));
+    const crfFundingAmount = roundCurrency(adjustment.crfFunding);
+    const eiFundingAmount = roundCurrency(adjustment.eiFunding);
+    const totalFundingAmount = roundCurrency(crfFundingAmount + eiFundingAmount);
+    const basis = String(adjustment.basis || 'Manual adjustment');
+
+    if (Number(adjustment.approvedApplications || 0) === 1) {
+      report.auditDetails.approvedApplications.push({
+        applicationReference: `Manual adjustment — ${adjustment.client}`,
+        applicationId: null,
+        caseReference: '',
+        clientName: adjustment.client,
+        clientId: null,
+        reportingDates: [basis],
+        fundedClient: totalFundingAmount > 0,
+        crfFundingAmount,
+        eiFundingAmount,
+        totalFundingAmount,
+      });
+    } else if (totalFundingAmount > 0) {
+      const approvedEntry = report.auditDetails.approvedApplications.find(matchesClient);
+      if (!approvedEntry) {
+        throw new Error(
+          `Manual funding for ${adjustment.client} has no approved application row to merge.`
+        );
+      }
+      approvedEntry.crfFundingAmount = roundCurrency(
+        Number(approvedEntry.crfFundingAmount || 0) + crfFundingAmount
+      );
+      approvedEntry.eiFundingAmount = roundCurrency(
+        Number(approvedEntry.eiFundingAmount || 0) + eiFundingAmount
+      );
+      approvedEntry.totalFundingAmount = roundCurrency(
+        approvedEntry.crfFundingAmount + approvedEntry.eiFundingAmount
+      );
+      approvedEntry.reportingDates = [...approvedEntry.reportingDates, basis];
+    }
+
+    if (Number(adjustment.fundedClients || 0) === 1) {
+      report.auditDetails.fundedClients.push({
+        clientName: adjustment.client,
+        clientId: null,
+        applicationReferences: [`Manual adjustment — ${adjustment.client}`],
+        caseReferences: [],
+        fundingOccurrenceCount: 'Manual adjustment',
+        crfFundingAmount,
+        eiFundingAmount,
+        totalFundingAmount,
+        manualAdjustmentBasis: basis,
+      });
+    } else if (totalFundingAmount > 0) {
+      const fundedEntry = report.auditDetails.fundedClients.find(matchesClient);
+      if (!fundedEntry) {
+        throw new Error(
+          `Manual funding for ${adjustment.client} has no funded-client row to merge.`
+        );
+      }
+      fundedEntry.crfFundingAmount = roundCurrency(
+        Number(fundedEntry.crfFundingAmount || 0) + crfFundingAmount
+      );
+      fundedEntry.eiFundingAmount = roundCurrency(
+        Number(fundedEntry.eiFundingAmount || 0) + eiFundingAmount
+      );
+      fundedEntry.totalFundingAmount = roundCurrency(
+        fundedEntry.crfFundingAmount + fundedEntry.eiFundingAmount
+      );
+      fundedEntry.fundingOccurrenceCount =
+        `${fundedEntry.fundingOccurrenceCount} + manual adjustment`;
+      fundedEntry.manualAdjustmentBasis = [
+        fundedEntry.manualAdjustmentBasis,
+        basis,
+      ].filter(Boolean).join(' | ');
+    }
+  });
+
+  return applyManualAdjustments(reports, payload);
+}
+
+async function verifyAgainstSnapshotWorkbook(reports, snapshotPath) {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(SNAPSHOT_PATH);
+  await workbook.xlsx.readFile(snapshotPath);
   const summary = workbook.getWorksheet('Summary');
   const summaryByCode = new Map();
   for (let rowIndex = 5; rowIndex < 5 + reports.length; rowIndex += 1) {
@@ -270,6 +395,7 @@ async function verifyAgainstSnapshotWorkbook(reports) {
 }
 
 async function main() {
+  const args = parseArgs(process.argv.slice(2));
   const options = {
     fiscalYearStart: 2026,
     periodType: 'year',
@@ -298,7 +424,7 @@ async function main() {
   const { buildRegionalSnapshotPayload } = require('../isetadminserver');
   const executor = createExecutor(data);
   const regions = data.__REGIONS__.filter(region => region.code !== 'XX');
-  const reports = [];
+  let reports = [];
   for (const region of regions) {
     reports.push(await buildRegionalSnapshotPayload({
       regionId: Number(region.region_id),
@@ -311,7 +437,14 @@ async function main() {
   }
   dependencyStore.clearAppFactoryTestDependencies();
 
-  await verifyAgainstSnapshotWorkbook(reports);
+  if (args.manualAdjustments) {
+    const manualAdjustmentPayload = JSON.parse(
+      fs.readFileSync(args.manualAdjustments, 'utf8')
+    );
+    reports = applyManualAuditAdjustments(reports, manualAdjustmentPayload);
+  }
+
+  await verifyAgainstSnapshotWorkbook(reports, args.snapshot);
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'PATH';
@@ -321,9 +454,12 @@ async function main() {
     const worksheet = workbook.addWorksheet(report.region.name.slice(0, 31));
     writeProvinceSheet(worksheet, report);
   });
-  await workbook.xlsx.writeFile(OUTPUT_PATH);
+  fs.mkdirSync(path.dirname(args.output), { recursive: true });
+  await workbook.xlsx.writeFile(args.output);
   process.stdout.write(`${JSON.stringify({
-    output: OUTPUT_PATH,
+    output: args.output,
+    snapshot: args.snapshot,
+    manualAdjustments: args.manualAdjustments,
     provinces: reports.map(report => ({
       code: report.region.code,
       approvedApplications: report.auditDetails.approvedApplications.length,

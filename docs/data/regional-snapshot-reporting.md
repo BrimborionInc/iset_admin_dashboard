@@ -197,6 +197,11 @@ Current PROD data reality verified 2026-07-27:
   It has one tab per province/territory with separate, reconciling Approved Applications and
   unique Funded Clients tables. The supporting detail is opt-in for the offline generator and is
   not exposed by the normal Regional Snapshot API response.
+- `scripts/generate-regional-snapshot-audit-from-prod.js` accepts `--snapshot`,
+  `--manual-adjustments`, and `--output` so a helper workbook can be generated against the same
+  manual-adjusted report. It adds explicit manual application/client rows, merges funding-only
+  adjustments such as Kaitlyn Kitson's into the existing automated row, and fails if the helper
+  does not reconcile to the supplied report workbook province by province.
 - The generated workbook excludes the incomplete manual population. After the guarded 2026-07-27
   PROD action-plan provenance backfills, archived-record correction, confirmed original-draft
   rule, and approved-new-proposal classification described below, the current read-only PROD
