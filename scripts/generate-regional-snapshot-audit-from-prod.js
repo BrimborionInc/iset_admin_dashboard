@@ -330,6 +330,12 @@ function applyManualAuditAdjustments(reports, payload) {
       );
       fundedEntry.fundingOccurrenceCount =
         `${fundedEntry.fundingOccurrenceCount} + manual adjustment`;
+      if (Number(adjustment.approvedApplications || 0) === 1) {
+        fundedEntry.applicationReferences = Array.from(new Set([
+          ...(fundedEntry.applicationReferences || []),
+          `Manual adjustment — ${adjustment.client}`,
+        ]));
+      }
       fundedEntry.manualAdjustmentBasis = [
         fundedEntry.manualAdjustmentBasis,
         basis,

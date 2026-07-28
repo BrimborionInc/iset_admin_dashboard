@@ -109,6 +109,11 @@ Agreed starting definition:
   source interventions without making activation a reporting requirement.
 - Only positive approved funding qualifies. A zero-dollar or negative funding line contributes neither a funded client nor a CRF/EI amount; an invalid negative approved-funding value should be emitted as a data-quality issue.
 - Section C is client-centric: deduplicate a client to one `Funded Clients` count per reporting period across all of their applications, interventions, and qualifying funding occurrences, while summing every qualifying occurrence into the CRF/EI amount rows.
+- Application lineage is not a prerequisite for Section C. If a non-manual intervention has a
+  valid positive approved funding schedule and a known participant/province, include its
+  qualifying occurrences and deduplicate the participant normally even when PATH cannot resolve
+  the application link. Keep the intervention out of Section B application activity and emit a
+  data-quality issue describing the missing or conflicting link.
 - Intervention duration does not make a client funded in every period through which the intervention runs.
 - Allocate each approved funding-line occurrence only to the reporting period containing its payment due date.
 - Example: a 12-month Diploma spanning two fiscal years, with the full tuition payment scheduled at the intervention start in the first fiscal year, contributes one funded client and the full tuition amount to the first fiscal year only.
@@ -186,7 +191,10 @@ Current PROD data reality verified 2026-07-27:
 
 - The deployed implementation replaces the separate submission-date Client Activity query and approval-date Financial Reports reuse with one shared Regional Snapshot calculation path.
 - Application-backed interventions and standalone proposals contribute their scheduled approved-funding occurrence dates or intervention start dates to application-period membership. Application received date is used only when the application has no dated intervention/proposal.
-- Application-less manual interventions are excluded from both automated sections. No case-proximity or single-application inference is used.
+- Explicit manual-backload/application-less manual interventions are excluded from both automated
+  sections and handled only through the reviewed offline overlay. Other non-manual interventions
+  without usable application lineage remain excluded from Section B but contribute valid approved
+  funding to Section C. No case-proximity or single-application inference is used.
 - Section C expands embedded approved cost-line recurrence schedules, allocates each positive occurrence to its due-date period, deduplicates clients, and derives the client average from displayed CRF + EI totals.
 - The API payload now includes `dataQualityIssues` and a calculation note identifying the temporary manual-record exclusion. The dashboard shows an expandable warning table when issues exist. The all-regions Excel Summary always includes a Data Quality Issues table, including an explicit no-issues row when none apply.
 - `scripts/generate-regional-snapshot-from-prod.js` executes the pending calculation code against a read-only, narrowly scoped PROD extraction and generates the same workbook shape without deploying code or changing PROD data.
@@ -327,6 +335,31 @@ Current PROD data reality verified 2026-07-27:
   application counts, funded-client counts, and CRF/EI totals unchanged. The remaining rows are
   two genuinely missing BC application links (interventions `11` and `37`) and the two indirect
   links on Kaitlyn's mixed-plan interventions `219` and `290`.
+
+### Application-lineage funding correction (prepared 2026-07-28)
+
+- Review of Sarah Froese's remaining missing-link rows showed that intervention `11` is an
+  approved/in-progress FY 2026-27 Diploma intervention with positive approved cost lines. The
+  prior reporting safeguard excluded the entire intervention when it could not resolve an
+  application, incorrectly suppressing valid client-centric Section C funding.
+- Section C now evaluates valid non-manual approved funding independently of application
+  lineage. Section B still fails closed: an unlinked intervention does not create or change an
+  application count. Missing/conflicting lineage remains visible as a data-quality issue.
+- Sarah's approved cost lines total `$8,116.40`; the intervention header records `$8,116.00`.
+  The report uses the itemized approved lines and adds a separate 40-cent mismatch warning.
+  Her Employment Counselling intervention is zero-funded.
+- The complete offline overlay no longer adds a second funded-client count for Sarah because
+  automated Section C now counts her once. It still adds her client-supplied `$4,200.00` in
+  FY 2026/27 transactions and the manual Section B application/approval adjustment.
+- Kaitlyn Kitson is not affected by this omission. Her approved active intervention `219`
+  already contributes `$4,885.00`; draft intervention `290` is a pending amendment cloned from
+  `219` and remains correctly excluded to prevent duplicate funding. Its indirect-link warning
+  is a lineage-cleanup issue, not omitted funding.
+- The refreshed complete manual-adjusted report retains 211 applications and 37 funded clients.
+  CRF increases by `$8,116.40` to `$159,912.17`; EI remains `$125,926.02`. The Data Quality
+  Issues table now has five rows: Sarah's two missing-link records, her 40-cent header/line
+  mismatch, and Kaitlyn's two indirect-link records.
+- This correction is implemented and tested locally but is not yet deployed to PATH.
 
 ## What is not stored here
 

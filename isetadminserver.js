@@ -32112,8 +32112,14 @@ function buildRegionalSnapshotInterventionFacts(
   } = {}
 ) {
   const applicationId = normalisePositiveInteger(row?.resolved_application_id ?? row?.application_id);
-  if (!applicationId || !application) return null;
+  if (applicationId && !application) return null;
   const clientId = normalisePositiveInteger(row?.client_id);
+  const caseId = normalisePositiveInteger(row?.case_id);
+  const clientName =
+    application?.clientName ||
+    [normaliseString(row?.client_first_name), normaliseString(row?.client_last_name)]
+      .filter(Boolean)
+      .join(' ');
   const startDate = toDateOnly(row?.start_date);
   const { metadata, rawCostLines } = readRegionalSnapshotCostLines(row);
   const normalizedLines = rawCostLines
@@ -32315,6 +32321,9 @@ function buildRegionalSnapshotInterventionFacts(
       `proposal-${normalisePositiveInteger(row?.proposal_id) || 'unknown'}`,
     applicationId,
     clientId,
+    caseId,
+    clientName,
+    caseReference: normaliseString(row?.case_number) || null,
     startDate,
     activityDates: Array.from(new Set(activityDates)),
     approvedNewInterventionProposal:
@@ -32351,6 +32360,7 @@ async function readRegionalSnapshotCalculatedMetrics(
     dataQualityIssues: [],
     calculationNotes: {
       applicationlessManualRecordsExcluded: true,
+      applicationLineageDoesNotSuppressFunding: true,
     },
   };
   const runner = executor || pool;
@@ -32559,6 +32569,25 @@ async function readRegionalSnapshotCalculatedMetrics(
     const dataQualityIssues = [];
     let excludedManualRecordCount = 0;
     let unresolvedApplicationLineageCount = 0;
+    const appendApplicationlessFundingFacts = resolvedRow => {
+      const facts = buildRegionalSnapshotInterventionFacts({
+        ...resolvedRow,
+        resolved_application_id: null,
+        application_id: null,
+      }, null, {
+        recurrencePolicyByType,
+        submissionTimingByType,
+      });
+      if (!facts) return;
+      normalizedInterventions.push(facts);
+      dataQualityIssues.push(...facts.dataQualityIssues);
+    };
+    const isApplicationlessManualRow = row => {
+      const { metadata } = readRegionalSnapshotCostLines(row);
+      const payload = safeJsonParse(row?.payload_json, null) || {};
+      const actionPlanMetadata = safeJsonParse(row?.action_plan_metadata_json, null) || {};
+      return isExplicitManualReportingRecord({ metadata, payload, actionPlanMetadata });
+    };
 
     [...(interventionRows || []), ...(proposalRows || [])].forEach(row => {
       const lineage = resolveReportingApplicationLineage({
@@ -32585,24 +32614,26 @@ async function readRegionalSnapshotCalculatedMetrics(
       if (lineage.conflict || lineageCaseMismatch) {
         const rowProvince = normaliseReportingProvinceCode(buildRegionalSnapshotProvince(row));
         if (!matchesReportingProvinceFilter(rowProvince, provinceCodes)) return;
+        if (isApplicationlessManualRow(row)) {
+          excludedManualRecordCount += 1;
+          return;
+        }
         unresolvedApplicationLineageCount += 1;
         dataQualityIssues.push(
           buildRegionalSnapshotDataQualityIssue(resolvedRow, null, {
             issueType: 'conflicting_application_lineage',
             includeInEveryPeriod: true,
             reportingEffect:
-              'Excluded this intervention because its authoritative application links conflict.',
+              'Excluded this intervention from application activity; included any valid approved funding in Section C.',
             remediation:
-              'Reconcile the action plan, proposal, and ESDC application links before issuing the report.',
+              'Reconcile the action plan, proposal, and ESDC application links.',
           })
         );
+        appendApplicationlessFundingFacts(resolvedRow);
         return;
       }
       if (!application) {
-        const { metadata } = readRegionalSnapshotCostLines(row);
-        const payload = safeJsonParse(row?.payload_json, null) || {};
-        const actionPlanMetadata = safeJsonParse(row?.action_plan_metadata_json, null) || {};
-        if (isExplicitManualReportingRecord({ metadata, payload, actionPlanMetadata })) {
+        if (isApplicationlessManualRow(row)) {
           excludedManualRecordCount += 1;
           return;
         }
@@ -32614,11 +32645,12 @@ async function readRegionalSnapshotCalculatedMetrics(
             issueType: 'missing_application_lineage',
             includeInEveryPeriod: true,
             reportingEffect:
-              'Excluded this non-manual intervention because PATH cannot attribute it to an application without guessing.',
+              'Excluded this intervention from application activity; included any valid approved funding in Section C.',
             remediation:
-              'Restore the action plan or proposal application link from authoritative provenance before issuing the report.',
+              'Restore the action plan or proposal application link from authoritative provenance.',
           })
         );
+        appendApplicationlessFundingFacts(resolvedRow);
         return;
       }
       if (!matchesReportingProvinceFilter(application.province, provinceCodes)) return;
@@ -32669,6 +32701,7 @@ async function readRegionalSnapshotCalculatedMetrics(
       ...calculated,
       calculationNotes: {
         applicationlessManualRecordsExcluded: true,
+        applicationLineageDoesNotSuppressFunding: true,
         excludedManualRecordCount,
         unresolvedApplicationLineageCount,
       },

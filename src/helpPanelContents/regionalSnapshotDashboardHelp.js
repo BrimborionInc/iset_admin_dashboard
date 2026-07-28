@@ -15,6 +15,7 @@ const RegionalSnapshotDashboardHelp = () => (
       <li>Approved, denied/ineligible/withdrawn/NC, and pending rows always partition the same Applications Received total using each application's current outcome.</li>
       <li>CRF/EI funding is assigned to the period in which each positive approved funding occurrence is due. Recurring funding is split across its scheduled periods.</li>
       <li>Funded clients are shown with the funding metrics because they are a unique participant count, not an application-status bucket.</li>
+      <li>Valid approved funding remains in the funding totals when an application link needs correction; the affected intervention stays out of application activity and is flagged for review.</li>
       <li>Coordinator salary is pulled from the Salaries dashboard, with saved operating values shown beside it.</li>
       <li>Calculated totals and ratios based on the saved amounts and live funded-client count.</li>
       <li>Compliance flag and comments or recommendations for the selected reporting window.</li>
@@ -45,8 +46,11 @@ that Client Activity assigns applications to periods using intervention start da
 approved-funding due dates, falling back to the received date only when no dated intervention exists. The current
 application outcome partitions Applications Received into approved, denied/ineligible/withdrawn/NC, and pending
 rows. Funded clients are unique participants with a positive approved funding occurrence due in the period.
-CRF/EI amounts allocate one-time and recurring approved funding occurrences to their scheduled due periods. Coordinator
-salary is a live value from the Salaries dashboard, while operating, compliance, and comments fields are saved
+CRF/EI amounts allocate one-time and recurring approved funding occurrences to their scheduled due periods.
+Application lineage controls Section B attribution but does not suppress valid non-manual Section C funding;
+missing or conflicting links remain visible as data-quality issues. Explicit manual-backload records remain
+outside the live calculation and require a reviewed manual adjustment. Coordinator salary is a live value from
+the Salaries dashboard, while operating, compliance, and comments fields are saved
 report inputs that admins can edit. Note that totals and ratios are calculated automatically from the live and
 saved inputs and funded-client count. Explain records needing attention in plain English, using the
 participant, application, intervention type, reporting treatment, and corrective action shown in the table.

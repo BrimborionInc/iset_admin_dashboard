@@ -51,7 +51,8 @@ const buildRegionalSnapshotIssueExplanation = ({
   if (issueType === 'missing_application_lineage') {
     return (
       'PATH cannot determine which application this intervention belongs to. ' +
-      'The intervention was excluded from this report; link the action plan or proposal to the correct application.'
+      'It was excluded from application activity, but any valid approved funding remains included in Section C. ' +
+      'Link the action plan or proposal to the correct application.'
     );
   }
   if (issueType === 'indirect_application_lineage') {
@@ -64,7 +65,8 @@ const buildRegionalSnapshotIssueExplanation = ({
   if (issueType === 'conflicting_application_lineage') {
     return (
       'Related PATH records point this intervention to different applications. ' +
-      'The intervention was excluded from this report; correct the conflicting application links before issuing the report.'
+      'It was excluded from application activity, but any valid approved funding remains included in Section C. ' +
+      'Correct the conflicting application links.'
     );
   }
   if (issueType === 'active_funding_on_denied_or_withdrawn_application') {
@@ -334,7 +336,7 @@ function calculateRegionalSnapshotMetrics({
 
   interventions.forEach(intervention => {
     const applicationId = resolveInterventionApplicationId(intervention);
-    if (!applicationId || !applicationById.has(applicationId)) return;
+    const application = applicationId ? applicationById.get(applicationId) : null;
     const qualifyingOccurrences = (Array.isArray(intervention?.fundingOccurrences)
       ? intervention.fundingOccurrences
       : [])
@@ -346,15 +348,20 @@ function calculateRegionalSnapshotMetrics({
 
     fundedInterventionCount += 1;
     const clientId = Number(intervention?.clientId ?? intervention?.client_id);
+    const caseId = Number(intervention?.caseId ?? intervention?.case_id);
     const clientKey =
       Number.isFinite(clientId) && clientId > 0
         ? `client-${clientId}`
-        : `application-${applicationId}`;
+        : Number.isFinite(caseId) && caseId > 0
+          ? `case-${caseId}`
+          : applicationId
+            ? `application-${applicationId}`
+            : `intervention-${intervention?.id || fundedInterventionCount}`;
     fundedClientKeys.add(clientKey);
     if (includeAuditDetails && !fundedClientAudit.has(clientKey)) {
       fundedClientAudit.set(clientKey, {
         clientId: Number.isFinite(clientId) && clientId > 0 ? clientId : null,
-        clientName: applicationById.get(applicationId)?.clientName || '',
+        clientName: application?.clientName || intervention?.clientName || '',
         applicationReferences: new Set(),
         caseReferences: new Set(),
         occurrenceCount: 0,
@@ -372,23 +379,25 @@ function calculateRegionalSnapshotMetrics({
         crfFundingAmount += amount;
       }
       if (includeAuditDetails) {
-        const applicationAudit = applicationFundingAudit.get(applicationId) || {
-          occurrenceCount: 0,
-          crfFundingAmount: 0,
-          eiFundingAmount: 0,
-        };
-        applicationAudit.occurrenceCount += 1;
-        if (isEi) applicationAudit.eiFundingAmount += amount;
-        else applicationAudit.crfFundingAmount += amount;
-        applicationFundingAudit.set(applicationId, applicationAudit);
+        if (applicationId && application) {
+          const applicationAudit = applicationFundingAudit.get(applicationId) || {
+            occurrenceCount: 0,
+            crfFundingAmount: 0,
+            eiFundingAmount: 0,
+          };
+          applicationAudit.occurrenceCount += 1;
+          if (isEi) applicationAudit.eiFundingAmount += amount;
+          else applicationAudit.crfFundingAmount += amount;
+          applicationFundingAudit.set(applicationId, applicationAudit);
+        }
 
         const clientAudit = fundedClientAudit.get(clientKey);
-        const application = applicationById.get(applicationId);
         clientAudit.occurrenceCount += 1;
         if (isEi) clientAudit.eiFundingAmount += amount;
         else clientAudit.crfFundingAmount += amount;
         if (application?.reference) clientAudit.applicationReferences.add(application.reference);
-        if (application?.caseReference) clientAudit.caseReferences.add(application.caseReference);
+        const caseReference = application?.caseReference || intervention?.caseReference;
+        if (caseReference) clientAudit.caseReferences.add(caseReference);
       }
     });
   });

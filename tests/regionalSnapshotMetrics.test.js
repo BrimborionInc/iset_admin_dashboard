@@ -42,7 +42,7 @@ describe('regionalSnapshotMetrics', () => {
       buildRegionalSnapshotIssueExplanation({
         issueType: 'missing_application_lineage',
       })
-    ).toContain('excluded from this report');
+    ).toContain('valid approved funding remains included in Section C');
   });
 
   it('combines funding issue effects and corrective action into readable text', () => {
@@ -223,18 +223,40 @@ describe('regionalSnapshotMetrics', () => {
     });
   });
 
-  it('ignores application-less interventions in both sections', () => {
+  it('keeps application-less interventions out of application activity but includes valid funding', () => {
     const result = calculateRegionalSnapshotMetrics({
-      applications: [application({ submittedAt: '2026-05-10' })],
+      applications: [],
       interventions: [
-        intervention({ applicationId: null }),
+        intervention({
+          applicationId: null,
+          clientName: 'Sarah Froese',
+          fundingOccurrences: [
+            { date: '2026-07-13', amount: 5316.4, fundingSource: 'CRF' },
+            { date: '2026-07-13', amount: 1400, fundingSource: 'CRF' },
+            { date: '2026-08-13', amount: 1400, fundingSource: 'CRF' },
+          ],
+        }),
       ],
-      periodStart: '2026-05-01',
-      periodEnd: '2026-05-31',
+      periodStart: '2026-04-01',
+      periodEnd: '2027-03-31',
+      includeAuditDetails: true,
     });
 
-    expect(result.liveMetrics.applicationsReceived).toBe(1);
-    expect(result.fundingMetrics.fundedClientCount).toBe(0);
+    expect(result.liveMetrics.applicationsReceived).toBe(0);
+    expect(result.fundingMetrics).toEqual({
+      crfFundingAmount: 8116.4,
+      eiFundingAmount: 0,
+      fundedClientCount: 1,
+      fundedInterventionCount: 1,
+    });
+    expect(result.auditDetails.approvedApplications).toEqual([]);
+    expect(result.auditDetails.fundedClients).toEqual([
+      expect.objectContaining({
+        clientName: 'Sarah Froese',
+        applicationReferences: [],
+        crfFundingAmount: 8116.4,
+      }),
+    ]);
   });
 
   it('filters dated data-quality issues to the selected period', () => {
