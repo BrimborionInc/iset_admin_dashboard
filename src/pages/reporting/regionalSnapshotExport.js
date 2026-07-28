@@ -332,16 +332,17 @@ const writeSummaryWorksheet = (worksheet, reports, meta = {}) => {
   const issues = reports.flatMap(report =>
     (Array.isArray(report?.dataQualityIssues) ? report.dataQualityIssues : []).map(issue => ({
       region: issue?.region || report?.region?.code || report?.region?.name || "",
+      participantName: issue?.participantName || "",
       applicationReference: issue?.applicationReference || "",
-      caseReference: issue?.caseReference || "",
-      interventionReference: issue?.interventionReference || "",
-      issueType: issue?.issueType || "",
-      reportingEffect: issue?.reportingEffect || "",
-      remediation: issue?.remediation || "",
+      interventionName: issue?.interventionName || "",
+      explanation:
+        issue?.explanation ||
+        [issue?.reportingEffect, issue?.remediation].filter(Boolean).join(" ") ||
+        "Review this record.",
     }))
   );
   const issueTitleRowIndex = totalRowIndex + 3;
-  worksheet.mergeCells(issueTitleRowIndex, 1, issueTitleRowIndex, 7);
+  worksheet.mergeCells(issueTitleRowIndex, 1, issueTitleRowIndex, 8);
   const issueTitleCell = worksheet.getCell(issueTitleRowIndex, 1);
   issueTitleCell.value = "Data Quality Issues";
   issueTitleCell.fill = SECTION_FILL;
@@ -350,32 +351,34 @@ const writeSummaryWorksheet = (worksheet, reports, meta = {}) => {
 
   const issueHeaders = [
     "Region",
+    "Participant",
     "Application",
-    "Case",
     "Intervention",
-    "Issue Type",
-    "Reporting Effect / Fallback",
-    "Remediation",
+    "What this means",
   ];
   const issueHeaderRow = worksheet.getRow(issueTitleRowIndex + 1);
-  issueHeaders.forEach((header, index) => {
+  issueHeaders.slice(0, 4).forEach((header, index) => {
     const cell = issueHeaderRow.getCell(index + 1);
     cell.value = header;
     cell.fill = SECTION_FILL;
     cell.border = BORDER_STYLE;
     cell.font = { name: "Aptos", size: 11, bold: true };
   });
+  worksheet.mergeCells(issueTitleRowIndex + 1, 5, issueTitleRowIndex + 1, 8);
+  const explanationHeaderCell = issueHeaderRow.getCell(5);
+  explanationHeaderCell.value = issueHeaders[4];
+  explanationHeaderCell.fill = SECTION_FILL;
+  explanationHeaderCell.border = BORDER_STYLE;
+  explanationHeaderCell.font = { name: "Aptos", size: 11, bold: true };
   if (issues.length) {
     issues.forEach((issue, issueIndex) => {
-      const row = worksheet.getRow(issueTitleRowIndex + 2 + issueIndex);
+      const rowIndex = issueTitleRowIndex + 2 + issueIndex;
+      const row = worksheet.getRow(rowIndex);
       [
         issue.region,
+        issue.participantName,
         issue.applicationReference,
-        issue.caseReference,
-        issue.interventionReference,
-        String(issue.issueType).replace(/_/g, " "),
-        issue.reportingEffect,
-        issue.remediation,
+        issue.interventionName,
       ].forEach((value, index) => {
         const cell = row.getCell(index + 1);
         cell.value = value;
@@ -383,10 +386,16 @@ const writeSummaryWorksheet = (worksheet, reports, meta = {}) => {
         cell.font = { name: "Aptos", size: 11 };
         cell.alignment = { vertical: "top", wrapText: true };
       });
+      worksheet.mergeCells(rowIndex, 5, rowIndex, 8);
+      const explanationCell = row.getCell(5);
+      explanationCell.value = issue.explanation;
+      explanationCell.border = BORDER_STYLE;
+      explanationCell.font = { name: "Aptos", size: 11 };
+      explanationCell.alignment = { vertical: "top", wrapText: true };
     });
   } else {
     const emptyRowIndex = issueTitleRowIndex + 2;
-    worksheet.mergeCells(emptyRowIndex, 1, emptyRowIndex, 7);
+    worksheet.mergeCells(emptyRowIndex, 1, emptyRowIndex, 8);
     const emptyCell = worksheet.getCell(emptyRowIndex, 1);
     emptyCell.value = "No data quality issues identified for this reporting period.";
     emptyCell.border = BORDER_STYLE;

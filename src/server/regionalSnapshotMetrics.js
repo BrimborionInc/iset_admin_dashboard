@@ -30,6 +30,71 @@ const normalizeStatus = value =>
     .toLowerCase()
     .replace(/[\s-]+/g, '_');
 
+const stripTerminalPunctuation = value =>
+  String(value || '').trim().replace(/[.;:\s]+$/g, '');
+
+const lowerFirst = value => {
+  const text = String(value || '').trim();
+  return text ? `${text.charAt(0).toLowerCase()}${text.slice(1)}` : '';
+};
+
+const buildRegionalSnapshotIssueExplanation = ({
+  issueType,
+  applicationReference,
+  reportingEffect,
+  remediation,
+} = {}) => {
+  const application = String(applicationReference || '').trim();
+  const effect = stripTerminalPunctuation(reportingEffect);
+  const action = stripTerminalPunctuation(remediation);
+
+  if (issueType === 'missing_application_lineage') {
+    return (
+      'PATH cannot determine which application this intervention belongs to. ' +
+      'The intervention was excluded from this report; link the action plan or proposal to the correct application.'
+    );
+  }
+  if (issueType === 'indirect_application_lineage') {
+    return (
+      'The action plan is not directly linked to an application, although related PATH records ' +
+      `agree that it belongs to ${application || 'the application shown here'}. ` +
+      'The report used that verified connection; add the missing direct link to clean up the record.'
+    );
+  }
+  if (issueType === 'conflicting_application_lineage') {
+    return (
+      'Related PATH records point this intervention to different applications. ' +
+      'The intervention was excluded from this report; correct the conflicting application links before issuing the report.'
+    );
+  }
+  if (issueType === 'active_funding_on_denied_or_withdrawn_application') {
+    return (
+      'This application is denied or withdrawn, but its intervention still has an active approved funding schedule. ' +
+      'The report included that funding; confirm it remains approved or cancel the superseded schedule.'
+    );
+  }
+
+  const introductionByType = {
+    negative_funding_line: 'A funding line has a negative amount.',
+    unusable_funding_line_schedule: 'PATH could not build a usable payment schedule from one funding line.',
+    unknown_funding_source: 'PATH does not identify whether this funding belongs to CRF or EI.',
+    missing_funding_due_date: 'A funding line does not have a usable payment due date.',
+    missing_approved_funding_lines:
+      'This intervention has an approved amount but no itemized approved funding lines.',
+    approved_amount_cost_line_mismatch:
+      'The intervention total does not match the sum of its approved funding lines.',
+  };
+  const introduction =
+    introductionByType[issueType] ||
+    'PATH found incomplete or inconsistent information that affects this report.';
+  const detailParts = [];
+  if (effect) detailParts.push(`The report ${lowerFirst(effect)}`);
+  if (action) detailParts.push(`to correct this, ${lowerFirst(action)}`);
+  return detailParts.length
+    ? `${introduction} ${detailParts.join('; ')}.`
+    : introduction;
+};
+
 const isExplicitManualReportingRecord = ({
   metadata = {},
   payload = {},
@@ -407,6 +472,7 @@ function calculateRegionalSnapshotMetrics({
 }
 
 module.exports = {
+  buildRegionalSnapshotIssueExplanation,
   calculateRegionalSnapshotMetrics,
   classifyApplicationOutcome,
   isExplicitManualReportingRecord,

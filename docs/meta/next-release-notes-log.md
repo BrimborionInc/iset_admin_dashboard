@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-07-27
+Last Updated: 2026-07-28
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-07-28 | Release TBD | UX/Reporting | Regional Snapshot data-quality issues | Data-quality warnings now identify the participant, application, and intervention type and explain the problem and required correction in plain English. | The dashboard and Excel summary no longer expose case references or intervention database IDs in this table; reporting totals are unchanged.
 - 2026-07-27 | Release 20260727-regional-snapshot-financial-overview | Fix/Application Assessment | Signed Financial Overview preservation | Submitting or resubmitting an Application Assessment no longer hides a signed or version-managed Financial Overview from Supporting Documents. | The assessment flow still replaces its own legacy unversioned budget snapshot when applicable; Financial Overview revisions continue through the explicit version/signing workflow.
 - 2026-07-27 | Release TBD | Reporting/Local export | Regional Snapshot manual adjustments | The pre-deployment workbook generator can apply an explicit reviewed JSON overlay for manual intervention records that cannot yet be calculated from application-linked PATH data. | The current partial overlay covers 21 clients, leaves nine outstanding clients excluded and visibly disclosed, and does not update PROD data.
 - 2026-07-27 | Release 20260727-regional-snapshot-financial-overview | Fix/Reporting | Approved intervention proposals | An approved new-intervention proposal now makes its linked application an Approved Application in Regional Snapshot reporting, including while applicant documents are still awaited. | The application remains counted only once per reporting period; revisions do not create extra applications, and a current withdrawal or denial still takes precedence.

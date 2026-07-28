@@ -125,7 +125,11 @@ Agreed starting definition:
 - Regional Snapshot needs an explicit data-quality issue collection in the API/report payload. Show those issues in the PATH dashboard and include them on the exported all-regions Excel Summary sheet so assumptions such as missing funding lines or defaulted CRF classification are visible rather than silent.
 - Dashboard presentation: show a compact warning/count with an expandable issue table rather than mixing warnings into the report totals.
 - Excel presentation: add a separate `Data Quality Issues` table below the regional totals on the all-regions Summary sheet.
-- Issue rows should be actionable without unnecessarily exposing participant names: include region, application/case reference, intervention reference, issue type, reporting effect/fallback applied, and a concise remediation message.
+- Issue rows should be understandable to a report reader without database knowledge. Show region,
+  participant name, application reference, and the intervention's business name/type. Do not show
+  the case reference or intervention database ID. Present the problem, its reporting treatment,
+  and the corrective action as one short plain-English explanation rather than separate technical
+  issue/effect/remediation columns.
 
 ### Temporary manual-participant boundary
 

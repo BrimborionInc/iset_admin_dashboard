@@ -49,29 +49,27 @@ const EDITOR_ROLES = new Set(["System Administrator", "NWAC Administrator"]);
 
 const DATA_QUALITY_COLUMN_DEFINITIONS = [
   {
+    id: "participant",
+    header: "Participant",
+    cell: item => item.participantName || "—",
+  },
+  {
     id: "application",
-    header: "Application / case",
-    cell: item => [item.applicationReference, item.caseReference].filter(Boolean).join(" · ") || "—",
+    header: "Application",
+    cell: item => item.applicationReference || "—",
   },
   {
     id: "intervention",
     header: "Intervention",
-    cell: item => item.interventionReference || "—",
+    cell: item => item.interventionName || "—",
   },
   {
-    id: "issue",
-    header: "Issue",
-    cell: item => String(item.issueType || "Data quality").replace(/_/g, " "),
-  },
-  {
-    id: "effect",
-    header: "Reporting effect",
-    cell: item => item.reportingEffect || "—",
-  },
-  {
-    id: "remediation",
-    header: "Remediation",
-    cell: item => item.remediation || "—",
+    id: "explanation",
+    header: "What this means",
+    cell: item =>
+      item.explanation ||
+      [item.reportingEffect, item.remediation].filter(Boolean).join(" ") ||
+      "Review this record.",
   },
 ];
 
@@ -1114,7 +1112,7 @@ const RegionalSnapshotDashboard = () => {
                   dataQualityIssues.length === 1 ? "issue affects" : "issues affect"
                 } this snapshot`}
               >
-                <ExpandableSection headerText="Review reporting fallbacks">
+                <ExpandableSection headerText="Review records that need attention">
                   <Table
                     variant="embedded"
                     columnDefinitions={DATA_QUALITY_COLUMN_DEFINITIONS}

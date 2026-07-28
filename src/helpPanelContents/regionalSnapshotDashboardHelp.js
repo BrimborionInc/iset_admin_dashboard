@@ -18,7 +18,7 @@ const RegionalSnapshotDashboardHelp = () => (
       <li>Coordinator salary is pulled from the Salaries dashboard, with saved operating values shown beside it.</li>
       <li>Calculated totals and ratios based on the saved amounts and live funded-client count.</li>
       <li>Compliance flag and comments or recommendations for the selected reporting window.</li>
-      <li>Any reporting fallback or incomplete scheduling data in the selected period appears in an expandable data-quality warning.</li>
+      <li>Any record needing attention appears in an expandable table showing the participant, application, intervention type, and a plain-English explanation.</li>
     </ul>
 
     <h3>Filters</h3>
@@ -48,7 +48,8 @@ rows. Funded clients are unique participants with a positive approved funding oc
 CRF/EI amounts allocate one-time and recurring approved funding occurrences to their scheduled due periods. Coordinator
 salary is a live value from the Salaries dashboard, while operating, compliance, and comments fields are saved
 report inputs that admins can edit. Note that totals and ratios are calculated automatically from the live and
-saved inputs and funded-client count. Explain data-quality warnings as visible fallbacks that need correction.
+saved inputs and funded-client count. Explain records needing attention in plain English, using the
+participant, application, intervention type, reporting treatment, and corrective action shown in the table.
 Do not describe funded clients as part of the Client Activity status breakdown.
 `;
 

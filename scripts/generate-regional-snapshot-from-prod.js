@@ -264,6 +264,8 @@ LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id;
 SELECT '__INTERVENTIONS__' AS marker;
 SELECT ${encode(`JSON_OBJECT(
   'intervention_id', ci.id,
+  'intervention_code', ci.intervention_code,
+  'intervention_type_label', ic.label,
   'case_id', ci.case_id,
   'action_plan_id', ci.action_plan_id,
   'status', ci.status,
@@ -277,6 +279,8 @@ SELECT ${encode(`JSON_OBJECT(
   'metadata_json', ci.metadata_json,
   'client_id', c.client_id,
   'case_number', c.case_number,
+  'client_first_name', cl.first_name,
+  'client_last_name', cl.last_name,
   'client_address_province', COALESCE(
     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.province')), ''),
     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.provinceCode')), ''),
@@ -301,6 +305,7 @@ SELECT ${encode(`JSON_OBJECT(
 FROM iset_case_intervention ci
 JOIN iset_case c ON c.id = ci.case_id
 LEFT JOIN client cl ON cl.id = c.client_id
+LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
 LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
 LEFT JOIN esdc_participant_submission eps ON eps.action_plan_id = ap.id
 LEFT JOIN (
@@ -326,6 +331,8 @@ SELECT '__PROPOSALS__' AS marker;
 SELECT ${encode(`JSON_OBJECT(
   'intervention_id', NULL,
   'proposal_id', p.id,
+  'intervention_code', p.intervention_code,
+  'intervention_type_label', ic.label,
   'case_id', p.case_id,
   'action_plan_id', p.action_plan_id,
   'status', p.review_status,
@@ -341,6 +348,8 @@ SELECT ${encode(`JSON_OBJECT(
   'metadata_json', p.metadata_json,
   'client_id', c.client_id,
   'case_number', c.case_number,
+  'client_first_name', cl.first_name,
+  'client_last_name', cl.last_name,
   'client_address_province', COALESCE(
     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.province')), ''),
     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.provinceCode')), ''),
@@ -364,6 +373,7 @@ SELECT ${encode(`JSON_OBJECT(
 FROM iset_intervention_proposal p
 JOIN iset_case c ON c.id = p.case_id
 LEFT JOIN client cl ON cl.id = c.client_id
+LEFT JOIN esdc_intervention_code ic ON ic.code = p.intervention_code
 LEFT JOIN iset_case_action_plan ap ON ap.id = p.action_plan_id
 LEFT JOIN esdc_participant_submission eps ON eps.action_plan_id = ap.id
 LEFT JOIN (

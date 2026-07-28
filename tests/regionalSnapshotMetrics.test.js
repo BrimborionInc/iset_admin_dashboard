@@ -1,4 +1,5 @@
 const {
+  buildRegionalSnapshotIssueExplanation,
   calculateRegionalSnapshotMetrics,
   classifyApplicationOutcome,
   isExplicitManualReportingRecord,
@@ -26,6 +27,37 @@ const intervention = (overrides = {}) => ({
 });
 
 describe('regionalSnapshotMetrics', () => {
+  it('explains application-link issues in plain English', () => {
+    expect(
+      buildRegionalSnapshotIssueExplanation({
+        issueType: 'indirect_application_lineage',
+        applicationReference: 'APP-123',
+      })
+    ).toBe(
+      'The action plan is not directly linked to an application, although related PATH records ' +
+      'agree that it belongs to APP-123. The report used that verified connection; add the missing ' +
+      'direct link to clean up the record.'
+    );
+    expect(
+      buildRegionalSnapshotIssueExplanation({
+        issueType: 'missing_application_lineage',
+      })
+    ).toContain('excluded from this report');
+  });
+
+  it('combines funding issue effects and corrective action into readable text', () => {
+    expect(
+      buildRegionalSnapshotIssueExplanation({
+        issueType: 'unknown_funding_source',
+        reportingEffect: 'Included the approved amount in CRF by default.',
+        remediation: 'Assign the approved line to CRF or EI.',
+      })
+    ).toBe(
+      'PATH does not identify whether this funding belongs to CRF or EI. ' +
+      'The report included the approved amount in CRF by default; to correct this, assign the approved line to CRF or EI.'
+    );
+  });
+
   it('uses intervention reporting dates instead of the application submission date', () => {
     const march = calculateRegionalSnapshotMetrics({
       applications: [application()],

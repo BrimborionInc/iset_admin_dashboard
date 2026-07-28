@@ -112,6 +112,7 @@ const {
   resolveWatchColumn,
 } = require('./src/server/caseWatchRepository');
 const {
+  buildRegionalSnapshotIssueExplanation,
   calculateRegionalSnapshotMetrics,
   classifyApplicationOutcome,
   isExplicitManualReportingRecord,
@@ -32030,12 +32031,43 @@ function resolveRegionalSnapshotInterventionReference(row) {
   return 'Intervention unavailable';
 }
 
+function resolveRegionalSnapshotInterventionName(row) {
+  const { metadata } = readRegionalSnapshotCostLines(row);
+  const payload = safeJsonParse(row?.payload_json, null) || {};
+  const candidates = [
+    row?.intervention_type_label,
+    metadata?.title,
+    metadata?.name,
+    metadata?.interventionType,
+    metadata?.intervention_type,
+    payload?.title,
+    payload?.name,
+    payload?.interventionType,
+    payload?.intervention_type,
+  ];
+  for (const candidate of candidates) {
+    const label = normaliseString(candidate);
+    if (label) return label;
+  }
+  const code = normalisePositiveInteger(row?.intervention_code);
+  return code ? `Intervention type ${code}` : 'Intervention type unavailable';
+}
+
 function buildRegionalSnapshotDataQualityIssue(row, application, issue) {
   const applicationId = normalisePositiveInteger(
     row?.resolved_application_id ??
     row?.application_id ??
     application?.id
   );
+  const applicationReference =
+    application?.reference ||
+    (applicationId ? `Application ${applicationId}` : 'Application unavailable');
+  const participantName =
+    application?.clientName ||
+    [normaliseString(row?.client_first_name), normaliseString(row?.client_last_name)]
+      .filter(Boolean)
+      .join(' ') ||
+    'Participant unavailable';
   return {
     id: [
       issue.issueType,
@@ -32048,16 +32080,22 @@ function buildRegionalSnapshotDataQualityIssue(row, application, issue) {
       application?.province ||
       normaliseReportingProvinceCode(buildRegionalSnapshotProvince(row)) ||
       'Unknown',
-    applicationReference:
-      application?.reference ||
-      (applicationId ? `Application ${applicationId}` : 'Application unavailable'),
+    participantName,
+    applicationReference,
     caseReference:
       normaliseString(row?.case_number) ||
       (normalisePositiveInteger(row?.case_id) ? `Case ${row.case_id}` : 'Case unavailable'),
     interventionReference: resolveRegionalSnapshotInterventionReference(row),
+    interventionName: resolveRegionalSnapshotInterventionName(row),
     issueType: issue.issueType,
     reportingEffect: issue.reportingEffect,
     remediation: issue.remediation,
+    explanation: buildRegionalSnapshotIssueExplanation({
+      issueType: issue.issueType,
+      applicationReference,
+      reportingEffect: issue.reportingEffect,
+      remediation: issue.remediation,
+    }),
     reportingDate: issue.reportingDate || null,
     fallbackDate: issue.fallbackDate || null,
     interventionStartDate: toDateOnly(row?.start_date) || null,
@@ -32356,6 +32394,8 @@ async function readRegionalSnapshotCalculatedMetrics(
         `
         SELECT
           ci.id AS intervention_id,
+          ci.intervention_code,
+          ic.label AS intervention_type_label,
           ci.case_id,
           ci.action_plan_id,
           ci.status,
@@ -32369,6 +32409,8 @@ async function readRegionalSnapshotCalculatedMetrics(
           ci.metadata_json,
           c.client_id,
           c.case_number,
+          cl.first_name AS client_first_name,
+          cl.last_name AS client_last_name,
           ${clientProvinceExpr} AS client_address_province,
           ap.application_id AS action_plan_application_id,
           ap.status AS action_plan_status,
@@ -32387,6 +32429,7 @@ async function readRegionalSnapshotCalculatedMetrics(
         FROM iset_case_intervention ci
         JOIN iset_case c ON c.id = ci.case_id
         LEFT JOIN client cl ON cl.id = c.client_id
+        LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
         LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
         LEFT JOIN esdc_participant_submission eps ON eps.action_plan_id = ap.id
         LEFT JOIN (
@@ -32414,6 +32457,8 @@ async function readRegionalSnapshotCalculatedMetrics(
         SELECT
           NULL AS intervention_id,
           p.id AS proposal_id,
+          p.intervention_code,
+          ic.label AS intervention_type_label,
           p.case_id,
           p.action_plan_id,
           p.review_status AS status,
@@ -32429,6 +32474,8 @@ async function readRegionalSnapshotCalculatedMetrics(
           p.metadata_json,
           c.client_id,
           c.case_number,
+          cl.first_name AS client_first_name,
+          cl.last_name AS client_last_name,
           ${clientProvinceExpr} AS client_address_province,
           ap.application_id AS action_plan_application_id,
           ap.status AS action_plan_status,
@@ -32446,6 +32493,7 @@ async function readRegionalSnapshotCalculatedMetrics(
         FROM iset_intervention_proposal p
         JOIN iset_case c ON c.id = p.case_id
         LEFT JOIN client cl ON cl.id = c.client_id
+        LEFT JOIN esdc_intervention_code ic ON ic.code = p.intervention_code
         LEFT JOIN iset_case_action_plan ap ON ap.id = p.action_plan_id
         LEFT JOIN esdc_participant_submission eps ON eps.action_plan_id = ap.id
         LEFT JOIN (

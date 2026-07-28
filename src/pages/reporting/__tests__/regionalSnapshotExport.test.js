@@ -46,12 +46,17 @@ describe("regionalSnapshotExport", () => {
           dataQualityIssues: [
             {
               region: "TR",
+              participantName: "Test Participant",
               applicationReference: "APP-1",
               caseReference: "CASE-1",
               interventionReference: "Intervention 11",
+              interventionName: "Occupational skills training – diploma",
               issueType: "unknown_funding_source",
               reportingEffect: "Included the approved amount in CRF by default.",
               remediation: "Assign the approved line to CRF or EI.",
+              explanation:
+                "PATH does not identify whether this funding belongs to CRF or EI. " +
+                "The report included the approved amount in CRF by default; assign the approved line to CRF or EI.",
             },
           ],
         },
@@ -67,9 +72,13 @@ describe("regionalSnapshotExport", () => {
     expect(summary.getCell("Q6").value).toEqual({ formula: 'IF(I6=0,"",O6/I6)' });
     expect(summary.getCell("R6").value).toEqual({ formula: 'IF(L6=0,"",O6/L6)' });
     expect(summary.getCell("A9").value).toBe("Data Quality Issues");
-    expect(summary.getCell("E10").value).toBe("Issue Type");
+    expect(summary.getCell("E10").value).toBe("What this means");
     expect(summary.getCell("A11").value).toBe("TR");
-    expect(summary.getCell("E11").value).toBe("unknown funding source");
+    expect(summary.getCell("B11").value).toBe("Test Participant");
+    expect(summary.getCell("C11").value).toBe("APP-1");
+    expect(summary.getCell("D11").value).toBe("Occupational skills training – diploma");
+    expect(summary.getCell("E11").value).toContain("PATH does not identify");
+    expect(summary.getCell("E10").isMerged).toBe(true);
 
     const regionalSheet = workbook.getWorksheet("Test Region");
     expect(regionalSheet.getCell("D6").value).toBe("Approved Applications");
