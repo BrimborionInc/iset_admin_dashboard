@@ -28,9 +28,10 @@ Current saved fields:
 ## Current live metric basis
 
 - Region filtering uses participant home province / territory, matching Financial Reports rather than case portfolio assignment.
-- Current deployed behavior: Client Activity is an application workflow breakdown for applications submitted during the selected period. Applications received, approved applications, denied / ineligible / withdrawn / NC, and pending / no decision share the same submitted-in-period denominator.
-- CRF/EI funding and funded-client count reuse the Financial Reports approved-funding basis: approved CRF/EI intervention rows in the selected period, excluding zero-dollar rows for funded-client totals.
-- Funded Clients appears with the funding metrics rather than in Client Activity because it is a unique participant count from the approved-funding basis, not an application-status bucket.
+- Current deployed behavior assigns applications and approved funding to periods using the intervention/payment-schedule rules documented below. Application received date is only the fallback when no intervention date can be derived.
+- Client Activity outcome rows partition the same reporting-period application population and therefore reconcile to Applications Received.
+- Section C allocates positive approved funding occurrences by due date, deduplicates Funded Clients by participant and period, and derives the client average from the displayed CRF/EI totals.
+- The manually entered, application-less historical population remains outside the automated calculation and is incorporated only by an explicit offline manual-adjustment overlay.
 
 ## Agreed Section B Client Activity requirements (2026-07-27)
 
@@ -71,8 +72,8 @@ Agreed business rule for the target report:
 - Use the current amended intervention and payment-schedule facts. An amendment that adds funding, changes scheduled payment/recurrence dates, or changes an intervention start date can add, remove, or move the application between reporting periods.
 - This requirement applies to both the PATH Regional Snapshot dashboard and its Excel export.
 
-This is not current deployed behavior. The implementation currently selects applications by
-`iset_application_submission.submitted_at`.
+This behavior was deployed to TEST and PROD in release
+`20260727-regional-snapshot-financial-overview` on 2026-07-27.
 
 Open requirements that must be resolved before implementation:
 
@@ -130,12 +131,12 @@ Agreed starting definition:
 
 - The reconciled review population is 32 manually entered intervention rows covering 30 clients.
 - Exclude that application-less manual population from the new automated Section B and Section C calculations for now.
-- This is a deliberate temporary reporting boundary, not evidence that the records are irrelevant. The client will provide the missing reporting information later.
-- Incorporate that population through a separately specified manual-adjustment overlay, using the existing reserved `iset_regional_snapshot_report.manual_inputs_json` field or a refined replacement contract once the adjustment requirements are known.
-- Until that overlay is defined, do not infer application attribution or scheduled funding for these records from case proximity, dates, or unrelated applications on the same case.
-- On 2026-07-27 the client supplied partial information for 21 named participants; information
-  for the remaining nine clients is still outstanding. The source is preserved locally as
-  `docs/data/temp/regional-snapshot-manual-source-2026-07-27.json`.
+- This is a deliberate temporary reporting boundary, not evidence that the records are irrelevant. The client has now supplied the FY 2026-27 payout information needed for the offline overlay.
+- Incorporate that population only through the explicit offline manual-adjustment overlay documented below. The live dashboard does not currently apply this overlay.
+- Do not infer application attribution or scheduled funding for these records from case proximity, dates, or unrelated applications on the same case.
+- The client supplied information for all 30 named clients across 2026-07-27 and 2026-07-28.
+  The reconciled source is preserved locally as
+  `docs/data/temp/regional-snapshot-manual-source-complete-2026-07-28.json`.
 - For this one-off manual adjustment only, the leading transaction date controls when a note also
   names a different service month. For example, `May 8: Apr. LA` is assigned to May 2026.
   This does not replace the automated report's general scheduled-due-date rule.
@@ -152,16 +153,23 @@ Agreed starting definition:
   approval, or funded-client count.
 - Joanna Nevers' $500 immunization approval falls within the Apr.-Jun. 2026 renewal and is
   distinct from the dated $100 internet payout, so her manual funding adjustment is $600 EI.
-- The partial interpreted overlay is
-  `docs/data/temp/regional-snapshot-manual-adjustments-partial-2026-07-27.json`. It applies
-  adjustments for 14 clients with positive in-period funding, records seven supplied no-payout
-  clients as zero adjustments, and leaves the nine outstanding clients completely unadjusted.
-  Funding is assigned to CRF or EI from the matching PATH intervention funding source.
+- The complete interpreted overlay is
+  `docs/data/temp/regional-snapshot-manual-adjustments-complete-2026-07-28.json`. It applies
+  funding adjustments for 19 clients, records 11 no-payout clients as zero adjustments, and has
+  no outstanding clients. Funding is assigned to CRF or EI from the matching PATH intervention
+  funding source.
+- The complete overlay adds 18 applications, 18 approved applications, 18 funded clients,
+  $19,744.27 CRF, and $51,502.63 EI. Kaitlyn Kitson is the one positive-funding adjustment that
+  adds funding only because her application, approval, and funded-client count already exist in
+  the automated report.
+- The nine records completed on 2026-07-28 add five applications/approvals/funded clients:
+  Chrystal Loucks ($2,000 CRF), Jaida Duclos ($5,381.15 CRF), Shalaine Mezzo ($6,400 EI),
+  Allison Moores ($2,000 EI), and Candace Stone ($4,000 EI). Madison Lightning-Swampy,
+  Madison Bouvier-Morin, Tanisha Gardypie, and Glennis Tony have no FY 2026-27 payouts and
+  therefore add no manual counts.
 
-This is not current deployed behavior. Regional Snapshot currently reuses Financial Reports'
-approved-funding basis, which assigns funded interventions to periods by approval date and can
-place the whole approved intervention amount in one period rather than distributing scheduled
-payment occurrences.
+This behavior was deployed to TEST and PROD in release
+`20260727-regional-snapshot-financial-overview` on 2026-07-27.
 
 Current PROD data reality verified 2026-07-27:
 
@@ -170,9 +178,9 @@ Current PROD data reality verified 2026-07-27:
 - Of 52 interventions with a positive `approved_amount`, `budget_amount`, or `intervention_cost`, 51 have at least one embedded cost line. One `manual_backload` intervention has a positive amount but an empty cost-line array.
 - The workflow/data model therefore does permit a positive approved/budgeted intervention without usable approved funding lines. Section C needs an explicit fallback rule for that case.
 
-## DEV implementation status (2026-07-27)
+## Implementation and release status (2026-07-28)
 
-- The pending DEV implementation replaces the separate submission-date Client Activity query and approval-date Financial Reports reuse with one shared Regional Snapshot calculation path.
+- The deployed implementation replaces the separate submission-date Client Activity query and approval-date Financial Reports reuse with one shared Regional Snapshot calculation path.
 - Application-backed interventions and standalone proposals contribute their scheduled approved-funding occurrence dates or intervention start dates to application-period membership. Application received date is used only when the application has no dated intervention/proposal.
 - Application-less manual interventions are excluded from both automated sections. No case-proximity or single-application inference is used.
 - Section C expands embedded approved cost-line recurrence schedules, allocates each positive occurrence to its due-date period, deduplicates clients, and derives the client average from displayed CRF + EI totals.
@@ -197,11 +205,18 @@ Current PROD data reality verified 2026-07-27:
   $74,423.39 EI. British Columbia now reconciles at 21 applications: 2 approved, 13
   denied/ineligible/withdrawn/NC, and 6 pending; Kaitlyn Kitson's linked application is one of
   the two approved applications and one of the two funded clients.
-- The partial-adjustment workbook is
+- The historical partial-adjustment workbook is
   `docs/data/temp/regional-snapshot-all-regions-fy-2026-27-partial-manual-adjustments-2026-07-27.xlsx`.
   Its current totals are 202 applications received (32 approved,
   84 denied/ineligible/withdrawn/NC, 86 pending), 32 funded clients, $144,414.62 CRF, and
   $113,526.02 EI. The nine outstanding clients remain excluded.
+- The complete-adjustment workbook generated from a fresh read-only PROD extraction on
+  2026-07-28 is
+  `docs/data/temp/regional-snapshot-all-regions-fy-2026-27-complete-manual-adjustments-2026-07-28.xlsx`.
+  It reports 211 applications received (37 approved, 84 denied/ineligible/withdrawn/NC,
+  90 pending), 37 funded clients, $151,795.77 CRF, and $125,926.02 EI. The increase of four
+  pending applications relative to the previous day's workbook comes from new live PATH data,
+  not from the manual overlay.
 - A broader read-only PROD integrity sweep is implemented in
   `scripts/audit-regional-snapshot-prod-data.js`; its sensitive local result is
   `docs/data/temp/regional-snapshot-integrity-audit-2026-07-27.json`. The current sweep covered
@@ -233,14 +248,15 @@ Current PROD data reality verified 2026-07-27:
   `docs_requested / awaiting_applicant`; the application has no durable `decision_outcome`.
   PATH's intervention-approval path neither requires nor updates an approved application outcome,
   so the source model can contain an approved/in-progress funded intervention attached to an
-  application that the current Section B classifier calls pending. This is a verified
-  workflow/data-model gap, not a hypothetical edge case. Section C correctly sees Kaitlyn Kitson's
-  $4,885 approved schedule, while Section B currently places the application in Pending. The
-  durable resolution—repair/preserve the application decision or derive approval from authoritative
-  intervention approval—must be settled before treating the current 1-approved/2-funded BC result
-  as final.
+  application whose operational state looks pending. The deployed Regional Snapshot classifier
+  resolves this reporting gap by treating an authoritative approved new-intervention proposal as
+  approval of its linked application, while preserving explicit withdrawn or denied outcomes.
+  Kaitlyn Kitson's application and $4,885 approved schedule therefore reconcile in the approved
+  application and funded-client rows.
 - Focused calculation/export tests, the complete admin aggregate test command, lint, syntax checks, workbook ZIP integrity, and a normal optimized frontend build passed. The build retains the repository's pre-existing hook-warning baseline; strict `CI=true` compilation continues to reject those unrelated existing warnings.
-- This code has not been deployed to PROD. The original exported workbook remains untouched.
+- Release `20260727-regional-snapshot-financial-overview` deployed exact admin commit `a0455e1`
+  to TEST and PROD on 2026-07-27. The offline manual-adjustment artifacts do not modify live PATH
+  data and are not applied by the live dashboard.
 
 ## Historical action-plan provenance repair (PROD, 2026-07-27)
 
