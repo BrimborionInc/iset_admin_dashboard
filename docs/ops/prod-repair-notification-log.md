@@ -2,9 +2,53 @@
 
 Purpose: track live PROD data repairs whose affected staff or business owners may need to be informed later.
 Audience: operations, product, support, and future AI-assisted maintenance threads.
-Last Updated: 2026-07-27
+Last Updated: 2026-07-28
 
 Use this log for repairs that may be externally invisible to staff but should be available for later owner communication. Keep entries concise, evidence-based, and linked to the exact scripts or reports where possible. Do not use this file as approval to mutate PROD; follow the PROD repair rules in `docs/ops/agent-operational-access.md`.
+
+## 2026-07-28 - Regional Snapshot action-plan provenance follow-up
+
+Status: PROD guarded data repair applied and refreshed report verified.
+
+Reason: the FY 2026-27 Regional Snapshot still showed 11 `indirect application lineage`
+warnings across five historical action plans. Four plans had exactly one same-case application
+retained by their proposal and/or ESDC submission records. Action plan `15` was excluded because
+it mixes Kaitlyn Kitson's historical intervention with later renewal work and cannot safely be
+linked wholesale to the renewal application.
+
+Repair applied:
+
+- Linked action plan `27` / case `90` to application `8`.
+- Linked archived auto-assessment plan `29` / case `131` to application `52`.
+- Linked archived auto-assessment plan `32` / case `127` to application `48`.
+- Linked closed manual-backload plan `53` / case `94` to application `12`.
+- Inserted four `data_repair` case events under repair id
+  `prod-regional-snapshot-lineage-backfill-20260728`.
+- Changed no intervention, proposal, funding, status, document, assessment, application, or case
+  value. Action plan `15` remains null pending a proper historical/renewal split.
+
+Evidence:
+
+- Preview artifact:
+  `sql/ops/prod-regional-snapshot-lineage-backfill-preview-20260728.sql`; clean preview SSM
+  command `82e518bb-b81d-4efa-9735-00bf149cf40a` confirmed four targets, four matching
+  same-case applications, no conflicts, and no existing repair events.
+- Apply artifact:
+  `sql/ops/prod-regional-snapshot-lineage-backfill-apply-20260728.sql`; SSM command
+  `0cc2a736-6652-41a4-9822-f3751a4758fc` updated four plans and inserted four audit events.
+- Independent verification command `67b232cf-9064-4aa0-8798-e53655c9932b` confirmed all four
+  exact links, four audit events, zero cross-case links, and action plan `15` still null.
+- Emergency rollback artifact:
+  `sql/ops/prod-regional-snapshot-lineage-backfill-rollback-20260728.sql`.
+- A fresh manual-adjusted export reduced data-quality rows from 13 to 4 while leaving all report
+  counts and funding totals unchanged. The four remaining rows are two genuinely missing
+  application links on BC interventions `11` and `37`, plus two indirect links on Kaitlyn's
+  mixed-plan interventions `219` and `290`.
+
+Notification note:
+
+- No staff action is required. This repair restored internal provenance used by reporting and did
+  not change business outcomes or funding.
 
 ## 2026-07-27 - Solana Henderson Case 41 fiscal-period repair
 

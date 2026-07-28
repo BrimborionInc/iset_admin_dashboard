@@ -302,6 +302,28 @@ Current PROD data reality verified 2026-07-27:
   $4,000.00 EI; both were previously omitted because their historical action plans lacked
   application provenance.
 
+### Follow-up provenance repair (PROD, 2026-07-28)
+
+- A fresh report exposed 11 `indirect_application_lineage` rows across five remaining historical
+  action plans. Four plans had one exact same-case application retained by proposal and/or ESDC
+  submission records.
+- Guarded repair `sql/ops/prod-regional-snapshot-lineage-backfill-apply-20260728.sql` linked
+  plans `27 -> application 8`, `29 -> 52`, `32 -> 48`, and `53 -> 12`, and inserted four
+  `data_repair` case events. No intervention, funding, outcome, status, proposal, assessment,
+  application, or case value changed.
+- Clean preview SSM command `82e518bb-b81d-4efa-9735-00bf149cf40a`, apply command
+  `0cc2a736-6652-41a4-9822-f3751a4758fc`, and independent verification command
+  `67b232cf-9064-4aa0-8798-e53655c9932b` proved the exact links, four audit events, and zero
+  cross-case relationships.
+- Action plan `15` remains deliberately unlinked. It contains Kaitlyn Kitson's historical
+  2025 intervention and later FY 2026-27 renewal work; assigning the whole plan to application
+  `88` would incorrectly attach the historical intervention to the renewal. It requires a
+  separate split/re-home repair.
+- The refreshed manual-adjusted workbook has four data-quality rows instead of 13, with all
+  application counts, funded-client counts, and CRF/EI totals unchanged. The remaining rows are
+  two genuinely missing BC application links (interventions `11` and `37`) and the two indirect
+  links on Kaitlyn's mixed-plan interventions `219` and `290`.
+
 ## What is not stored here
 
 This table should not become a duplicate store for operational PATH data that can be calculated live, such as:
