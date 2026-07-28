@@ -22,8 +22,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
-- 2026-07-28 | Release TBD | UX/Reporting | Regional Snapshot data-quality issues | Data-quality warnings now identify the participant, application, and intervention type and explain the problem and required correction in plain English. | The dashboard and Excel summary no longer expose case references or intervention database IDs in this table; reporting totals are unchanged.
-- 2026-07-28 | Release TBD | Fix/Reporting | Application-less approved funding | Regional Snapshot Section C now includes valid scheduled approved funding even when a non-manual intervention's application link is missing or conflicting. | Application activity remains fail-closed and a plain-English data-quality warning remains visible; explicit manual-backload records still require the reviewed offline overlay.
+- 2026-07-28 | Runtime update | Fix/Public portal | Document uploads and postal code | Applicants can attach saved PDFs to the remaining photo-enabled document fields, and the Canadian postal-code field now opens a text-capable mobile keyboard. | The upload fields retain image/camera eligibility through `image/*`; only the current live workflow 21 runtime row was patched, with a complete rollback copy retained.
+- 2026-07-28 | Release 20260728-regional-snapshot-data-quality-funding | UX/Reporting | Regional Snapshot data-quality issues | Data-quality warnings now identify the participant, application, and intervention type and explain the problem and required correction in plain English. | The dashboard and Excel summary no longer expose case references or intervention database IDs in this table; reporting totals are unchanged.
+- 2026-07-28 | Release 20260728-regional-snapshot-data-quality-funding | Fix/Reporting | Application-less approved funding | Regional Snapshot Section C now includes valid scheduled approved funding even when a non-manual intervention's application link is missing or conflicting. | Application activity remains fail-closed and a plain-English data-quality warning remains visible; explicit manual-backload records still require the reviewed offline overlay.
 - 2026-07-27 | Release 20260727-regional-snapshot-financial-overview | Fix/Application Assessment | Signed Financial Overview preservation | Submitting or resubmitting an Application Assessment no longer hides a signed or version-managed Financial Overview from Supporting Documents. | The assessment flow still replaces its own legacy unversioned budget snapshot when applicable; Financial Overview revisions continue through the explicit version/signing workflow.
 - 2026-07-27 | Release TBD | Reporting/Local export | Regional Snapshot manual adjustments | The pre-deployment workbook generator can apply an explicit reviewed JSON overlay for manual intervention records that cannot yet be calculated from application-linked PATH data. | The current partial overlay covers 21 clients, leaves nine outstanding clients excluded and visibly disclosed, and does not update PROD data.
 - 2026-07-27 | Release 20260727-regional-snapshot-financial-overview | Fix/Reporting | Approved intervention proposals | An approved new-intervention proposal now makes its linked application an Approved Application in Regional Snapshot reporting, including while applicant documents are still awaited. | The application remains counted only once per reporting period; revisions do not create extra applications, and a current withdrawal or denial still takes precedence.
@@ -478,11 +479,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Regional Snapshot reports now assign application and funding totals to intervention start dates and scheduled funding due dates, including recurring funding that crosses reporting periods.
-- Regional Snapshot exports now reconcile application outcomes, show approved scheduled funding by CRF/EI, and identify source-data issues requiring review.
+- Regional Snapshot data-quality issues now identify the participant and intervention in plain English, with a clear explanation of what needs correction.
+- Valid approved funding remains in Regional Snapshot funding totals when an application link is missing or conflicting, while application activity stays excluded until its lineage is corrected.
 - Signed and version-managed Financial Overviews now remain available when an Application Assessment is submitted again.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260728-regional-snapshot-data-quality-funding
+
+- Regional Snapshot data-quality issues now name the participant, application, and intervention type and explain the problem and corrective action in plain English.
+- Section C now retains valid positive approved funding from non-manual interventions when an application link is missing or conflicting. Section B application activity remains excluded until the lineage is corrected, and the report continues to flag the data issue.
 
 #### Release 20260727-regional-snapshot-financial-overview
 
@@ -496,22 +502,22 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Existing interventions now preserve their own saved `Paid from` value when reopened for editing; new interventions still inherit the parent Action Plan as their starting value.
 - Intervention revisions with a blank review-level EI value now prefill it from the same Action Plan's structured EI claimant category. New proposals still require a fresh EI selection.
 
-#### Release 20260719-rm-cross-region-reassignment-r3
-
-- Regional Managers can now reassign a client file they can access to any active casework staff member, regardless of the assignee's region.
-- Existing client-file access rules remain unchanged, and inactive staff cannot be selected as assignees.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Les rapports d'instantane regional attribuent maintenant les demandes et le financement aux dates de debut des interventions et aux dates prevues de versement, y compris le financement recurrent qui chevauche plusieurs periodes.
-- Les exportations d'instantane regional rapprochent maintenant les resultats des demandes, presentent le financement approuve prevu par CRF/AE et signalent les problemes de donnees sources a examiner.
+- Les problèmes de qualité des données de l'instantané régional indiquent maintenant la participante ou le participant et l'intervention en langage clair, avec une explication précise de la correction requise.
+- Le financement approuvé valide reste dans les totaux de financement de l'instantané régional lorsqu'un lien de demande est absent ou contradictoire; l'activité de la demande reste exclue jusqu'à la correction de sa filiation.
 - Les apercus financiers signes et geres par version restent maintenant disponibles lorsqu'une evaluation de demande est soumise de nouveau.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260728-regional-snapshot-data-quality-funding
+
+- Les problèmes de qualité des données de l'instantané régional indiquent maintenant la participante ou le participant, la demande et le type d'intervention, puis expliquent en langage clair le problème et la correction requise.
+- La section C conserve maintenant le financement approuvé positif et valide des interventions non manuelles lorsqu'un lien de demande est absent ou contradictoire. L'activité des demandes de la section B reste exclue jusqu'à la correction de la filiation, et le rapport continue de signaler le problème de données.
 
 #### Release 20260727-regional-snapshot-financial-overview
 
@@ -524,11 +530,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Les interventions existantes conservent maintenant leur propre valeur enregistree « Paye par » lorsqu'elles sont rouvertes pour modification; les nouvelles interventions reprennent toujours la valeur initiale du plan d'action parent.
 - Pour une revision d'intervention sans valeur d'AE au niveau de l'examen, PATH reprend maintenant la categorie structuree de prestataire d'AE du meme plan d'action. Les nouvelles propositions exigent toujours une nouvelle selection.
-
-#### Release 20260719-rm-cross-region-reassignment-r3
-
-- Les gestionnaires regionaux peuvent maintenant reattribuer un dossier client auquel ils ont acces a toute personne active affectee au travail de cas, quelle que soit la region de cette personne.
-- Les regles existantes d'acces aux dossiers clients restent inchangees et les membres du personnel inactifs ne peuvent pas etre selectionnes.
 
 ### Problemes connus (brouillon - FR)
 
