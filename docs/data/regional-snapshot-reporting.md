@@ -359,7 +359,11 @@ Current PROD data reality verified 2026-07-27:
   CRF increases by `$8,116.40` to `$159,912.17`; EI remains `$125,926.02`. The Data Quality
   Issues table now has five rows: Sarah's two missing-link records, her 40-cent header/line
   mismatch, and Kaitlyn's two indirect-link records.
-- This correction is implemented and tested locally but is not yet deployed to PATH.
+- This correction was deployed to TEST and PROD in release
+  `20260728-regional-snapshot-data-quality-funding` from admin commit `a252416`.
+  Exact-source DEV qualification and deployed TEST acceptance both returned `GO`; PROD source
+  hashes for the metrics, dashboard, export, help, and server integration matched the qualified
+  files after deployment.
 
 ## What is not stored here
 
