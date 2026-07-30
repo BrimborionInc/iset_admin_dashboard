@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-07-28
+Last Updated: 2026-07-30
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-07-30 | Release 20260730-feedback-173-cfa-hotfix | Fix/Application approval | Repeat applications and Client Funding Agreements | A newly approved application now creates and uses its own application-linked action plan and intervention details, even when the participant has a historical plan in the same file. | The participant signing flow also finalizes the matching versioned agreement and preserves the signed PDF relationship.
 - 2026-07-28 | Runtime update | Fix/Public portal | Document uploads and postal code | Applicants can attach saved PDFs to the remaining photo-enabled document fields, and the Canadian postal-code field now opens a text-capable mobile keyboard. | The upload fields retain image/camera eligibility through `image/*`; only the current live workflow 21 runtime row was patched, with a complete rollback copy retained.
 - 2026-07-28 | Release 20260728-regional-snapshot-data-quality-funding | UX/Reporting | Regional Snapshot data-quality issues | Data-quality warnings now identify the participant, application, and intervention type and explain the problem and required correction in plain English. | The dashboard and Excel summary no longer expose case references or intervention database IDs in this table; reporting totals are unchanged.
 - 2026-07-28 | Release 20260728-regional-snapshot-data-quality-funding | Fix/Reporting | Application-less approved funding | Regional Snapshot Section C now includes valid scheduled approved funding even when a non-manual intervention's application link is missing or conflicting. | Application activity remains fail-closed and a plain-English data-quality warning remains visible; explicit manual-backload records still require the reviewed offline overlay.
@@ -479,11 +480,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Newly approved repeat applications now use their own action plan and intervention details when PATH creates a Client Funding Agreement.
 - Regional Snapshot data-quality issues now identify the participant and intervention in plain English, with a clear explanation of what needs correction.
 - Valid approved funding remains in Regional Snapshot funding totals when an application link is missing or conflicting, while application activity stays excluded until its lineage is corrected.
-- Signed and version-managed Financial Overviews now remain available when an Application Assessment is submitted again.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260730-feedback-173-cfa-hotfix
+
+- Newly approved repeat applications now create and use an application-linked action plan, so historical plan information cannot replace the current intervention details in a Client Funding Agreement.
+- When a participant signs a versioned Client Funding Agreement, PATH now links the signed PDF to that exact version and records the version as signed.
 
 #### Release 20260728-regional-snapshot-data-quality-funding
 
@@ -497,22 +503,22 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Submitting or resubmitting an Application Assessment no longer hides signed or version-managed Financial Overviews from Supporting Documents.
 - Financial Overview revisions continue through the dedicated version and participant-signature workflow.
 
-#### Release 20260723-end-of-day-r4
-
-- Existing interventions now preserve their own saved `Paid from` value when reopened for editing; new interventions still inherit the parent Action Plan as their starting value.
-- Intervention revisions with a blank review-level EI value now prefill it from the same Action Plan's structured EI claimant category. New proposals still require a fresh EI selection.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
+- Les nouvelles demandes approuvees utilisent maintenant leur propre plan d'action et leurs propres details d'intervention lorsque PATH cree une entente de financement du client.
 - Les problèmes de qualité des données de l'instantané régional indiquent maintenant la participante ou le participant et l'intervention en langage clair, avec une explication précise de la correction requise.
 - Le financement approuvé valide reste dans les totaux de financement de l'instantané régional lorsqu'un lien de demande est absent ou contradictoire; l'activité de la demande reste exclue jusqu'à la correction de sa filiation.
-- Les apercus financiers signes et geres par version restent maintenant disponibles lorsqu'une evaluation de demande est soumise de nouveau.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260730-feedback-173-cfa-hotfix
+
+- Les nouvelles demandes approuvees creent et utilisent maintenant un plan d'action lie a la demande, afin que l'information d'un ancien plan ne remplace pas les details d'intervention actuels dans une entente de financement du client.
+- Lorsqu'une participante ou un participant signe une entente de financement du client geree par version, PATH lie maintenant le PDF signe a cette version precise et enregistre la version comme signee.
 
 #### Release 20260728-regional-snapshot-data-quality-funding
 
@@ -525,11 +531,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les totaux des clientes et clients finances et les montants CRF/AE utilisent maintenant les montants prevus dans la periode selectionnee; le tableau de bord et l'exportation signalent les problemes de donnees sources a examiner.
 - La soumission ou la nouvelle soumission d'une evaluation de demande ne masque plus les apercus financiers signes ou geres par version dans les documents justificatifs.
 - Les revisions d'un apercu financier continuent de suivre le processus distinct de gestion des versions et de signature de la participante ou du participant.
-
-#### Release 20260723-end-of-day-r4
-
-- Les interventions existantes conservent maintenant leur propre valeur enregistree « Paye par » lorsqu'elles sont rouvertes pour modification; les nouvelles interventions reprennent toujours la valeur initiale du plan d'action parent.
-- Pour une revision d'intervention sans valeur d'AE au niveau de l'examen, PATH reprend maintenant la categorie structuree de prestataire d'AE du meme plan d'action. Les nouvelles propositions exigent toujours une nouvelle selection.
 
 ### Problemes connus (brouillon - FR)
 

@@ -14002,6 +14002,20 @@ function computeCfaSnapshotSignature(snapshot) {
 }
 
 async function buildCfaSnapshot({ connection, caseId, actionPlanId }) {
+  const [[planRow]] = await connection.query(
+    `SELECT id, application_id, name, funding_stream, agreement_number, effective_date
+       FROM iset_case_action_plan
+      WHERE id = ? AND case_id = ?
+      LIMIT 1`,
+    [actionPlanId, caseId]
+  );
+  if (!planRow) {
+    throw new Error('action_plan_not_found');
+  }
+  const planApplicationId = normalisePositiveInteger(planRow.application_id);
+  const applicationJoinSql = planApplicationId
+    ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
+    : buildCasePrimaryApplicationJoinSql('c', 'a');
   const [[caseRow]] = await connection.query(
     `SELECT c.id,
             c.case_number,
@@ -14012,24 +14026,14 @@ async function buildCfaSnapshot({ connection, caseId, actionPlanId }) {
             s.reference_number,
             s.intake_payload
        FROM iset_case c
-       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+       ${applicationJoinSql}
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       WHERE c.id = ?
       LIMIT 1`,
-    [caseId]
+    planApplicationId ? [planApplicationId, caseId] : [caseId]
   );
   if (!caseRow) {
     throw new Error('case_not_found');
-  }
-  const [[planRow]] = await connection.query(
-    `SELECT id, name, funding_stream, agreement_number, effective_date
-       FROM iset_case_action_plan
-      WHERE id = ? AND case_id = ?
-      LIMIT 1`,
-    [actionPlanId, caseId]
-  );
-  if (!planRow) {
-    throw new Error('action_plan_not_found');
   }
   const [interventionRows] = await connection.query(
     `SELECT id, status, intervention_code, start_date, end_date, intervention_cost, budget_amount, approved_amount,
@@ -14124,14 +14128,27 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId, applicationI
   if (!assessmentRow) {
     throw new Error('assessment_not_found');
   }
-  const [interventionRows] = await connection.query(
-    `SELECT id, status, intervention_code, start_date, end_date, intervention_cost, budget_amount, approved_amount,
-            related_noc, related_noc_version, funding_stream_decision AS funding_stream, metadata_json, notes
-       FROM iset_case_intervention
-      WHERE case_id = ?
-      ORDER BY start_date IS NULL, start_date ASC, id ASC`,
-    [caseId]
-  );
+  const [interventionRows] = normalizedApplicationId
+    ? await connection.query(
+        `SELECT i.id, i.status, i.intervention_code, i.start_date, i.end_date,
+                i.intervention_cost, i.budget_amount, i.approved_amount,
+                i.related_noc, i.related_noc_version,
+                i.funding_stream_decision AS funding_stream, i.metadata_json, i.notes
+           FROM iset_case_intervention i
+           JOIN iset_case_action_plan ap ON ap.id = i.action_plan_id
+          WHERE i.case_id = ?
+            AND ap.application_id = ?
+          ORDER BY i.start_date IS NULL, i.start_date ASC, i.id ASC`,
+        [caseId, normalizedApplicationId]
+      )
+    : await connection.query(
+        `SELECT id, status, intervention_code, start_date, end_date, intervention_cost, budget_amount, approved_amount,
+                related_noc, related_noc_version, funding_stream_decision AS funding_stream, metadata_json, notes
+           FROM iset_case_intervention
+          WHERE case_id = ?
+          ORDER BY start_date IS NULL, start_date ASC, id ASC`,
+        [caseId]
+      );
   const buildFallbackAssessmentIntervention = () => {
     const itpPayload = safeJsonParse(assessmentRow?.itp_payload, null) || {};
     const wagePayload = safeJsonParse(assessmentRow?.wage_payload, null) || {};
@@ -17179,24 +17196,44 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   const justification = assessmentRow.justification ? String(assessmentRow.justification).trim() : null;
   const recommendation = assessmentRow.recommendation ? String(assessmentRow.recommendation).trim() : null;
 
-  const [[existingAutoPlan]] = await connection.query(
-    `SELECT id, status FROM iset_case_action_plan
-      WHERE case_id = ?
-        AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) = ?
-      LIMIT 1`,
-    [caseId, AUTO_PLAN_METADATA_SOURCE]
-  );
+  const [[existingAutoPlan]] = actionPlanApplicationId
+    ? await connection.query(
+        `SELECT id, status FROM iset_case_action_plan
+          WHERE case_id = ?
+            AND application_id = ?
+            AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) = ?
+            AND status IN ('draft','active','closed')
+          LIMIT 1`,
+        [caseId, actionPlanApplicationId, AUTO_PLAN_METADATA_SOURCE]
+      )
+    : await connection.query(
+        `SELECT id, status FROM iset_case_action_plan
+          WHERE case_id = ?
+            AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) = ?
+            AND status IN ('draft','active','closed')
+          LIMIT 1`,
+        [caseId, AUTO_PLAN_METADATA_SOURCE]
+      );
   if (existingAutoPlan) {
     return { createdPlan: false, createdIntervention: false, interventionId: null, planId: null };
   }
 
-  const [[existingPlan]] = await connection.query(
-    `SELECT id FROM iset_case_action_plan
-      WHERE case_id = ?
-        AND status IN ('draft','active')
-      LIMIT 1`,
-    [caseId]
-  );
+  const [[existingPlan]] = actionPlanApplicationId
+    ? await connection.query(
+        `SELECT id FROM iset_case_action_plan
+          WHERE case_id = ?
+            AND application_id = ?
+            AND status IN ('draft','active')
+          LIMIT 1`,
+        [caseId, actionPlanApplicationId]
+      )
+    : await connection.query(
+        `SELECT id FROM iset_case_action_plan
+          WHERE case_id = ?
+            AND status IN ('draft','active')
+          LIMIT 1`,
+        [caseId]
+      );
   if (existingPlan) {
     // Preserve manually created plan; do not auto-generate duplicates.
     return { createdPlan: false, createdIntervention: false, interventionId: null, planId: null };
@@ -91032,25 +91069,15 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         const actorUserId = autoPlanApprovalUserId || (await resolveOrCreateUserIdFromAuth(req));
         const staffProfileId = resolveActiveStaffProfileId(req);
         const caseManagerName = await resolveStaffDisplayName(pool, req);
-        const [[existingCfaRow]] = await pool.query(
-          `SELECT v.id
-             FROM cfa_series s
-             JOIN cfa_version v ON v.series_id = s.id
-            WHERE s.case_id = ?
-            LIMIT 1`,
-          [caseId]
-        );
-        if (!existingCfaRow) {
-          await createCfaVersionForPlan({
-            caseId,
-            actionPlanId: autoPlanSuggestion.planId,
-            changeReason: 'NEW_INTERVENTION_APPROVED',
-            changeSummary: 'Initial funding agreement',
-            actorUserId,
-            staffProfileId,
-            caseManagerName
-          });
-        }
+        await createCfaVersionForPlan({
+          caseId,
+          actionPlanId: autoPlanSuggestion.planId,
+          changeReason: 'NEW_INTERVENTION_APPROVED',
+          changeSummary: 'Application funding agreement',
+          actorUserId,
+          staffProfileId,
+          caseManagerName
+        });
       } catch (err) {
         console.warn('[cfa] auto-plan draft failed', err?.message || err);
       }
@@ -93625,6 +93652,8 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
 
 const adminRepairExports = {
   pool,
+  createCfaVersionForPlan,
+  ensureAutoPlanAndInterventionFromAssessment,
   startInterventionReviewWorkflow,
   storeAssessmentPdfDocument,
   syncInterventionProposalCompatibility,

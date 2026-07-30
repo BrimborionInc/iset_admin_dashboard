@@ -34,6 +34,7 @@ const ADMIN_SUPPORT_SCRIPT_FILES = [
   'application-assessment-option-b-smoke.js',
   'payments-workflow-smoke.js',
   'privacy-route-denial-smoke.js',
+  'prod-repair-feedback-173.js',
 ];
 const RELEASE_QUALIFICATION_INVENTORY = path.join(REPO_ROOT, 'docs', 'testing', 'release-coverage-inventory.json');
 
