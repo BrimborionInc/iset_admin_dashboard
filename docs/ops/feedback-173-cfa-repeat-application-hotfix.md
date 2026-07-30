@@ -1,6 +1,6 @@
 # Feedback 173 Repeat-Application CFA Hotfix Contract
 
-Status: release candidate for `20260730-feedback-173-cfa-hotfix`.
+Status: deployed to PROD on 2026-07-30; guarded Case `12` repair complete; staff review/send and participant re-sign verification remain open.
 Feedback report: `173`.
 Incident record: Case `12`, application `95`, assessment `492`, incorrect CFA version `33`.
 
@@ -67,3 +67,18 @@ Rollback is allowed only while the corrected CFA remains draft and has never bee
 - PROD deployment must use the documented warning/fallback/bootstrap-recovery sequence.
 - Post-deploy evidence must prove exact source markers, public/local readiness, the guarded Case `12` repair result, and no automated applicant send.
 - Feedback `173` remains `in_progress` until staff review/send the corrected CFA and the resulting live signing/artifact chain is rechecked. It is not resolved merely by deployment.
+
+## 2026-07-30 Release And Repair Evidence
+
+- Exact-source DEV qualification returned `GO` for all 16 checks under evidence `0d623b236dfa5bc4b0a7ff1aaadb14344b740f06f9c9098ebef08948dd34e325`.
+- Deployed TEST acceptance returned `GO` for all 11 checks under evidence `4da552600b2793af476c25a402b0c7ab940d1280d2c9ba11b47e1797f13ed304`.
+- PROD release `20260730-feedback-173-cfa-hotfix` deployed admin `4ac74022c1e7da08c771eb66a14c98ba6cdd3d7f`, portal `5afed494fd06808c2a3d009e92ba389cd3218fcc`, and shared `e8dc303d8ecc057e52509b00854106f230823d96`. No schema migration, workflow/config promotion, or general data sync ran.
+- Staff received the full ten-minute close warning before all three live PATH hosts moved behind the ALB maintenance response. Snapshot `path-prod-feedback-173-case12-20260730t1510` reached `AVAILABLE` before the repair.
+- ASG refresh `3793b3c8-c754-4f77-bda3-af3211e86641` completed successfully on replacement `i-09fe637ba5dd582e7`. Deployed provenance matched the qualified source, Node was `20.20.2`, and both PM2 processes were online with zero restarts.
+- Guarded read-only preview command `8238a53b-1fe2-464f-acb2-3cba653384d1` matched the pinned live record set. Apply command `86444c5b-d712-47e2-ab16-39e872b5f78b` created application plan `149`, interventions `323`, `324`, and `325`, and corrected draft CFA version `34`.
+- Independent read-only command `c6fd457b-af5f-4c38-80a9-28bcdbf9b9dd` confirmed application `95` is approved/active, plan `149` is application-linked and draft, its three interventions are approved/planned, CFA v2 is draft with active clean/redline documents `8674`/`8675`, and incorrect v1 remains withdrawn with its signature facts preserved and documents `8452`/`8527` archived.
+- Feedback command `962142fd-22d6-44c1-94d3-8436b1e81a15` moved report `173` from `submitted` to `in_progress` and recorded that automation sent no applicant message.
+- Final checks returned `200` for all three public `/readyz` URLs, both ALB targets were healthy, the ASG refresh was 100% successful, and process command `5dbef4f9-f8ab-475e-9511-32931b9f9c1f` reconfirmed local readiness and zero restarts. The first smoke during listener-rule propagation saw one transient maintenance `503`; direct recheck and both subsequent full smokes returned `200`.
+- ALB rules are back on normal forwarding. Maintenance-clear SQL command `534c2e6c-d214-41ff-bb3c-c876d68f7d47` confirmed zero active service-announcement rows.
+- PROD deployment manifest: `/home/bill/ISET/hotfix-173/admin-dashboard/tmp/path-deploy/prod/20260730-feedback-173-cfa-hotfix--2026-07-30T15-26-36-289Z.json`.
+- Do not close report `173` yet. Authorized staff must review CFA v2, send it through the normal workflow, and verify the resulting participant signing and canonical signed-document linkage.
