@@ -325,7 +325,7 @@
       "id": "application-review-workflows",
       "description": "Application assessment, action plan and intervention review state machines and artifacts.",
       "matches": {
-        "admin": ["(Assessment|assessment|applicationApproval|reviewWorkflow|Intervention|intervention|actionPlan|prod-repair-feedback|two-step-review|isetadminserver\\.js$)"],
+        "admin": ["(Assessment|assessment|applicationApproval|reviewWorkflow|Intervention|intervention|actionPlan|decisionLetterExternalAiBoundary|prod-repair-feedback|two-step-review|isetadminserver\\.js$)"],
         "shared": ["(review|event|notification)"]
       },
       "dependsOn": ["notifications-workers", "files-messages-signing"],
@@ -371,7 +371,7 @@
       "id": "files-messages-signing",
       "description": "Object storage, uploads, documents, generated files, secure messages and signing completion.",
       "matches": {
-        "admin": ["(document|Document|upload|Upload|file|File|message|Message|signing|Signing|attendance|Attendance|storage|Storage|pdf|PDF|feedback[1-9][0-9]*RepairContract|prod-repair-feedback|isetadminserver\\.js$)"],
+        "admin": ["(document|Document|upload|Upload|file|File|message|Message|signing|Signing|attendance|Attendance|storage|Storage|pdf|PDF|decisionLetterExternalAiBoundary|feedback[1-9][0-9]*RepairContract|prod-repair-feedback|isetadminserver\\.js$)"],
         "portal": ["(document|upload|file|message|signing|storage|pdf|server\\.js$)"],
         "shared": ["(storage|financialOverview|notificationDispatcher|events)"]
       },
@@ -404,7 +404,7 @@
       "id": "external-integrations",
       "description": "Sage Intacct, SES, S3, Cognito and external AI contracts with safe substitutes or controlled proof.",
       "matches": {
-        "admin": ["(intacct|openrouter|cognito|ses|s3|storage|Puppeteer|isetadminserver\\.js$)"],
+        "admin": ["(intacct|openrouter|cognito|ses|s3|storage|Puppeteer|decisionLetterExternalAiBoundary|isetadminserver\\.js$)"],
         "portal": ["(openrouter|cognito|ses|s3|storage|server\\.js$)"],
         "shared": ["(ai/|notification|storage|events)"] ,
         "intacctMock": [".*"]
@@ -417,7 +417,7 @@
       "id": "documentation-only",
       "description": "Persistent project memory and runbook changes that do not alter a deployable surface.",
       "matches": {
-        "admin": ["^docs/"],
+        "admin": ["^(AGENTS\\.md|docs/)"],
         "portal": ["^docs/"],
         "shared": ["\\.md$"],
         "intacctMock": ["\\.md$"]
