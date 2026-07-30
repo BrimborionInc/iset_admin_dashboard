@@ -610,11 +610,17 @@ const checks = [
   {
     name: 'admin denial letter drafts use local templates instead of external AI',
     source: 'coordinator',
-    anchor: 'if (isDenialDraft && denialTemplateDraft)',
+    anchor: 'denialTemplateDraft = buildDenialTemplateDraftForReason',
     patterns: [
       "letter_title: 'Letter of Denial'",
       "decision_label: 'Denied'",
       'return;',
+    ],
+    forbidden: [
+      "apiFetch('/api/ai/chat'",
+      'const contextPayload =',
+      'applicant_full_name:',
+      'case_manager_email:',
     ],
     after: 2500,
   },

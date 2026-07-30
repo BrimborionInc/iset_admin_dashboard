@@ -201,23 +201,6 @@ const buildDenialTemplateDraftForReason = ({
       };
   }
 };
-const TARGET_PROGRAM_LABELS = {
-  skills_development: 'Skills Development (Education)',
-  tws: 'Targeted Wage Subsidy',
-  jcp: 'Job Creation Partnership',
-  group: 'Group Training',
-  self_support: 'Self-employment supports',
-  not_yet: 'Not yet'
-};
-const REQUESTED_SUPPORT_LABELS = {
-  tuition: 'Tuition',
-  books: 'Books or program materials',
-  living: 'Living allowance',
-  transportation: 'Transportation',
-  childcare: 'Childcare',
-  other: 'Other'
-};
-
 const CHILDCARE_OPTIONS = [
   { value: 'yes', label: 'Yes' },
   { value: 'no', label: 'No' }
@@ -730,13 +713,6 @@ const toReadablePaymentTypeLabel = (value) => {
   if (!raw) return '';
   return raw.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
 };
-const formatReadableList = (items = []) => {
-  const list = Array.isArray(items) ? items.map(item => String(item).trim()).filter(Boolean) : [];
-  if (!list.length) return '';
-  if (list.length === 1) return list[0];
-  if (list.length === 2) return `${list[0]} and ${list[1]}`;
-  return `${list.slice(0, -1).join(', ')}, and ${list[list.length - 1]}`;
-};
 const SUPPORT_LABEL_OVERRIDES = {
   TuitionFeesDirect: 'tuition',
   TuitionFeesReimbursement: 'tuition',
@@ -761,63 +737,6 @@ const getSupportLabelFromPaymentType = (type) => {
   if (!base) return '';
   return formatSupportLabelForLetter(base);
 };
-const isLikelyPlaceholderText = (value) => {
-  if (!value || typeof value !== 'string') return true;
-  const trimmed = value.trim();
-  if (!trimmed) return true;
-  if (trimmed.length < 12) return true;
-  return /\b(test|testing|tbd|todo|lorem|sample)\b/i.test(trimmed);
-};
-const getPaymentExplanationForType = (type) => {
-  if (!type) return '';
-  if (/Reimbursement/i.test(type)) return 'reimbursed after you submit receipts';
-  if (/Direct/i.test(type)) return 'paid directly to the provider';
-  if (/Advance/i.test(type)) return 'paid in advance (details in your funding agreement)';
-  if (type === 'WageSubsidyEmployer') return 'paid directly to your employer';
-  if (type === 'LivingAllowance') return 'paid to you on a schedule';
-  return '';
-};
-const buildFundedSupportEntries = (costLines = []) => {
-  const lines = Array.isArray(costLines) ? costLines : [];
-  const entries = [];
-  const seen = new Set();
-  lines.forEach(line => {
-    if (!line?.type) return;
-    const amount = parseCurrencyToNumber(line.amount);
-    if (!(amount > 0)) return;
-    const label = getSupportLabelFromPaymentType(line.type);
-    if (!label) return;
-    const paymentExplanation = getPaymentExplanationForType(line.type);
-    const key = `${label}::${paymentExplanation}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    entries.push({
-      label,
-      payment_explanation: paymentExplanation || null
-    });
-  });
-  return entries;
-};
-const buildFundedSupportText = (entries = []) => {
-  const parts = Array.isArray(entries)
-    ? entries
-        .map(entry => {
-          if (!entry?.label) return '';
-          const payment = entry.payment_explanation ? ` (${entry.payment_explanation})` : '';
-          return `${entry.label}${payment}`;
-        })
-        .filter(Boolean)
-    : [];
-  return formatReadableList(parts);
-};
-const buildPaymentExplanationSummary = (entries = []) => {
-  const phrases = Array.isArray(entries)
-    ? entries.map(entry => entry?.payment_explanation).filter(Boolean)
-    : [];
-  const unique = Array.from(new Set(phrases));
-  return formatReadableList(unique);
-};
-
 const costLineHasPositiveFundingAmount = (line) => parseCurrencyToNumber(line?.amount) > 0;
 
 const interventionHasFundedCostLines = (intervention) => {
@@ -3000,42 +2919,6 @@ const CoordinatorAssessmentWidget = forwardRef(
       ),
     [normalizeAnswerArray, readApplicationAnswer]
   );
-  const applicantTargetProgram = useMemo(() => {
-    const raw = normalizeAnswerValue(readApplicationAnswer(['target-program', 'target_program', 'targetProgram']));
-    if (!raw) return '';
-    const normalized = raw.toLowerCase();
-    if (normalized === 'not_yet') return '';
-    return TARGET_PROGRAM_LABELS[normalized] || raw;
-  }, [readApplicationAnswer]);
-  const applicantRequestedSupports = useMemo(
-    () => normalizeAnswerArray(readApplicationAnswer(['requested-supports', 'requested_supports', 'requestedSupports'])),
-    [normalizeAnswerArray, readApplicationAnswer]
-  );
-  const applicantRequestedSupportDetail = useMemo(
-    () => normalizeAnswerValue(readApplicationAnswer(['other-requested-support', 'other_requested_support', 'otherRequestedSupport'])),
-    [readApplicationAnswer]
-  );
-  const applicantRequestedSupportLabels = useMemo(() => {
-    const labels = applicantRequestedSupports
-      .map(value => REQUESTED_SUPPORT_LABELS[value] || value)
-      .filter(Boolean);
-    if (!labels.length) return [];
-    if (!labels.includes('Other') || !applicantRequestedSupportDetail) return labels;
-    return labels.map(label => (label === 'Other' ? `Other (${applicantRequestedSupportDetail})` : label));
-  }, [applicantRequestedSupports, applicantRequestedSupportDetail]);
-  const applicantRequestedSupportLabelsForLetter = useMemo(
-    () => applicantRequestedSupportLabels.map(formatSupportLabelForLetter).filter(Boolean),
-    [applicantRequestedSupportLabels]
-  );
-  const applicantRequestedSupportsText = useMemo(
-    () => formatReadableList(applicantRequestedSupportLabelsForLetter),
-    [applicantRequestedSupportLabelsForLetter]
-  );
-  const applicantRequestSummary = useMemo(() => {
-    if (applicantRequestedSupportsText) return applicantRequestedSupportsText;
-    if (applicantTargetProgram) return applicantTargetProgram;
-    return '';
-  }, [applicantRequestedSupportsText, applicantTargetProgram]);
   const otherFundingForLetters = useMemo(
     () =>
       normalizeOtherFundingDetails({
@@ -7376,9 +7259,6 @@ const CoordinatorAssessmentWidget = forwardRef(
       return;
     }
     const isDenialDraft = activeLetterKey === 'denial';
-    const useAssessorInterventionContext = !isDenialDraft;
-    const applicantTargetProgramForLetter =
-      isDenialDraft && applicantRequestedSupportLabels.length ? null : applicantTargetProgram || null;
     const decisionDate = formatDate(new Date());
     setDraftingLetter(true);
     setDraftingLetterError(null);
@@ -7391,55 +7271,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       const costLines = interventions.flatMap(intervention =>
         Array.isArray(intervention?.costLines) ? intervention.costLines : []
       );
-      const sumByType = (types = []) =>
-        costLines.reduce((sum, line) => {
-          if (!line?.type || !types.includes(line.type)) return sum;
-          const amount = parseCurrencyToNumber(line.amount);
-          return sum + (amount > 0 ? amount : 0);
-        }, 0);
-      const knownTypes = new Set([
-        'TuitionFeesDirect',
-        'TuitionFeesReimbursement',
-        'BooksMaterialsDirect',
-        'BooksMaterialsReimbursement',
-        'LivingAllowance',
-        'Childcare',
-        'WageSubsidyEmployer'
-      ]);
-      const otherAmount = costLines.reduce((sum, line) => {
-        if (!line?.type || knownTypes.has(line.type)) return sum;
-        const amount = parseCurrencyToNumber(line.amount);
-        return sum + (amount > 0 ? amount : 0);
-      }, 0);
-      const fundingBreakdown = {
-        tuition: sumByType(['TuitionFeesDirect', 'TuitionFeesReimbursement']) || null,
-        books: sumByType(['BooksMaterialsDirect', 'BooksMaterialsReimbursement']) || null,
-        materials: null,
-        living: sumByType(['LivingAllowance']) || null,
-        childcare: sumByType(['Childcare']) || null,
-        other_label: null,
-        other_amount: otherAmount || null,
-        wage_subsidy: sumByType(['WageSubsidyEmployer']) || null,
-        wage_mercs: null,
-        wage_non_wages: null,
-        wage_other_1_label: null,
-        wage_other_1_amount: null,
-        wage_other_2_label: null,
-        wage_other_2_amount: null
-      };
-      const fundedSupportItems = buildFundedSupportEntries(costLines);
-      const fundedSupportsText = buildFundedSupportText(fundedSupportItems);
-      const paymentExplanationText = buildPaymentExplanationSummary(fundedSupportItems);
       const totalFunding = Number.isFinite(overallCostTotal) && overallCostTotal > 0 ? overallCostTotal : null;
-      const recurringDetails = null;
-      const requiredDocs = requiredFundingDocsChecklistItems
-        .map(item => item?.label || item?.id)
-        .filter(Boolean);
-      const missingDocs = requiredFundingDocsChecklistItems
-        .filter(item => item?.status !== 'complete')
-        .map(item => item?.label || item?.id)
-        .filter(Boolean);
-      const decisionLabel = activeLetterKey === 'approval' ? 'Approval' : 'Denial';
       if (!isDenialDraft) {
         const submissionDate = (() => {
           const raw =
@@ -7748,17 +7580,10 @@ ${JSON.stringify(aiContext, null, 2)}`;
         });
         return;
       }
-      const denialReasonSelection = isDenialDraft
-        ? DENIAL_REASON_OPTIONS.find(option => option.value === denialReasonChoice) || null
-        : null;
-      const denialReasonLabel = denialReasonSelection?.label || null;
-      const denialReasonCode = isDenialDraft ? String(denialReasonChoice || '').trim() : '';
-      const denialExplanation = isDenialDraft && typeof denialReasonExplanation === 'string'
+      const denialReasonCode = String(denialReasonChoice || '').trim();
+      const denialExplanation = typeof denialReasonExplanation === 'string'
         ? denialReasonExplanation.trim()
         : '';
-      const reasonSeed = isDenialDraft ? denialExplanation : assessment.justification;
-      const reasonSeedIsPlaceholder = !isDenialDraft && isLikelyPlaceholderText(reasonSeed || '');
-      const decisionAuthority = "This decision was made under NWAC's ISET authority, based on review of the Case Manager recommendation.";
       const optionsForwardByReason = {
         documentation_missing: ['Provide the required documentation and request a reassessment.'],
         training_not_aligned: ['Reapply when your selected program aligns more directly with your employment goal and labour-market outcomes.'],
@@ -7768,10 +7593,8 @@ ${JSON.stringify(aiContext, null, 2)}`;
         funding_unavailable: ['Contact your case manager to review other available supports or timing options.'],
         eligibility_not_met: ['You may reapply if your circumstances change and eligibility criteria are met.']
       };
-      const optionsForward = isDenialDraft
-        ? (optionsForwardByReason[denialReasonCode] || [])
-        : [];
-      const partialServicesAvailable = isDenialDraft && denialReasonCode === 'documentation_missing'
+      const optionsForward = optionsForwardByReason[denialReasonCode] || [];
+      const partialServicesAvailable = denialReasonCode === 'documentation_missing'
         ? [
             'Career and client assessments',
             'Access to labour-market information and career exploration support',
@@ -7786,260 +7609,40 @@ ${JSON.stringify(aiContext, null, 2)}`;
         notes: assessment.otherFundingNotes
       });
       const otherFundingSummary = buildOtherFundingSummary(normalizedOtherFunding);
-      const applicantLabourForceStatus = normalizeAnswerValue(
-        readApplicationAnswer(['labour-force-status', 'labour_force_status', 'labourForceStatus'])
-      ) || null;
-      const applicantHighestEducation = normalizeAnswerValue(
-        readApplicationAnswer(['highest-education', 'highest_education', 'highestEducation'])
-      ) || null;
-      const applicantLegalIndigenousIdentity = normalizeAnswerValue(
-        readApplicationAnswer(['legal-indigenous-identity', 'legal_indigenous_identity', 'legalIndigenousIdentity'])
-      ) || null;
       const requestedProgramName = primary?.programName || null;
       const requestedInstitution = primary?.institution || null;
-      const requestedInterventionLabel = primary ? (resolveInterventionLabel(primary.code) || null) : null;
-      const requestedInterventionCode = primary?.code || null;
       const applicantEmploymentGoal = String(
         assessment.employmentGoals ||
           normalizeAnswerValue(readApplicationAnswer(['long-term-goal', 'long_term_goal', 'longTermGoal'])) ||
           ''
       ).trim() || null;
-      denialTemplateDraft = isDenialDraft
-        ? buildDenialTemplateDraftForReason({
-            reasonCode: denialReasonCode,
-            requestedProgramName,
-            requestedInstitution,
-            employmentGoal: applicantEmploymentGoal,
-            denialExplanation,
-            optionsForward,
-            partialServicesAvailable,
-            otherFundingSummary
-          })
-        : null;
-      if (isDenialDraft && denialTemplateDraft) {
-        setLetterDrafts(prev => {
-          const current = prev?.[activeLetterKey] || buildEmptyDecisionLetterDraft();
-          return {
-            ...prev,
-            [activeLetterKey]: {
-              ...current,
-              decision_date: decisionDate,
-              letter_title: 'Letter of Denial',
-              decision_label: 'Denied',
-              decision_intro: denialTemplateDraft.decision_intro || current.decision_intro,
-              decision_reason: denialTemplateDraft.decision_reason || current.decision_reason,
-              next_step_1: '',
-              next_step_2: ''
-            }
-          };
-        });
-        return;
-      }
-      const approvedInterventions = interventions.map(item => ({
-        label: resolveInterventionLabel(item?.code) || null,
-        program_name: item?.programName || null,
-        institution: item?.institution || null,
-        start_date: item?.startDate || null,
-        end_date: item?.endDate || null
-      }));
-      const contextPayload = {
-        decision: decisionLabel,
-        decision_date: decisionDate,
-        effective_date: decisionDate,
-        applicant_name: applicantSalutationName || null,
-        applicant_full_name: applicantName || null,
-        tracking_id: trackingReference || null,
-        case_number: caseData?.case_number || null,
-        applicant_target_program: applicantTargetProgramForLetter,
-        applicant_requested_supports: applicantRequestedSupportLabelsForLetter.length
-          ? applicantRequestedSupportLabelsForLetter
-          : null,
-        applicant_requested_support_detail: applicantRequestedSupportDetail || null,
-        applicant_requested_supports_text: applicantRequestedSupportsText || null,
-        applicant_request_summary: applicantRequestSummary || null,
-        applicant_employment_goal: applicantEmploymentGoal,
-        requested_program_name: requestedProgramName,
-        requested_institution: requestedInstitution,
-        requested_intervention_label: requestedInterventionLabel,
-        requested_intervention_code: requestedInterventionCode,
-        assessment_summary: assessment.overview || null,
-        employment_goals: assessment.employmentGoals || null,
-        program_name: useAssessorInterventionContext ? (primary?.programName || null) : null,
-        institution: useAssessorInterventionContext ? (primary?.institution || null) : null,
-        intervention_label: useAssessorInterventionContext && primary ? resolveInterventionLabel(primary.code) : null,
-        intervention_code: useAssessorInterventionContext ? (primary?.code || null) : null,
-        delivery_mode: useAssessorInterventionContext ? (primary?.deliveryMode || null) : null,
-        intervention_start_date: useAssessorInterventionContext ? (primary?.startDate || null) : null,
-        intervention_end_date: useAssessorInterventionContext ? (primary?.endDate || null) : null,
-        intervention_cost_total: useAssessorInterventionContext && primary ? (totalFunding || null) : null,
-        recurring_details: useAssessorInterventionContext ? recurringDetails : null,
-        funding_breakdown: useAssessorInterventionContext ? fundingBreakdown : null,
-        funded_supports: useAssessorInterventionContext && fundedSupportItems.length ? fundedSupportItems : null,
-        funded_supports_text: useAssessorInterventionContext && fundedSupportsText ? fundedSupportsText : null,
-        payment_explanations_text: useAssessorInterventionContext && paymentExplanationText ? paymentExplanationText : null,
-        approved_interventions_count: useAssessorInterventionContext ? approvedInterventions.length : null,
-        approved_interventions: useAssessorInterventionContext ? approvedInterventions : null,
-        required_documents: requiredDocs,
-        missing_documents: missingDocs,
-        decision_reason_seed: reasonSeed || null,
-        decision_reason_seed_is_placeholder: reasonSeedIsPlaceholder || null,
-        decision_authority: decisionAuthority,
-        case_manager_name: currentUserName || null,
-        case_manager_email: currentUserEmail || null,
-        denial_reason_code: denialReasonCode || null,
-        denial_reason_label: denialReasonLabel,
-        denial_reason_explanation: denialExplanation || null,
-        applicant_labour_force_status: applicantLabourForceStatus,
-        applicant_highest_education: applicantHighestEducation,
-        applicant_legal_indigenous_identity: applicantLegalIndigenousIdentity,
-        assessment_other_funding_summary: otherFundingSummary || null,
-        partial_services_available: partialServicesAvailable.length ? partialServicesAvailable : null,
-        options_going_forward: optionsForward,
-        denial_template_intro: denialTemplateDraft?.decision_intro || null,
-        denial_template_reason: denialTemplateDraft?.decision_reason || null
-      };
-      const prompt = isDenialDraft
-        ? `Draft a denial letter for the NWAC ISET program using TEMPLATE-FIRST mode. Return JSON only with keys: letter_title, decision_intro, decision_label, decision_reason, next_step_1, next_step_2.
-
-Strict template rules:
-- Use denial_template_intro and denial_template_reason as the base text.
-- Keep paragraph order and sentence intent very close to the templates.
-- You may only make minimal edits for grammar, flow, and applicant-specific details.
-- Keep the overall tone formal, respectful, and criteria-based.
-
-Required output:
-- letter_title: "Letter of Denial"
-- decision_label: "Denied"
-- decision_intro: close to denial_template_intro
-- decision_reason: close to denial_template_reason
-- next_step_1: ""
-- next_step_2: ""
-
-Content rules:
-- Explicitly state the request is denied at this time.
-- Ground rationale in denial_reason_code, denial_reason_label, denial_reason_explanation, and context facts.
-- Rewrite internal-case-note phrasing into applicant-facing prose. Do not copy wording like "Person is..." or "Client has..." verbatim.
-- Use options_going_forward and partial_services_available when present.
-- Do not add headings, bullets, legal citations, placeholders, or any fabricated facts.
-
-If context fields are missing:
-- Keep the template structure and remove only the missing clause gracefully.
-
-Context:
-${JSON.stringify(contextPayload, null, 2)}`
-        : `Draft an approval letter for the NWAC ISET program using TEMPLATE-FIRST mode, aligned to NWAC's manual approval-letter style. Return JSON only with keys: letter_title, decision_intro, decision_label, decision_reason, next_step_1, next_step_2.
-
-Strict template rules:
-- Keep a formal, case-manager voice ("I am writing...", "I have approved...").
-- Match this high-level sequence:
-  1) Salutation and opening assessment statement.
-  2) Approved funding amounts section.
-  3) Client Funding Outcome & Agreement return instruction.
-  4) Questions/support closing sentence.
-- Keep wording close to this pattern while adapting only to available context fields.
-
-Required output:
-- letter_title: "Letter of Approval"
-- decision_label: "Approved"
-- decision_intro:
-  - Start with "Dear <applicant_name>," (use "Dear Client," if applicant_name is missing).
-  - Include one opening paragraph that says the application was assessed under NWAC ISET and approved.
-  - Reference requested_program_name/requested_institution when available.
-- decision_reason:
-  - First paragraph: "I have approved the following funding amounts:" followed by plain-text bullets only when funding details exist.
-  - Use funded_supports, funding_breakdown, or payment_explanations_text when present.
-  - If detailed amounts are unavailable, include a concise generic funding-approval paragraph without fabricated figures.
-  - Include a paragraph stating the Client Funding Agreement and Banking Details form are attached, and asking the client to complete them so funding deposit can proceed.
-  - Include a final contact/support sentence.
-- next_step_1: ""
-- next_step_2: ""
-
-Hard constraints:
-- Do not invent amounts, institution, program, address, phone number, dates, or signature details not present in context.
-- Do not include placeholders (e.g., "INSERT ... HERE").
-- Do not use markdown headings/tables.
-- Keep content applicant-facing and concise.
-
-Context:
-${JSON.stringify(contextPayload, null, 2)}`;
-      const resp = await apiFetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [
-            { role: 'system', content: 'You draft decision letters for program applicants. Respond only with JSON, no markdown.' },
-            { role: 'user', content: prompt }
-          ],
-          temperature: 0.3
-        })
+      denialTemplateDraft = buildDenialTemplateDraftForReason({
+        reasonCode: denialReasonCode,
+        requestedProgramName,
+        requestedInstitution,
+        employmentGoal: applicantEmploymentGoal,
+        denialExplanation,
+        optionsForward,
+        partialServicesAvailable,
+        otherFundingSummary
       });
-      if (!resp.ok) {
-        const detail = await resp.text().catch(() => '');
-        throw new Error(detail || 'AI draft failed.');
-      }
-      const data = await resp.json().catch(() => ({}));
-      const content = data?.choices?.[0]?.message?.content || '';
-      const parsed = extractJsonFromAi(content);
-      if (!parsed || typeof parsed !== 'object') {
-        throw new Error('AI draft returned invalid JSON.');
-      }
-      const scrubLetterText = (value) => {
-        if (typeof value !== 'string') return value;
-        let next = value;
-        if (isDenialDraft) {
-          next = next.replace(/\bThis decision is not a judgment[^.]*\.\s*/gi, '');
-        }
-        next = next.replace(/^.*\bINSERT\b.+\bHERE\b.*$/gim, '');
-        return next
-          .replace(/^\s*(Decision|Reason|Next steps?)\s*:\s*/gim, '')
-          .replace(/[ \t]{2,}/g, ' ')
-          .replace(/\n{3,}/g, '\n\n')
-          .trim();
-      };
-      const docList = requiredDocs.length ? requiredDocs.join(', ') : '';
-      const defaultDocStep = docList
-        ? `Please complete the required documents in your checklist (${docList}) so we can release payment.`
-        : 'Please complete the required documents in your checklist so we can release payment.';
       setLetterDrafts(prev => {
         const current = prev?.[activeLetterKey] || buildEmptyDecisionLetterDraft();
-        const nextSteps = Array.isArray(parsed.next_steps || parsed.nextSteps) ? (parsed.next_steps || parsed.nextSteps) : [];
-        const rawStep1 = parsed.next_step_1 || nextSteps[0] || '';
-        const rawStep2 = parsed.next_step_2 || nextSteps[1] || '';
-        const fallbackDenialIntro = denialTemplateDraft?.decision_intro || current.decision_intro;
-        const fallbackDenialReason = denialTemplateDraft?.decision_reason || current.decision_reason;
-        const parsedIntro = scrubLetterText(parsed.decision_intro || '');
-        const parsedReason = scrubLetterText(parsed.decision_reason || '');
-        const denialIntroLooksOnTemplate = /^thank you for your recent application/i.test(parsedIntro);
-        const denialReasonLooksOnTemplate =
-          parsedReason.length >= 120 && /(denied|not approved|unable to approve)/i.test(parsedReason);
-        const resolvedDecisionIntro = isDenialDraft
-          ? (denialIntroLooksOnTemplate ? parsedIntro : fallbackDenialIntro)
-          : scrubLetterText(parsed.decision_intro || current.decision_intro);
-        const resolvedDecisionReason = isDenialDraft
-          ? (denialReasonLooksOnTemplate ? parsedReason : fallbackDenialReason)
-          : scrubLetterText(parsed.decision_reason || current.decision_reason);
-        const nextStep1 = isDenialDraft ? '' : (rawStep1 || current.next_step_1);
-        let nextStep2 = isDenialDraft ? '' : (rawStep2 || current.next_step_2 || defaultDocStep);
-        if (!isDenialDraft) {
-          const step2HasCost = typeof nextStep2 === 'string' && /\$|cost|amount/i.test(nextStep2);
-          if (step2HasCost) {
-            nextStep2 = defaultDocStep;
-          }
-        }
         return {
           ...prev,
           [activeLetterKey]: {
             ...current,
             decision_date: decisionDate,
-            letter_title: isDenialDraft ? 'Letter of Denial' : (parsed.letter_title || current.letter_title),
-            decision_intro: resolvedDecisionIntro,
-            decision_label: isDenialDraft ? 'Denied' : (parsed.decision_label || current.decision_label),
-            decision_reason: resolvedDecisionReason,
-            next_step_1: nextStep1,
-            next_step_2: nextStep2
+            letter_title: 'Letter of Denial',
+            decision_label: 'Denied',
+            decision_intro: denialTemplateDraft.decision_intro || current.decision_intro,
+            decision_reason: denialTemplateDraft.decision_reason || current.decision_reason,
+            next_step_1: '',
+            next_step_2: ''
           }
         };
       });
+      return;
     } catch (err) {
       if (isDenialDraft && denialTemplateDraft) {
         setLetterDrafts(prev => {
@@ -8058,7 +7661,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
             }
           };
         });
-        setDraftingLetterError('AI draft unavailable. A template-based denial draft was applied instead.');
+        setDraftingLetterError('A template-based denial draft was applied after a drafting error.');
       } else {
         setDraftingLetterError(err?.message || 'Failed to generate a letter draft.');
       }

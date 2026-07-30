@@ -2,7 +2,7 @@
 
 Purpose: move PATH workflow grounding for the embedded admin help chat out of brittle page-local `aiContext` strings and into dedicated database-backed guidance records.
 
-Last updated: 2026-05-28
+Last updated: 2026-07-30
 
 ## Transformation plan
 
@@ -27,6 +27,7 @@ Use those planning docs for cross-thread scope, source-of-truth rules, knowledge
 - When `ADMIN_AI_GUIDANCE_DEBUG=true`, System Administrator callers receive a `_guidance` debug object with prompt-injected, match/no-match status, matched guidance slugs, scores, source refs, expected anchors, forbidden phrases, and matched example slugs. Ordinary users do not receive this metadata.
 - Before calling OpenRouter, the server blocks obvious raw identifiers and secrets in the submitted messages and chat context, including SIN-style values, PATH reference numbers, email/phone values, credentials, and JSON fields such as `applicant_name`, `tracking_id`, or `case_number` with live values.
 - Denial-letter drafts use the local decision-letter template path. They do not send applicant denial context to OpenRouter.
+- Application approval-letter drafting has one optional OpenRouter copy-editing call. It sends only generic opening/closing templates and three non-personal mode flags; applicant, case, program, institution, funding, payee, date, and staff details are merged locally after that call. The former unreachable full-record decision-letter payload has been removed, and source-level privacy checks require that only this narrow approval call remains.
 - AI-backed dummy-data generators are local-dev/demo utilities only and require `ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true` plus System Administrator access.
 
 ## Guidance Library relationship

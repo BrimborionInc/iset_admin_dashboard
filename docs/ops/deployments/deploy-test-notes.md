@@ -1,7 +1,7 @@
 # Test Environment Deployment Notes
 
 Status: current TEST deployment notes. Prefer `deployment-quick-guide.md` for the shortest operator commands.
-Last reviewed: 2026-07-13 after the committed Client Monthly Attendance Report rehearsal.
+Last reviewed: 2026-07-30 after restoring TEST public-portal idle protection.
 
 For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
 
@@ -25,6 +25,8 @@ Important: the deploy scripts package the current WSL working tree, not just the
 Important coupling rule: do not assume `admin-only` just because the user-facing behavior is in the admin console. The admin backend stages sibling `../shared` during the TEST admin deploy, and some admin runtime paths also import sibling `../ISET-intake` modules from the deployed portal tree. If the changed code path touches either of those sibling locations, deploy the coupled surface as well instead of using `--skip-portal`. Fresh ASG replacement makes this coupling sharper: a new TEST app instance may not yet have `/opt/nwac/portal` dependencies, and admin notification startup can fail through `../shared/events/notificationDispatcher.js -> /opt/nwac/portal/sesMailer.js` with a missing `@aws-sdk/client-ses` unless the portal runtime has also been installed.
 
 Important maintenance rule: TEST should rehearse PROD maintenance behavior. If a TEST deploy can restart the admin or portal app, make either surface unavailable, or expose transient `502 Bad Gateway` responses, set a scoped maintenance warning before the deploy or put the affected surface behind the ALB fixed-response maintenance page. TEST can remain less strict than PROD about approval flags, but it should not intentionally show raw gateway errors while down. TEST maintenance messages must use the user-facing name `Test and Training environment` and explicitly state that Production is not affected.
+
+Important idle-protection rule: the TEST public portal must remain behind its portal-scoped ALB fixed-response protection page whenever active portal testing is not underway. A portal deploy or acceptance run may temporarily restore normal forwarding, but the operator must set the portal protection again before closing the testing thread. Do not finish an all-surface maintenance sequence by clearing both surfaces and leaving `nwac-public-test.awentech.ca` open; keep the TEST admin console independently forwarded. Use `node scripts/path-maintenance-fallback.js status|set --env test --surfaces portal`.
 
 Important release-note rule: before any TEST app deploy with user-visible changes, create the newest release package in `docs/meta/next-release-notes-log.md` draft sections, not only the dated working-log entries. The first English and French package groups must describe the release being deployed and the generated `src/generated/publicReleaseNotes.js` must show that package first. If the generated release ID is current but the first package title is older, stop before `path:deploy`; the landing page will otherwise show stale release notes.
 
