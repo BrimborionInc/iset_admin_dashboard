@@ -20,6 +20,7 @@ import {
   deriveAssessmentReviewStatusSelection,
   deriveApplicationDecisionOutcome,
 } from '../utils/applicationStatus';
+import { canRegionalManagerEditApplicationAssessment } from '../utils/assessmentEditAccess';
 
 const BARRIERS = [
   'None', 'Education', 'Lack of Marketable Skills', 'Lack of Work Experience', 'Remoteness', 'Lack of Transportation', 'Economic', 'Language', 'Lack of Labour Force Attachment', 'Dependent Care', 'Physical, Emotional, or Mental Health', 'Other'
@@ -2392,6 +2393,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [lockingAssessment, setLockingAssessment] = useState(false);
   const {
     userId: currentUserId,
+    staffProfileId: currentStaffProfileId,
     displayName: currentUserName,
     email: currentUserEmail,
     role: currentUserRole,
@@ -4528,12 +4530,15 @@ const CoordinatorAssessmentWidget = forwardRef(
   // Disable all fields (including NWAC) if review is complete, a final decision exists, status is locked, conflict not signed, or eligibility not set
   const baseAssessmentLocked = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal || isPostDecisionStatus;
   const canEditDraftAssessmentAsRegionalManager =
-    isRegionalManager &&
-    normalizedApplicationStatus === 'in_review' &&
-    !hasReviewWorkflow;
+    canRegionalManagerEditApplicationAssessment({
+      isRegionalManager,
+      applicationStatus: normalizedApplicationStatus,
+      reviewWorkflow,
+      currentStaffProfileId,
+    });
   const canEditAssessmentBody = isAssessor || roleKey === 'systemadministrator' || canEditDraftAssessmentAsRegionalManager;
   const assessmentEditBlockedMessage = isRegionalManager
-    ? 'Regional Managers can edit in-review draft assessments before submission. Submitted assessments must move through the review actions instead.'
+    ? 'Regional Managers can edit their own in-review drafts, including assessments returned to them as the original submitter. Other submitted assessments must move through the review actions instead.'
     : 'This role cannot edit assessment fields in the current stage.';
   const canManageEligibilityDuringAssessment =
     canManageEiEligibility &&
