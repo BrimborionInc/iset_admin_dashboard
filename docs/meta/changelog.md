@@ -2,6 +2,9 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-08-01
+- Fix/Application Assessment/Documents/Release: Fixed feedback `#171` as a repeat-application document-lineage defect on top of the exact admin source currently running in PROD. Assessment submission now preserves an Application Form or Financial Overview only when the active document belongs to the application being submitted; older-application and case-level documents no longer suppress generation of the required current-application documents. Missing application context fails closed to generation. Focused unit coverage and a rollback-only real-MySQL release contract cover current-application preservation, older-application and case-level isolation, metadata/link compatibility, and both server submission paths.
+
 ## 2026-07-30
 - Security/Decision letters: Removed the unreachable legacy decision-letter OpenRouter branch that assembled applicant, case, assessment, funding, education, identity, and staff context. Application denial drafts remain fully local; application approval drafting retains only its narrow generic-template copy-editing call and merges all record-specific facts locally afterward. Source-level regression coverage proves that exactly one decision-letter AI call remains and that the removed personal-context fields cannot be reconstructed in the drafting function.
 - Fix/CFA/PROD: Deployed `20260730-feedback-173-cfa-hotfix`. Repeat-application approval now scopes action-plan duplicate checks and CFA intervention selection to the selected application, so a historical application-less plan cannot block or replace the newly approved intervention data. Every newly materialized application plan creates the next CFA draft, and participant signing now finalizes only the matching version/document after case/application/participant scope validation.

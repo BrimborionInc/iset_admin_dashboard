@@ -16,6 +16,7 @@ const {
 } = require('../../ISET-intake/src/services/schemaReadiness');
 const {
   archiveReplaceableAssessmentFinancialOverviews,
+  shouldPreserveAssessmentApplicationForm,
   shouldPreserveAssessmentFinancialOverview,
 } = require('../src/lib/financialOverviewDocumentPolicy');
 
@@ -83,6 +84,9 @@ async function runRollbackContracts(connection) {
   const caseNumber = `RQ-FO-${suffix.slice(0, 20)}`;
   const protectedDocumentPath = `release-qualification/${suffix}/financial-overview-v1-signed.pdf`;
   const replaceableDocumentPath = `release-qualification/${suffix}/financial-overview-legacy.pdf`;
+  const caseLevelApplicationFormPath = `release-qualification/${suffix}/case-level-application-form.pdf`;
+  const currentApplicationFormPath = `release-qualification/${suffix}/current-application-form.pdf`;
+  const metadataOnlyCurrentOverviewPath = `release-qualification/${suffix}/financial-overview-v2-metadata-only.pdf`;
   let transactionStarted = false;
 
   try {
@@ -169,6 +173,12 @@ async function runRollbackContracts(connection) {
       [clientId, caseId]
     );
     const applicationId = applicationResult.insertId;
+    const [currentApplicationResult] = await connection.query(
+      `INSERT INTO iset_application (submission_id, client_id, case_id, status)
+       VALUES (NULL, ?, ?, 'pending_approval')`,
+      [clientId, caseId]
+    );
+    const currentApplicationId = currentApplicationResult.insertId;
     const [seriesResult] = await connection.query(
       `INSERT INTO funding_overview_series (case_id, template_key)
        VALUES (?, 'ISET_FUNDING_OVERVIEW_STANDARD')`,
@@ -222,11 +232,100 @@ async function runRollbackContracts(connection) {
 
     const preserveVersionManaged = await shouldPreserveAssessmentFinancialOverview(connection, {
       caseId,
+      applicationId,
       explicitlyPreserve: false,
     });
     if (!preserveVersionManaged) {
       throw new Error('financial_overview_version_preservation_contract_failed');
     }
+    const preserveOlderVersionForCurrentApplication = await shouldPreserveAssessmentFinancialOverview(connection, {
+      caseId,
+      applicationId: currentApplicationId,
+      explicitlyPreserve: false,
+    });
+    if (preserveOlderVersionForCurrentApplication) {
+      throw new Error('repeat_application_financial_overview_isolation_contract_failed');
+    }
+
+    const [metadataOnlyVersionResult] = await connection.query(
+      `INSERT INTO funding_overview_version
+         (series_id, version_number, status, signed_at, signed_by_participant_id,
+          snapshot_schema_version, metadata_json)
+       VALUES (?, 2, 'signed', NOW(), ?, '1', CAST('{}' AS JSON))`,
+      [seriesResult.insertId, applicantUserId]
+    );
+    await connection.query(
+      `INSERT INTO iset_document
+         (applicant_user_id, client_id, application_id, case_id, source, file_name,
+          file_path, mime_type, label, metadata, status, document_category)
+       VALUES (?, ?, ?, ?, 'system_generated', 'financial-overview-v2-metadata-only.pdf',
+               ?, 'application/pdf', 'Financial Overview v2 (metadata-only link)',
+               CAST(? AS JSON), 'active', 'financial_overview')`,
+      [
+        applicantUserId,
+        clientId,
+        currentApplicationId,
+        caseId,
+        metadataOnlyCurrentOverviewPath,
+        JSON.stringify({ funding_overview_version_id: metadataOnlyVersionResult.insertId }),
+      ]
+    );
+    const preserveMetadataOnlyCurrentOverview = await shouldPreserveAssessmentFinancialOverview(connection, {
+      caseId,
+      applicationId: currentApplicationId,
+      explicitlyPreserve: false,
+    });
+    if (!preserveMetadataOnlyCurrentOverview) {
+      throw new Error('metadata_only_financial_overview_preservation_contract_failed');
+    }
+
+    await connection.query(
+      `INSERT INTO iset_document
+         (applicant_user_id, client_id, case_id, source, file_name, file_path,
+          mime_type, label, metadata, status, document_category)
+       VALUES (?, ?, ?, 'manual_upload', 'case-level-application-form.pdf', ?,
+               'application/pdf', 'Case-level application form', CAST(? AS JSON),
+               'active', 'application_form')`,
+      [
+        applicantUserId,
+        clientId,
+        caseId,
+        caseLevelApplicationFormPath,
+        JSON.stringify({ document_type: 'application_form' }),
+      ]
+    );
+    const preserveCaseLevelApplicationForm = await shouldPreserveAssessmentApplicationForm(connection, {
+      applicationId: currentApplicationId,
+      explicitlyPreserve: true,
+    });
+    if (preserveCaseLevelApplicationForm) {
+      throw new Error('case_level_application_form_isolation_contract_failed');
+    }
+
+    await connection.query(
+      `INSERT INTO iset_document
+         (applicant_user_id, client_id, application_id, case_id, source, file_name,
+          file_path, mime_type, label, metadata, status, document_category)
+       VALUES (?, ?, ?, ?, 'manual_upload', 'current-application-form.pdf', ?,
+               'application/pdf', 'Current application form', CAST(? AS JSON),
+               'active', 'application_form')`,
+      [
+        applicantUserId,
+        clientId,
+        currentApplicationId,
+        caseId,
+        currentApplicationFormPath,
+        JSON.stringify({ document_type: 'application_form' }),
+      ]
+    );
+    const preserveCurrentApplicationForm = await shouldPreserveAssessmentApplicationForm(connection, {
+      applicationId: currentApplicationId,
+      explicitlyPreserve: true,
+    });
+    if (!preserveCurrentApplicationForm) {
+      throw new Error('current_application_form_preservation_contract_failed');
+    }
+
     const archivedCount = await archiveReplaceableAssessmentFinancialOverviews(connection, {
       applicationId,
     });
@@ -267,8 +366,14 @@ async function runRollbackContracts(connection) {
     financialOverviewCases: await queryScalar(connection, 'SELECT COUNT(*) AS c FROM iset_case WHERE case_number = ?', [caseNumber]),
     financialOverviewDocuments: await queryScalar(
       connection,
-      'SELECT COUNT(*) AS c FROM iset_document WHERE file_path IN (?, ?)',
-      [protectedDocumentPath, replaceableDocumentPath]
+      'SELECT COUNT(*) AS c FROM iset_document WHERE file_path IN (?, ?, ?, ?, ?)',
+      [
+        protectedDocumentPath,
+        replaceableDocumentPath,
+        caseLevelApplicationFormPath,
+        currentApplicationFormPath,
+        metadataOnlyCurrentOverviewPath,
+      ]
     ),
   };
   if (Object.values(residue).some(value => value !== 0)) {
@@ -306,6 +411,9 @@ async function main() {
         importClaimPersistence: true,
         eventDeliveryPersistence: true,
         financialOverviewVersionPreservation: true,
+        financialOverviewMetadataCompatibility: true,
+        repeatApplicationDocumentIsolation: true,
+        currentApplicationDocumentPreservation: true,
       },
       requirementCounts: {
         admin: require('../src/lib/adminRuntimeSchemaContract').ADMIN_RUNTIME_SCHEMA_REQUIREMENTS.length,

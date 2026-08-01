@@ -1,38 +1,37 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-07-27T12:26:45.217Z",
-  "releaseId": "20260727-financial-overview-preservation",
-  "releaseLabel": "Release 20260727-financial-overview-preservation",
-  "releaseDateEn": "27th July 2026",
-  "releaseDateFr": "27 juillet 2026",
+  "generatedAt": "2026-08-01T10:39:04.928Z",
+  "releaseId": "20260801-assessment-document-lineage-r2",
+  "releaseLabel": "Release 20260801-assessment-document-lineage-r2",
+  "releaseDateEn": "1st August 2026",
+  "releaseDateFr": "1 aout 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",
     "featuresHeading": "What changed",
     "features": [
-      "Signed and version-managed Financial Overviews now remain available when an Application Assessment is submitted again.",
-      "Existing interventions now reopen with their own saved Internal/NWAC or External/PTMA `Paid from` value.",
-      "Intervention revisions with a blank review-level EI value now prefill it from the same Action Plan for Decision Maker review."
+      "Fixed a bug that could block submission of a repeat application assessment by treating documents from an older application as if they belonged to the current one.",
+      "Newly approved repeat applications now use their own action plan and intervention details when PATH creates a Client Funding Agreement."
     ],
     "featurePackages": [
       {
-        "title": "Release 20260727-financial-overview-preservation",
+        "title": "Release 20260801-assessment-document-lineage-r2",
         "items": [
-          "Submitting or resubmitting an Application Assessment no longer hides signed or version-managed Financial Overviews from Supporting Documents.",
-          "Financial Overview revisions continue through the dedicated version and participant-signature workflow."
+          "Repeat application assessments now preserve Application Forms and Financial Overviews only when the document belongs to the application being submitted.",
+          "Documents from an older application or the general case file no longer prevent PATH from generating the required documents for the current application."
         ]
       },
       {
-        "title": "Release 20260723-end-of-day-r4",
+        "title": "Release 20260730-feedback-173-cfa-hotfix",
         "items": [
-          "Existing interventions now preserve their own saved `Paid from` value when reopened for editing; new interventions still inherit the parent Action Plan as their starting value.",
-          "Intervention revisions with a blank review-level EI value now prefill it from the same Action Plan's structured EI claimant category. New proposals still require a fresh EI selection."
+          "Newly approved repeat applications now create and use an application-linked action plan, so historical plan information cannot replace the current intervention details in a Client Funding Agreement.",
+          "When a participant signs a versioned Client Funding Agreement, PATH now links the signed PDF to that exact version and records the version as signed."
         ]
       },
       {
-        "title": "Release 20260719-rm-cross-region-reassignment-r3",
+        "title": "Release 20260728-regional-snapshot-data-quality-funding",
         "items": [
-          "Regional Managers can now reassign a client file they can access to any active casework staff member, regardless of the assignee's region.",
-          "Existing client-file access rules remain unchanged, and inactive staff cannot be selected as assignees."
+          "Regional Snapshot data-quality issues now name the participant, application, and intervention type and explain the problem and corrective action in plain English.",
+          "Section C now retains valid positive approved funding from non-manual interventions when an application link is missing or conflicting. Section B application activity remains excluded until the lineage is corrected, and the report continues to flag the data issue."
         ]
       }
     ],
@@ -46,30 +45,29 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
-      "Les apercus financiers signes et geres par version restent maintenant disponibles lorsqu'une evaluation de demande est soumise de nouveau.",
-      "Les interventions existantes conservent maintenant leur valeur enregistree « Paye par » Interne/AFAC ou Externe/PTMA lorsqu'elles sont rouvertes.",
-      "Pour une revision d'intervention sans valeur d'AE au niveau de l'examen, PATH reprend maintenant la valeur du meme plan d'action afin que la personne decisionnaire puisse la verifier."
+      "Correction d'un problème qui pouvait bloquer la soumission de l'évaluation d'une demande répétée en traitant les documents d'une ancienne demande comme s'ils appartenaient à la demande actuelle.",
+      "Les nouvelles demandes approuvees utilisent maintenant leur propre plan d'action et leurs propres details d'intervention lorsque PATH cree une entente de financement du client."
     ],
     "featurePackages": [
       {
-        "title": "Release 20260727-financial-overview-preservation",
+        "title": "Release 20260801-assessment-document-lineage-r2",
         "items": [
-          "La soumission ou la nouvelle soumission d'une evaluation de demande ne masque plus les apercus financiers signes ou geres par version dans les documents justificatifs.",
-          "Les revisions d'un apercu financier continuent de suivre le processus distinct de gestion des versions et de signature de la participante ou du participant."
+          "Les évaluations de demandes répétées conservent maintenant les formulaires de demande et les aperçus financiers uniquement lorsque le document appartient à la demande soumise.",
+          "Les documents d'une ancienne demande ou du dossier général ne bloquent plus la production des documents requis pour la demande actuelle."
         ]
       },
       {
-        "title": "Release 20260723-end-of-day-r4",
+        "title": "Release 20260730-feedback-173-cfa-hotfix",
         "items": [
-          "Les interventions existantes conservent maintenant leur propre valeur enregistree « Paye par » lorsqu'elles sont rouvertes pour modification; les nouvelles interventions reprennent toujours la valeur initiale du plan d'action parent.",
-          "Pour une revision d'intervention sans valeur d'AE au niveau de l'examen, PATH reprend maintenant la categorie structuree de prestataire d'AE du meme plan d'action. Les nouvelles propositions exigent toujours une nouvelle selection."
+          "Les nouvelles demandes approuvees creent et utilisent maintenant un plan d'action lie a la demande, afin que l'information d'un ancien plan ne remplace pas les details d'intervention actuels dans une entente de financement du client.",
+          "Lorsqu'une participante ou un participant signe une entente de financement du client geree par version, PATH lie maintenant le PDF signe a cette version precise et enregistre la version comme signee."
         ]
       },
       {
-        "title": "Release 20260719-rm-cross-region-reassignment-r3",
+        "title": "Release 20260728-regional-snapshot-data-quality-funding",
         "items": [
-          "Les gestionnaires regionaux peuvent maintenant reattribuer un dossier client auquel ils ont acces a toute personne active affectee au travail de cas, quelle que soit la region de cette personne.",
-          "Les regles existantes d'acces aux dossiers clients restent inchangees et les membres du personnel inactifs ne peuvent pas etre selectionnes."
+          "Les problèmes de qualité des données de l'instantané régional indiquent maintenant la participante ou le participant, la demande et le type d'intervention, puis expliquent en langage clair le problème et la correction requise.",
+          "La section C conserve maintenant le financement approuvé positif et valide des interventions non manuelles lorsqu'un lien de demande est absent ou contradictoire. L'activité des demandes de la section B reste exclue jusqu'à la correction de la filiation, et le rapport continue de signaler le problème de données."
         ]
       }
     ],

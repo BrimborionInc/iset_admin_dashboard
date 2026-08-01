@@ -1,6 +1,8 @@
 const {
   archiveReplaceableAssessmentFinancialOverviews,
+  hasActiveApplicationDocument,
   hasVersionManagedFinancialOverview,
+  shouldPreserveAssessmentApplicationForm,
   shouldPreserveAssessmentFinancialOverview,
 } = require('../financialOverviewDocumentPolicy');
 const fs = require('fs');
@@ -8,6 +10,10 @@ const path = require('path');
 
 const serverSource = fs.readFileSync(
   path.join(process.cwd(), 'isetadminserver.js'),
+  'utf8'
+);
+const assessmentWidgetSource = fs.readFileSync(
+  path.join(process.cwd(), 'src/widgets/CoordinatorAssessmentWidget.js'),
   'utf8'
 );
 
@@ -20,7 +26,7 @@ function extractFunction(name, nextName) {
 }
 
 describe('Financial Overview document policy', () => {
-  test('assessment submission automatically preserves a version-managed overview', async () => {
+  test('assessment submission preserves a version-managed overview linked to the current application', async () => {
     const connection = {
       query: jest.fn().mockResolvedValue([[{ has_version: 1 }]]),
     };
@@ -28,37 +34,102 @@ describe('Financial Overview document policy', () => {
     await expect(
       shouldPreserveAssessmentFinancialOverview(connection, {
         caseId: 172,
+        applicationId: 103,
         explicitlyPreserve: false,
       })
     ).resolves.toBe(true);
 
     expect(connection.query).toHaveBeenCalledWith(
-      expect.stringContaining('FROM funding_overview_series s'),
-      [172]
+      expect.stringContaining('JOIN funding_overview_series s'),
+      [172, 103]
     );
+    const [sql] = connection.query.mock.calls[0];
+    expect(sql).toContain('FROM iset_document d');
+    expect(sql).toContain('LEFT JOIN funding_overview_version_documents vd');
+    expect(sql).toContain("JSON_EXTRACT(d.metadata, '$.funding_overview_version_id')");
+    expect(sql).toContain('d.application_id = ?');
+    expect(sql).toContain("d.document_category = 'financial_overview'");
+    expect(sql).toContain("d.status = 'active'");
   });
 
-  test('explicit preservation does not depend on a database lookup', async () => {
-    const connection = { query: jest.fn() };
+  test('explicit Financial Overview preservation requires an active current-application document', async () => {
+    const connection = {
+      query: jest.fn().mockResolvedValue([[{ has_document: 1 }]]),
+    };
 
     await expect(
       shouldPreserveAssessmentFinancialOverview(connection, {
         caseId: 172,
+        applicationId: 103,
         explicitlyPreserve: true,
       })
     ).resolves.toBe(true);
 
-    expect(connection.query).not.toHaveBeenCalled();
+    expect(connection.query).toHaveBeenCalledWith(
+      expect.stringContaining('FROM iset_document'),
+      [103, 'financial_overview']
+    );
   });
 
-  test('legacy assessment overview generation remains available when no version exists', async () => {
+  test('explicit Application Form preservation requires an active current-application document', async () => {
+    const connection = {
+      query: jest.fn().mockResolvedValue([[{ has_document: 1 }]]),
+    };
+
+    await expect(
+      shouldPreserveAssessmentApplicationForm(connection, {
+        applicationId: 103,
+        explicitlyPreserve: true,
+      })
+    ).resolves.toBe(true);
+
+    expect(connection.query).toHaveBeenCalledWith(
+      expect.stringContaining('application_id = ?'),
+      [103, 'application_form']
+    );
+  });
+
+  test('case-level documents cannot be preserved for an application submission', async () => {
     const connection = {
       query: jest.fn().mockResolvedValue([[]]),
     };
 
     await expect(
+      hasActiveApplicationDocument(connection, {
+        applicationId: 104,
+        documentCategory: 'application_form',
+      })
+    ).resolves.toBe(false);
+
+    expect(connection.query).toHaveBeenCalledWith(
+      expect.stringContaining('application_id = ?'),
+      [104, 'application_form']
+    );
+  });
+
+  test('an older application version does not suppress overview generation for the current application', async () => {
+    const connection = {
+      query: jest.fn().mockResolvedValue([[]]),
+    };
+
+    await expect(
+      hasVersionManagedFinancialOverview(connection, { caseId: 172, applicationId: 104 })
+    ).resolves.toBe(false);
+
+    expect(connection.query).toHaveBeenCalledWith(
+      expect.stringContaining('d.application_id = ?'),
+      [172, 104]
+    );
+  });
+
+  test('automatic preservation fails closed when the current application is unknown', async () => {
+    const connection = { query: jest.fn() };
+
+    await expect(
       hasVersionManagedFinancialOverview(connection, { caseId: 172 })
     ).resolves.toBe(false);
+
+    expect(connection.query).not.toHaveBeenCalled();
   });
 
   test('replacement archives only legacy assessment-generated overviews', async () => {
@@ -96,5 +167,10 @@ describe('Financial Overview document policy', () => {
     expect(applicationFormStore).not.toContain('archiveReplaceableAssessmentFinancialOverviews');
     expect(financialOverviewStore).toContain('archiveReplaceableAssessmentFinancialOverviews');
     expect(serverSource.match(/shouldPreserveAssessmentFinancialOverview\(/g)).toHaveLength(2);
+    expect(serverSource.match(/shouldPreserveAssessmentApplicationForm\(/g)).toHaveLength(2);
+    expect(serverSource).toContain('applicationId: documentCaseRow.application_id');
+    expect(serverSource).toContain('applicationId: caseRow?.application_id');
+    expect(assessmentWidgetSource).toContain('return rowApplicationId === Number(applicationId);');
+    expect(assessmentWidgetSource).not.toContain('if (rowApplicationId) return rowApplicationId === Number(applicationId);');
   });
 });

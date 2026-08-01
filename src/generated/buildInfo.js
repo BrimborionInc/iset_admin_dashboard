@@ -1,15 +1,15 @@
 const buildInfo = {
   "packageVersion": "0.1.0",
-  "releaseId": "20260727-financial-overview-preservation",
+  "releaseId": "20260801-assessment-document-lineage-r2",
   "buildTarget": "test",
-  "builtAt": "2026-07-27T12:26:45.217Z",
-  "gitCommit": "60d41809d3b8fb6cc08f93b77a67749b801ef307",
-  "gitShort": "60d41809",
+  "builtAt": "2026-08-01T10:39:04.928Z",
+  "gitCommit": "ea39c4553efedf5f1a99ed89b12f5e9e6a34340a",
+  "gitShort": "ea39c455",
   "gitDirty": true,
-  "publicReleaseLabel": "Release 20260727-financial-overview-preservation",
-  "publicReleaseDateEn": "27th July 2026",
-  "publicReleaseDateFr": "27 juillet 2026",
-  "displayLabel": "release 20260727-financial-overview-preservation | 60d41809-dirty"
+  "publicReleaseLabel": "Release 20260801-assessment-document-lineage-r2",
+  "publicReleaseDateEn": "1st August 2026",
+  "publicReleaseDateFr": "1 aout 2026",
+  "displayLabel": "release 20260801-assessment-document-lineage-r2 | ea39c455-dirty"
 };
 
 export default buildInfo;

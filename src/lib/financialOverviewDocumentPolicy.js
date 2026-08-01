@@ -3,18 +3,63 @@ function normalisePositiveInteger(value) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-async function hasVersionManagedFinancialOverview(connection, { caseId } = {}) {
+const ASSESSMENT_PRESERVABLE_DOCUMENT_CATEGORIES = new Set([
+  'application_form',
+  'financial_overview',
+]);
+
+async function hasActiveApplicationDocument(connection, {
+  applicationId,
+  documentCategory,
+} = {}) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedDocumentCategory = typeof documentCategory === 'string'
+    ? documentCategory.trim().toLowerCase()
+    : '';
+  if (
+    !connection ||
+    !normalizedApplicationId ||
+    !ASSESSMENT_PRESERVABLE_DOCUMENT_CATEGORIES.has(normalizedDocumentCategory)
+  ) {
+    return false;
+  }
+
+  const [[row]] = await connection.query(
+    `SELECT 1 AS has_document
+       FROM iset_document
+      WHERE application_id = ?
+        AND document_category = ?
+        AND status = 'active'
+      LIMIT 1`,
+    [normalizedApplicationId, normalizedDocumentCategory]
+  );
+
+  return Number(row?.has_document || 0) === 1;
+}
+
+async function hasVersionManagedFinancialOverview(connection, { caseId, applicationId } = {}) {
   const normalizedCaseId = normalisePositiveInteger(caseId);
-  if (!connection || !normalizedCaseId) return false;
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!connection || !normalizedCaseId || !normalizedApplicationId) return false;
 
   const [[row]] = await connection.query(
     `SELECT 1 AS has_version
-       FROM funding_overview_series s
+       FROM iset_document d
+       LEFT JOIN funding_overview_version_documents vd
+         ON vd.document_id = d.id
        JOIN funding_overview_version v
-         ON v.series_id = s.id
+         ON v.id = COALESCE(
+           vd.funding_overview_version_id,
+           CAST(JSON_UNQUOTE(JSON_EXTRACT(d.metadata, '$.funding_overview_version_id')) AS UNSIGNED)
+         )
+       JOIN funding_overview_series s
+         ON s.id = v.series_id
       WHERE s.case_id = ?
+        AND d.application_id = ?
+        AND d.document_category = 'financial_overview'
+        AND d.status = 'active'
       LIMIT 1`,
-    [normalizedCaseId]
+    [normalizedCaseId, normalizedApplicationId]
   );
 
   return Number(row?.has_version || 0) === 1;
@@ -22,10 +67,27 @@ async function hasVersionManagedFinancialOverview(connection, { caseId } = {}) {
 
 async function shouldPreserveAssessmentFinancialOverview(connection, {
   caseId,
+  applicationId,
   explicitlyPreserve = false,
 } = {}) {
-  if (explicitlyPreserve) return true;
-  return hasVersionManagedFinancialOverview(connection, { caseId });
+  if (explicitlyPreserve) {
+    return hasActiveApplicationDocument(connection, {
+      applicationId,
+      documentCategory: 'financial_overview',
+    });
+  }
+  return hasVersionManagedFinancialOverview(connection, { caseId, applicationId });
+}
+
+async function shouldPreserveAssessmentApplicationForm(connection, {
+  applicationId,
+  explicitlyPreserve = false,
+} = {}) {
+  if (!explicitlyPreserve) return false;
+  return hasActiveApplicationDocument(connection, {
+    applicationId,
+    documentCategory: 'application_form',
+  });
 }
 
 async function archiveReplaceableAssessmentFinancialOverviews(connection, {
@@ -56,6 +118,8 @@ async function archiveReplaceableAssessmentFinancialOverviews(connection, {
 
 module.exports = {
   archiveReplaceableAssessmentFinancialOverviews,
+  hasActiveApplicationDocument,
   hasVersionManagedFinancialOverview,
+  shouldPreserveAssessmentApplicationForm,
   shouldPreserveAssessmentFinancialOverview,
 };

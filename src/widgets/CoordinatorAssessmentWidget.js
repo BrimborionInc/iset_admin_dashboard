@@ -3434,7 +3434,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       if (source === 'system_generated') return false;
       if (applicationId) {
         const rowApplicationId = Number(row?.application_id || row?.applicationId || 0);
-        if (rowApplicationId) return rowApplicationId === Number(applicationId);
+        return rowApplicationId === Number(applicationId);
       }
       const rowCaseId = Number(row?.case_id || row?.caseId || 0);
       return caseId ? rowCaseId === Number(caseId) || !rowCaseId : true;

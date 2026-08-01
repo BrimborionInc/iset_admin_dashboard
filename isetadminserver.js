@@ -180,6 +180,7 @@ const {
 } = require('./src/lib/reviewWorkflowCaseNotes');
 const {
   archiveReplaceableAssessmentFinancialOverviews,
+  shouldPreserveAssessmentApplicationForm,
   shouldPreserveAssessmentFinancialOverview,
 } = require('./src/lib/financialOverviewDocumentPolicy');
 
@@ -90844,14 +90845,18 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       };
       const trackingId = documentCaseRow?.tracking_id || null;
       const afterCaseContext = safeJsonParse(documentCaseRow?.case_context_json, null);
-      const preserveExistingApplicationForm = parseBooleanFlag(
-        body.assessment_preserve_existing_application_form ??
-        body.preserveExistingApplicationForm ??
-        body.preserveExistingApplicationFormDocument,
-        false
-      );
+      const preserveExistingApplicationForm = await shouldPreserveAssessmentApplicationForm(conn, {
+        applicationId: documentCaseRow.application_id,
+        explicitlyPreserve: parseBooleanFlag(
+          body.assessment_preserve_existing_application_form ??
+          body.preserveExistingApplicationForm ??
+          body.preserveExistingApplicationFormDocument,
+          false
+        ),
+      });
       const preserveExistingFinancialOverview = await shouldPreserveAssessmentFinancialOverview(conn, {
         caseId,
+        applicationId: documentCaseRow.application_id,
         explicitlyPreserve: parseBooleanFlag(
           body.assessment_preserve_existing_financial_overview ??
           body.preserveExistingFinancialOverview ??
@@ -91556,14 +91561,18 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     const submittedApplicationLifecycleStatus = normaliseApplicationLifecycleStatusValue(body.applicationStatus, {
       preserveUnknown: true,
     });
-    const preserveExistingApplicationForm = parseBooleanFlag(
-      body.assessment_preserve_existing_application_form ??
-      body.preserveExistingApplicationForm ??
-      body.preserveExistingApplicationFormDocument,
-      false
-    );
+    const preserveExistingApplicationForm = await shouldPreserveAssessmentApplicationForm(pool, {
+      applicationId: caseRow?.application_id,
+      explicitlyPreserve: parseBooleanFlag(
+        body.assessment_preserve_existing_application_form ??
+        body.preserveExistingApplicationForm ??
+        body.preserveExistingApplicationFormDocument,
+        false
+      ),
+    });
     const preserveExistingFinancialOverview = await shouldPreserveAssessmentFinancialOverview(pool, {
       caseId,
+      applicationId: caseRow?.application_id,
       explicitlyPreserve: parseBooleanFlag(
         body.assessment_preserve_existing_financial_overview ??
         body.preserveExistingFinancialOverview ??

@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-07-30
+Last Updated: 2026-08-01
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-08-01 | Release 20260801-assessment-document-lineage-r2 | Fix/Application Assessment | Repeat-application documents | Fixed a bug that could block submission of a repeat application assessment by treating documents from an older application as if they belonged to the current one. | Application Forms and Financial Overviews are now preserved only when they belong to the application being submitted; otherwise PATH generates the required current-application documents.
 - 2026-07-30 | Release 20260730-feedback-173-cfa-hotfix | Fix/Application approval | Repeat applications and Client Funding Agreements | A newly approved application now creates and uses its own application-linked action plan and intervention details, even when the participant has a historical plan in the same file. | The participant signing flow also finalizes the matching versioned agreement and preserves the signed PDF relationship.
 - 2026-07-28 | Runtime update | Fix/Public portal | Document uploads and postal code | Applicants can attach saved PDFs to the remaining photo-enabled document fields, and the Canadian postal-code field now opens a text-capable mobile keyboard. | The upload fields retain image/camera eligibility through `image/*`; only the current live workflow 21 runtime row was patched, with a complete rollback copy retained.
 - 2026-07-28 | Release 20260728-regional-snapshot-data-quality-funding | UX/Reporting | Regional Snapshot data-quality issues | Data-quality warnings now identify the participant, application, and intervention type and explain the problem and required correction in plain English. | The dashboard and Excel summary no longer expose case references or intervention database IDs in this table; reporting totals are unchanged.
@@ -480,11 +481,15 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Fixed a bug that could block submission of a repeat application assessment by treating documents from an older application as if they belonged to the current one.
 - Newly approved repeat applications now use their own action plan and intervention details when PATH creates a Client Funding Agreement.
-- Regional Snapshot data-quality issues now identify the participant and intervention in plain English, with a clear explanation of what needs correction.
-- Valid approved funding remains in Regional Snapshot funding totals when an application link is missing or conflicting, while application activity stays excluded until its lineage is corrected.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260801-assessment-document-lineage-r2
+
+- Repeat application assessments now preserve Application Forms and Financial Overviews only when the document belongs to the application being submitted.
+- Documents from an older application or the general case file no longer prevent PATH from generating the required documents for the current application.
 
 #### Release 20260730-feedback-173-cfa-hotfix
 
@@ -496,24 +501,21 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Regional Snapshot data-quality issues now name the participant, application, and intervention type and explain the problem and corrective action in plain English.
 - Section C now retains valid positive approved funding from non-manual interventions when an application link is missing or conflicting. Section B application activity remains excluded until the lineage is corrected, and the report continues to flag the data issue.
 
-#### Release 20260727-regional-snapshot-financial-overview
-
-- Regional Snapshot application activity now follows intervention start dates and approved scheduled-funding dates, including recurring funding across reporting periods. Application outcomes reconcile to the same population.
-- Funded-client and CRF/EI totals now use the scheduled amounts belonging to the selected period, and the dashboard/export identify source-data issues that require review.
-- Submitting or resubmitting an Application Assessment no longer hides signed or version-managed Financial Overviews from Supporting Documents.
-- Financial Overview revisions continue through the dedicated version and participant-signature workflow.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
+- Correction d'un problème qui pouvait bloquer la soumission de l'évaluation d'une demande répétée en traitant les documents d'une ancienne demande comme s'ils appartenaient à la demande actuelle.
 - Les nouvelles demandes approuvees utilisent maintenant leur propre plan d'action et leurs propres details d'intervention lorsque PATH cree une entente de financement du client.
-- Les problèmes de qualité des données de l'instantané régional indiquent maintenant la participante ou le participant et l'intervention en langage clair, avec une explication précise de la correction requise.
-- Le financement approuvé valide reste dans les totaux de financement de l'instantané régional lorsqu'un lien de demande est absent ou contradictoire; l'activité de la demande reste exclue jusqu'à la correction de sa filiation.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260801-assessment-document-lineage-r2
+
+- Les évaluations de demandes répétées conservent maintenant les formulaires de demande et les aperçus financiers uniquement lorsque le document appartient à la demande soumise.
+- Les documents d'une ancienne demande ou du dossier général ne bloquent plus la production des documents requis pour la demande actuelle.
 
 #### Release 20260730-feedback-173-cfa-hotfix
 
@@ -524,13 +526,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Les problèmes de qualité des données de l'instantané régional indiquent maintenant la participante ou le participant, la demande et le type d'intervention, puis expliquent en langage clair le problème et la correction requise.
 - La section C conserve maintenant le financement approuvé positif et valide des interventions non manuelles lorsqu'un lien de demande est absent ou contradictoire. L'activité des demandes de la section B reste exclue jusqu'à la correction de la filiation, et le rapport continue de signaler le problème de données.
-
-#### Release 20260727-regional-snapshot-financial-overview
-
-- L'activite des demandes dans l'instantane regional suit maintenant les dates de debut des interventions et les dates prevues du financement approuve, y compris le financement recurrent qui traverse plusieurs periodes. Les resultats des demandes se rapprochent avec la meme population.
-- Les totaux des clientes et clients finances et les montants CRF/AE utilisent maintenant les montants prevus dans la periode selectionnee; le tableau de bord et l'exportation signalent les problemes de donnees sources a examiner.
-- La soumission ou la nouvelle soumission d'une evaluation de demande ne masque plus les apercus financiers signes ou geres par version dans les documents justificatifs.
-- Les revisions d'un apercu financier continuent de suivre le processus distinct de gestion des versions et de signature de la participante ou du participant.
 
 ### Problemes connus (brouillon - FR)
 
