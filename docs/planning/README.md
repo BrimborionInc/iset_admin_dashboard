@@ -31,6 +31,7 @@ As of 2026-07-10, these are the main planning docs intentionally linked from `do
 - `admin-ai-chatbot-coverage-register.md`
 - `engineering-audit-register.md`
 - `engineering-audit-release-wave-manifest.md`
+- `staff-record-correction-controls-proposal-email.md`
 
 `client-case-application-cutover-dependency-inventory.md` is useful for dependency history, but `docs/AGENTS.md` currently says to use `client-case-application-target-model.md` for the live target model where they differ.
 
