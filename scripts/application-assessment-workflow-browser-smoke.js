@@ -1335,6 +1335,84 @@ function buildScenarios() {
       },
     },
     {
+      name: 'regional-manager-edit-returned-assessment-as-original-submitter',
+      role: 'Regional Manager',
+      path: FRONTEND_CASE_PATH,
+      forceCoordinatorOnlyLayout: true,
+      casePayload: buildCasePayload({
+        status: 'intake',
+        applicationStatus: 'in_review',
+        completeAssessment: true,
+        conflictSigned: true,
+        twoStepReviewEnabled: true,
+        reviewWorkflow: buildReviewWorkflow(REVIEW_STAGES.returnedToSubmitter, {
+          submittedByStaffProfileId: 1,
+          submitted_by_staff_profile_id: 1,
+          rmReviewNote: 'Please clarify the training rationale before approval.',
+          rm_review_note: 'Please clarify the training rationale before approval.',
+        }),
+      }),
+      run: async ({ page, state }) => {
+        await waitForWorkspaceReady(page, 'Assess Eligibility');
+        await waitForButtonEnabled(page, 'Next');
+        await clickButtonByText(page, 'Next');
+        await waitForText(page, 'What is being proposed?');
+        await waitForButtonEnabled(page, 'Next');
+        await clickButtonByText(page, 'Next');
+        await waitForText(page, 'Why is this intervention needed?');
+
+        const overviewInput = await page.evaluate(() => {
+          const textareas = Array.from(document.querySelectorAll('textarea'));
+          const visible = textareas.find(element => {
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+            return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+          });
+          if (!visible) return null;
+          return {
+            readOnly: visible.readOnly,
+            disabled: visible.disabled,
+            value: visible.value,
+          };
+        });
+        if (!overviewInput || overviewInput.readOnly || overviewInput.disabled) {
+          throw new Error(`Returned assessment remained read-only for its Regional Manager submitter: ${JSON.stringify(overviewInput)}`);
+        }
+
+        const revisedOverview = `${overviewInput.value} Clarified after Regional Manager review.`;
+        await page.evaluate(value => {
+          const textareas = Array.from(document.querySelectorAll('textarea'));
+          const visible = textareas.find(element => {
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+            return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+          });
+          if (!visible) throw new Error('Visible returned-assessment overview textarea was not found.');
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+          setter.call(visible, value);
+          visible.dispatchEvent(new Event('input', { bubbles: true }));
+          visible.dispatchEvent(new Event('change', { bubbles: true }));
+        }, revisedOverview);
+        await waitForButtonEnabled(page, 'Save Progress');
+        await clickButtonByText(page, 'Save Progress');
+
+        const savePut = await waitUntil(
+          () => state.mutations.casePuts.find(entry => entry.body.case_summary === revisedOverview),
+          'returned Regional Manager assessment save PUT'
+        );
+        if (savePut.body.applicationId !== APPLICATION_ID) {
+          throw new Error(`Returned assessment save used wrong applicationId: ${savePut.body.applicationId}`);
+        }
+        if (savePut.body.expectedRowVersion !== 7) {
+          throw new Error(`Returned assessment save sent wrong expectedRowVersion: ${savePut.body.expectedRowVersion}`);
+        }
+        if (state.casePayload.reviewWorkflow?.currentStage !== REVIEW_STAGES.returnedToSubmitter) {
+          throw new Error(`Returned assessment save changed workflow stage: ${state.casePayload.reviewWorkflow?.currentStage}`);
+        }
+        await waitForText(page, 'Assessment saved successfully');
+      },
+    },
+    {
       name: 'coordinator-recall-pending-assessment',
       role: 'ISET Coordinator',
       path: FRONTEND_CASE_PATH,
