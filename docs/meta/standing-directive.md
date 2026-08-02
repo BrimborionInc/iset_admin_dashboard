@@ -1,3 +1,7 @@
+# STOP: NEVER GUESS DATABASE SCHEMA OR SQL
+
+This rule outranks task momentum and applies to every environment, including read-only work. No agent may compose or execute SQL against an object that has not been verified in the exact target environment during the current task. Verify the environment/database/host/user first; discover names from live metadata; and before any mutation inspect full live DDL, columns, indexes, constraints, relationships, enums, and collations for every touched table and joined or compared field. Code, docs, migrations, prior repairs, memory, and plausible names are not live-schema proof. After any schema-related SQL failure, stop ordinary work and run discovery queries only—never revise the guess and retry. A breach requires immediate stop, rollback/state proof, cleanup of temporary operational controls, direct disclosure to Bill, and a fresh schema-first restart.
+
 # Project Memory Standing Directive
 
 Purpose: durable operating contract for maintaining this repository's agent-facing project memory across short task-based AI threads.

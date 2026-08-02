@@ -1,3 +1,7 @@
+# STOP: DOCUMENTATION IS NOT LIVE-SCHEMA PROOF
+
+Never use this index, its linked docs, migrations, code, prior SQL, or remembered PATH structure as proof that a database object exists in the target environment. Before any SQL—including `SELECT`—verify the exact environment/database/host/user and discover every referenced object from live metadata. Before mutation, inspect full live DDL, columns, indexes, constraints, relationships, enums, and collations for every touched table and joined or compared field. After a schema-related failure, permit discovery queries only; do not revise a guessed query and retry it.
+
 # Database Documentation Index (ISET Shared MySQL)
 
 Purpose: Single entrypoint for database documentation across the admin dashboard and public intake portal. Use this first in future Codex sessions.

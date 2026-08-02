@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-08-01
+Last Updated: 2026-08-02
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,7 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
-- 2026-08-01 | Release TBD | Fix/Application Assessment | Returned changes for dual-role Regional Managers | A Regional Manager who originally submitted an assessment can edit it when requested changes are returned to that submitter. | PATH matches the signed-in staff profile to the assessment workflow's recorded submitter; other Regional Managers and all active review/decision stages remain read-only.
+- 2026-08-01 | Release 20260801-returned-assessment-edit | Fix/Application Assessment | Returned changes for dual-role Regional Managers | A Regional Manager who originally submitted an assessment can edit it when requested changes are returned to that submitter. | PATH matches the signed-in staff profile to the assessment workflow's recorded submitter; other Regional Managers and all active review/decision stages remain read-only. Deployed to PROD on 2026-08-02.
 - 2026-08-01 | Release 20260801-assessment-document-lineage-r2 | Fix/Application Assessment | Repeat-application documents | Fixed a bug that could block submission of a repeat application assessment by treating documents from an older application as if they belonged to the current one. | Application Forms and Financial Overviews are now preserved only when they belong to the application being submitted; otherwise PATH generates the required current-application documents.
 - 2026-07-30 | Release 20260730-feedback-173-cfa-hotfix | Fix/Application approval | Repeat applications and Client Funding Agreements | A newly approved application now creates and uses its own application-linked action plan and intervention details, even when the participant has a historical plan in the same file. | The participant signing flow also finalizes the matching versioned agreement and preserves the signed PDF relationship.
 - 2026-07-28 | Runtime update | Fix/Public portal | Document uploads and postal code | Applicants can attach saved PDFs to the remaining photo-enabled document fields, and the Canadian postal-code field now opens a text-capable mobile keyboard. | The upload fields retain image/camera eligibility through `image/*`; only the current live workflow 21 runtime row was patched, with a complete rollback copy retained.

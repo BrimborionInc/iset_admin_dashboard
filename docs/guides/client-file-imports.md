@@ -1,6 +1,7 @@
 # Client File Imports
 
 Date: 2026-04-05
+Last reviewed: 2026-07-29 after the Stephanie Swampy application-less client-file repair.
 
 ## Summary
 
@@ -84,6 +85,10 @@ This means the database does not require a fake intake history just to preserve 
 - Allow action plans, interventions, funding/cost lines, and documents to be backloaded later through the explicit case-workspace backload actions rather than by inventing fake intake history.
 - If the organization later decides historical applications matter, import them as a second phase with their own explicit rules rather than fabricating them during client-file setup.
 - Do not create placeholder application, submission, approval, or applicant-account records just to unlock later case-management features.
+
+## Verified PROD example
+
+On 2026-07-29, Stephanie Swampy was missing from PATH because her pre-PATH approval was not part of the original backload. The guarded repair used this application-less model to create client `384` and Manitoba case `264` (`CASE-2026-0000264`) assigned to Judy Cook. The source workbook/sheet/row and its EI / `$4,000` report context were retained as import metadata only. No applicant user, application, submission, assessment, action plan, intervention, payment, or finance record was fabricated. Staff can now use the Case Workspace's `Add existing action plan` flow to enter the real historical plan.
 
 ## Current dashboard implementation
 

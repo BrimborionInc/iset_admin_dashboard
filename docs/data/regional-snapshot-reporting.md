@@ -167,15 +167,34 @@ Agreed starting definition:
   funding adjustments for 19 clients, records 11 no-payout clients as zero adjustments, and has
   no outstanding clients. Funding is assigned to CRF or EI from the matching PATH intervention
   funding source.
-- The complete overlay adds 18 applications, 18 approved applications, 18 funded clients,
-  $19,744.27 CRF, and $51,502.63 EI. Kaitlyn Kitson is the one positive-funding adjustment that
-  adds funding only because her application, approval, and funded-client count already exist in
-  the automated report.
+- Before the Manitoba supplement described below, the complete overlay added 18 applications,
+  18 approved applications, 17 funded clients, $19,744.27 CRF, and $51,502.63 EI. Sarah
+  Froese and Kaitlyn Kitson are the positive-funding adjustments that do not add another
+  funded-client count because each participant is already counted automatically in Section C.
 - The nine records completed on 2026-07-28 add five applications/approvals/funded clients:
   Chrystal Loucks ($2,000 CRF), Jaida Duclos ($5,381.15 CRF), Shalaine Mezzo ($6,400 EI),
   Allison Moores ($2,000 EI), and Candace Stone ($4,000 EI). Madison Lightning-Swampy,
   Madison Bouvier-Morin, Tanisha Gardypie, and Glennis Tony have no FY 2026-27 payouts and
   therefore add no manual counts.
+- On 2026-07-29 the client supplied `docs/data/temp/NWAC MB Report.xlsx`. Its annual
+  `Carry Over Clients` table adds 11 Manitoba applications, 11 approved applications,
+  11 funded clients, and $21,070 EI funding. Exact transaction dates are unavailable, which
+  is acceptable for this one-off annual fiscal-year report but does not support monthly or
+  quarterly allocation.
+- The workbook's Denied, Withdrawn, and Current Application rows are not manual additions.
+  Read-only PROD comparison matched all 20 rows to existing PATH applications after accounting
+  for minor name differences. Adding them would double-count applications. Where the workbook
+  and PATH outcome differ, the current PATH outcome remains authoritative.
+- The extended overlay now adds 29 applications, 29 approved applications, 28 funded clients,
+  $19,744.27 CRF, and $72,572.63 EI. The existing
+  `regional-snapshot-manual-adjustments-complete-2026-07-28.json` file was extended in place
+  with the Manitoba rows and records the 2026-07-29 source in its metadata.
+- The resulting 2026-07-29 report generated from a fresh read-only PROD extraction contains
+  230 applications (48 approved, 84 denied/ineligible/withdrawn/NC, and 98 pending),
+  48 funded clients, $159,912.17 CRF, and $146,996.02 EI. Compared with the final
+  2026-07-28 workbook, 11 approved applications/funded clients and $21,070 EI come from the
+  Manitoba supplement, while eight additional pending applications come from new live PATH
+  data recorded since the earlier extraction.
 
 This behavior was deployed to TEST and PROD in release
 `20260727-regional-snapshot-financial-overview` on 2026-07-27.

@@ -1,7 +1,7 @@
 # PROD Duplicate Applicant Identity Merge
 
 Status: current operational guidance for rare live data repairs. Verify schema, code, and live DB state before use.
-Last reviewed: 2026-05-21 after the Molly Hink PROD repair.
+Last reviewed: 2026-07-29 after the Susan Guimond PROD repair.
 
 Purpose: record how to detect and repair the pattern where one real applicant has both an imported case/client identity and a later public-portal application identity. This is not a general-purpose merge script. Treat every PROD repair as bespoke, guarded, snapshotted, and recoverable.
 
@@ -28,6 +28,8 @@ When the public portal application is the applicant-submitted current record, tr
 For the 2026-05-04 Jodie Stephens repair, the survivor was public portal client `156` / user `199` / case `134` / application `56`, and the imported identity client `72` / user `75` / case `72` was retired. The reviewed SQL script was `sql/ops/prod-merge-jodie-stephens-client-case-20260504.sql`.
 
 For the 2026-05-21 Molly Hink repair, staff confirmed the Hotmail login was canonical. The survivor was Hotmail client `149` / user `189` / case `129` / active application `50`; imported/Gmail client `42` / user `45` / case `42` and duplicate application `76` were retired. The reviewed SQL script was `sql/ops/prod-merge-molly-hink-gmail-into-hotmail-20260521.sql`.
+
+For the 2026-07-29 Susan Guimond repair, the current public-portal identity remained canonical as client `244` / user `180` / case `172` / application `103`. The imported typo-email identity was client `20` / user `23` / case `20`. A full live-FK inventory proved the imported case had no operational casework and the imported user had no dependent rows. The repair therefore left application `103` and submission `103` completely untouched, moved the one imported account event to client `244`, suspended user `23`, retained client `20` with merge metadata, and archived/detached case `20`. Recovery point `path-prod-mb-client-repair-20260729163423` is available; the reviewed artifacts are `sql/ops/prod-mb-client-repair-apply-20260729.sql`, `sql/ops/prod-mb-client-repair-verify-20260729.sql`, and `sql/ops/prod-mb-client-repair-rollback-20260729.sql`.
 
 ## Repair Shape
 

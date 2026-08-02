@@ -1,3 +1,7 @@
+# STOP: NEVER GUESS DATABASE SCHEMA OR SQL
+
+No SQL—including `SELECT`—may reference an unverified live object. First prove the exact AWS account/environment, database, host, and current user. Discover tables and columns from live metadata. Before any mutation, inspect `SHOW CREATE TABLE` and the required full column/index/constraint/collation metadata for every touched table and every joined or compared field. Never substitute code, migrations, docs, earlier repair scripts, memory, or naming conventions for live proof. If any query fails because of schema, object, type, constraint, or collation assumptions, stop ordinary investigation and allow only schema-discovery queries until the exact live shape is proven. In PROD, do not proceed from discovery to mutation without a read-only preview, exact guards, reviewed recovery, appropriate lock/warning/snapshot controls, and independent verification.
+
 # Agent Operational Access Notes
 
 Status: current operational access guidance for Codex/WSL threads. Verify live AWS/DB state before running mutating commands.

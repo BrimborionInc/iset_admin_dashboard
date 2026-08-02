@@ -1,8 +1,8 @@
 # Proposal Email: Greater Staff Control to Correct PATH Records
 
-Status: Current proposal sent for NWAC policy discussion; awaiting Émilie/client-PM feedback  
-Prepared: 2026-07-31  
-Revised: 2026-08-01
+Status: Current proposal sent for NWAC policy discussion; awaiting Émilie/client-PM feedback
+Prepared: 2026-07-31
+Revised: 2026-08-02
 
 ## Workstream status
 
@@ -15,7 +15,7 @@ Recent feedback work provides implementation evidence for this proposal, but onl
 | `#157` | Limited post-submission corrections | A dependency-gated EI-status correction control is deployed and the report is resolved. This is one delivered example, not a general post-submission edit framework. |
 | `#154` | Communication mistakes | Plain staff-to-applicant messages now have recipient safeguards and an audit-preserving withdrawal path; the report is resolved. Messages with linked files or signing requests remain outside the simple withdrawal path. |
 | `#166` | Document withdrawal/restoration | The signed Financial Overview was recovered and preservation guards were deployed; the report is resolved. This was a targeted recovery/prevention fix, not general document-correction authority. |
-| `#168` and `#170` | Returned assessment editing | The exact workflow submitter can edit an assessment returned to them even when they also hold the Regional Manager role. The code is complete and tested but is not deployed. This supports the existing return-to-submitter workflow; it does not let a reviewer directly make minor edits. |
+| `#168` and `#170` | Returned assessment editing | The exact workflow submitter can edit an assessment returned to them even when they also hold the Regional Manager role. Release `20260801-returned-assessment-edit` passed the complete TEST acceptance gate, was deployed to PROD on 2026-08-02, and both reports are resolved. This supports the existing return-to-submitter workflow; it does not let a reviewer directly make minor edits. |
 | `#169` and `#172` | Accidental workflow decisions | The two accidental denials were repaired and the reports are resolved. PATH still lacks a staff self-service decision-reversal control. |
 | `#175` | Incorrect historical entries | The dependency-free accidental manual-backload entry was removed and the report is resolved. PATH still lacks an audit-preserving staff retraction control for this class of mistake. |
 | `#165` | Action-plan corrections | The affected record was repaired and the report is resolved. The repair is evidence for the need; it did not add general self-service action-plan correction controls. |
