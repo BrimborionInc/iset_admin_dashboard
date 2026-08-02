@@ -17,7 +17,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-08-01
+Last Updated: 2026-08-02
 
 ## Project memory layer
 
@@ -29,6 +29,13 @@ Last Updated: 2026-08-01
 - Prefer concise, current, task-useful docs. Revise, merge, archive, or delete stale/conflicting documentation instead of preserving old wording because it might be useful.
 - Keep improving the quality of the persistent knowledge base as you work. When you encounter guidance that survived from the Windows-mounted checkout era, update it to the current WSL/Linux `/home/bill/ISET` reality or mark it as historical instead of carrying stale Windows paths, commands, or assumptions forward.
 - Follow `docs/meta/standing-directive.md` for the durable maintenance contract and `docs/meta/documentation-audit-2026-04-29.md` for the current documentation cleanup inventory.
+
+## Source-control baseline
+
+- The canonical GitHub branch is `main` in each PATH repository: `admin-dashboard`, `ISET-intake`, and `shared`.
+- Use temporary local branches and Git worktrees to isolate qualification, hotfix, and release candidates, but do not leave deployed commits stranded there. After a release is verified, fast-forward or merge the exact deployed commit into `main`, push `main`, then delete the obsolete remote release branch.
+- A local release worktree may remain detached only when its ignored `tmp/` files are still needed as deployment evidence. It is an evidence snapshot, not a competing source branch.
+- The historical admin `backup-main` branch was the working mainline during an older repository transition. It was superseded by canonical `main` during the 2026-08-02 reconciliation and must not be recreated or used for new work.
 
 ## Working relationship (design dialog)
 
