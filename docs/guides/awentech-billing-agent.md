@@ -57,7 +57,7 @@ For a successful month, the command writes:
 
 - `Awentech - Invoice - {Month YYYY}.docx`
 - `Awentech - Invoice - {Month YYYY}.pdf`
-- `Awentech - Invoice - {Month YYYY} - audit.md`
+- audit file named *Awentech - Invoice - {Month YYYY} - audit.md*
 - `billing-ledger.json` under the client folder
 
 The audit file records the AWS response, usage/tax breakdown, FX source/rate, conversion, tax calculation, output paths, and file hashes.
@@ -83,4 +83,3 @@ After running it, report only the generated file paths, invoice number, total du
 
 Email sending is out of scope. If Bill asks about email automation, treat it as a future SES phase and do not send anything.
 ```
-
