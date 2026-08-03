@@ -17,7 +17,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-08-02
+Last Updated: 2026-08-03
 
 ## Project memory layer
 
@@ -32,10 +32,12 @@ Last Updated: 2026-08-02
 
 ## Source-control baseline
 
+- Read `docs/guides/source-control-and-github-operations.md` before any push, branch reconciliation, canonical-branch change, workflow change, or GitHub automation work. Treat every push as a potentially operational event: inspect the full pushed range and all active workflows, integrations, and webhooks before changing `main`.
 - The canonical GitHub branch is `main` in each PATH repository: `admin-dashboard`, `ISET-intake`, and `shared`.
 - Use temporary local branches and Git worktrees to isolate qualification, hotfix, and release candidates, but do not leave deployed commits stranded there. After a release is verified, fast-forward or merge the exact deployed commit into `main`, push `main`, then delete the obsolete remote release branch.
 - A local release worktree may remain detached only when its ignored `tmp/` files are still needed as deployment evidence. It is an evidence snapshot, not a competing source branch.
 - The historical admin `backup-main` branch was the working mainline during an older repository transition. It was superseded by canonical `main` during the 2026-08-02 reconciliation and must not be recreated or used for new work.
+- No Git push, pull request, merge, branch operation, or path filter may automatically deploy PATH code, mutate a PATH database, or apply Terraform to TEST or PROD. PROD changes must use the established runbooks, explicit environment authorization, and their fail-closed verification gates.
 
 ## Working relationship (design dialog)
 
