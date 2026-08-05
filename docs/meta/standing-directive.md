@@ -2,6 +2,10 @@
 
 This rule outranks task momentum and applies to every environment, including read-only work. No agent may compose or execute SQL against an object that has not been verified in the exact target environment during the current task. Verify the environment/database/host/user first; discover names from live metadata; and before any mutation inspect full live DDL, columns, indexes, constraints, relationships, enums, and collations for every touched table and joined or compared field. The rule also covers application result-row access: every `row.field` must be proven as a live column on the exact queried table or an explicit alias in the executed `SELECT`; related-table fields, models, fixtures, docs, prior repairs, memory, and plausible names are not proof. After any schema-related SQL failure, stop ordinary work and run discovery queries only—never revise the guess and retry. A breach requires immediate stop, rollback/state proof, cleanup of temporary operational controls, direct disclosure to Bill, and a fresh schema-first restart.
 
+## STOP AGAIN: LIVE DDL MUST MATCH THE FINAL SQL TEXT
+
+Live DDL discovery is only the first half of the control. Immediately before every non-metadata SQL execution, compare the finished statement identifier by identifier with the current target's live metadata. Confirm separately for each table that every selected, filtered, joined, ordered, inserted, or updated column actually belongs to that table; a column verified on a related table is not proof. If any identifier, function, enum value, collation, or relationship is not directly supported by the captured metadata, do not run the statement and return to metadata-only discovery. For PROD repairs, write reviewed non-metadata SQL under `sql/ops/` rather than improvising multi-table statements in a shell command.
+
 # Project Memory Standing Directive
 
 Purpose: durable operating contract for maintaining this repository's agent-facing project memory across short task-based AI threads.

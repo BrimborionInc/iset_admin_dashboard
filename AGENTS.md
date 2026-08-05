@@ -2,6 +2,13 @@
 
 This is the first and non-negotiable instruction for every agent working in this repository.
 
+## STOP AGAIN: CHECK THE FINISHED SQL AGAINST LIVE SCHEMA BEFORE EXECUTION
+
+- Retrieving live DDL is not enough. Immediately before executing every non-metadata SQL statement, compare every identifier in the finished SQL text against the live metadata captured for that exact target environment.
+- Check one table at a time and explicitly confirm that every selected, filtered, joined, ordered, inserted, or updated column belongs to that table. Never carry a similarly named column from another table into the statement.
+- If even one identifier, function, enum value, collation, or relationship cannot be pointed to in the current live metadata output, do not run the statement. Return to metadata-only discovery.
+- For PROD repair work, put reviewed non-metadata SQL in an artifact under `sql/ops/`; do not improvise multi-table inventory or mutation SQL directly in a shell command.
+
 - Never compose or execute SQL that references a table, column, index, constraint, relationship, enum, collation, function, or database object that has not been verified against the exact target environment in the current task. This prohibition includes read-only `SELECT` statements and applies to DEV, TEST, and PROD.
 - Before any SQL, verify the target account/environment, database, host, and current user. Discover object names through live metadata. Before any mutation, inspect the full live DDL (`SHOW CREATE TABLE` plus any required `SHOW FULL COLUMNS`/index/constraint metadata) for every table touched and every joined or compared field.
 - Code, ORM models, migrations, docs, earlier repairs, remembered names, and plausible naming conventions are not proof of the deployed schema. Do not turn a failed guessed query into a revised guess: stop ordinary work and return to schema-discovery queries only.

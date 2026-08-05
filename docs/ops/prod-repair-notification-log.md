@@ -2,9 +2,35 @@
 
 Purpose: track live PROD data repairs whose affected staff or business owners may need to be informed later.
 Audience: operations, product, support, and future AI-assisted maintenance threads.
-Last Updated: 2026-07-28
+Last Updated: 2026-08-05
 
 Use this log for repairs that may be externally invisible to staff but should be available for later owner communication. Keep entries concise, evidence-based, and linked to the exact scripts or reports where possible. Do not use this file as approval to mutate PROD; follow the PROD repair rules in `docs/ops/agent-operational-access.md`.
+
+## 2026-08-05 - Feedback #178 approved assessment correction recovery
+
+Status: PROD guarded recovery applied and independently verified; owner follow-up drafted but not sent. Report `#178` remains `in_progress` until the normal correction and renewed-decision workflow is complete.
+
+Reason: Kayla Gladue's application assessment had reached final approval before a funding-amount correction was identified. The preferred management workflow is for the Regional Manager to return the assessment to its submitter so the return reason, correction, resubmission, Regional Manager review, and renewed Decision Maker decision remain in PATH's audit history. The final-decision state has no supported return transition, so the System Administrator exceptional recovery path was required.
+
+Repair applied:
+
+- Restored application `61` / review workflow `17` to `pending_approval / pending_decision` and `rm_review`, preserving all nine prior workflow events and adding a System Administrator recovery event and internal case note.
+- Cleared the selected application's active decision/decision-letter context so the earlier approval is not presented as current.
+- Archived draft action plan `166`; cancelled generated interventions `351-353`; withdrew unsigned, unsent CFA version `37`; archived its generated document `9195`; and removed the untouched `needs_review / pending` ESDC seed.
+- Preflight and transactional guards proved there were no related intervention proposals, intervention-document links, payments, finance transactions, or CFA signing requests.
+- Moved feedback `#178` from `triaging` to `in_progress` with status history and a recovery note. The report is intentionally still open.
+
+Evidence:
+
+- Preview, lock, apply, independent verification, unlock, and recovery artifacts are `sql/ops/prod-feedback-178-assessment-correction-*-20260805.*`.
+- Application lock command `6e329a44-fb84-4976-bbc5-01c7e4b0efbc` acquired the exact record lock; unlock command `3f15a9d9-ac87-413e-a621-8e1ec62f707b` released it after verification.
+- Aurora snapshot `path-prod-feedback-178-recovery-20260805-1606` reached `available` before apply.
+- Apply SSM command `406dc222-15b2-4788-9836-1ead3733cb97` completed successfully.
+- Independent verification SSM command `d70cb67b-98df-4fad-9d8c-272ed2434968` confirmed the expected application/workflow states, cleared decision markers, preserved workflow history, withdrawn generated artifacts, removed ESDC seed, case audit rows, and feedback history/note.
+
+Notification note:
+
+- Danielle Burdett, Derry Yellowfly, and Madison Coppola need the workflow handoff. Derry's next action is `Return to Coordinator`; Danielle then corrects and resubmits; Derry reviews/submits for final decision; Madison records the renewed decision. The earlier draft plan, interventions, and CFA must not be used; PATH will generate replacement drafts from the renewed approval.
 
 ## 2026-07-28 - Regional Snapshot action-plan provenance follow-up
 

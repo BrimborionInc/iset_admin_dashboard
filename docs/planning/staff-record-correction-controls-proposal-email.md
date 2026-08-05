@@ -22,6 +22,7 @@ Recent feedback work provides implementation evidence for this proposal, but onl
 | `#175` | Incorrect historical entries | The dependency-free accidental manual-backload entry was removed and the report is resolved. PATH still lacks an audit-preserving staff retraction control for this class of mistake. |
 | `#165` | Action-plan corrections | The affected record was repaired and the report is resolved. The repair is evidence for the need; it did not add general self-service action-plan correction controls. |
 | `#173` | Generated-document/workflow correction | The targeted repair and prevention work are complete, but the corrected CFA draft still requires staff review and sending. This does not add general correction authority. |
+| `#178` | Post-decision assessment/funding correction | A guarded System Administrator recovery restored the affected approved assessment to Regional Manager review and withdrew its unsigned generated plan/CFA artifacts. Derry must now use the normal Return to Coordinator action, after which Danielle can correct/resubmit and Madison can record the renewed decision. The report remains in progress, and the exceptional repair does not add a general post-decision return or staff correction control. |
 
 Next gate: obtain the client-PM response, then turn the agreed policy into an explicit matrix of roles, permitted actions, workflow states, dependency blockers, audit requirements and any second-person approval. Only then should the remaining correction controls be designed and scheduled as a coherent work package.
 
