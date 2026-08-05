@@ -1,6 +1,6 @@
 # Feedback 173 Repeat-Application CFA Hotfix Contract
 
-Status: deployed to PROD on 2026-07-30; guarded Case `12` repair complete; staff review/send and participant re-sign verification remain open.
+Status: July 30 CFA release and guarded Case `12` repair complete; August 5 signing-regression hotfix deployed; participant retry and completed-chain verification remain open.
 Feedback report: `173`.
 Incident record: Case `12`, application `95`, assessment `492`, incorrect CFA version `33`.
 
@@ -73,6 +73,16 @@ Rollback is allowed only while the corrected CFA remains draft and has never bee
 Portal commit `5afed494fd06808c2a3d009e92ba389cd3218fcc` introduced a caller-wiring defect in the July 30 release: the signing route passed `row.application_id` to CFA finalization even though the live `signing_request` table has no `application_id` column. The route had already resolved the correct application through its linked message/case as `resolvedApplicationId`. Earlier tests proved the finalizer when given a correct application ID but did not exercise the real Express route with the live signing-request row shape, so the invalid caller argument escaped qualification.
 
 Release `20260805-cfa-signing-hotfix-r3` replaces that argument with the already-resolved application ID, removes the remaining fallback reads of the nonexistent field, and adds three required proofs: a full Express-stack regression whose signing row deliberately omits `application_id`; an authenticated real-DEV signing journey with live metadata/DDL proof, document/version/event/idempotency checks and zero-residue cleanup; and the same deployed journey in TEST. Feedback `177` remains open until the exact release has TEST `GO`, receives explicit PROD approval, is deployed, and the affected live journey is rechecked without fabricating or editing participant records.
+
+### 2026-08-05 PROD signing-hotfix evidence
+
+- Clean portal commit `8dcae3d6fb3c91c42e678c12bca99a194aadb019` passed DEV 16/16 and deployed TEST 12/12; PROD admission used TEST evidence `9397487554aa7c0b97930241d1f500049bc09a21fea2271df2bd1373021ae9ca`.
+- The production build completed before the five-minute portal warning and fallback. Portal-only release `20260805-cfa-signing-hotfix-r3` deployed with schema, data, admin and shared components skipped; ASG refresh `797a0130-2c6d-4b79-9a96-67362bf93a0e` completed on `i-057ea680c05fff947`.
+- SSM verification matched deployed provenance to the qualified portal commit and matched `/opt/nwac/portal/server.js` SHA-256 `4d76c43e76909b79f5728c68cee6b3e2604e9cf15e594e6158fef41a4807c5a4`; the live CFA finalizer receives `resolvedApplicationId`.
+- Both target groups were healthy, all three public `/readyz` checks returned `200`, the new portal error log was empty, ALB rules returned to normal forwarding, and the active maintenance-announcement count returned to zero.
+- Read-only live recheck confirmed requests `152`, `159`, and `162` remain `viewed`, have no active completion claim, retain their existing application-scoped partial document, and point through the linked message to applications `95`, `90`, and `86`; CFA versions `34`, `35`, and `36` remain `sent`. No direct data repair or replacement CFA was required. Participants should retry the existing request.
+- Feedback `177` moved from `planned` to `in_progress` with a status-history row and deployment note. Keep it open until a participant retry proves the complete signing request, canonical signed document, CFA version, and event chain.
+- PROD manifest: `/home/bill/ISET/admin-dashboard/tmp/path-deploy/prod/20260805-cfa-signing-hotfix-r3--2026-08-05T14-37-14-470Z.json`.
 
 ## 2026-07-30 Release And Repair Evidence
 
