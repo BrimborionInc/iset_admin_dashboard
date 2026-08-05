@@ -43,7 +43,7 @@ The JSON inventory is executable project memory. Every changed file must match a
 | Release domain | Principal proof |
 | --- | --- |
 | Admin application and role journeys | Admin aggregate, compiled bundle, 13 deterministic browser journeys, deployed Coordinator/Regional Manager/Decision Maker smoke |
-| Portal application and applicant scope | Portal aggregate and composition tests, deployed intake completion/retry/files smoke, two-applicant browser/API ownership smoke |
+| Portal application and applicant scope | Portal aggregate and composition tests, real caller-boundary tests with live-schema-faithful result shapes, deployed intake completion/retry/files/signing smoke, two-applicant browser/API ownership smoke |
 | Shared runtime and API composition | Both aggregate suites, injected full Express-stack tests, exact shared-tree provenance, deployed cross-app journeys |
 | Schema and readiness/request parity | Canonical migration plan, exact admin and portal readiness contracts on real MySQL, authenticated `staff_profiles` hydration using the same exported column list, deployed `/readyz`, zero pending migrations and zero unresolved failures for current canonical checksums |
 | Identity, authentication, authorization | Unit/composition authorization suites, disposable Cognito role journeys, strict real-token wrong-role/cross-surface/wrong-owner denials with no skipped checks |
@@ -198,6 +198,8 @@ For an approved dataset or TEST reset, include the exact previously qualified fl
 
 The TEST deployment records the prior retained timestamped admin and portal artifacts before uploading the candidate. Missing prior rollback artifacts block TEST acceptance. First adoption of artifact provenance should deploy both applications so both roots receive `.path-release-provenance.json`.
 
+For a partial deployment, exact candidate provenance is required only on components replaced by that deployment; untouched components retain their prior release marker and must still pass process, readiness, and health checks. Do not compare an untouched component's older artifact fingerprint to the new all-repository candidate fingerprint. Qualification still fingerprints all three source trees, and a later deployment of an untouched component must admit matching evidence and stamp its own artifact provenance.
+
 TEST portal preflight builds use an ignored release-scoped directory under `tmp/path-deploy-builds/`, not the portal repo's tracked `build-test/` tree. The same isolated output is packaged if preflight passes and is removed in the deploy command's final cleanup on success or failure. A preflight build must never make its own source fingerprint fail or leave generated portal output dirty.
 
 ## Phase 3 — deployed TEST acceptance
@@ -223,7 +225,7 @@ The acceptance gate proves:
 - admin and portal PM2 processes are online with live PIDs and required DB env is present; portal runtime DDL is disabled;
 - canonical TEST migration plan has zero pending migrations and zero failed attempts for current canonical checksums; historical failures for obsolete checksums remain visible as audit evidence but are non-blocking only when the current checksum has succeeded;
 - no stale, dead-letter, ambiguous, or uncertain event deliveries; Finance email and Intacct are disabled; maintenance announcement count is zero;
-- deployed Coordinator, Regional Manager, Decision Maker, intake completion/retry/generated files, applicant ownership, cross-surface, wrong-role, wrong-owner, Finance, document, message, and payment rollback journeys pass;
+- deployed Coordinator, Regional Manager, Decision Maker, intake completion/retry/generated files, CFA signing/finalization, applicant ownership, cross-surface, wrong-role, wrong-owner, Finance, document, message, and payment rollback journeys pass;
 - all disposable Cognito, DB, notification, document, and S3 fixtures report zero residue;
 - both ALB host rules are normal `forward` actions.
 

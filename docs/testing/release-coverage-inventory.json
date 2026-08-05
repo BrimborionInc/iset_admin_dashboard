@@ -51,6 +51,7 @@
       "test-runtime-postflight",
       "test-two-step-role-journeys",
       "test-intake-completion",
+      "test-cfa-signing",
       "test-applicant-scope-browser",
       "test-live-privacy-denials",
       "test-payment-rollback",
@@ -230,6 +231,14 @@
       "description": "Published-workflow validation, completion transaction, retry/idempotency, generated files, and cleanup on deployed TEST.",
       "effects": "Creates disposable TEST applicant/Cognito/DB/object fixtures; no real email.",
       "cleanup": "Script must prove zero DB, Cognito and object residue."
+    },
+    "test-cfa-signing": {
+      "stage": "test",
+      "cwd": "admin",
+      "command": ["node", "scripts/cfa-signing-test-smoke.js", "--profile", "nwac-test", "--region", "ca-central-1", "--json"],
+      "description": "Authenticated deployed CFA completion using the live signing_request row shape, application lineage, generated PDF, version finalizer, event, idempotent retry, and cleanup.",
+      "effects": "Creates disposable TEST Cognito, DB and object-store fixtures; no email or provider call.",
+      "cleanup": "Script must prove zero DB, Cognito and generated-object residue."
     },
     "test-applicant-scope-browser": {
       "stage": "test",

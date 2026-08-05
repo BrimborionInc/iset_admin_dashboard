@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-'use strict';
 
 /*
  * Live TEST smoke for the Regional Manager two-step review workflow.
@@ -334,7 +333,7 @@ function waitForCommand(instanceId, commandId, options) {
     }
     const status = invocation?.Status || '';
     if (['Pending', 'InProgress', 'Delayed', ''].includes(status)) {
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2500);
+      execFileSync('sleep', ['2.5']);
       continue;
     }
     return invocation;
@@ -457,7 +456,9 @@ async function main() {
     result = parseRemoteResult(invocation?.Stdout);
     if (invocation?.Status !== 'Success') {
       const stderr = invocation?.Stderr ? `\n${invocation.Stderr}` : '';
-      throw new Error(`Remote smoke failed with status ${invocation?.Status || 'unknown'}${stderr}`);
+      const failedChecks = (result?.checks || []).filter(check => check.status === 'FAIL');
+      const details = failedChecks.length ? `\n${JSON.stringify(failedChecks)}` : '';
+      throw new Error(`Remote smoke failed with status ${invocation?.Status || 'unknown'}${stderr}${details}`);
     }
     if (!result) {
       throw new Error(`Remote smoke finished but did not emit a parseable result.\n${invocation?.Stdout || ''}`);
@@ -485,8 +486,6 @@ async function main() {
 }
 
 function remoteRunner() {
-  'use strict';
-
   const fs = require('fs');
   const path = require('path');
   const { createRequire } = require('module');
@@ -534,9 +533,19 @@ function remoteRunner() {
     documents: [],
   };
 
+  const smokeDates = {
+    sourceStart: dateFromNow(30),
+    sourceEnd: dateFromNow(60),
+    proposalStart: dateFromNow(90),
+    proposalEnd: dateFromNow(120),
+    revisionStart: dateFromNow(150),
+    revisionEnd: dateFromNow(180),
+    assessmentStart: dateFromNow(90),
+    assessmentEnd: dateFromNow(195),
+  };
+
   let connection = null;
   let browser = null;
-  let seeded = false;
   let finalCleanupComplete = false;
 
   main()
@@ -581,7 +590,6 @@ function remoteRunner() {
     progress('db connected');
     await cleanupFixture({ quiet: true });
     await seedFixture();
-    seeded = true;
     await verifyRuntimeConfig();
     browser = await puppeteer.launch({
       headless: 'new',
@@ -622,6 +630,11 @@ function remoteRunner() {
 
   function stripTrailingSlash(value) {
     return String(value || '').replace(/\/+$/, '');
+  }
+
+  function dateFromNow(days) {
+    const value = new Date(Date.now() + (Number(days) * 24 * 60 * 60 * 1000));
+    return value.toISOString().slice(0, 10);
   }
 
   function dbConfig() {
@@ -1024,7 +1037,7 @@ function remoteRunner() {
           institution, program_name, itp_payload, wage_payload, recommendation,
           justification, proposed_interventions, childcare_need, created_at, updated_at)
        VALUES (?, ?, CURRENT_DATE(), ?, ?, 0, CAST(? AS JSON), CAST(? AS JSON), ?,
-          'CRF', '2026-09-01', '2026-12-15', ?, 'external', 4, 1, 106, 100,
+          'CRF', ?, ?, ?, 'external', 4, 1, 106, 100,
           'Smoke College', 'Smoke Certificate', CAST(? AS JSON), CAST(? AS JSON),
           'recommend', ?, CAST(? AS JSON), 0, NOW(), NOW())`,
       [
@@ -1035,6 +1048,8 @@ function remoteRunner() {
         json(['Lack of Marketable Skills']),
         json(['Off Reserve']),
         'No other funding identified.',
+        smokeDates.assessmentStart,
+        smokeDates.assessmentEnd,
         1780058672308,
         json({ tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: 'Training plan details.' }),
         json({ wages: '', mercs: '', nonwages: '', other1Label: '', other1Amount: '', other2Label: '', other2Amount: '', subsidyDetails: '' }),
@@ -1043,8 +1058,8 @@ function remoteRunner() {
           {
             id: `two-step-assessment-${suffix}`,
             code: '4',
-            startDate: '2026-09-01',
-            endDate: '2026-12-15',
+            startDate: smokeDates.assessmentStart,
+            endDate: smokeDates.assessmentEnd,
             deliveryMode: 'partner',
             institution: 'Smoke College',
             programName: 'Smoke Certificate',
@@ -1124,14 +1139,16 @@ function remoteRunner() {
             intervention_cost, notes, metadata_json, esdc_intervention_json,
             created_by_staff_profile_id, reviewed_by_staff_profile_id, reviewed_at,
             eligibility_result, funding_stream_decision)
-         VALUES (?, ?, 3, 'approved', 'planned', '2026-08-01', '2026-08-31', 31,
+         VALUES (?, ?, 3, 'approved', 'planned', ?, ?, 31,
             100.00, 100.00, 100.00, 'Synthetic approved source intervention.',
             CAST(? AS JSON), CAST(? AS JSON), ?, ?, NOW(), 'eligible', 'CRF')`,
         [
           caseId,
           actionPlanId,
+          smokeDates.sourceStart,
+          smokeDates.sourceEnd,
           markerJson({ kind: label, title: 'Approved source intervention', code: '3', cost: 100, postingContext: 'external' }),
-          json({ interventionCode: '3', interventionStartDate: '2026-08-01', interventionEndDate: '2026-08-31', interventionCost: 100 }),
+          json({ interventionCode: '3', interventionStartDate: smokeDates.sourceStart, interventionEndDate: smokeDates.sourceEnd, interventionCost: 100 }),
           fixture.staff.coordinator.staffProfileId,
           fixture.staff.decisionMaker.staffProfileId,
         ]
@@ -1176,8 +1193,8 @@ function remoteRunner() {
       assessment_local_area_priorities: ['Off Reserve'],
       assessment_other_funding_details: 'No other funding identified.',
       assessment_esdc_eligibility: 'CRF',
-      assessment_intervention_start_date: '2026-09-01',
-      assessment_intervention_end_date: '2026-12-15',
+      assessment_intervention_start_date: smokeDates.assessmentStart,
+      assessment_intervention_end_date: smokeDates.assessmentEnd,
       assessment_institution: 'Smoke College',
       assessment_program_name: 'Smoke Certificate',
       assessment_itp: { tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: 'Training plan details.' },
@@ -1195,8 +1212,8 @@ function remoteRunner() {
         {
           id: `two-step-assessment-${fixture.suffix}`,
           code: '4',
-          startDate: '2026-09-01',
-          endDate: '2026-12-15',
+          startDate: smokeDates.assessmentStart,
+          endDate: smokeDates.assessmentEnd,
           deliveryMode: 'partner',
           institution: 'Smoke College',
           programName: 'Smoke Certificate',
@@ -1434,8 +1451,8 @@ function remoteRunner() {
       code: '3',
       title,
       status: 'submitted',
-      startDate: '2026-09-01',
-      endDate: '2026-09-30',
+      startDate: smokeDates.proposalStart,
+      endDate: smokeDates.proposalEnd,
       durationDays: 30,
       cost: '100',
       notes: 'Synthetic two-step review intervention.',
@@ -1447,8 +1464,8 @@ function remoteRunner() {
           {
             id: `two-step-intervention-${fixture.suffix}`,
             code: '3',
-            startDate: '2026-09-01',
-            endDate: '2026-09-30',
+            startDate: smokeDates.proposalStart,
+            endDate: smokeDates.proposalEnd,
             deliveryMode: 'partner',
             institution: 'Smoke College',
             programName: title,
@@ -1608,8 +1625,8 @@ function remoteRunner() {
       body: json({
         status: 'submitted',
         title: 'Coordinator revision smoke',
-        startDate: '2026-10-01',
-        endDate: '2026-10-31',
+        startDate: smokeDates.revisionStart,
+        endDate: smokeDates.revisionEnd,
         durationDays: 31,
         cost: '100',
         metadata: {
@@ -1619,8 +1636,8 @@ function remoteRunner() {
             {
               id: `two-step-revision-${fixture.suffix}`,
               code: '3',
-              startDate: '2026-10-01',
-              endDate: '2026-10-31',
+              startDate: smokeDates.revisionStart,
+              endDate: smokeDates.revisionEnd,
               programName: 'Revised smoke plan',
               costLines: [{ id: 'tuition', label: 'Tuition', paymentType: 'tuition', payeeType: 'institution', payeeName: 'Smoke College', amount: '100' }],
             },

@@ -2,11 +2,13 @@
 
 Status: Current proposal sent for NWAC policy discussion; awaiting Émilie/client-PM feedback
 Prepared: 2026-07-31
-Revised: 2026-08-02
+Revised: 2026-08-05
 
 ## Workstream status
 
 Bill confirmed that this proposal has been sent for client review and is awaiting feedback from Émilie and the client PM group. Do not expand correction permissions merely because a related bug or data repair is completed. The policy gate remains open.
+
+NWAC management direction confirmed by Bill on 2026-08-05: when an error found after assessment submission requires the assessment or approved funding amounts to change, the preferred correction is for the Regional Manager to return the assessment to the submitter. That path must preserve the return reason, submitter edit, resubmission, and renewed review/decision history. If the assessment's current state has no supported return transition, a System Administrator may exceptionally change status or directly repair the record, but that is a technical recovery path rather than the target business workflow and is disfavoured because it does not produce the normal business audit trail. A missing post-decision return transition is therefore a workflow gap; it is not justification for direct coordinator editing of finally decided assessments.
 
 Recent feedback work provides implementation evidence for this proposal, but only a few narrow controls are already delivered:
 

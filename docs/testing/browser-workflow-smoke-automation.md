@@ -18,6 +18,7 @@ The core lesson from the repeat-application assessment release is that browser t
    - Create a rollback fixture mode for fast proof that can run inside a transaction.
    - Add a persistent fixture mode when a browser needs stable IDs and late workflow state.
    - Assert data invariants directly: selected owner, no duplicate owners, no root-context leakage, document provenance, queue eligibility, and legacy compatibility.
+   - Mirror the live database result shape used by the production caller. A service test that injects the correct argument does not prove the route/job/event handler resolved it; exercise that real caller boundary and omit nonexistent columns from fixtures.
 
 2. Use real authenticated paths.
    - Prefer temporary Cognito staff users plus temporary `staff_profiles` rows over auth bypasses.

@@ -68,6 +68,12 @@ Rollback is allowed only while the corrected CFA remains draft and has never bee
 - Post-deploy evidence must prove exact source markers, public/local readiness, the guarded Case `12` repair result, and no automated applicant send.
 - Feedback `173` remains `in_progress` until staff review/send the corrected CFA and the resulting live signing/artifact chain is rechecked. It is not resolved merely by deployment.
 
+## 2026-08-05 Signing Regression And Corrective Gate
+
+Portal commit `5afed494fd06808c2a3d009e92ba389cd3218fcc` introduced a caller-wiring defect in the July 30 release: the signing route passed `row.application_id` to CFA finalization even though the live `signing_request` table has no `application_id` column. The route had already resolved the correct application through its linked message/case as `resolvedApplicationId`. Earlier tests proved the finalizer when given a correct application ID but did not exercise the real Express route with the live signing-request row shape, so the invalid caller argument escaped qualification.
+
+Release `20260805-cfa-signing-hotfix-r2` replaces that argument with the already-resolved application ID, removes the remaining fallback reads of the nonexistent field, and adds three required proofs: a full Express-stack regression whose signing row deliberately omits `application_id`; an authenticated real-DEV signing journey with live metadata/DDL proof, document/version/event/idempotency checks and zero-residue cleanup; and the same deployed journey in TEST. Feedback `177` remains open until the exact release has TEST `GO`, receives explicit PROD approval, is deployed, and the affected live journey is rechecked without fabricating or editing participant records.
+
 ## 2026-07-30 Release And Repair Evidence
 
 - Exact-source DEV qualification returned `GO` for all 16 checks under evidence `0d623b236dfa5bc4b0a7ff1aaadb14344b740f06f9c9098ebef08948dd34e325`.
