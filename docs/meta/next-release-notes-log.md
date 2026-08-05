@@ -22,7 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
-- 2026-08-05 | Release 20260805-cfa-signing-hotfix-r2 | Fix/Public portal | Client Funding Agreement signing | Fixed a failure that prevented participants from completing versioned Client Funding Agreements during signed-document finalization. | The portal now carries the application resolved from the linked secure message/case into the signed document, CFA version finalizer, and audit event; authenticated DEV and deployed TEST qualification prove repeat submissions remain idempotent.
+- 2026-08-05 | Release 20260805-cfa-signing-hotfix-r3 | Fix/Public portal | Client Funding Agreement signing | Fixed a failure that prevented participants from completing versioned Client Funding Agreements during signed-document finalization. | The portal now carries the application resolved from the linked secure message/case into the signed document, CFA version finalizer, and audit event; authenticated DEV and deployed TEST qualification prove repeat submissions remain idempotent.
 - 2026-08-01 | Release 20260801-returned-assessment-edit | Fix/Application Assessment | Returned changes for dual-role Regional Managers | A Regional Manager who originally submitted an assessment can edit it when requested changes are returned to that submitter. | PATH matches the signed-in staff profile to the assessment workflow's recorded submitter; other Regional Managers and all active review/decision stages remain read-only. Deployed to PROD on 2026-08-02.
 - 2026-08-01 | Release 20260801-assessment-document-lineage-r2 | Fix/Application Assessment | Repeat-application documents | Fixed a bug that could block submission of a repeat application assessment by treating documents from an older application as if they belonged to the current one. | Application Forms and Financial Overviews are now preserved only when they belong to the application being submitted; otherwise PATH generates the required current-application documents.
 - 2026-07-30 | Release 20260730-feedback-173-cfa-hotfix | Fix/Application approval | Repeat applications and Client Funding Agreements | A newly approved application now creates and uses its own application-linked action plan and intervention details, even when the participant has a historical plan in the same file. | The participant signing flow also finalizes the matching versioned agreement and preserves the signed PDF relationship.
@@ -487,7 +487,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What Changed Packages (draft - EN)
 
-#### Release 20260805-cfa-signing-hotfix-r2
+#### Release 20260805-cfa-signing-hotfix-r3
 
 - Fixed Client Funding Agreement signing so PATH carries the agreement's verified application link into the signed PDF, agreement version, document record, and case event.
 - Repeated submission of an already signed agreement remains safe and does not create duplicate documents or events.
@@ -511,7 +511,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Lots de changements (brouillon - FR)
 
-#### Release 20260805-cfa-signing-hotfix-r2
+#### Release 20260805-cfa-signing-hotfix-r3
 
 - Correction de la signature des ententes de financement du client : PATH transmet maintenant le lien vérifié de la demande au PDF signé, à la version de l'entente, au document et à l'événement du dossier.
 - Une nouvelle soumission d'une entente déjà signée demeure sans danger et ne crée pas de documents ni d'événements en double.
