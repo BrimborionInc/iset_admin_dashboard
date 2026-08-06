@@ -2,8 +2,32 @@
 
 Purpose: Define a repeatable plan to extract nForm-related functionality from the current PATH-aligned workspace into the standalone WSL repository at `/home/bill/nForm`. The older `X:\nForm` / `/mnt/x/nForm` target is historical.
 Audience: Engineering and operations teams maintaining PATH, nForm, and shared services.
-Last Updated: 2026-07-23
+Last Updated: 2026-08-06
 Status: Active implementation in the standalone `/home/bill/nForm` repository.
+
+## Workstream Management Contract (2026-08-06)
+
+- Codex owns the plan, technical direction, implementation sequence, progress
+  ledger, verification, and resumable session checkpoints.
+- Bill is not expected to track engineering progress independently. Persistent
+  repository memory must be sufficient to resume in a later task thread.
+- Bill guides business objectives, intended user experience, priorities, and
+  consequential product choices. Codex asks in plain language when those are
+  genuinely uncertain rather than silently guessing.
+- Codex resolves ordinary code, schema, testing, and architecture details from
+  evidence and engineering judgment without delegating them to Bill.
+
+## PATH Protection Boundary (2026-08-06)
+
+- The current PATH implementation is an operational source system and read-only
+  reference for this extraction.
+- nForm work must not modify, remove, reorganize, migrate, or repoint PATH code,
+  data, configuration, infrastructure, deployments, or Git history.
+- Extraction happens additively in `/home/bill/nForm`. Copying a responsibility
+  does not authorize changing or deleting its PATH source.
+- Migrating PATH onto nForm may be considered later, but it is not part of this
+  work. It requires a separate, explicitly authorized migration programme with
+  compatibility analysis, rehearsals, rollback controls, and release approval.
 
 ## Current Product Direction (2026-07-21)
 
@@ -22,9 +46,11 @@ Status: Active implementation in the standalone `/home/bill/nForm` repository.
 
 - No product decision is currently blocking the dependency/coupling audit. Codex should proceed with engineering recommendations and return to Bill only for genuine business/product ambiguities or consequential tradeoffs.
 
-## Implementation Checkpoint (2026-07-23)
+## Implementation Checkpoint (updated 2026-08-06)
 
-- Created a separate local Git repository at `/home/bill/nForm` on branch `main`; no remote or AWS resource was created.
+- Created a separate Git repository at `/home/bill/nForm` on branch `main` and
+  pushed its complete history to the private canonical remote
+  `https://github.com/BrimborionInc/nForm.git`; no AWS resource was created.
 - Added npm-workspace boundaries for staff portal, public portal, API, and reusable packages.
 - Added the clean squashed baseline migration described by `docs/planning/nform-v1-schema-and-extension-contract.md`.
 - Added repository-local product memory, empty-template guardrails, and boundary tests.
@@ -36,7 +62,9 @@ Status: Active implementation in the standalone `/home/bill/nForm` repository.
 - The authoring service now covers empty-intake creation, incomplete draft saving, optimistic concurrency, validation, direct publication, strict separated author/reviewer/publisher governance, immutable versions, automatic next-draft creation, and rollback through appended publication history.
 - Forward migration `0002_intake_authoring_controls.sql` records publication policy, draft lock version, publication-request release notes, and the non-unique checksum index required for rollback history.
 - `npm run check` passes after the authoring slice; the next implementation boundary is the MySQL repository/HTTP API, followed by the staff editor UI.
-- Application extraction remains in progress. The new repository is not yet a runnable product and has no remote.
+- Application extraction remains in progress. The repository is not yet a
+  runnable product. Codex Cloud environment configuration and validation are
+  the next operational setup step.
 
 ## Historical Session Checkpoint (2026-07-21)
 
