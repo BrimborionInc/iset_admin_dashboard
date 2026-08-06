@@ -2,9 +2,34 @@
 
 Purpose: track live PROD data repairs whose affected staff or business owners may need to be informed later.
 Audience: operations, product, support, and future AI-assisted maintenance threads.
-Last Updated: 2026-08-05
+Last Updated: 2026-08-06
 
 Use this log for repairs that may be externally invisible to staff but should be available for later owner communication. Keep entries concise, evidence-based, and linked to the exact scripts or reports where possible. Do not use this file as approval to mutate PROD; follow the PROD repair rules in `docs/ops/agent-operational-access.md`.
+
+## 2026-08-06 - Chrystal Loucks withdrawn application restoration
+
+Status: PROD guarded restoration applied and independently verified; no staff notification was sent by PATH.
+
+Reason: Danielle Burdett withdrew Chrystal Loucks' June 24 application `117`, then confirmed that it should be restored so Madison Coppola can show her how to close both of Chrystal's applications through the normal workflow. Application `140` was not to be changed.
+
+Repair applied:
+
+- Restored application `117` from `withdrawn / closed` to `on_hold / awaiting_applicant` with awaiting reason `external_funding`.
+- Removed only the withdrawal-generated reporting plan `173`, interventions `369-370`, unsubmitted ESDC seed `443` and its validation history `2374`, and the corresponding case-context reporting marker.
+- Preserved application `140` as `in_review`, hold reminder `165`, Danielle's notes and original withdrawal event, manual plan `95`, intervention `205`, and the active case assignment.
+- Added case audit event `282` and a suppressed system timeline event recording the restoration. The applicant received no automated notification.
+
+Evidence:
+
+- Preview, dependency inventory, lock, apply, independent verification, unlock, recovery, and visibility artifacts are `sql/ops/prod-chrystal-loucks-*-20260806.*`.
+- Application lock command `ac12fcd6-0f8d-4beb-823c-7b4f6869947b` acquired the two application-scoped locks; unlock command `95493ddc-369b-4fb4-837a-6fbe451b9f26` released them after verification.
+- Aurora snapshot `path-prod-chrystal-loucks-restore-20260806-1439` reached `available` at 100% before apply.
+- Apply SSM command `8773f728-cfc3-4c76-a62b-a7b043216cb0` completed successfully.
+- Independent verification command `97cee3cf-466e-409f-adce-3128219252e6` confirmed the restored and preserved states and absence of the generated artifacts. Final visibility command `af74c385-0bee-4075-badb-ef924225212a` confirmed Danielle remains the active assigned coordinator and both applications are current and visible in their expected states.
+
+Notification note:
+
+- Tell Danielle that the June 24 application is back On Hold and the July 6 application remains In Review, so she and Madison can now complete the normal closing workflow.
 
 ## 2026-08-05 - Feedback #178 approved assessment correction recovery
 

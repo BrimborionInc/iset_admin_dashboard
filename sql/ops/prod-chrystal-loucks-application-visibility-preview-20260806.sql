@@ -5,7 +5,8 @@
 -- - client c: id, first_name, last_name
 -- - iset_application a: id, client_id, case_id, status, lifecycle_status,
 --   created_at
--- - iset_case k: id, client_id, assigned_staff_profile_id
+-- - iset_case k: id, client_id, assigned_staff_profile_id,
+--   open_intervention_count, total_intervention_count, updated_at
 -- - staff_profiles sp: id, email, name, display_name, primary_role, status,
 --   region_id
 --
@@ -21,6 +22,9 @@ SELECT
   c.last_name,
   k.id AS case_id,
   k.assigned_staff_profile_id,
+  k.open_intervention_count,
+  k.total_intervention_count,
+  k.updated_at AS case_updated_at,
   sp.email AS assigned_staff_email,
   sp.display_name AS assigned_staff_display_name,
   sp.primary_role AS assigned_staff_role,

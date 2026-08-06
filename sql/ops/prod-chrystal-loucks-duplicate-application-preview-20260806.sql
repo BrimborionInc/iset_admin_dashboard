@@ -44,7 +44,22 @@ SELECT
   k.status AS case_status,
   k.lifecycle_status AS case_lifecycle_status,
   k.closure_reason AS case_closure_reason,
-  k.case_context_json,
+  JSON_TYPE(JSON_EXTRACT(
+    k.case_context_json,
+    '$.applicationReportingArtifacts'
+  )) AS application_reporting_artifacts_type,
+  JSON_LENGTH(JSON_EXTRACT(
+    k.case_context_json,
+    '$.applicationReportingArtifacts'
+  )) AS application_reporting_artifacts_count,
+  JSON_UNQUOTE(JSON_EXTRACT(
+    k.case_context_json,
+    '$.applicationReportingArtifacts."117".reportingTrigger'
+  )) AS application_117_reporting_trigger,
+  JSON_UNQUOTE(JSON_EXTRACT(
+    k.case_context_json,
+    '$.applicationReportingArtifacts."140".reportingTrigger'
+  )) AS application_140_reporting_trigger,
   a.id AS application_id,
   a.submission_id,
   a.status AS application_status,
