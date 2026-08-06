@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-08-05
+Last Updated: 2026-08-06
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -23,6 +23,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
 - 2026-08-05 | Release 20260805-cfa-signing-hotfix-r3 | Fix/Public portal | Client Funding Agreement signing | Fixed a failure that prevented participants from completing versioned Client Funding Agreements during signed-document finalization. | The portal now carries the application resolved from the linked secure message/case into the signed document, CFA version finalizer, and audit event; authenticated DEV and deployed TEST qualification proved repeat submissions remain idempotent, and the portal-only hotfix deployed to PROD on 2026-08-05.
+- 2026-08-06 | Release TBD | Fix/Application Assessment | Returned assessments and requested forms | Fixed a bug that could hide a returned assessment from the Regional Manager or leave it read-only after the participant completed a requested form. | Returned assessments now stay in the correct review queue, form requests and signing remain tied to the exact application, and the original submitter can edit and resubmit after the Regional Manager forwards the requested changes. TEST and PROD deployment are still pending.
+- 2026-08-06 | Release TBD | Fix/Application Assessment | Approved-assessment corrections | When a finally decided assessment is exceptionally reopened for a Coordinator correction, the Regional Manager must return it to the Coordinator before it can go to the Decision Maker again. | The RM workspace hides the final-decision action and explains the required handoff; the backend independently blocks bypass attempts. Ordinary assessments and intervention reviews are unchanged. This prevention is implemented and locally verified but not yet deployed.
 - 2026-08-01 | Release 20260801-returned-assessment-edit | Fix/Application Assessment | Returned changes for dual-role Regional Managers | A Regional Manager who originally submitted an assessment can edit it when requested changes are returned to that submitter. | PATH matches the signed-in staff profile to the assessment workflow's recorded submitter; other Regional Managers and all active review/decision stages remain read-only. Deployed to PROD on 2026-08-02.
 - 2026-08-01 | Release 20260801-assessment-document-lineage-r2 | Fix/Application Assessment | Repeat-application documents | Fixed a bug that could block submission of a repeat application assessment by treating documents from an older application as if they belonged to the current one. | Application Forms and Financial Overviews are now preserved only when they belong to the application being submitted; otherwise PATH generates the required current-application documents.
 - 2026-07-30 | Release 20260730-feedback-173-cfa-hotfix | Fix/Application approval | Repeat applications and Client Funding Agreements | A newly approved application now creates and uses its own application-linked action plan and intervention details, even when the participant has a historical plan in the same file. | The participant signing flow also finalizes the matching versioned agreement and preserves the signed PDF relationship.

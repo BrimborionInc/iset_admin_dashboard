@@ -15,11 +15,14 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
+const EXPECTED_AWS_ACCOUNT = '124355655255';
 const DEFAULT_PROFILE = 'nwac-test';
 const DEFAULT_REGION = 'ca-central-1';
 const DEFAULT_BUCKET = 'nwac-test-artifacts';
 const DEFAULT_ADMIN_ENV = path.resolve(__dirname, '..', '.env.test');
+const DEFAULT_PORTAL_ENV = path.resolve(__dirname, '..', '..', 'ISET-intake', '.env.test');
 const DEFAULT_LOCAL_BASE_URL = 'http://127.0.0.1:5001';
+const DEFAULT_PORTAL_LOCAL_BASE_URL = 'http://127.0.0.1:5000';
 
 function parseArgs(argv) {
   const args = {
@@ -28,6 +31,7 @@ function parseArgs(argv) {
     bucket: process.env.TWO_STEP_REVIEW_SMOKE_BUCKET || DEFAULT_BUCKET,
     instanceId: process.env.TWO_STEP_REVIEW_SMOKE_INSTANCE_ID || '',
     adminEnv: process.env.TWO_STEP_REVIEW_SMOKE_ADMIN_ENV || DEFAULT_ADMIN_ENV,
+    portalEnv: process.env.TWO_STEP_REVIEW_SMOKE_PORTAL_ENV || DEFAULT_PORTAL_ENV,
     keepFixture: false,
     json: false,
   };
@@ -38,6 +42,7 @@ function parseArgs(argv) {
     else if (token === '--bucket') args.bucket = argv[++index];
     else if (token === '--instance-id') args.instanceId = argv[++index];
     else if (token === '--admin-env') args.adminEnv = argv[++index];
+    else if (token === '--portal-env') args.portalEnv = argv[++index];
     else if (token === '--keep-fixture') args.keepFixture = true;
     else if (token === '--json') args.json = true;
     else if (token === '--help' || token === '-h') {
@@ -63,6 +68,7 @@ function usage() {
     '  --region REGION    AWS region. Default: ca-central-1.',
     '  --bucket NAME      Temporary S3 bucket. Default: nwac-test-artifacts.',
     '  --admin-env PATH   Admin .env.test used for staff pool values.',
+    '  --portal-env PATH  Portal .env.test used for participant pool values.',
     '  --keep-fixture     Keep DB fixture and Cognito users for inspection.',
     '  --json             Emit JSON summary.',
   ].join('\n'));
@@ -198,6 +204,46 @@ function createStaffUser({ email, password, givenName, familyName, poolId, group
   ], options);
   const sub = (user.UserAttributes || []).find(attribute => attribute.Name === 'sub')?.Value;
   if (!sub) throw new Error(`Unable to resolve Cognito sub for ${email}`);
+  return sub;
+}
+
+function createApplicantUser({ email, password, poolId }, options) {
+  aws([
+    'cognito-idp',
+    'admin-create-user',
+    '--user-pool-id',
+    poolId,
+    '--username',
+    email,
+    '--message-action',
+    'SUPPRESS',
+    '--user-attributes',
+    `Name=email,Value=${email}`,
+    'Name=email_verified,Value=true',
+    'Name=given_name,Value=Two',
+    'Name=family_name,Value=StepApplicant',
+  ], options);
+  aws([
+    'cognito-idp',
+    'admin-set-user-password',
+    '--user-pool-id',
+    poolId,
+    '--username',
+    email,
+    '--password',
+    password,
+    '--permanent',
+  ], options);
+  const user = awsJson([
+    'cognito-idp',
+    'admin-get-user',
+    '--user-pool-id',
+    poolId,
+    '--username',
+    email,
+  ], options);
+  const sub = (user.UserAttributes || []).find(attribute => attribute.Name === 'sub')?.Value;
+  if (!sub) throw new Error(`Unable to resolve applicant Cognito sub for ${email}`);
   return sub;
 }
 
@@ -362,10 +408,20 @@ function summarizeResult(result) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  const identity = awsJson(['sts', 'get-caller-identity'], options);
+  if (identity?.Account !== EXPECTED_AWS_ACCOUNT) {
+    throw new Error(
+      `AWS account ${identity?.Account || 'unknown'} did not match expected TEST account ${EXPECTED_AWS_ACCOUNT}`
+    );
+  }
   if (!fs.existsSync(options.adminEnv)) {
     throw new Error(`Admin env file not found: ${options.adminEnv}`);
   }
+  if (!fs.existsSync(options.portalEnv)) {
+    throw new Error(`Portal env file not found: ${options.portalEnv}`);
+  }
   const adminEnv = readEnvFile(options.adminEnv);
+  const portalEnv = readEnvFile(options.portalEnv);
   const poolId =
     adminEnv.COGNITO_STAFF_USER_POOL_ID ||
     adminEnv.COGNITO_USER_POOL_ID;
@@ -375,6 +431,11 @@ async function main() {
     adminEnv.COGNITO_CLIENT_ID ||
     adminEnv.REACT_APP_COGNITO_CLIENT_ID;
   if (!clientId) throw new Error('COGNITO_STAFF_CLIENT_ID not found in admin env.');
+  const applicantPoolId =
+    portalEnv.COGNITO_APPLICANT_USER_POOL_ID ||
+    portalEnv.COGNITO_PORTAL_USER_POOL_ID ||
+    portalEnv.COGNITO_USER_POOL_ID;
+  if (!applicantPoolId) throw new Error('COGNITO_USER_POOL_ID not found in portal env.');
 
   const suffix = randomSuffix();
   const stamp = `two-step-${Date.now()}-${suffix}`;
@@ -408,6 +469,11 @@ async function main() {
     },
   ];
   const createdUsers = [];
+  const applicantUser = {
+    email: `codex.twostep.${suffix}.applicant@example.com`,
+    password: randomPassword(),
+    sub: null,
+  };
   let remoteKey = null;
   let result = null;
 
@@ -422,6 +488,7 @@ async function main() {
       user.session = authenticateStaffUser({ ...user, poolId, clientId }, options);
       createdUsers.push(user);
     }
+    applicantUser.sub = createApplicantUser({ ...applicantUser, poolId: applicantPoolId }, options);
 
     remoteKey = `ssm-scripts/two-step-review-smoke-${stamp}.js`;
     uploadRemoteScript(`(${remoteRunner.toString()})();\n`, remoteKey, options);
@@ -436,6 +503,7 @@ async function main() {
         `FIXTURE_STAMP=${shellQuote(stamp)}`,
         `KEEP_FIXTURE=${options.keepFixture ? '1' : '0'}`,
         `LOCAL_BASE_URL=${shellQuote(DEFAULT_LOCAL_BASE_URL)}`,
+        `PORTAL_LOCAL_BASE_URL=${shellQuote(DEFAULT_PORTAL_LOCAL_BASE_URL)}`,
         `STAFF_USERS_JSON=${shellQuote(JSON.stringify(staffUsers.map(user => ({
           key: user.key,
           email: user.email,
@@ -444,6 +512,7 @@ async function main() {
           role: user.role,
           session: user.session,
         }))))}`,
+        `APPLICANT_USER_JSON=${shellQuote(JSON.stringify(applicantUser))}`,
         `node ${shellQuote(remotePath)}`,
       ].join(' '),
       `rm -f ${shellQuote(remotePath)}`,
@@ -474,6 +543,7 @@ async function main() {
   } finally {
     if (remoteKey) deleteRemoteScript(remoteKey, options);
     if (!options.keepFixture) {
+      deleteStaffUser({ email: applicantUser.email, poolId: applicantPoolId }, options);
       for (const user of createdUsers.reverse()) {
         deleteStaffUser({ email: user.email, poolId }, options);
       }
@@ -515,7 +585,9 @@ function remoteRunner() {
     stamp: requiredEnv('FIXTURE_STAMP'),
     keepFixture: process.env.KEEP_FIXTURE === '1',
     localBaseUrl: stripTrailingSlash(process.env.LOCAL_BASE_URL || 'http://127.0.0.1:5001'),
+    portalLocalBaseUrl: stripTrailingSlash(process.env.PORTAL_LOCAL_BASE_URL || 'http://127.0.0.1:5000'),
     staffUsers: JSON.parse(requiredEnv('STAFF_USERS_JSON')),
+    applicantUser: JSON.parse(requiredEnv('APPLICANT_USER_JSON')),
     regionId: Number(process.env.TWO_STEP_REVIEW_REGION_ID || 1),
   };
 
@@ -530,6 +602,7 @@ function remoteRunner() {
     interventions: {},
     proposals: {},
     workflows: {},
+    reminders: {},
     documents: [],
   };
 
@@ -597,6 +670,7 @@ function remoteRunner() {
     });
     const auth = await loginAllRoles();
     await runApplicationAssessmentWorkflow(auth);
+    await runDualRoleApplicationAssessmentWorkflow(auth);
     await runInterventionProposalWorkflow(auth);
     await runInterventionRevisionWorkflow(auth);
     await verifyNoKnownFixtureMismatches();
@@ -926,6 +1000,525 @@ function remoteRunner() {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  async function addBrowserFailureDiagnostics(page, label, error) {
+    const safeLabel = String(label).replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    const screenshot = `/tmp/two-step-review-${safeLabel}-${config.stamp}.png`;
+    await page.screenshot({ path: screenshot, fullPage: true }).catch(() => {});
+    const pageText = await page.evaluate(() => document.body?.innerText?.slice(0, 1200) || '').catch(() => '');
+    error.message = `${error.message} (url=${page.url()}, screenshot=${screenshot}, pageText=${JSON.stringify(pageText.slice(0, 500))})`;
+  }
+
+  async function waitForBodyText(page, text, timeout = 60_000) {
+    await page.waitForFunction(
+      expected => (document.body?.innerText || '').includes(expected),
+      { timeout },
+      text
+    );
+  }
+
+  async function clickVisibleButton(page, label) {
+    await page.waitForFunction(expected => {
+      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      return Array.from(document.querySelectorAll('button, [role="button"]')).some(button => (
+        visible(button) &&
+        !button.disabled &&
+        button.getAttribute('aria-disabled') !== 'true' &&
+        normalize(button.innerText || button.textContent || button.getAttribute('aria-label')) === expected
+      ));
+    }, { timeout: 60_000 }, label);
+    const clicked = await page.evaluate(expected => {
+      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      const button = Array.from(document.querySelectorAll('button, [role="button"]')).find(candidate => (
+        visible(candidate) &&
+        !candidate.disabled &&
+        candidate.getAttribute('aria-disabled') !== 'true' &&
+        normalize(candidate.innerText || candidate.textContent || candidate.getAttribute('aria-label')) === expected
+      ));
+      if (!button) return false;
+      button.click();
+      return true;
+    }, label);
+    if (!clicked) throw new Error(`Visible enabled button not found: ${label}`);
+  }
+
+  async function fillFirstVisibleTextarea(page, value) {
+    const updated = await page.evaluate(nextValue => {
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      const textarea = Array.from(document.querySelectorAll('textarea')).find(element => (
+        visible(element) && !element.disabled && !element.readOnly
+      ));
+      if (!textarea) return false;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+      if (setter) setter.call(textarea, nextValue);
+      else textarea.value = nextValue;
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }, value);
+    if (!updated) throw new Error('No visible editable textarea was available.');
+  }
+
+  async function clickForwardChangesThroughBrowser(auth, caseId, applicationId) {
+    const page = await authedPage(auth);
+    const routePath = `/application-case/${caseId}?applicationId=${applicationId}&entry=approval&approvalType=application&step=decision`;
+    try {
+      await page.goto(`${config.localBaseUrl}${routePath}`, { waitUntil: 'domcontentloaded' });
+      await dismissTutorialPromptIfPresent(page);
+      await waitForBodyText(page, 'Decision Maker requested changes');
+      await fillFirstVisibleTextarea(page, 'Please make the requested Financial Overview correction.');
+      const responsePromise = page.waitForResponse(response => (
+        response.request().method() === 'POST' &&
+        response.url() === `${config.localBaseUrl}/api/cases/${caseId}/assessment/review-workflow/action`
+      ), { timeout: 60_000 });
+      await clickVisibleButton(page, 'Forward changes to Coordinator');
+      const response = await responsePromise;
+      const requestBody = JSON.parse(response.request().postData() || '{}');
+      const responseText = await response.text().catch(() => '');
+      if (!response.ok()) {
+        throw new Error(`Forward changes returned ${response.status()}: ${responseText.slice(0, 500)}`);
+      }
+      expect('application assessment: deployed RM UI forwards the exact returned application', (
+        Number(requestBody.applicationId) === Number(applicationId) &&
+        requestBody.action === 'rm_forward_changes_to_submitter'
+      ), { routePath, requestBody, status: response.status() });
+      await waitForBodyText(page, 'Requested changes forwarded to the Coordinator.');
+    } catch (error) {
+      await addBrowserFailureDiagnostics(page, 'forward-changes', error);
+      throw error;
+    } finally {
+      await page.close().catch(() => {});
+    }
+  }
+
+  async function assertReturnedAssessmentEditableAndSave(auth, caseId, applicationId) {
+    const page = await authedPage(auth);
+    const routePath = `/application-case/${caseId}?applicationId=${applicationId}`;
+    try {
+      await page.goto(`${config.localBaseUrl}${routePath}`, { waitUntil: 'domcontentloaded' });
+      await dismissTutorialPromptIfPresent(page);
+      await waitForBodyText(page, 'Assess Eligibility');
+      await clickVisibleButton(page, 'Next');
+      await waitForBodyText(page, 'What is being proposed?');
+      await clickVisibleButton(page, 'Next');
+      await waitForBodyText(page, 'Why is this intervention needed?');
+
+      const fieldState = await page.evaluate(() => {
+        const visible = element => {
+          if (!element) return false;
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        };
+        const textarea = Array.from(document.querySelectorAll('textarea')).find(visible);
+        return textarea
+          ? { disabled: textarea.disabled, readOnly: textarea.readOnly, value: textarea.value }
+          : null;
+      });
+      if (!fieldState || fieldState.disabled || fieldState.readOnly) {
+        throw new Error(`Returned dual-role assessment was not editable: ${JSON.stringify(fieldState)}`);
+      }
+
+      const revisedOverview = `${fieldState.value} Clarified after the Decision Maker return.`;
+      await fillFirstVisibleTextarea(page, revisedOverview);
+      const responsePromise = page.waitForResponse(response => (
+        response.request().method() === 'PUT' &&
+        response.url() === `${config.localBaseUrl}/api/cases/${caseId}`
+      ), { timeout: 60_000 });
+      await clickVisibleButton(page, 'Save Progress');
+      const response = await responsePromise;
+      const requestBody = JSON.parse(response.request().postData() || '{}');
+      const responseText = await response.text().catch(() => '');
+      if (!response.ok()) {
+        throw new Error(`Returned assessment Save Progress returned ${response.status()}: ${responseText.slice(0, 500)}`);
+      }
+      expect('application assessment: dual-role RM edits and saves the exact returned application in deployed UI', (
+        Number(requestBody.applicationId) === Number(applicationId) &&
+        requestBody.case_summary === revisedOverview
+      ), { routePath, applicationId, requestApplicationId: requestBody.applicationId, status: response.status() });
+      await waitForBodyText(page, 'Assessment saved successfully');
+      return revisedOverview;
+    } catch (error) {
+      await addBrowserFailureDiagnostics(page, 'returned-assessment-edit', error);
+      throw error;
+    } finally {
+      await page.close().catch(() => {});
+    }
+  }
+
+  async function waitForVisibleEnabledButton(page, label) {
+    await page.waitForFunction(expectedLabel => {
+      const normalize = value => String(value || '').trim().replace(/\s+/g, ' ');
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      return Array.from(document.querySelectorAll('button, [role="button"]')).some(candidate => (
+        visible(candidate) &&
+        !candidate.disabled &&
+        candidate.getAttribute('aria-disabled') !== 'true' &&
+        normalize(candidate.innerText || candidate.textContent || candidate.getAttribute('aria-label')) === normalize(expectedLabel)
+      ));
+    }, { timeout: 60_000 }, label);
+  }
+
+  async function resubmitReturnedAssessmentThroughBrowser(auth, caseId, applicationId) {
+    const page = await authedPage(auth);
+    const routePath = `/application-case/${caseId}?applicationId=${applicationId}`;
+    try {
+      await page.goto(`${config.localBaseUrl}${routePath}`, { waitUntil: 'domcontentloaded' });
+      await dismissTutorialPromptIfPresent(page);
+      await waitForBodyText(page, 'Assess Eligibility');
+      for (let index = 0; index < 11; index += 1) {
+        await waitForVisibleEnabledButton(page, 'Next');
+        await clickVisibleButton(page, 'Next');
+        if (index === 9) {
+          await waitForBodyText(page, 'All required checklist items are complete.');
+        }
+      }
+      await waitForVisibleEnabledButton(page, 'Resubmit for review');
+      const responsePromise = page.waitForResponse(response => (
+        response.request().method() === 'PUT' &&
+        response.url() === `${config.localBaseUrl}/api/cases/${caseId}`
+      ), { timeout: 60_000 });
+      await clickVisibleButton(page, 'Resubmit for review');
+      const response = await responsePromise;
+      const requestBody = JSON.parse(response.request().postData() || '{}');
+      const responseText = await response.text().catch(() => '');
+      if (!response.ok()) {
+        throw new Error(`Returned assessment resubmit returned ${response.status()}: ${responseText.slice(0, 500)}`);
+      }
+      expect('application assessment: dual-role RM resubmits corrected assessment through deployed UI', (
+        Number(requestBody.applicationId) === Number(applicationId) &&
+        requestBody.assessment_submit_action === true &&
+        requestBody.applicationStatus === 'pending_approval'
+      ), { routePath, applicationId, requestBody, status: response.status() });
+      await waitForBodyText(page, 'Assessment submitted to Regional Manager review.');
+    } catch (error) {
+      await addBrowserFailureDiagnostics(page, 'returned-assessment-resubmit', error);
+      throw error;
+    } finally {
+      await page.close().catch(() => {});
+    }
+  }
+
+  async function submitCorrectedAssessmentForFinalDecisionThroughBrowser(auth, caseId, applicationId) {
+    const page = await authedPage(auth);
+    const routePath = `/application-case/${caseId}?applicationId=${applicationId}&entry=approval&approvalType=application&step=decision`;
+    try {
+      await page.goto(`${config.localBaseUrl}${routePath}`, { waitUntil: 'domcontentloaded' });
+      await dismissTutorialPromptIfPresent(page);
+      await waitForBodyText(page, 'Regional Manager review');
+      await fillFirstVisibleTextarea(page, 'Corrected Financial Overview reviewed and ready for final decision.');
+      await waitForVisibleEnabledButton(page, 'Submit for final decision');
+      const responsePromise = page.waitForResponse(response => (
+        response.request().method() === 'POST' &&
+        response.url() === `${config.localBaseUrl}/api/cases/${caseId}/assessment/review-workflow/action`
+      ), { timeout: 60_000 });
+      await clickVisibleButton(page, 'Submit for final decision');
+      const response = await responsePromise;
+      const requestBody = JSON.parse(response.request().postData() || '{}');
+      const responseText = await response.text().catch(() => '');
+      if (!response.ok()) {
+        throw new Error(`Corrected assessment final-decision submit returned ${response.status()}: ${responseText.slice(0, 500)}`);
+      }
+      expect('application assessment: dual-role RM sends corrected assessment to Decision Maker through deployed UI', (
+        Number(requestBody.applicationId) === Number(applicationId) &&
+        requestBody.action === 'rm_submit_to_nwac'
+      ), { routePath, applicationId, requestBody, status: response.status() });
+      await waitForBodyText(page, 'Assessment submitted for final decision.');
+    } catch (error) {
+      await addBrowserFailureDiagnostics(page, 'corrected-assessment-final-submit', error);
+      throw error;
+    } finally {
+      await page.close().catch(() => {});
+    }
+  }
+
+  async function loginApplicantThroughPortal() {
+    const response = await fetch(`${config.portalLocalBaseUrl}/api/auth/password-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: json({ email: config.applicantUser.email, password: config.applicantUser.password }),
+    });
+    const responseText = await response.text();
+    if (!response.ok) {
+      throw new Error(`Participant password login returned ${response.status}: ${responseText.slice(0, 500)}`);
+    }
+    const setCookieHeaders = typeof response.headers.getSetCookie === 'function'
+      ? response.headers.getSetCookie()
+      : String(response.headers.get('set-cookie') || '').split(/,(?=\s*[^;,=\s]+=[^;,]+)/g).filter(Boolean);
+    const cookies = setCookieHeaders.map(header => {
+      const [pair] = String(header).split(';');
+      const equals = pair.indexOf('=');
+      return {
+        name: pair.slice(0, equals).trim(),
+        value: pair.slice(equals + 1).trim(),
+        url: config.portalLocalBaseUrl,
+      };
+    }).filter(cookie => cookie.name && cookie.value);
+    if (!cookies.length) throw new Error('Participant password login returned no auth cookies.');
+    return {
+      cookies,
+      cookieHeader: cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; '),
+    };
+  }
+
+  async function typeIntoInput(page, selector, value) {
+    await page.waitForSelector(selector, { visible: true, timeout: 60_000 });
+    await page.click(selector, { clickCount: 3 });
+    await page.keyboard.press('Backspace');
+    await page.type(selector, String(value));
+  }
+
+  async function interceptPortalApi(page, cookieHeader) {
+    const corsHeaders = {
+      'access-control-allow-origin': config.portalLocalBaseUrl,
+      'access-control-allow-credentials': 'true',
+      'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+      'access-control-allow-headers': 'content-type,authorization,x-access-token',
+    };
+    await page.setRequestInterception(true);
+    page.on('request', async request => {
+      if (!/\/api\//.test(request.url())) {
+        request.continue().catch(() => {});
+        return;
+      }
+      if (request.method() === 'OPTIONS') {
+        request.respond({ status: 204, headers: corsHeaders, body: '' }).catch(() => {});
+        return;
+      }
+      try {
+        const parsed = new URL(request.url());
+        const response = await fetch(`${config.portalLocalBaseUrl}${parsed.pathname}${parsed.search}`, {
+          method: request.method(),
+          headers: {
+            Accept: request.headers().accept || 'application/json',
+            Cookie: cookieHeader,
+            ...(request.headers()['content-type']
+              ? { 'Content-Type': request.headers()['content-type'] }
+              : {}),
+          },
+          body: ['GET', 'HEAD'].includes(request.method()) ? undefined : request.postData(),
+          redirect: 'manual',
+        });
+        const body = Buffer.from(await response.arrayBuffer());
+        await request.respond({
+          status: response.status,
+          headers: {
+            ...corsHeaders,
+            'content-type': response.headers.get('content-type') || 'application/json; charset=utf-8',
+          },
+          body,
+        });
+      } catch (error) {
+        await request.respond({
+          status: 599,
+          headers: { ...corsHeaders, 'content-type': 'application/json; charset=utf-8' },
+          body: json({ error: 'intercept_failed', message: error.message || String(error) }),
+        }).catch(() => {});
+      }
+    });
+  }
+
+  async function completeFinancialOverviewThroughPortal(signingRequestId) {
+    const { cookies, cookieHeader } = await loginApplicantThroughPortal();
+    const page = await browser.newPage();
+    page.setDefaultTimeout(60_000);
+    page.on('pageerror', error => result.browserIssues.push({ type: 'pageerror', message: error.message }));
+    page.on('console', message => {
+      const text = message.text();
+      if (/ReferenceError|TypeError|Unhandled/i.test(text)) {
+        result.browserIssues.push({ type: 'console', level: message.type(), text: text.slice(0, 700) });
+      }
+    });
+    page.on('response', response => {
+      if (/\/api\//.test(response.url()) && response.status() >= 500) {
+        result.browserIssues.push({ type: 'api', status: response.status(), url: response.url() });
+      }
+    });
+    try {
+      await page.setCookie(...cookies);
+      await interceptPortalApi(page, cookieHeader);
+      await page.goto(`${config.portalLocalBaseUrl}/documents/${signingRequestId}`, { waitUntil: 'networkidle2' });
+      await waitForBodyText(page, 'Financial Overview');
+      await typeIntoInput(page, '#income-employment', '1640.50');
+      await typeIntoInput(page, '#income-spousal', '250.00');
+      await typeIntoInput(page, '#income-social-assist', '0.00');
+      await clickVisibleButton(page, 'Next');
+      await typeIntoInput(page, '#expenses-rent', '925.00');
+      await typeIntoInput(page, '#expenses-electricity', '185.25');
+      await typeIntoInput(page, '#expenses-groceries', '465.00');
+      await clickVisibleButton(page, 'Next');
+      await typeIntoInput(page, '#client-sig', 'Two StepApplicant');
+      await clickVisibleButton(page, 'Sign Now');
+      const responsePromise = page.waitForResponse(response => (
+        response.request().method() === 'POST' &&
+        response.url().endsWith(`/api/signing-requests/${signingRequestId}/sign`)
+      ), { timeout: 60_000 });
+      await clickVisibleButton(page, 'Submit');
+      const response = await responsePromise;
+      const responseText = await response.text().catch(() => '');
+      if (!response.ok()) {
+        throw new Error(`Financial Overview signing returned ${response.status()}: ${responseText.slice(0, 500)}`);
+      }
+      await waitForBodyText(page, 'Submitted');
+      const signedRequest = await page.evaluate(async id => {
+        const response = await fetch(`/api/signing-requests/${id}`);
+        return { status: response.status, body: await response.json().catch(() => null) };
+      }, signingRequestId);
+      expect('application assessment: participant signs Financial Overview in deployed portal', (
+        signedRequest.status === 200 && signedRequest.body?.status === 'signed'
+      ), { signingRequestId, signedRequest });
+    } catch (error) {
+      await addBrowserFailureDiagnostics(page, 'financial-overview-signing', error);
+      throw error;
+    } finally {
+      await page.close().catch(() => {});
+    }
+  }
+
+  async function getReminderRows(reminderIds) {
+    if (!Array.isArray(reminderIds) || reminderIds.length === 0) return [];
+    const placeholders = reminderIds.map(() => '?').join(',');
+    const [rows] = await query(
+      `SELECT id, application_id, status, due_at, metadata_json, updated_at, deleted_at
+         FROM iset_case_reminder
+        WHERE id IN (${placeholders})
+        ORDER BY id`,
+      reminderIds
+    );
+    return rows || [];
+  }
+
+  function reminderFingerprint(rows) {
+    return (rows || []).map(row => ({
+      id: Number(row.id),
+      applicationId: Number(row.application_id),
+      status: row.status || null,
+      dueAt: row.due_at ? new Date(row.due_at).toISOString() : null,
+      metadata: typeof row.metadata_json === 'string'
+        ? JSON.parse(row.metadata_json)
+        : (row.metadata_json || null),
+      updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+      deletedAt: row.deleted_at ? new Date(row.deleted_at).toISOString() : null,
+    }));
+  }
+
+  async function requestAndSignFinancialOverview(auth, caseId, applicationId, siblingApplicationId) {
+    const targetReminderIds = fixture.reminders.dualRoleApplication || [];
+    const siblingReminderIds = fixture.reminders.dualRoleSibling || [];
+    const siblingRemindersBefore = reminderFingerprint(await getReminderRows(siblingReminderIds));
+    const message = await fetchJson(`/api/cases/${caseId}/messages`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth), 'Content-Type': 'application/json' },
+      body: json({
+        subject: `Financial Overview two-step review ${config.stamp}`,
+        body: 'Please complete the Financial Overview requested during decision review.',
+        urgent: false,
+        toDisplayName: 'Two Step Applicant',
+        fromDisplayName: 'Regional Manager Smoke',
+        applicationId,
+        attachments: [{ workflow_id: 52, financial_overview_mode: 'blank' }],
+      }),
+    });
+    const thread = await fetchJson(`/api/cases/${caseId}/messages`, {
+      headers: authHeaders(auth),
+    });
+    const sentMessage = (thread.items || []).find(item => Number(item.id) === Number(message.messageId));
+    const signingAttachment = (sentMessage?.attachments || []).find(item => Number(item.workflow_id) === 52);
+    if (!signingAttachment?.id) {
+      throw new Error(`Financial Overview signing request missing from secure message ${message.messageId}`);
+    }
+    const requestedState = await getApplicationState(applicationId);
+    expect('application assessment: Financial Overview request preserves returned-to-RM review state', (
+      requestedState?.current_stage === 'returned_to_rm' &&
+      requestedState?.status === 'pending_approval' &&
+      requestedState?.lifecycle_status === 'pending_decision' &&
+      Number(requestedState?.docs_requested_active) === 1 &&
+      requestedState?.docs_requested_source === 'secure_message'
+    ), requestedState || {});
+    pass('application assessment: Financial Overview requested on exact returned application', {
+      caseId,
+      applicationId,
+      messageId: message.messageId,
+      signingRequestId: signingAttachment.id,
+    });
+    const targetRemindersRequested = reminderFingerprint(await getReminderRows(targetReminderIds));
+    const siblingRemindersRequested = reminderFingerprint(await getReminderRows(siblingReminderIds));
+    expect('application assessment: document request updates only exact-application reminders', (
+      targetRemindersRequested.length === targetReminderIds.length &&
+      targetRemindersRequested.every(row => (
+        row.applicationId === Number(applicationId) &&
+        row.status === 'open' &&
+        row.deletedAt == null
+      )) &&
+      json(siblingRemindersRequested) === json(siblingRemindersBefore)
+    ), {
+      applicationId,
+      siblingApplicationId,
+      targetRemindersRequested,
+      siblingRemindersBefore,
+      siblingRemindersRequested,
+    });
+    await completeFinancialOverviewThroughPortal(signingAttachment.id);
+    const targetRemindersSigned = reminderFingerprint(await getReminderRows(targetReminderIds));
+    const siblingRemindersSigned = reminderFingerprint(await getReminderRows(siblingReminderIds));
+    expect('application assessment: signing clears only exact-application reminders', (
+      targetRemindersSigned.length === targetReminderIds.length &&
+      targetRemindersSigned.every(row => (
+        row.applicationId === Number(applicationId) &&
+        row.status === 'cancelled' &&
+        row.deletedAt != null
+      )) &&
+      json(siblingRemindersSigned) === json(siblingRemindersBefore)
+    ), {
+      applicationId,
+      siblingApplicationId,
+      targetRemindersSigned,
+      siblingRemindersBefore,
+      siblingRemindersSigned,
+    });
+    return signingAttachment.id;
+  }
+
+  async function assertReturnedApplicationInRmQueue(auth, caseId, applicationId, siblingApplicationId) {
+    const queue = await fetchJson('/api/dashboard/awaiting-approval-items', {
+      headers: authHeaders(auth),
+    });
+    const targetItems = (queue.items || []).filter(item => (
+      Number(item.caseId) === Number(caseId) &&
+      Number(item.applicationId) === Number(applicationId)
+    ));
+    const siblingItems = (queue.items || []).filter(item => (
+      Number(item.caseId) === Number(caseId) &&
+      Number(item.applicationId) === Number(siblingApplicationId)
+    ));
+    expect('application assessment: RM queue returns the exact non-primary damaged application only', (
+      targetItems.length === 1 &&
+      targetItems[0].review_workflow_stage === 'returned_to_rm' &&
+      siblingItems.length === 0
+    ), { caseId, applicationId, siblingApplicationId, targetItems, siblingItems });
+  }
+
   async function seedFixture() {
     progress('seed fixture starting');
     await connection.beginTransaction();
@@ -956,17 +1549,23 @@ function remoteRunner() {
       fixture.applicantUser = await insert(
         `INSERT INTO user (name, email, cognito_sub, email_verified, suspended, preferred_language)
          VALUES (?, ?, ?, 1, 0, 'en')`,
-        [`Two Step Applicant ${suffix}`, `codex.twostep.${suffix}.applicant@example.com`, `two-step-applicant-${suffix}`]
+        [`Two Step Applicant ${suffix}`, config.applicantUser.email, config.applicantUser.sub]
       );
       fixture.client = await insert(
         `INSERT INTO client
            (first_name, last_name, applicant_cognito_sub, applicant_cognito_username,
             applicant_account_status, applicant_account_email, applicant_activated_at, address_json)
          VALUES (?, ?, ?, ?, 'activated', ?, NOW(), CAST(? AS JSON))`,
-        ['Two Step', `Applicant ${suffix}`, `two-step-applicant-${suffix}`, `codex.twostep.${suffix}.applicant@example.com`, `codex.twostep.${suffix}.applicant@example.com`, markerJson()]
+        ['Two Step', `Applicant ${suffix}`, config.applicantUser.sub, config.applicantUser.email, config.applicantUser.email, markerJson()]
       );
 
       await seedApplicationAssessmentCase('application');
+      await seedApplicationAssessmentCase('dualRoleApplication', {
+        assignedStaffProfileId: fixture.staff.manager.staffProfileId,
+      });
+      await seedRepeatApplicationSibling('dualRoleSibling', 'dualRoleApplication');
+      await seedDocsReminderPair('dualRoleApplication', 'dualRoleApplication');
+      await seedDocsReminderPair('dualRoleSibling', 'dualRoleSibling');
       await seedInterventionCase('proposal');
       await seedInterventionCase('revision');
       await seedInterventionCase('rmProposal');
@@ -988,9 +1587,10 @@ function remoteRunner() {
     }
   }
 
-  async function seedApplicationAssessmentCase(label) {
+  async function seedApplicationAssessmentCase(label, options = {}) {
     const suffix = fixture.suffix;
-    const reference = `TSTEPA-${suffix}`.slice(0, 32);
+    const assignedStaffProfileId = Number(options.assignedStaffProfileId) || fixture.staff.coordinator.staffProfileId;
+    const reference = `TSTEPA-${label}-${suffix}`.slice(0, 32);
     const answers = {
       'first-name': 'Two',
       'last-name': `Assessment ${suffix}`,
@@ -1011,13 +1611,13 @@ function remoteRunner() {
           opened_at, portfolio_region_id, case_context_json, created_by_staff_profile_id, updated_by_staff_profile_id)
        VALUES (?, ?, ?, 'intake', 'intake', 'two_step_smoke', NOW(), ?, CAST(? AS JSON), ?, ?)`,
       [
-        `TSTEP-APP-${suffix}`.slice(0, 32),
+        `TSTEP-${label}-${suffix}`.slice(0, 32),
         fixture.client,
-        fixture.staff.coordinator.staffProfileId,
+        assignedStaffProfileId,
         config.regionId,
         markerJson({ kind: label }),
-        fixture.staff.coordinator.staffProfileId,
-        fixture.staff.coordinator.staffProfileId,
+        assignedStaffProfileId,
+        assignedStaffProfileId,
       ]
     );
     const applicationId = await insert(
@@ -1072,6 +1672,64 @@ function remoteRunner() {
     fixture.submissions[label] = submissionId;
     fixture.cases[label] = caseId;
     fixture.applications[label] = applicationId;
+  }
+
+  async function seedRepeatApplicationSibling(label, caseLabel) {
+    const suffix = fixture.suffix;
+    const caseId = fixture.cases[caseLabel];
+    const reference = `TSTEPA-${label}-${suffix}`.slice(0, 32);
+    const answers = {
+      'first-name': 'Two',
+      'last-name': `Sibling ${suffix}`,
+      email: `codex.twostep.${suffix}.sibling@example.com`,
+      'address-province': 'QC',
+    };
+    const submissionId = await insert(
+      `INSERT INTO iset_application_submission
+         (user_id, workflow_id, reference_number, status, submitted_at, intake_payload, schema_snapshot, history, doc_refs, locale)
+       VALUES (?, 'iset-v1', ?, 'submitted', NOW(), CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), 'en')`,
+      [fixture.applicantUser, reference, json(answers), markerJson(), json([]), json([])]
+    );
+    const applicationId = await insert(
+      `INSERT INTO iset_application
+         (submission_id, client_id, case_id, payload_json, status, lifecycle_status,
+          decision_outcome, awaiting_reason, created_at, updated_at, row_version)
+       VALUES (?, ?, ?, CAST(? AS JSON), 'in_review', 'in_review', NULL, 'none', NOW(), NOW(), 1)`,
+      [
+        submissionId,
+        fixture.client,
+        caseId,
+        markerJson({ kind: label, submission_snapshot: { reference_number: reference } }),
+      ]
+    );
+    fixture.submissions[label] = submissionId;
+    fixture.applications[label] = applicationId;
+  }
+
+  async function seedDocsReminderPair(label, applicationLabel) {
+    const caseId = fixture.cases.dualRoleApplication;
+    const applicationId = fixture.applications[applicationLabel];
+    const reminders = [];
+    for (const [kind, offsetDays] of [['reminder', 30], ['closure', 60]]) {
+      const reminderId = await insert(
+        `INSERT INTO iset_case_reminder
+           (case_id, application_id, title, description, category, status, due_at,
+            metadata_json, created_by_staff_profile_id, updated_by_staff_profile_id)
+         VALUES (?, ?, ?, ?, 'Docs requested', 'open', ?, CAST(? AS JSON), ?, ?)`,
+        [
+          caseId,
+          applicationId,
+          `Synthetic ${label} ${kind}`,
+          `Synthetic exact-application ${kind} scope guard.`,
+          dateFromNow(offsetDays),
+          markerJson({ source: 'docs_requested', kind }),
+          fixture.staff.manager.staffProfileId,
+          fixture.staff.manager.staffProfileId,
+        ]
+      );
+      reminders.push(reminderId);
+    }
+    fixture.reminders[label] = reminders;
   }
 
   async function seedInterventionCase(label) {
@@ -1229,14 +1887,27 @@ function remoteRunner() {
 
   async function getApplicationState(applicationId) {
     const [[row]] = await query(
-      `SELECT a.id, a.case_id, a.status, a.lifecycle_status, a.decision_outcome, a.row_version,
-              rw.id AS workflow_id, rw.current_stage, rw.current_owner_role, rw.nwac_decision
+      `SELECT a.id, a.case_id, a.status, a.lifecycle_status, a.decision_outcome,
+              a.awaiting_reason, a.docs_requested_active, a.docs_requested_source, a.row_version,
+              rw.id AS workflow_id, rw.current_stage, rw.current_owner_role,
+              rw.submitted_by_staff_profile_id, rw.nwac_decision
          FROM iset_application a
          LEFT JOIN iset_review_workflow rw
            ON rw.workflow_type = 'application_assessment'
           AND rw.application_id = a.id
           AND rw.archived_at IS NULL
         WHERE a.id = ?
+        LIMIT 1`,
+      [applicationId]
+    );
+    return row || null;
+  }
+
+  async function getApplicationAssessmentBodyState(applicationId) {
+    const [[row]] = await query(
+      `SELECT application_id, case_id, overview
+         FROM iset_application_assessment
+        WHERE application_id = ?
         LIMIT 1`,
       [applicationId]
     );
@@ -1263,9 +1934,9 @@ function remoteRunner() {
     return row || null;
   }
 
-  async function satisfySubmitChecklist(auth) {
-    const caseId = fixture.cases.application;
-    const applicationId = fixture.applications.application;
+  async function satisfySubmitChecklist(auth, label = 'application') {
+    const caseId = fixture.cases[label];
+    const applicationId = fixture.applications[label];
     const url = `/api/applicants/${fixture.applicantUser}/document-checklist?applicationId=${applicationId}&stage=submit_assessment`;
     const before = await fetchJson(url, { headers: authHeaders(auth) });
     const missing = (before.items || []).filter(item => item.required !== false && item.status !== 'complete');
@@ -1444,6 +2115,196 @@ function remoteRunner() {
     state = await getApplicationState(applicationId);
     expect('application assessment: final decision recorded by Decision Maker', state.current_stage === 'final_decision_recorded' && state.decision_outcome === 'approved', state);
     await assertGeneratedDocuments({ caseId, applicationId, workflow: 'application_assessment', minCount: 2 });
+  }
+
+  async function runDualRoleApplicationAssessmentWorkflow(auth) {
+    const caseId = fixture.cases.dualRoleApplication;
+    const applicationId = fixture.applications.dualRoleApplication;
+    const unaffectedApplicationId = fixture.applications.dualRoleSibling;
+    const unaffectedBefore = await getApplicationState(unaffectedApplicationId);
+    await satisfySubmitChecklist(auth.manager, 'dualRoleApplication');
+
+    let state = await getApplicationState(applicationId);
+    await fetchJson(`/api/cases/${caseId}`, {
+      method: 'PUT',
+      headers: { ...authHeaders(auth.manager), 'Content-Type': 'application/json' },
+      body: json(completeAssessmentPayload(applicationId, state.row_version, {
+        assessment_submit_action: true,
+        status: 'intake',
+        applicationStatus: 'pending_approval',
+      })),
+    });
+    state = await getApplicationState(applicationId);
+    fixture.workflows.dualRoleApplication = state.workflow_id;
+    expect('application assessment: dual-role RM submits as original submitter', (
+      state.current_stage === 'rm_review' &&
+      state.status === 'pending_approval' &&
+      state.lifecycle_status === 'pending_decision' &&
+      Number(state.submitted_by_staff_profile_id) === Number(fixture.staff.manager.staffProfileId)
+    ), state);
+
+    const omittedActionScope = await fetchExpectingFailure(
+      `/api/cases/${caseId}/assessment/review-workflow/action`,
+      {
+        method: 'POST',
+        headers: { ...authHeaders(auth.manager), 'Content-Type': 'application/json' },
+        body: json({
+          action: 'rm_submit_to_nwac',
+          note: 'This deliberately omits application scope.',
+        }),
+      }
+    );
+    expect('application assessment: review action fails closed without exact application', (
+      omittedActionScope.status === 400 &&
+      omittedActionScope.body?.error === 'application_id_required_for_assessment'
+    ), omittedActionScope);
+
+    const omittedRecallScope = await fetchExpectingFailure(
+      `/api/cases/${caseId}/assessment/recall`,
+      {
+        method: 'POST',
+        headers: { ...authHeaders(auth.manager), 'Content-Type': 'application/json' },
+        body: json({ expectedApplicationRowVersion: state.row_version }),
+      }
+    );
+    expect('application assessment: recall fails closed without exact application', (
+      omittedRecallScope.status === 400 &&
+      omittedRecallScope.body?.error === 'application_id_required_for_assessment'
+    ), omittedRecallScope);
+    const afterScopeDenials = await getApplicationState(applicationId);
+    expect('application assessment: omitted-scope denials do not mutate either repeat application', (
+      afterScopeDenials.current_stage === state.current_stage &&
+      Number(afterScopeDenials.row_version) === Number(state.row_version)
+    ), { before: state, after: afterScopeDenials });
+
+    await fetchJson(`/api/cases/${caseId}/assessment/review-workflow/action`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.manager), 'Content-Type': 'application/json' },
+      body: json({
+        applicationId,
+        action: 'rm_submit_to_nwac',
+        note: 'Dual-role Regional Manager sign-off for final decision.',
+      }),
+    });
+    state = await getApplicationState(applicationId);
+    expect('application assessment: dual-role RM submission reaches Decision Maker', (
+      state.current_stage === 'nwac_review' &&
+      state.status === 'pending_approval' &&
+      state.lifecycle_status === 'pending_decision'
+    ), state);
+
+    await fetchJson(`/api/cases/${caseId}`, {
+      method: 'PUT',
+      headers: { ...authHeaders(auth.decisionMaker), 'Content-Type': 'application/json' },
+      body: json({
+        applicationId,
+        assessment_nwac_review_status: 'push_back',
+        assessment_nwac_reason: 'Please obtain and apply the participant Financial Overview.',
+      }),
+    });
+    state = await getApplicationState(applicationId);
+    expect('application assessment: Decision Maker return preserves the review-state status invariant', (
+      state.current_stage === 'returned_to_rm' &&
+      state.status === 'pending_approval' &&
+      state.lifecycle_status === 'pending_decision' &&
+      state.decision_outcome == null &&
+      state.awaiting_reason === 'none'
+    ), state);
+
+    await requestAndSignFinancialOverview(
+      auth.manager,
+      caseId,
+      applicationId,
+      unaffectedApplicationId
+    );
+    state = await getApplicationState(applicationId);
+    expect('application assessment: Financial Overview request and signing preserve returned-to-RM state', (
+      state.current_stage === 'returned_to_rm' &&
+      state.status === 'pending_approval' &&
+      state.lifecycle_status === 'pending_decision' &&
+      Number(state.docs_requested_active) === 0 &&
+      state.docs_requested_source === 'secure_message'
+    ), state);
+
+    const [legacyMismatchUpdate] = await query(
+      `UPDATE iset_application
+          SET status = 'in_review',
+              lifecycle_status = 'awaiting_applicant',
+              awaiting_reason = 'documents'
+        WHERE id = ?
+          AND status = 'pending_approval'
+          AND lifecycle_status = 'pending_decision'`,
+      [applicationId]
+    );
+    expect('application assessment: legacy Amanda state reproduced on exact TEST fixture', legacyMismatchUpdate.affectedRows === 1, {
+      applicationId,
+      affectedRows: legacyMismatchUpdate.affectedRows,
+    });
+    state = await getApplicationState(applicationId);
+    expect('application assessment: legacy status mismatch retains authoritative returned-to-RM workflow', (
+      state.current_stage === 'returned_to_rm' &&
+      state.status === 'in_review' &&
+      state.lifecycle_status === 'awaiting_applicant'
+    ), state);
+    await assertReturnedApplicationInRmQueue(
+      auth.manager,
+      caseId,
+      applicationId,
+      unaffectedApplicationId
+    );
+
+    await clickForwardChangesThroughBrowser(auth.manager, caseId, applicationId);
+    state = await getApplicationState(applicationId);
+    expect('application assessment: deployed UI recovers legacy mismatch to exact submitter-edit state', (
+      state.current_stage === 'returned_to_submitter' &&
+      state.status === 'in_review' &&
+      state.lifecycle_status === 'in_review' &&
+      Number(state.submitted_by_staff_profile_id) === Number(fixture.staff.manager.staffProfileId)
+    ), state);
+    await assertNotification('rm_review_changes_forwarded', fixture.staff.manager.staffProfileId, { caseId, applicationId });
+
+    const revisedOverview = await assertReturnedAssessmentEditableAndSave(
+      auth.manager,
+      caseId,
+      applicationId
+    );
+    const persistedAfterBrowserSave = await getApplicationAssessmentBodyState(applicationId);
+    expect('application assessment: deployed browser edit is durably persisted on exact assessment row', (
+      Number(persistedAfterBrowserSave?.application_id) === Number(applicationId) &&
+      Number(persistedAfterBrowserSave?.case_id) === Number(caseId) &&
+      persistedAfterBrowserSave?.overview === revisedOverview
+    ), { applicationId, caseId, persistedAfterBrowserSave });
+    await resubmitReturnedAssessmentThroughBrowser(auth.manager, caseId, applicationId);
+    state = await getApplicationState(applicationId);
+    expect('application assessment: dual-role RM resubmits corrected assessment to own RM review queue', (
+      state.current_stage === 'rm_review' &&
+      state.status === 'pending_approval' &&
+      state.lifecycle_status === 'pending_decision' &&
+      Number(state.submitted_by_staff_profile_id) === Number(fixture.staff.manager.staffProfileId)
+    ), state);
+
+    await submitCorrectedAssessmentForFinalDecisionThroughBrowser(
+      auth.manager,
+      caseId,
+      applicationId
+    );
+    state = await getApplicationState(applicationId);
+    expect('application assessment: corrected dual-role assessment returns to Decision Maker with canonical state', (
+      state.current_stage === 'nwac_review' &&
+      state.status === 'pending_approval' &&
+      state.lifecycle_status === 'pending_decision' &&
+      state.decision_outcome == null &&
+      state.awaiting_reason === 'none'
+    ), state);
+
+    const unaffectedAfter = await getApplicationState(unaffectedApplicationId);
+    expect('application assessment: exact dual-role journey leaves other synthetic application unchanged', (
+      unaffectedAfter.id === unaffectedBefore.id &&
+      unaffectedAfter.status === unaffectedBefore.status &&
+      unaffectedAfter.lifecycle_status === unaffectedBefore.lifecycle_status &&
+      unaffectedAfter.current_stage === unaffectedBefore.current_stage &&
+      Number(unaffectedAfter.row_version) === Number(unaffectedBefore.row_version)
+    ), { unaffectedBefore, unaffectedAfter });
   }
 
   function interventionSubmitPayload(title, overrides = {}) {
@@ -1850,8 +2711,28 @@ function remoteRunner() {
       if (interventionIds.length) await deleteWhereIn('iset_document_intervention', 'intervention_id', interventionIds);
       await deleteWhereIn('iset_event_entry', 'subject_id', caseIds.map(String), "subject_type = 'case'");
       if (staffProfileIds.length) await deleteWhereIn('iset_event_entry', 'actor_staff_profile_id', staffProfileIds);
+      if (fixture.applicantUser) await deleteWhereIn('iset_event_entry', 'actor_applicant_user_id', [fixture.applicantUser]);
+      if (caseIds.length) {
+        const placeholders = caseIds.map(() => '?').join(',');
+        await query(
+          `DELETE FROM iset_event_entry
+            WHERE CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.caseId')) AS UNSIGNED) IN (${placeholders})
+               OR CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.case_id')) AS UNSIGNED) IN (${placeholders})`,
+          [...caseIds, ...caseIds]
+        );
+      }
       await deleteWhereLike('iset_event_entry', 'payload_json', stampLike);
       if (staffProfileIds.length) await deleteWhereIn('iset_internal_notification', 'audience_staff_profile_id', staffProfileIds);
+      if (fixture.applicantUser) await deleteWhereIn('iset_internal_notification', 'audience_applicant_user_id', [fixture.applicantUser]);
+      if (caseIds.length) {
+        const placeholders = caseIds.map(() => '?').join(',');
+        await query(
+          `DELETE FROM iset_internal_notification
+            WHERE CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.caseId')) AS UNSIGNED) IN (${placeholders})
+               OR CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.case_id')) AS UNSIGNED) IN (${placeholders})`,
+          [...caseIds, ...caseIds]
+        );
+      }
       await deleteWhereLike('iset_internal_notification', 'metadata', stampLike);
       await deleteWhereIn('iset_case_note', 'case_id', caseIds);
       await deleteWorkflowRows(caseIds, applicationIds, interventionIds, proposalIds);
@@ -1859,6 +2740,15 @@ function remoteRunner() {
       const documentIds = await idsForDocuments(caseIds, stampLike);
       await deleteGeneratedAgreementRows(caseIds, documentIds);
       await deleteWhereIn('iset_document', 'id', documentIds);
+      const messageIds = await idsFromQuery('SELECT id FROM messages', 'case_id', caseIds);
+      const signingRequestIds = await idsFromQuery('SELECT id FROM signing_request', 'case_id', caseIds);
+      await deleteWhereIn('message_attachment', 'message_id', messageIds);
+      await deleteWhereIn('message_item', 'message_id', messageIds);
+      await deleteWhereIn('message_signing_request', 'message_id', messageIds);
+      await deleteWhereIn('message_signing_request', 'signing_request_id', signingRequestIds);
+      await deleteWhereIn('signing_request', 'id', signingRequestIds);
+      await deleteWhereIn('messages', 'id', messageIds);
+      await deleteWhereIn('iset_case_reminder', 'case_id', caseIds);
       await deleteWhereIn('iset_intervention_proposal', 'id', proposalIds);
       await deleteWhereIn('iset_case_intervention', 'id', interventionIds);
       await deleteWhereIn('iset_case_action_plan', 'id', Object.values(fixture.actionPlans).filter(Boolean));
@@ -2008,6 +2898,41 @@ function remoteRunner() {
     counts.documents = Number(docCount.count || 0);
     const [[notificationCount]] = await query('SELECT COUNT(*) AS count FROM iset_internal_notification WHERE metadata IS NOT NULL AND CAST(metadata AS CHAR) LIKE ?', [stampLike]);
     counts.notifications = Number(notificationCount.count || 0);
+    const caseIds = Object.values(fixture.cases).filter(Boolean);
+    if (caseIds.length) {
+      const placeholders = caseIds.map(() => '?').join(',');
+      const [[messageCount]] = await query(`SELECT COUNT(*) AS count FROM messages WHERE case_id IN (${placeholders})`, caseIds);
+      counts.messages = Number(messageCount.count || 0);
+      const [[signingRequestCount]] = await query(`SELECT COUNT(*) AS count FROM signing_request WHERE case_id IN (${placeholders})`, caseIds);
+      counts.signingRequests = Number(signingRequestCount.count || 0);
+      const [[reminderCount]] = await query(`SELECT COUNT(*) AS count FROM iset_case_reminder WHERE case_id IN (${placeholders})`, caseIds);
+      counts.reminders = Number(reminderCount.count || 0);
+      const [[caseEventCount]] = await query(
+        `SELECT COUNT(*) AS count
+           FROM iset_event_entry
+          WHERE (subject_type = 'case' AND subject_id IN (${placeholders}))
+             OR CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.caseId')) AS UNSIGNED) IN (${placeholders})
+             OR CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.case_id')) AS UNSIGNED) IN (${placeholders})`,
+        [...caseIds.map(String), ...caseIds, ...caseIds]
+      );
+      counts.caseEvents = Number(caseEventCount.count || 0);
+      const [[caseNotificationCount]] = await query(
+        `SELECT COUNT(*) AS count
+           FROM iset_internal_notification
+          WHERE CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.caseId')) AS UNSIGNED) IN (${placeholders})
+             OR CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.case_id')) AS UNSIGNED) IN (${placeholders})`,
+        [...caseIds, ...caseIds]
+      );
+      counts.caseNotifications = Number(caseNotificationCount.count || 0);
+      const [[fundingOverviewCount]] = await query(
+        `SELECT COUNT(*) AS count
+           FROM funding_overview_version v
+           JOIN funding_overview_series s ON s.id = v.series_id
+          WHERE s.case_id IN (${placeholders})`,
+        caseIds
+      );
+      counts.fundingOverviewVersions = Number(fundingOverviewCount.count || 0);
+    }
     if (staffEmails.length) {
       const [[staffCount]] = await query(`SELECT COUNT(*) AS count FROM staff_profiles WHERE email IN (${staffEmails.map(() => '?').join(',')})`, staffEmails);
       counts.staffProfiles = Number(staffCount.count || 0);

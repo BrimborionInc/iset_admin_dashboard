@@ -410,6 +410,7 @@ const mapPendingCompletionInterventionItems = (items = [], bucketId = 'pending-c
                     basePath: `/cases/${caseId}`,
                     approvalType: 'intervention',
                     step: 'communication',
+                    applicationId: row.applicationId || row.application_id || null,
                     interventionId,
                     planId: actionPlanId
                 })
@@ -1989,6 +1990,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                                 basePath: `/cases/${caseId}`,
                                 approvalType: 'intervention',
                                 step: 'review',
+                                applicationId: row.applicationId || row.application_id || null,
                                 interventionId,
                                 planId: actionPlanId
                             })
@@ -3104,7 +3106,8 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             ? buildApprovalWorkspacePath({
                                 basePath: `/application-case/${caseId}`,
                                 approvalType: 'application',
-                                step: 'decision'
+                                step: 'decision',
+                                applicationId: row.applicationId || row.application_id || null
                             })
                             : '/case-assignment-dashboard'
                     };
@@ -3226,6 +3229,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                                 basePath: `/cases/${caseId}`,
                                 approvalType: 'intervention',
                                 step: isRegionalCoordinatorRole ? 'review' : 'decision',
+                                applicationId: row.applicationId || row.application_id || null,
                                 interventionId,
                                 planId: actionPlanId
                             })

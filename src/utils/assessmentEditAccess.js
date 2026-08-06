@@ -7,6 +7,22 @@ const normalizePositiveId = value => {
 const normalizeWorkflowStage = value =>
   String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
 
+export const isCurrentApplicationAssessmentWorkflowSubmitter = ({
+  reviewWorkflow,
+  currentStaffProfileId,
+} = {}) => {
+  const submitterStaffProfileId = normalizePositiveId(
+    reviewWorkflow?.submittedByStaffProfileId ??
+    reviewWorkflow?.submitted_by_staff_profile_id
+  );
+  const activeStaffProfileId = normalizePositiveId(currentStaffProfileId);
+  return Boolean(
+    submitterStaffProfileId &&
+    activeStaffProfileId &&
+    submitterStaffProfileId === activeStaffProfileId
+  );
+};
+
 export const canRegionalManagerEditApplicationAssessment = ({
   isRegionalManager,
   applicationStatus,
@@ -28,15 +44,45 @@ export const canRegionalManagerEditApplicationAssessment = ({
     return false;
   }
 
-  const submitterStaffProfileId = normalizePositiveId(
-    reviewWorkflow.submittedByStaffProfileId ??
-    reviewWorkflow.submitted_by_staff_profile_id
-  );
-  const activeStaffProfileId = normalizePositiveId(currentStaffProfileId);
+  return isCurrentApplicationAssessmentWorkflowSubmitter({
+    reviewWorkflow,
+    currentStaffProfileId,
+  });
+};
 
-  return Boolean(
-    submitterStaffProfileId &&
-    activeStaffProfileId &&
-    submitterStaffProfileId === activeStaffProfileId
+export const canEditApplicationAssessmentBody = ({
+  isAssessor,
+  isRegionalManager,
+  isSystemAdministrator,
+  applicationStatus,
+  reviewWorkflow,
+  currentStaffProfileId,
+} = {}) => {
+  if (isSystemAdministrator) {
+    return true;
+  }
+
+  const reviewStage = normalizeWorkflowStage(
+    reviewWorkflow?.currentStage ?? reviewWorkflow?.current_stage
   );
+  if (reviewStage === 'returned_to_submitter') {
+    return Boolean(
+      (isAssessor || isRegionalManager) &&
+      isCurrentApplicationAssessmentWorkflowSubmitter({
+        reviewWorkflow,
+        currentStaffProfileId,
+      })
+    );
+  }
+
+  if (isAssessor) {
+    return true;
+  }
+
+  return canRegionalManagerEditApplicationAssessment({
+    isRegionalManager,
+    applicationStatus,
+    reviewWorkflow,
+    currentStaffProfileId,
+  });
 };

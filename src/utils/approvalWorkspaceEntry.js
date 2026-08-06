@@ -2,7 +2,7 @@ const APPROVAL_ENTRY_MODE = "approval";
 
 const toPositiveInteger = value => {
   const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
 };
 
 const normalizeApprovalType = value => {
@@ -21,6 +21,7 @@ export const buildApprovalWorkspacePath = ({
   basePath,
   approvalType,
   step = "decision",
+  applicationId = null,
   interventionId = null,
   planId = null,
 }) => {
@@ -29,8 +30,12 @@ export const buildApprovalWorkspacePath = ({
   params.set("entry", APPROVAL_ENTRY_MODE);
   params.set("approvalType", normalizeApprovalType(approvalType) || "application");
   params.set("step", normalizeStep(step));
+  const resolvedApplicationId = toPositiveInteger(applicationId);
   const resolvedInterventionId = toPositiveInteger(interventionId);
   const resolvedPlanId = toPositiveInteger(planId);
+  if (resolvedApplicationId) {
+    params.set("applicationId", String(resolvedApplicationId));
+  }
   if (resolvedInterventionId) {
     params.set("interventionId", String(resolvedInterventionId));
   }
@@ -54,14 +59,23 @@ export const parseWorkspaceEntry = search => {
     return null;
   }
   const step = normalizeStep(params.get("step"));
+  const applicationId = toPositiveInteger(params.get("applicationId"));
   const interventionId = toPositiveInteger(params.get("interventionId"));
   const planId = toPositiveInteger(params.get("planId"));
   return {
     mode: APPROVAL_ENTRY_MODE,
     approvalType,
     step,
+    applicationId,
     interventionId,
     planId,
-    key: [APPROVAL_ENTRY_MODE, approvalType, step, interventionId || "none", planId || "none"].join(":"),
+    key: [
+      APPROVAL_ENTRY_MODE,
+      approvalType,
+      step,
+      applicationId || "none",
+      interventionId || "none",
+      planId || "none",
+    ].join(":"),
   };
 };

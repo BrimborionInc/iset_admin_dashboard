@@ -136,4 +136,32 @@ describe('complete admin Express stack', () => {
     });
     expect(fakePool.queries.some(({ sql }) => sql.includes("'ai.fallbacks'"))).toBe(false);
   });
+
+  test('refuses a signing-form message before any write when exact application scope is omitted', async () => {
+    const beforeQueryCount = fakePool.queries.length;
+    const response = await requestJson(server, '/api/cases/76/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        subject: 'Financial Overview required',
+        body: 'Please complete the attached form.',
+        toDisplayName: 'Applicant',
+        fromDisplayName: 'Regional Manager',
+        attachments: [{ workflow_id: 52 }],
+      }),
+    });
+
+    expect(response).toEqual({
+      status: 400,
+      body: {
+        error: 'application_id_required_for_signing_request',
+        message: 'Choose the exact application before sending a form for signature.',
+      },
+    });
+    const routeQueries = fakePool.queries.slice(beforeQueryCount);
+    expect(routeQueries.some(({ sql }) => sql.includes('INSERT INTO messages'))).toBe(false);
+    expect(routeQueries.some(({ sql }) => sql.includes('INSERT INTO signing_request'))).toBe(false);
+    expect(routeQueries.some(({ sql }) => sql.includes('message_signing_request'))).toBe(false);
+    expect(routeQueries.some(({ sql }) => sql.includes('UPDATE iset_application'))).toBe(false);
+  });
 });

@@ -869,7 +869,9 @@ const checks = [
       "app.post('/api/signing-requests/:id/sign'",
       'row.participant_user_id !== userId',
     ],
-    after: 10000,
+    // The exact-scope reconciliation helper intentionally sits between the
+    // detail and sign route registrations; include both complete guards.
+    after: 30000,
   },
 ];
 

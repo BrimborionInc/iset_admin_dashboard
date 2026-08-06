@@ -20,7 +20,7 @@ import {
   deriveAssessmentReviewStatusSelection,
   deriveApplicationDecisionOutcome,
 } from '../utils/applicationStatus';
-import { canRegionalManagerEditApplicationAssessment } from '../utils/assessmentEditAccess';
+import { canEditApplicationAssessmentBody } from '../utils/assessmentEditAccess';
 
 const BARRIERS = [
   'None', 'Education', 'Lack of Marketable Skills', 'Lack of Work Experience', 'Remoteness', 'Lack of Transportation', 'Economic', 'Language', 'Lack of Labour Force Attachment', 'Dependent Care', 'Physical, Emotional, or Mental Health', 'Other'
@@ -2580,7 +2580,31 @@ const CoordinatorAssessmentWidget = forwardRef(
   const caseId = caseData?.id ?? caseData?.case_id ?? null;
   const reviewWorkflow = caseData?.reviewWorkflow || caseData?.review_workflow || null;
   const reviewStage = reviewWorkflow?.currentStage || reviewWorkflow?.current_stage || null;
+  const reviewWorkflowMetadata = (() => {
+    const raw = reviewWorkflow?.metadata || reviewWorkflow?.metadata_json || {};
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw;
+    if (typeof raw !== 'string') return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  })();
+  const requiresSubmitterCorrectionReturn = Boolean(
+    reviewWorkflowMetadata.requiresSubmitterCorrectionReturn === true ||
+    reviewWorkflowMetadata.requires_submitter_correction_return === true
+  );
   const hasReviewWorkflow = Boolean(reviewStage);
+  const reviewWorkflowSubmitterStaffProfileId = Number(
+    reviewWorkflow?.submittedByStaffProfileId ??
+    reviewWorkflow?.submitted_by_staff_profile_id ??
+    0
+  );
+  const isCurrentReviewWorkflowSubmitter = Boolean(
+    reviewWorkflowSubmitterStaffProfileId > 0 &&
+    Number(currentStaffProfileId) === reviewWorkflowSubmitterStaffProfileId
+  );
   const twoStepReviewEnabled = Boolean(
     caseData?.twoStepReviewEnabled ||
     caseData?.two_step_review_enabled ||
@@ -2596,6 +2620,11 @@ const CoordinatorAssessmentWidget = forwardRef(
   const isReviewWithNwac =
     twoStepReviewEnabled &&
     reviewStage === ASSESSMENT_REVIEW_STAGES.nwacReview;
+  // The workflow stage is authoritative for reviewer ownership. Keep reviewer
+  // controls reachable even if an independent lifecycle writer left the
+  // application status stale (for example, a document-request completion).
+  const isApplicationAssessmentReviewerStage =
+    isReviewWithRegionalManager || isReviewWithNwac;
   const canRegionalManagerReview = isRegionalManager && isReviewWithRegionalManager;
   useEffect(() => {
     if (!caseId) {
@@ -2794,9 +2823,14 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const isDecisionFinal = APPLICATION_FINAL_STATUSES.has(normalizedApplicationStatus);
   const isLockedStatus = APPLICATION_LOCKED_STATUSES.has(normalizedApplicationStatus);
-  const showOutcomeByStatus = isPendingApprovalStatus;
+  const showOutcomeByStatus = isPendingApprovalStatus || isReviewWithNwac;
   const isOutcomeNoticeDisabled = isDecisionFinal;
-  const canManageOutcomeReview = canCompleteOutcomeReview({ role: userRole, status: rawApplicationStatus });
+  const canManageOutcomeReview =
+    canCompleteOutcomeReview({ role: userRole, status: rawApplicationStatus }) ||
+    (
+      isReviewWithNwac &&
+      canCompleteOutcomeReview({ role: userRole, status: 'pending_approval' })
+    );
   const canNwacReview =
     canManageOutcomeReview &&
     (
@@ -4506,19 +4540,36 @@ const CoordinatorAssessmentWidget = forwardRef(
   // Show NWAC section after submission, review completion, or outcome-ready status
   useEffect(() => {
     const pendingApproval = isPendingApprovalStatus;
-    const shouldShowOutcome = pendingApproval || isDecisionFinal || isPostDecisionStatus;
+    const shouldShowOutcome =
+      pendingApproval ||
+      isApplicationAssessmentReviewerStage ||
+      isDecisionFinal ||
+      isPostDecisionStatus;
     setShowNWACSection(shouldShowOutcome);
-    setLocalAssessmentSubmitted(pendingApproval || isDecisionFinal || isPostDecisionStatus);
-  }, [isDecisionFinal, isPendingApprovalStatus, isPostDecisionStatus]);
+    setLocalAssessmentSubmitted(shouldShowOutcome);
+  }, [
+    isApplicationAssessmentReviewerStage,
+    isDecisionFinal,
+    isPendingApprovalStatus,
+    isPostDecisionStatus
+  ]);
 
   useEffect(() => {
     setReviewWorkflowNote('');
   }, [reviewStage, reviewWorkflow?.id]);
 
   // UI logic: once status reaches pending decision or a final decision, lock assessment fields and surface decision review
-  const isAssessmentSubmitted = isPendingApprovalStatus;
+  const isAssessmentSubmitted =
+    isPendingApprovalStatus || isApplicationAssessmentReviewerStage;
   const isReviewComplete = APPLICATION_FINAL_STATUSES.has(normalizedApplicationStatus);
-  const shouldUnlockWizardNavigation = !isEditingAssessment && (isPendingApprovalStatus || isPostDecisionStatus || isReviewComplete);
+  const shouldUnlockWizardNavigation =
+    !isEditingAssessment &&
+    (
+      isPendingApprovalStatus ||
+      isApplicationAssessmentReviewerStage ||
+      isPostDecisionStatus ||
+      isReviewComplete
+    );
   const assessmentSubmitted =
     localAssessmentSubmitted ||
     isAssessmentSubmitted ||
@@ -4529,14 +4580,14 @@ const CoordinatorAssessmentWidget = forwardRef(
     lockedByAnotherUser;
   // Disable all fields (including NWAC) if review is complete, a final decision exists, status is locked, conflict not signed, or eligibility not set
   const baseAssessmentLocked = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal || isPostDecisionStatus;
-  const canEditDraftAssessmentAsRegionalManager =
-    canRegionalManagerEditApplicationAssessment({
-      isRegionalManager,
-      applicationStatus: normalizedApplicationStatus,
-      reviewWorkflow,
-      currentStaffProfileId,
-    });
-  const canEditAssessmentBody = isAssessor || roleKey === 'systemadministrator' || canEditDraftAssessmentAsRegionalManager;
+  const canEditAssessmentBody = canEditApplicationAssessmentBody({
+    isAssessor,
+    isRegionalManager,
+    isSystemAdministrator: roleKey === 'systemadministrator',
+    applicationStatus: normalizedApplicationStatus,
+    reviewWorkflow,
+    currentStaffProfileId,
+  });
   const assessmentEditBlockedMessage = isRegionalManager
     ? 'Regional Managers can edit their own in-review drafts, including assessments returned to them as the original submitter. Other submitted assessments must move through the review actions instead.'
     : 'This role cannot edit assessment fields in the current stage.';
@@ -4549,9 +4600,15 @@ const CoordinatorAssessmentWidget = forwardRef(
     !canEditAssessmentBody ||
     isEligibilityGateActive ||
     isPendingApprovalStatus ||
+    isApplicationAssessmentReviewerStage ||
     (assessmentSubmitted && !isEditingAssessment);
   const checklistUploadsLocked = isAssessmentDisabled && !isCommunicationStep && !isFundingDocsStep;
-  const isNWACFieldsDisabled = baseAssessmentLocked || isEligibilityGateActive || !showNWACSection || !isPendingApprovalStatus || !canNwacReview;
+  const isNWACFieldsDisabled =
+    baseAssessmentLocked ||
+    isEligibilityGateActive ||
+    !showNWACSection ||
+    !(isPendingApprovalStatus || isReviewWithNwac) ||
+    !canNwacReview;
   const isEligibilityDisabled = !canManageEligibilityDuringAssessment || !isEligibilityAdmin;
   const isEiVerificationUploadDisabled =
     !canManageEligibilityDuringAssessment ||
@@ -4575,7 +4632,9 @@ const CoordinatorAssessmentWidget = forwardRef(
         ? 'The program decision is recorded. Prepare or send the applicant communication and complete any remaining approval follow-up from here.'
         : currentStep === 'decision'
           ? isReviewWithRegionalManager
-            ? 'Review the submitted assessment and either return it with notes or submit it for final decision.'
+            ? requiresSubmitterCorrectionReturn
+              ? 'Return this reopened assessment to the Coordinator with correction notes. It cannot be submitted for another final decision until the Coordinator corrects and resubmits it.'
+              : 'Review the submitted assessment and either return it with notes or submit it for final decision.'
             : isReviewWithNwac
               ? 'Review the Regional Manager sign-off, confirm the program decision, and capture any required approval notes.'
               : 'Review the submitted assessment, confirm the program decision, and capture any required decision notes.'
@@ -8118,6 +8177,15 @@ ${JSON.stringify(aiContext, null, 2)}`;
       setValidationAlert(['Only the Regional Manager can complete this review action at the current stage.']);
       return;
     }
+    if (
+      action === ASSESSMENT_REVIEW_ACTIONS.rmSubmitToNwac &&
+      requiresSubmitterCorrectionReturn
+    ) {
+      setValidationAlert([
+        'Return this reopened assessment to the Coordinator for correction before submitting it for another final decision.'
+      ]);
+      return;
+    }
     const note = String(reviewWorkflowNote || '').trim();
     const noteRequired =
       action === ASSESSMENT_REVIEW_ACTIONS.rmReturnToSubmitter ||
@@ -8224,7 +8292,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
   };
 
   const handleComplete = async () => {
-    if (!isPendingApprovalStatus) {
+    if (!isPendingApprovalStatus && !isReviewWithNwac) {
       return;
     }
     if (!canNwacReview) {
@@ -8242,7 +8310,9 @@ ${JSON.stringify(aiContext, null, 2)}`;
     const isOutcomeApproved = decision === 'approve';
     const isOutcomePushBack = decision === 'push_back';
     const nextCaseStatus = isOutcomeApproved ? 'initiated' : (isOutcomePushBack ? 'intake' : 'closed');
-    const nextApplicationStatus = isOutcomePushBack ? 'in_review' : (isOutcomeApproved ? 'approved' : 'rejected');
+    const nextApplicationStatus = isOutcomePushBack
+      ? (twoStepReviewEnabled && hasReviewWorkflow ? 'pending_approval' : 'in_review')
+      : (isOutcomeApproved ? 'approved' : 'rejected');
     if (isOutcomeApproved && decisionHasCost && !assessment.interventionPotId) {
       errors.interventionPotId = 'Select a budget pot for the intervention cost.';
     }
@@ -8686,7 +8756,10 @@ ${JSON.stringify(aiContext, null, 2)}`;
     (
       !twoStepReviewEnabled ||
       !hasReviewWorkflow ||
-      reviewStage === ASSESSMENT_REVIEW_STAGES.rmReview
+      (
+        reviewStage === ASSESSMENT_REVIEW_STAGES.rmReview &&
+        isCurrentReviewWorkflowSubmitter
+      )
     ) &&
     assessmentSubmitted &&
     !isEditingAssessment;
@@ -11289,6 +11362,11 @@ ${JSON.stringify(aiContext, null, 2)}`;
     ) : null;
   const regionalManagerReviewContent = isReviewWithRegionalManager ? (
     <SpaceBetween size="m">
+      {requiresSubmitterCorrectionReturn && reviewStage === ASSESSMENT_REVIEW_STAGES.rmReview && (
+        <Alert type="warning" header="Coordinator correction required">
+          This assessment was reopened after a final decision. Return it to the Coordinator for correction before it can be submitted for another final decision.
+        </Alert>
+      )}
       {reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToRm && (
         <Alert type="warning" header="Decision Maker requested changes">
           <Box whiteSpace="pre-wrap">
@@ -11333,7 +11411,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
           </Button>
         ) : (
           <Button
-            variant="normal"
+            variant={requiresSubmitterCorrectionReturn ? 'primary' : 'normal'}
             onClick={() => handleReviewWorkflowAction(ASSESSMENT_REVIEW_ACTIONS.rmReturnToSubmitter)}
             loading={reviewWorkflowActionLoading === ASSESSMENT_REVIEW_ACTIONS.rmReturnToSubmitter}
             disabled={!canRegionalManagerReview || Boolean(reviewWorkflowActionLoading)}
@@ -11341,7 +11419,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
             Return to Coordinator
           </Button>
         )}
-        {reviewStage !== ASSESSMENT_REVIEW_STAGES.returnedToRm && (
+        {reviewStage !== ASSESSMENT_REVIEW_STAGES.returnedToRm && !requiresSubmitterCorrectionReturn && (
           <Button
             variant="primary"
             onClick={() => handleReviewWorkflowAction(ASSESSMENT_REVIEW_ACTIONS.rmSubmitToNwac)}

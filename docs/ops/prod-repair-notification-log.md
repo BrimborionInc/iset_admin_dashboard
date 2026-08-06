@@ -31,31 +31,38 @@ Notification note:
 
 - Tell Danielle that the June 24 application is back On Hold and the July 6 application remains In Review, so she and Madison can now complete the normal closing workflow.
 
-## 2026-08-05 - Feedback #178 approved assessment correction recovery
+## 2026-08-06 - Feedback #178 approved assessment correction second recovery
 
-Status: PROD guarded recovery applied and independently verified; owner follow-up drafted but not sent. Report `#178` remains `in_progress` until the normal correction and renewed-decision workflow is complete.
+Status: the second guarded PROD recovery is applied and independently verified. Application `61` is directly with its original submitter for correction. Report `#178` remains `in_progress` until Danielle corrects/resubmits, Derry reviews, Madison records a renewed decision, and replacement artifacts are verified. No completion message has been sent.
 
-Reason: Kayla Gladue's application assessment had reached final approval before a funding-amount correction was identified. The preferred management workflow is for the Regional Manager to return the assessment to its submitter so the return reason, correction, resubmission, Regional Manager review, and renewed Decision Maker decision remain in PATH's audit history. The final-decision state has no supported return transition, so the System Administrator exceptional recovery path was required.
+Reason: the 2026-08-05 repair mechanically restored workflow `17` from `final_decision_recorded` to ordinary `rm_review`, but that state still offered Derry both `Return to Coordinator` and `Submit for final decision`. Live workflow events prove Derry selected `rm_submit_to_nwac` at `2026-08-05 16:49:44`, and Madison selected `nwac_approve` at `2026-08-05 18:27:25`; the assessment was unchanged. The first recovery therefore depended on staff following an email instead of PATH enforcing the correction handoff.
 
-Repair applied:
+Second recovery applied:
 
-- Restored application `61` / review workflow `17` to `pending_approval / pending_decision` and `rm_review`, preserving all nine prior workflow events and adding a System Administrator recovery event and internal case note.
-- Cleared the selected application's active decision/decision-letter context so the earlier approval is not presented as current.
-- Archived draft action plan `166`; cancelled generated interventions `351-353`; withdrew unsigned, unsent CFA version `37`; archived its generated document `9195`; and removed the untouched `needs_review / pending` ESDC seed.
-- Preflight and transactional guards proved there were no related intervention proposals, intervention-document links, payments, finance transactions, or CFA signing requests.
-- Moved feedback `#178` from `triaging` to `in_progress` with status history and a recovery note. The report is intentionally still open.
+- Moved application `61` to `in_review / assessment` with no decision outcome and workflow `17` directly to `returned_to_submitter`, owned by the original submitter.
+- Added workflow event `283`, case audit event `283`, internal case note `454`, and feedback note `526` recording the failed first recovery and required correction path. All earlier workflow events remain intact.
+- Archived second-approval action plan `169`; cancelled interventions `360-362`; withdrew CFA version `40`; archived documents `9527-9529`; and removed untouched ESDC seed `439`.
+- Preserved the already withdrawn first-approval plan/artifacts and cleared current decision/draft/sent markers. Dependency inventory proved there were no signing requests, intervention proposals, normalized intervention-document links, payment packets/lines, or finance transactions for the second approval.
+- Released the exact application lock after independent verification. No applicant notification was generated.
 
 Evidence:
 
-- Preview, lock, apply, independent verification, unlock, and recovery artifacts are `sql/ops/prod-feedback-178-assessment-correction-*-20260805.*`.
-- Application lock command `6e329a44-fb84-4976-bbc5-01c7e4b0efbc` acquired the exact record lock; unlock command `3f15a9d9-ac87-413e-a621-8e1ec62f707b` released it after verification.
-- Aurora snapshot `path-prod-feedback-178-recovery-20260805-1606` reached `available` before apply.
-- Apply SSM command `406dc222-15b2-4788-9836-1ead3733cb97` completed successfully.
-- Independent verification SSM command `d70cb67b-98df-4fad-9d8c-272ed2434968` confirmed the expected application/workflow states, cleared decision markers, preserved workflow history, withdrawn generated artifacts, removed ESDC seed, case audit rows, and feedback history/note.
+- Current-state preview, dependency preview, lock, apply, independent verification, unlock, and recovery artifacts are `sql/ops/prod-feedback-178-*-20260806.*`.
+- Aurora snapshot `path-prod-feedback-178-second-recovery-20260806-2033` reached `available` at 100% before apply.
+- Lock SSM command `d608717a-682a-4f24-8d9e-4b21e63f9451` acquired the exact application lock.
+- Apply SSM command `03f2dea2-d799-41ab-9bb5-136153358fb4` completed successfully.
+- Independent verification SSM command `68ebc1b6-ef61-43a6-83da-00fab355497e` confirmed application/workflow ownership, complete history, withdrawn generated artifacts, cleared decision context, audit rows, open feedback state, and removed ESDC seed.
+- Unlock SSM command `2bebb969-82e1-4eb4-88a0-f41f5541d34c` removed the recovery lock.
+- Current handoff check `sql/ops/prod-feedback-178-handoff-status-20260806.sql`, run through SSM command `68fb61ed-d024-463d-ab3b-b3dc2c9bb623` after fresh PROD identity and DDL verification, reconfirmed application `61` is `in_review`, workflow `17` is `returned_to_submitter`, the recorded active submitter is Danielle's staff profile `5697`, and feedback `178` remains `in_progress`.
+
+Prevention status:
+
+- Local prevention code adds a workflow metadata guard for exceptional `rm_review` recovery rows. The RM UI shows `Coordinator correction required`, hides `Submit for final decision`, and makes Return the primary action; the backend independently rejects a forged escalation with `409 review_workflow_return_required` before writing.
+- All 97 Jest suites / 439 tests, lint, the complete 14-scenario application-assessment browser workflow, and the production build pass. The prevention code has not been deployed; TEST and PROD deployment still require their normal explicit approvals and release gates.
 
 Notification note:
 
-- Danielle Burdett, Derry Yellowfly, and Madison Coppola need the workflow handoff. Derry's next action is `Return to Coordinator`; Danielle then corrects and resubmits; Derry reviews/submits for final decision; Madison records the renewed decision. The earlier draft plan, interventions, and CFA must not be used; PATH will generate replacement drafts from the renewed approval.
+- Danielle can now correct the assessment and resubmit it. Derry then reviews and submits it for final decision; Madison records the renewed decision. Neither the first nor second approval's withdrawn plan, interventions, CFA, or documents should be used. Do not say the issue is complete until the renewed decision and replacement artifacts are verified.
 
 ## 2026-07-28 - Regional Snapshot action-plan provenance follow-up
 

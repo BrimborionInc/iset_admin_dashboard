@@ -33,14 +33,29 @@ const toNumberOrNull = value => {
   return Number.isFinite(numeric) ? numeric : null;
 };
 
+export const buildSecureMessageScopePayload = ({
+  applicationId,
+  isCaseWorkspace = false,
+  interventionId
+} = {}) => {
+  const resolvedApplicationId = toNumberOrNull(applicationId);
+  const resolvedInterventionId = toNumberOrNull(interventionId);
+  return {
+    ...(Number.isInteger(resolvedApplicationId) && resolvedApplicationId > 0
+      ? { applicationId: resolvedApplicationId }
+      : {}),
+    ...(isCaseWorkspace && Number.isInteger(resolvedInterventionId) && resolvedInterventionId > 0
+      ? { interventionId: resolvedInterventionId }
+      : {})
+  };
+};
+
 const SecureMessageComposePanel = ({
   caseId: propCaseId = null,
   caseData = null,
   isCaseWorkspace = false,
   selectedInterventionId = null,
   refreshCaseData,
-  onCaseUpdate,
-  applicationRowVersion
 }) => {
   const caseId = toNumberOrNull(
     propCaseId ??
@@ -100,11 +115,6 @@ const SecureMessageComposePanel = ({
       reviewStatus: caseData?.reviewStatus ?? caseData?.review_status ?? null,
     });
   }, [caseData]);
-  const canonicalApplicationStatus = applicationState.applicationStatus || null;
-  const rawApplicationStatus =
-    applicationState.applicationStatusRaw ||
-    applicationState.application_status_raw ||
-    canonicalApplicationStatus;
   const decisionOutcome = applicationState.decisionOutcome || null;
   const allowedLetterDocTypes = useMemo(() => {
     if (decisionOutcome === 'approved') return new Set(['assessment_approval_letter']);
@@ -288,10 +298,12 @@ const SecureMessageComposePanel = ({
   useEffect(() => {
     if (!composePanelOpen || !composeContext) return;
     const nextCaseId = Number(caseId || 0);
+    const nextApplicationId = Number(applicationId || 0);
     const nextApplicantUserId = Number(applicantUserId || 0);
     if (!nextCaseId) return;
     const contextChanged =
       Number(composeContext.caseId || 0) !== nextCaseId ||
+      (nextApplicationId > 0 && Number(composeContext.applicationId || 0) !== nextApplicationId) ||
       (nextApplicantUserId > 0 && Number(composeContext.applicantUserId || 0) !== nextApplicantUserId);
     if (!contextChanged) return;
     const hadDraft = hasComposeDraft;
@@ -303,83 +315,12 @@ const SecureMessageComposePanel = ({
     }
   }, [
     applicantUserId,
+    applicationId,
     caseId,
     composeContext,
     composePanelOpen,
     hasComposeDraft,
     resetComposeDraft
-  ]);
-
-  const updateStatusToDocsRequested = useCallback(async (targetContext = {}) => {
-    const targetCaseId = targetContext.caseId || caseId;
-    const targetApplicationId = targetContext.applicationId || applicationId;
-    if (!targetCaseId) return;
-    const statusKey = rawApplicationStatus || '';
-    const shouldUpdateStatus = ['submitted', 'in_review'].includes(statusKey);
-    let releaseLock = false;
-    try {
-      if (targetApplicationId) {
-        const lockResponse = await apiFetch(`/api/locks/application/${targetApplicationId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
-        });
-        if (!lockResponse.ok) {
-          return;
-        }
-        releaseLock = true;
-      }
-      const payload = {
-        docsRequested: true,
-        docsRequestedSource: 'secure_message'
-      };
-      if (shouldUpdateStatus) {
-        payload.applicationStatus = 'docs_requested';
-      }
-      const rowVersion =
-        Number(caseData?.application_row_version ?? caseData?.applicationRowVersion ?? applicationRowVersion ?? 0) || 0;
-      if (rowVersion > 0) {
-        payload.expectedRowVersion = rowVersion;
-      }
-      const response = await apiFetch(`/api/cases/${targetCaseId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) {
-        return;
-      }
-      if (typeof refreshCaseData === 'function') {
-        try {
-          await refreshCaseData();
-        } catch (_) {}
-      } else if (typeof onCaseUpdate === 'function') {
-        onCaseUpdate({
-          applicationStatus: 'docs_requested',
-          application_status: 'docs_requested',
-          docs_requested_active: true,
-          docs_requested_at: new Date().toISOString()
-        });
-      }
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('case-events-refresh', { detail: { caseId: targetCaseId } }));
-        window.dispatchEvent(new CustomEvent('case-reminders-refresh', { detail: { caseId: targetCaseId } }));
-      }
-    } finally {
-      if (targetApplicationId && releaseLock) {
-        try {
-          await apiFetch(`/api/locks/application/${targetApplicationId}`, { method: 'DELETE' });
-        } catch (_) {}
-      }
-    }
-  }, [
-    applicationId,
-    applicationRowVersion,
-    rawApplicationStatus,
-    caseData,
-    caseId,
-    onCaseUpdate,
-    refreshCaseData
   ]);
 
   const handleCancelCompose = () => {
@@ -429,12 +370,11 @@ const SecureMessageComposePanel = ({
       const sendApplicationId = composeContext?.applicationId || applicationId;
       const sendIsCaseWorkspace = composeContext?.isCaseWorkspace ?? isCaseWorkspace;
       const sendInterventionId = composeContext?.interventionId || null;
-      if (!sendIsCaseWorkspace && sendApplicationId) {
-        payload.applicationId = sendApplicationId;
-      }
-      if (sendIsCaseWorkspace && sendInterventionId) {
-        payload.interventionId = sendInterventionId;
-      }
+      Object.assign(payload, buildSecureMessageScopePayload({
+        applicationId: sendApplicationId,
+        isCaseWorkspace: sendIsCaseWorkspace,
+        interventionId: sendInterventionId
+      }));
       const response = await apiFetch(`/api/cases/${sendCaseId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -444,8 +384,10 @@ const SecureMessageComposePanel = ({
         const detail = await response.text().catch(() => '');
         throw new Error(detail || 'Failed to send message');
       }
-      if (attachmentsPayload.length > 0) {
-        await updateStatusToDocsRequested({ caseId: sendCaseId, applicationId: sendApplicationId });
+      if (typeof refreshCaseData === 'function') {
+        try {
+          await refreshCaseData();
+        } catch (_) {}
       }
       resetComposeDraft();
       if (typeof window !== 'undefined') {

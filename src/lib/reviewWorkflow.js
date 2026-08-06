@@ -62,6 +62,29 @@ function isSubmitterRole(role) {
   return SUBMITTER_ROLE_KEYS.has(normalizeRoleKey(role));
 }
 
+function parseReviewWorkflowMetadata(value) {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function requiresSubmitterCorrectionReturn(workflowType, workflowMetadata) {
+  if (normalizeReviewWorkflowType(workflowType) !== REVIEW_WORKFLOW_TYPES.ApplicationAssessment) {
+    return false;
+  }
+  const metadata = parseReviewWorkflowMetadata(workflowMetadata);
+  return (
+    metadata.requiresSubmitterCorrectionReturn === true ||
+    metadata.requires_submitter_correction_return === true
+  );
+}
+
 function isTwoStepReviewEnabled(config, workflowType) {
   const normalizedWorkflowType = normalizeReviewWorkflowType(workflowType);
   if (!normalizedWorkflowType) return false;
@@ -103,7 +126,7 @@ function getInitialReviewStage({ workflowType } = {}) {
   return normalizeReviewWorkflowType(workflowType) ? REVIEW_STAGES.RmReview : null;
 }
 
-function getReviewTransition({ action, currentStage, role, workflowType } = {}) {
+function getReviewTransition({ action, currentStage, role, workflowType, workflowMetadata } = {}) {
   const normalizedStage = normalizeReviewStage(currentStage);
   const actionKey = String(action || '').trim().toLowerCase();
   const normalizedWorkflowType = normalizeReviewWorkflowType(workflowType);
@@ -132,12 +155,23 @@ function getReviewTransition({ action, currentStage, role, workflowType } = {}) 
   }
 
   if (actionKey === REVIEW_ACTIONS.RmSubmitToNwac) {
+    const correctionReturnRequired = requiresSubmitterCorrectionReturn(
+      normalizedWorkflowType,
+      workflowMetadata
+    );
+    const otherwiseAllowed =
+      normalizedStage === REVIEW_STAGES.RmReview &&
+      isRegionalManagerRole(role);
     return {
-      allowed: normalizedStage === REVIEW_STAGES.RmReview && isRegionalManagerRole(role),
+      allowed: otherwiseAllowed && !correctionReturnRequired,
       nextStage: REVIEW_STAGES.NwacReview,
       nextOwnerRole: REVIEW_OWNER_ROLES.NwacAdministrator,
       requiresNote: false,
       recordsRmSignoff: true,
+      blockReason:
+        otherwiseAllowed && correctionReturnRequired
+          ? 'review_workflow_return_required'
+          : null,
     };
   }
 
@@ -216,4 +250,5 @@ module.exports = {
   normalizeReviewStage,
   normalizeReviewWorkflowType,
   normalizeRoleKey,
+  requiresSubmitterCorrectionReturn,
 };

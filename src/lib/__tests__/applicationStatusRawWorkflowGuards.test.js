@@ -16,14 +16,14 @@ describe('application raw status workflow guards', () => {
     expect(source).not.toContain('WITHDRAW_ALLOWED_STATUSES.has(normalizedStatusKey)');
   });
 
-  test('Secure Messaging resumes review from raw docs-requested status', () => {
+  test('Secure Messaging leaves document-request reconciliation to the signing backend', () => {
     const source = readSource('src/widgets/SecureMessagingWidget.js');
+    const portalSource = readSource('../ISET-intake/server.js');
 
-    expect(source).toContain('caseData?.applicationStatusRaw');
-    expect(source).toContain('workspaceCaseData?.applicationStatusRaw');
-    expect(source).toContain('const rawApplicationStatus =');
-    expect(source).toContain("resumeReviewStatuses.has(rawApplicationStatus || '')");
-    expect(source).not.toContain("resumeReviewStatuses.has(canonicalApplicationStatus || '')");
+    expect(source).not.toContain('updateStatusToInReview');
+    expect(source).not.toContain('allSigned');
+    expect(portalSource).toContain('reconcileApplicationDocumentRequestAfterSigning');
+    expect(portalSource).toContain('resolveApplicationAssessmentReviewState');
   });
 
   test('status resolvers prefer raw case status before display-normalized status', () => {

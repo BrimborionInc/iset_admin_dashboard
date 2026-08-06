@@ -168,7 +168,11 @@ const {
   sanitizeFinancialOverviewSubmissionPayload,
 } = require('../shared/financialOverview');
 const {
+  resolveApplicationAssessmentReviewState,
+} = require('../shared/applicationAssessmentReviewState');
+const {
   REVIEW_ACTIONS,
+  REVIEW_OWNER_ROLES,
   REVIEW_STAGES,
   REVIEW_WORKFLOW_TYPES,
   buildReviewSubjectKey,
@@ -12644,6 +12648,39 @@ async function refreshReviewWorkflowById(connection, workflowId) {
   return row || null;
 }
 
+function assertApplicationAssessmentReturnedToSubmitterActor({
+  reviewWorkflow,
+  actorStaffProfileId,
+  actorRole,
+  assessmentMutationRequested = false,
+} = {}) {
+  if (!assessmentMutationRequested) {
+    return { enforced: false, reason: 'no_assessment_mutation' };
+  }
+  if (reviewWorkflow?.current_stage !== REVIEW_STAGES.ReturnedToSubmitter) {
+    return { enforced: false, reason: 'not_returned_to_submitter' };
+  }
+  if (canonicaliseAccessRole(actorRole) === 'System Administrator') {
+    return { enforced: true, reason: 'system_administrator_support' };
+  }
+  const originalSubmitterStaffProfileId = normalisePositiveInteger(
+    reviewWorkflow?.submitted_by_staff_profile_id
+  );
+  const numericActorStaffProfileId = normalisePositiveInteger(actorStaffProfileId);
+  if (
+    originalSubmitterStaffProfileId &&
+    numericActorStaffProfileId === originalSubmitterStaffProfileId
+  ) {
+    return { enforced: true, reason: 'original_submitter' };
+  }
+  const error = new Error('assessment_returned_to_submitter_actor_forbidden');
+  error.code = 'assessment_returned_to_submitter_actor_forbidden';
+  error.status = 403;
+  error.publicMessage =
+    'Only the staff member who originally submitted this assessment can edit or resubmit it after it is returned for correction.';
+  throw error;
+}
+
 async function startReviewWorkflow(connection, {
   workflowType,
   caseId,
@@ -12654,6 +12691,7 @@ async function startReviewWorkflow(connection, {
   actorStaffProfileId = null,
   actorRole = null,
   metadata = null,
+  enforceApplicationAssessmentOriginalSubmitter = false,
 } = {}) {
   const subjectKey = buildReviewSubjectKey({
     workflowType,
@@ -12668,12 +12706,32 @@ async function startReviewWorkflow(connection, {
 
   const existing = await fetchReviewWorkflowBySubjectKey(connection, subjectKey, { forUpdate: true });
   const fromStage = existing?.current_stage || null;
-  const transition = getReviewTransition({
+  if (enforceApplicationAssessmentOriginalSubmitter) {
+    assertApplicationAssessmentReturnedToSubmitterActor({
+      reviewWorkflow: existing,
+      actorStaffProfileId,
+      actorRole,
+      assessmentMutationRequested: true,
+    });
+  }
+  let transition = getReviewTransition({
     action: REVIEW_ACTIONS.SubmitForRmReview,
     currentStage: fromStage,
     workflowType: normalizedWorkflowType,
     role: actorRole,
   });
+  const isSystemAdministratorReturnedAssessmentSupport =
+    enforceApplicationAssessmentOriginalSubmitter &&
+    existing?.current_stage === REVIEW_STAGES.ReturnedToSubmitter &&
+    canonicaliseAccessRole(actorRole) === 'System Administrator';
+  if (!transition.allowed && isSystemAdministratorReturnedAssessmentSupport) {
+    transition = {
+      allowed: true,
+      nextStage: REVIEW_STAGES.RmReview,
+      nextOwnerRole: REVIEW_OWNER_ROLES.RegionalManager,
+      requiresNote: false,
+    };
+  }
   if (!transition.allowed) {
     const err = new Error('review_workflow_transition_forbidden');
     err.status = 403;
@@ -12681,6 +12739,9 @@ async function startReviewWorkflow(connection, {
   }
 
   const metadataJson = metadata && typeof metadata === 'object' ? JSON.stringify(metadata) : null;
+  const workflowSubmitterStaffProfileId = isSystemAdministratorReturnedAssessmentSupport
+    ? normalisePositiveInteger(existing?.submitted_by_staff_profile_id)
+    : normalisePositiveInteger(actorStaffProfileId);
   let workflowId = existing?.id || null;
   if (existing) {
     await connection.query(
@@ -12713,7 +12774,7 @@ async function startReviewWorkflow(connection, {
         proposalId || null,
         transition.nextStage,
         transition.nextOwnerRole,
-        actorStaffProfileId || null,
+        workflowSubmitterStaffProfileId || null,
         metadataJson,
         existing.id
       ]
@@ -12734,7 +12795,7 @@ async function startReviewWorkflow(connection, {
         proposalId || null,
         transition.nextStage,
         transition.nextOwnerRole,
-        actorStaffProfileId || null,
+        workflowSubmitterStaffProfileId || null,
         metadataJson
       ]
     );
@@ -12759,6 +12820,7 @@ async function startApplicationAssessmentReviewWorkflow(connection, options = {}
   return startReviewWorkflow(connection, {
     ...options,
     workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+    enforceApplicationAssessmentOriginalSubmitter: true,
   });
 }
 
@@ -12801,10 +12863,16 @@ async function applyReviewWorkflowAction(connection, {
     currentStage: existing.current_stage,
     workflowType,
     role: actorRole,
+    workflowMetadata: existing.metadata_json,
   });
   if (!transition.allowed) {
-    const err = new Error('review_workflow_transition_forbidden');
-    err.status = 403;
+    const errorCode = transition.blockReason || 'review_workflow_transition_forbidden';
+    const err = new Error(errorCode);
+    err.code = errorCode;
+    err.status = errorCode === 'review_workflow_return_required' ? 409 : 403;
+    if (errorCode === 'review_workflow_return_required') {
+      err.publicMessage = 'Return this reopened assessment to the Coordinator for correction before submitting it for another final decision.';
+    }
     throw err;
   }
   const cleanNote = normaliseString(note) || null;
@@ -42180,16 +42248,23 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
   const regionIds = resolveRequestRegionIds(req);
   const regionId = regionIds.length ? regionIds[0] : null;
   const applicationLifecycleStatusExpr = buildApplicationLifecycleStatusExpr('a');
-  const filters = [`${applicationLifecycleStatusExpr} = ?`];
-  const params = ['pending_decision'];
+  const filters = [];
+  const params = [];
   if (role === 'NWAC Administrator') {
-    filters.push('(rw.id IS NULL OR rw.current_stage = ?)');
-    params.push(REVIEW_STAGES.NwacReview);
+    filters.push(`(
+      rw.current_stage = ?
+      OR (rw.id IS NULL AND ${applicationLifecycleStatusExpr} = ?)
+    )`);
+    params.push(REVIEW_STAGES.NwacReview, 'pending_decision');
   }
   if (role === 'Regional Manager') {
     if (!regionIds.length) {
       return res.json({ role, items: [] });
     }
+    // Workflow ownership is authoritative for the RM queue. Requiring the
+    // denormalized application lifecycle first can strand a valid review item
+    // when an independent lifecycle writer drifts (for example, document
+    // request/signing completion).
     filters.push('rw.current_stage IN (?, ?)');
     params.push(REVIEW_STAGES.RmReview, REVIEW_STAGES.ReturnedToRm);
     if (regionIds.length === 1) {
@@ -42235,8 +42310,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province,
       ic.label AS intervention_label
-    FROM iset_case c
-    ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
+    FROM iset_application a
+    JOIN iset_case c ON c.id = a.case_id
     LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
@@ -45429,6 +45504,7 @@ function pollDocsRequestedThresholds() {
                WHERE e_reminder.subject_type = 'case'
                  AND e_reminder.subject_id = CAST(c.id AS CHAR)
                  AND e_reminder.event_type = ?
+                 AND JSON_UNQUOTE(JSON_EXTRACT(e_reminder.payload_json, '$.application_id')) = CAST(a.id AS CHAR)
                  AND e_reminder.captured_at >= a.docs_requested_at
                LIMIT 1
             ) AS reminder_emitted,
@@ -45438,6 +45514,7 @@ function pollDocsRequestedThresholds() {
                WHERE e_closure.subject_type = 'case'
                  AND e_closure.subject_id = CAST(c.id AS CHAR)
                  AND e_closure.event_type = ?
+                 AND JSON_UNQUOTE(JSON_EXTRACT(e_closure.payload_json, '$.application_id')) = CAST(a.id AS CHAR)
                  AND e_closure.captured_at >= a.docs_requested_at
                LIMIT 1
             ) AS closure_emitted
@@ -45539,6 +45616,13 @@ function pollDocsRequestedThresholds() {
 
 const DOC_REQUEST_REMINDER_CATEGORY = 'Docs requested';
 const DOC_REQUEST_REMINDER_SOURCE = 'docs_requested';
+
+function isDocsRequestedSigningDocumentType(documentType) {
+  const normalized = String(documentType || '').trim().toLowerCase();
+  return Boolean(normalized) &&
+    normalized !== 'assessment_approval_letter' &&
+    normalized !== 'assessment_denial_letter';
+}
 const DOC_REQUEST_REMINDER_KINDS = Object.freeze({
   reminder: 'reminder',
   closure: 'closure',
@@ -45576,17 +45660,18 @@ const buildDocRequestReminderMetadata = ({ kind, docsRequestedAt, docsRequestedS
     threshold_days: Math.floor(Number(thresholdHours || 0) / 24),
   });
 
-const fetchDocRequestReminders = async (caseId) => {
+const fetchDocRequestReminders = async (caseId, applicationId) => {
   const [rows] = await pool.query(
     `SELECT id,
             status,
             JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.kind')) AS kind
        FROM iset_case_reminder
       WHERE case_id = ?
+        AND application_id = ?
         AND deleted_at IS NULL
         AND status = 'open'
         AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) = ?`,
-    [caseId, DOC_REQUEST_REMINDER_SOURCE]
+    [caseId, applicationId, DOC_REQUEST_REMINDER_SOURCE]
   );
   return rows || [];
 };
@@ -45601,7 +45686,8 @@ const upsertDocRequestReminders = async ({
   const numericCaseId = Number(caseId);
   if (!Number.isFinite(numericCaseId) || numericCaseId <= 0) return [];
   if (!docsRequestedAt) return [];
-  const applicationIdValue = Number.isFinite(Number(applicationId)) ? Number(applicationId) : null;
+  const applicationIdValue = Number(applicationId);
+  if (!Number.isInteger(applicationIdValue) || applicationIdValue <= 0) return [];
   const baseDate = docsRequestedAt instanceof Date ? docsRequestedAt : new Date(docsRequestedAt);
   if (Number.isNaN(baseDate.getTime())) return [];
   if (applicationIdValue) {
@@ -45617,7 +45703,7 @@ const upsertDocRequestReminders = async ({
 
   let existingRows = [];
   try {
-    existingRows = await fetchDocRequestReminders(numericCaseId);
+    existingRows = await fetchDocRequestReminders(numericCaseId, applicationIdValue);
   } catch (err) {
     if (isMissingTableErrorLocal(err)) return [];
     throw err;
@@ -45711,22 +45797,34 @@ const upsertDocRequestReminders = async ({
   return createdIds;
 };
 
-const cancelDocRequestReminders = async ({ caseId, actorStaffProfileId }) => {
+const cancelDocRequestReminders = async ({
+  caseId,
+  applicationId,
+  actorStaffProfileId,
+  connection = pool,
+}) => {
   const numericCaseId = Number(caseId);
-  if (!Number.isFinite(numericCaseId) || numericCaseId <= 0) return;
+  const numericApplicationId = Number(applicationId);
+  if (
+    !Number.isFinite(numericCaseId) ||
+    numericCaseId <= 0 ||
+    !Number.isInteger(numericApplicationId) ||
+    numericApplicationId <= 0
+  ) return;
   const actorId = Number.isInteger(actorStaffProfileId) && actorStaffProfileId > 0 ? actorStaffProfileId : null;
   try {
-    await pool.query(
+    await connection.query(
       `UPDATE iset_case_reminder
           SET status = 'cancelled',
               deleted_at = CURRENT_TIMESTAMP,
               updated_at = CURRENT_TIMESTAMP,
               updated_by_staff_profile_id = COALESCE(?, updated_by_staff_profile_id)
         WHERE case_id = ?
+          AND application_id = ?
           AND deleted_at IS NULL
           AND status = 'open'
           AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) = ?`,
-      [actorId, numericCaseId, DOC_REQUEST_REMINDER_SOURCE]
+      [actorId, numericCaseId, numericApplicationId, DOC_REQUEST_REMINDER_SOURCE]
     );
   } catch (err) {
     if (isMissingTableErrorLocal(err)) return;
@@ -45734,79 +45832,24 @@ const cancelDocRequestReminders = async ({ caseId, actorStaffProfileId }) => {
   }
 };
 
-const setDocsRequestedFromSecureMessage = async ({
+async function syncDocsRequestedLifecycleSideEffects({
   caseId,
   applicationId,
+  docsRequestedAt,
+  docsRequestedSource,
   actorUserId = null,
   actorName = null,
-  actorStaffProfileId = null
-}) => {
-  const numericCaseId = Number(caseId);
-  const numericApplicationId = Number(applicationId);
-  if (!Number.isFinite(numericCaseId) || numericCaseId <= 0) return { updated: false, reason: 'invalid_case_id' };
-  if (!Number.isFinite(numericApplicationId) || numericApplicationId <= 0) return { updated: false, reason: 'invalid_application_id' };
-
-  const [[currentRow]] = await pool.query(
-    `SELECT status,
-            docs_requested_active,
-            docs_requested_at,
-            docs_requested_cleared_at,
-            docs_requested_source
-       FROM iset_application
-      WHERE id = ?
-      LIMIT 1`,
-    [numericApplicationId]
-  );
-  if (!currentRow) return { updated: false, reason: 'application_not_found' };
-
-  const alreadyActive = Number(currentRow.docs_requested_active || 0) === 1;
-  if (alreadyActive) {
-    return { updated: false, reason: 'already_active' };
+  actorStaffProfileId = null,
+} = {}) {
+  const numericCaseId = normalisePositiveInteger(caseId);
+  const numericApplicationId = normalisePositiveInteger(applicationId);
+  if (!numericCaseId || !numericApplicationId || !docsRequestedAt) return;
+  let trackingId = null;
+  try {
+    trackingId = await fetchTrackingIdForCase(numericApplicationId, numericCaseId);
+  } catch (trackingError) {
+    console.warn('[doc-requests] failed to resolve tracking id', trackingError?.message || trackingError);
   }
-
-  const statusKey =
-    normaliseCaseStatusValue(currentRow.status) ||
-    String(currentRow.status || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
-  const shouldSetDocsRequestedStatus = statusKey === 'submitted' || statusKey === 'in_review';
-
-  if (shouldSetDocsRequestedStatus) {
-    await pool.query(
-      `UPDATE iset_application
-          SET status = 'docs_requested',
-              docs_requested_active = 1,
-              docs_requested_at = NOW(),
-              docs_requested_cleared_at = NULL,
-              docs_requested_source = 'secure_message'
-        WHERE id = ?`,
-      [numericApplicationId]
-    );
-  } else {
-    await pool.query(
-      `UPDATE iset_application
-          SET docs_requested_active = 1,
-              docs_requested_at = NOW(),
-              docs_requested_cleared_at = NULL,
-              docs_requested_source = 'secure_message'
-        WHERE id = ?`,
-      [numericApplicationId]
-    );
-  }
-
-  const [[updatedRow]] = await pool.query(
-    `SELECT status,
-            docs_requested_active,
-            docs_requested_at,
-            docs_requested_cleared_at,
-            docs_requested_source
-       FROM iset_application
-      WHERE id = ?
-      LIMIT 1`,
-    [numericApplicationId]
-  );
-  const trackingId = await fetchTrackingIdForCase(numericApplicationId, numericCaseId);
-  const docsRequestedAt = updatedRow?.docs_requested_at || new Date();
-  const docsRequestedSource = updatedRow?.docs_requested_source || 'secure_message';
-
   try {
     await captureCaseEvent({
       type: 'document_request_set',
@@ -45841,6 +45884,145 @@ const setDocsRequestedFromSecureMessage = async ({
     if (!isMissingTableErrorLocal(reminderErr)) {
       console.warn('[doc-requests] reminder sync failed', reminderErr?.message || reminderErr);
     }
+  }
+}
+
+const setDocsRequestedFromSecureMessage = async ({
+  caseId,
+  applicationId,
+  actorUserId = null,
+  actorName = null,
+  actorStaffProfileId = null,
+  connection = pool,
+  syncSideEffects = true,
+}) => {
+  const numericCaseId = Number(caseId);
+  const numericApplicationId = Number(applicationId);
+  if (!Number.isFinite(numericCaseId) || numericCaseId <= 0) return { updated: false, reason: 'invalid_case_id' };
+  if (!Number.isFinite(numericApplicationId) || numericApplicationId <= 0) return { updated: false, reason: 'invalid_application_id' };
+
+  const runner = connection || pool;
+  const [[currentRow]] = await runner.query(
+    `SELECT status,
+            docs_requested_active,
+            docs_requested_at,
+            docs_requested_cleared_at,
+            docs_requested_source
+       FROM iset_application
+      WHERE id = ?
+        AND case_id = ?
+      LIMIT 1`,
+    [numericApplicationId, numericCaseId]
+  );
+  if (!currentRow) return { updated: false, reason: 'application_not_found' };
+
+  const alreadyActive = Number(currentRow.docs_requested_active || 0) === 1;
+  if (alreadyActive) {
+    return { updated: false, reason: 'already_active' };
+  }
+
+  const statusKey =
+    normaliseCaseStatusValue(currentRow.status) ||
+    String(currentRow.status || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const reviewWorkflow = await fetchApplicationAssessmentReviewWorkflow(
+    runner,
+    { applicationId: numericApplicationId }
+  );
+  const reviewState = resolveApplicationAssessmentReviewState(
+    reviewWorkflow?.current_stage
+  );
+  const shouldSetDocsRequestedStatus =
+    !reviewState && (statusKey === 'submitted' || statusKey === 'in_review');
+
+  if (reviewState) {
+    const [updateResult] = await runner.query(
+      `UPDATE iset_application
+          SET status = ?,
+              lifecycle_status = ?,
+              decision_outcome = ?,
+              awaiting_reason = ?,
+              closure_reason = ?,
+              docs_requested_active = 1,
+              docs_requested_at = NOW(),
+              docs_requested_cleared_at = NULL,
+              docs_requested_source = 'secure_message',
+              row_version = row_version + 1
+        WHERE id = ?
+          AND case_id = ?
+          AND COALESCE(docs_requested_active, 0) = 0`,
+      [
+        reviewState.applicationStatus,
+        reviewState.lifecycleStatus,
+        reviewState.decisionOutcome,
+        reviewState.awaitingReason,
+        reviewState.closureReason,
+        numericApplicationId,
+        numericCaseId,
+      ]
+    );
+    if (Number(updateResult?.affectedRows || 0) === 0) {
+      return { updated: false, reason: 'already_active' };
+    }
+  } else if (shouldSetDocsRequestedStatus) {
+    const [updateResult] = await runner.query(
+      `UPDATE iset_application
+          SET status = 'docs_requested',
+              docs_requested_active = 1,
+              docs_requested_at = NOW(),
+              docs_requested_cleared_at = NULL,
+              docs_requested_source = 'secure_message',
+              row_version = row_version + 1
+        WHERE id = ?
+          AND case_id = ?
+          AND COALESCE(docs_requested_active, 0) = 0`,
+      [numericApplicationId, numericCaseId]
+    );
+    if (Number(updateResult?.affectedRows || 0) === 0) {
+      return { updated: false, reason: 'already_active' };
+    }
+  } else {
+    const [updateResult] = await runner.query(
+      `UPDATE iset_application
+          SET docs_requested_active = 1,
+              docs_requested_at = NOW(),
+              docs_requested_cleared_at = NULL,
+              docs_requested_source = 'secure_message',
+              row_version = row_version + 1
+        WHERE id = ?
+          AND case_id = ?
+          AND COALESCE(docs_requested_active, 0) = 0`,
+      [numericApplicationId, numericCaseId]
+    );
+    if (Number(updateResult?.affectedRows || 0) === 0) {
+      return { updated: false, reason: 'already_active' };
+    }
+  }
+
+  const [[updatedRow]] = await runner.query(
+    `SELECT status,
+            docs_requested_active,
+            docs_requested_at,
+            docs_requested_cleared_at,
+            docs_requested_source
+       FROM iset_application
+      WHERE id = ?
+        AND case_id = ?
+      LIMIT 1`,
+    [numericApplicationId, numericCaseId]
+  );
+  const docsRequestedAt = updatedRow?.docs_requested_at || new Date();
+  const docsRequestedSource = updatedRow?.docs_requested_source || 'secure_message';
+
+  if (syncSideEffects) {
+    await syncDocsRequestedLifecycleSideEffects({
+      caseId: numericCaseId,
+      applicationId: numericApplicationId,
+      docsRequestedAt,
+      docsRequestedSource,
+      actorUserId,
+      actorName,
+      actorStaffProfileId,
+    });
   }
 
   return {
@@ -64399,15 +64581,23 @@ const handlePostCaseSecureMessage = async (req, res) => {
         })
         .filter(Boolean)
     : [];
+  const requestedApplicationId = normalisePositiveInteger(applicationId || application_id);
   if (!subjectValue || !bodyValue) return res.status(400).json({ error: 'missing_required_fields' });
   if (!toNameValue || !fromNameValue) {
     return res.status(400).json({ error: 'recipient_and_sender_names_required' });
   }
+  if (attachmentSpecs.length > 0 && !requestedApplicationId) {
+    return res.status(400).json({
+      error: 'application_id_required_for_signing_request',
+      message: 'Choose the exact application before sending a form for signature.',
+    });
+  }
+  let messageWriteConnection = null;
+  let messageWriteTransactionStarted = false;
   try {
     const accessError = await validateCaseAccessByCaseId(req, caseId);
     if (accessError) return res.status(accessError.status).json(accessError.body);
 
-	    const requestedApplicationId = normalisePositiveInteger(applicationId || application_id);
 	    // Resolve applicant user id
 	    const caseRow = await resolveCaseApplicantMessagingContext(caseId, { applicationId: requestedApplicationId });
     if (!caseRow) return res.status(404).json({ error: 'case_not_found' });
@@ -65130,20 +65320,31 @@ const handlePostCaseSecureMessage = async (req, res) => {
       }
     }
 
-	    const caseApplicationId = normalisePositiveInteger(caseRow?.application_id);
-	    const messageApplicationId = caseApplicationId || null;
+    const caseApplicationId = normalisePositiveInteger(caseRow?.application_id);
+    const messageApplicationId = caseApplicationId || null;
     if (requestedApplicationId && requestedApplicationId !== messageApplicationId) {
-      console.warn(
-        '[messages] ignoring applicationId mismatch for case %s (requested %s, case %s)',
-        caseId,
-        requestedApplicationId,
-        caseApplicationId
-      );
+      return res.status(409).json({
+        error: 'application_scope_conflict',
+        message: 'The selected application does not belong to this case.',
+      });
     }
+
+    const { actorId: requestActorId, actorName } = resolveRequestActor(req);
+    const assessorDisplayName =
+      req?.staffProfile?.display_name ||
+      req?.staffProfile?.name ||
+      actorName ||
+      req?.auth?.name ||
+      null;
+
+    await ensureCaseMessageItemTable();
+    messageWriteConnection = await pool.getConnection();
+    await messageWriteConnection.beginTransaction();
+    messageWriteTransactionStarted = true;
 
     const senderStaffProfileId = resolvedSenderStaffProfileIdForForms;
     const senderActorType = senderStaffProfileId ? 'staff_profile' : 'local_user';
-    const [result] = await pool.query(
+    const [result] = await messageWriteConnection.query(
       `INSERT INTO messages
          (sender_actor_type, sender_user_id, sender_staff_profile_id, recipient_actor_type, recipient_user_id, recipient_staff_profile_id, case_id, application_id, subject, body, status, deleted, urgent, created_at)
        VALUES (?, ?, ?, 'applicant_user', ?, NULL, ?, ?, ?, ?, 'unread', FALSE, ?, NOW())`,
@@ -65159,7 +65360,6 @@ const handlePostCaseSecureMessage = async (req, res) => {
         !!urgent,
       ]
     );
-    await ensureCaseMessageItemTable();
     const deliveryRows = [];
     deliveryRows.push([
       result.insertId,
@@ -65182,7 +65382,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
       ]);
     }
     if (deliveryRows.length) {
-      await pool.query(
+      await messageWriteConnection.query(
         `INSERT INTO message_item (message_id, owner_user_id, folder, folder_before_deleted, read_at, deleted_at, purged_at)
          VALUES ?
          ON DUPLICATE KEY UPDATE
@@ -65298,7 +65498,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
           slugifyName(wf.name) ||
           wf.workflow_type ||
           'signing-form';
-        const [ins] = await pool.query(
+        const [ins] = await messageWriteConnection.query(
           `INSERT INTO signing_request
              (workflow_id, workflow_name, workflow_type, case_id, participant_user_id, created_by_user_id, status, due_at, checklist_doc_type, resolved_schema_json)
            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
@@ -65319,7 +65519,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
         if (docType) {
           createdSigningRequestDocTypes.add(String(docType).trim().toLowerCase());
         }
-        await pool.query(
+        await messageWriteConnection.query(
           `INSERT INTO message_signing_request (message_id, signing_request_id) VALUES (?, ?)`,
           [result.insertId, signingRequestId]
         );
@@ -65332,6 +65532,73 @@ const handlePostCaseSecureMessage = async (req, res) => {
           });
         }
       }
+    }
+    const hasDocsRequestedSigningForms =
+      createdSigningRequestCount > 0 &&
+      Array.from(createdSigningRequestDocTypes).some(isDocsRequestedSigningDocumentType);
+    if (cfaDraft) {
+      const staffProfileId = resolveActiveStaffProfileId(req);
+      await messageWriteConnection.query(
+        `UPDATE cfa_version
+            SET status = 'sent',
+                sent_at = NOW(),
+                sent_by_staff_profile_id = ?
+          WHERE id = ?
+            AND status = 'draft'`,
+        [staffProfileId, cfaDraft.id]
+      );
+    }
+    if (fundingOverviewDraft) {
+      await messageWriteConnection.query(
+        `UPDATE funding_overview_version
+            SET status = 'sent',
+                sent_at = NOW(),
+                sent_by_staff_profile_id = ?
+          WHERE id = ?
+            AND status = 'draft'`,
+        [senderStaffProfileId || null, fundingOverviewDraft.id]
+      );
+    }
+    let docsRequestedActivation = null;
+    if (hasDocsRequestedSigningForms) {
+      if (!caseApplicationId) {
+        throw new Error('application_id_required_for_signing_request');
+      }
+      docsRequestedActivation = await setDocsRequestedFromSecureMessage({
+        caseId,
+        applicationId: caseApplicationId,
+        actorUserId: senderId,
+        actorName: assessorDisplayName || fromNameValue || null,
+        actorStaffProfileId: senderStaffProfileId,
+        connection: messageWriteConnection,
+        syncSideEffects: false,
+      });
+      if (
+        !docsRequestedActivation?.updated &&
+        docsRequestedActivation?.reason !== 'already_active'
+      ) {
+        const activationError = new Error(
+          docsRequestedActivation?.reason || 'document_request_activation_failed'
+        );
+        activationError.code = docsRequestedActivation?.reason || 'document_request_activation_failed';
+        throw activationError;
+      }
+    }
+    await messageWriteConnection.commit();
+    messageWriteTransactionStarted = false;
+    messageWriteConnection.release();
+    messageWriteConnection = null;
+
+    if (docsRequestedActivation?.updated) {
+      await syncDocsRequestedLifecycleSideEffects({
+        caseId,
+        applicationId: caseApplicationId,
+        docsRequestedAt: docsRequestedActivation.docsRequestedAt,
+        docsRequestedSource: docsRequestedActivation.source,
+        actorUserId: senderId,
+        actorName: assessorDisplayName || fromNameValue || null,
+        actorStaffProfileId: senderStaffProfileId,
+      });
     }
     if (decisionLetterDocs.length) {
       const decisionApplicationId = normalisePositiveInteger(caseRow?.application_id) || null;
@@ -65389,29 +65656,6 @@ const handlePostCaseSecureMessage = async (req, res) => {
         applicationId: caseApplicationId,
       });
     }
-    if (cfaDraft) {
-      const staffProfileId = resolveActiveStaffProfileId(req);
-      await pool.query(
-        `UPDATE cfa_version
-            SET status = 'sent',
-                sent_at = NOW(),
-                sent_by_staff_profile_id = ?
-          WHERE id = ?
-            AND status = 'draft'`,
-        [staffProfileId, cfaDraft.id]
-      );
-    }
-    if (fundingOverviewDraft) {
-      await pool.query(
-        `UPDATE funding_overview_version
-            SET status = 'sent',
-                sent_at = NOW(),
-                sent_by_staff_profile_id = ?
-          WHERE id = ?
-            AND status = 'draft'`,
-        [senderStaffProfileId || null, fundingOverviewDraft.id]
-      );
-    }
     if (
       requestedInterventionId &&
       decisionLetterDocs.some(letter => letter?.docType === 'assessment_approval_letter')
@@ -65428,36 +65672,6 @@ const handlePostCaseSecureMessage = async (req, res) => {
         actorUserId: senderId || null,
       });
     }
-    const { actorId: requestActorId, actorName } = resolveRequestActor(req);
-    const assessorDisplayName =
-      req?.staffProfile?.display_name ||
-      req?.staffProfile?.name ||
-      actorName ||
-      req?.auth?.name ||
-      null;
-    const docsRequestedEligibleDocType = docTypeValue => {
-      const normalized = String(docTypeValue || '').trim().toLowerCase();
-      if (!normalized) return false;
-      if (normalized === 'assessment_approval_letter' || normalized === 'assessment_denial_letter') return false;
-      return true;
-    };
-    const hasDocsRequestedSigningForms =
-      createdSigningRequestCount > 0 &&
-      Array.from(createdSigningRequestDocTypes).some(docsRequestedEligibleDocType);
-    if (hasDocsRequestedSigningForms && caseApplicationId) {
-      try {
-        await setDocsRequestedFromSecureMessage({
-          caseId,
-          applicationId: caseApplicationId,
-          actorUserId: senderId,
-          actorName: assessorDisplayName || fromNameValue || null,
-          actorStaffProfileId: senderStaffProfileId
-        });
-      } catch (docsErr) {
-        console.warn('[doc-requests] failed to set docs requested from secure message', docsErr?.message || docsErr);
-      }
-    }
-
     const effectiveApplicantName =
       contextApplicantName ||
       resolveApplicantDisplayName({ caseRow: { applicant_name: toNameValue }, fallback: null }) ||
@@ -65502,6 +65716,17 @@ const handlePostCaseSecureMessage = async (req, res) => {
         : {})
     });
   } catch (e) {
+    if (messageWriteConnection && messageWriteTransactionStarted) {
+      try {
+        await messageWriteConnection.rollback();
+      } catch (rollbackError) {
+        console.error('[messages] failed to roll back message/signing transaction', rollbackError?.message || rollbackError);
+      }
+    }
+    if (messageWriteConnection) {
+      messageWriteConnection.release();
+      messageWriteConnection = null;
+    }
     console.error('POST /api/cases/:id/messages failed:', e.message);
     res.status(500).json({ error: 'failed_to_send_message' });
   }
@@ -88530,173 +88755,337 @@ app.get('/api/signing-requests/:id', async (req, res) => {
   }
 });
 
-// POST /api/signing-requests/:id/sign – participant submits/signs
-app.post('/api/signing-requests/:id/sign', async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid_id' });
-  const payload = req.body || {};
-  try {
-    const userId = await resolveOrCreateUserIdFromAuth(req);
-    if (!userId) return res.status(401).json({ error: 'unauthorized' });
-    const [[row]] = await pool.query(`SELECT * FROM signing_request WHERE id = ? LIMIT 1`, [id]);
-    if (!row) return res.status(404).json({ error: 'not_found' });
-    if (row.participant_user_id !== userId) return res.status(403).json({ error: 'forbidden' });
-    if (row.status === 'signed') {
-      return res.json({ id, status: 'signed', alreadySigned: true });
-    }
-    if (row.status === 'cancelled' || row.status === 'expired') {
-      return res.status(409).json({ error: 'not_signable' });
-    }
-    await pool.query(
-      `UPDATE signing_request
-          SET status = 'signed',
-              signed_payload_json = ?,
-              artifact_url = COALESCE(?, artifact_url),
-              updated_at = NOW()
-        WHERE id = ?`,
-      [JSON.stringify(payload), payload.artifact_url || null, id]
-    );
-    const resolvedSchema = safeJsonParse(row?.resolved_schema_json, null) || {};
-    const cfaVersionId = normalisePositiveInteger(
-      resolvedSchema?.meta?.cfaVersionId ?? resolvedSchema?.meta?.cfa_version_id ?? null
-    );
-    if (cfaVersionId) {
-      await pool.query(
-        `UPDATE cfa_version
-            SET status = 'signed',
-                signed_at = NOW(),
-                signed_by_participant_id = ?
-          WHERE id = ?
-            AND status <> 'signed'`,
-        [userId, cfaVersionId]
-      );
-      try {
-        await regenerateSignedCfaDocument({
-          connection: pool,
-          cfaVersionId,
-          participantUserId: userId,
-          signedPayload: payload,
-          actorUserId: userId,
-          createdByUserId: row.created_by_user_id || null
-        });
-      } catch (signedDocErr) {
-        console.warn('[cfa] failed to regenerate signed CFA document', signedDocErr?.message || signedDocErr);
-      }
-    }
-    const fundingOverviewVersionId = normalisePositiveInteger(
-      resolvedSchema?.meta?.fundingOverviewVersionId ?? resolvedSchema?.meta?.funding_overview_version_id ?? null
-    );
-    if (fundingOverviewVersionId) {
-      await finalizeSignedFundingOverviewSubmission({
-        connection: pool,
-        fundingOverviewVersionId,
-        signedPayload: payload,
-        signingRequestRow: row,
-        participantUserId: userId
-      });
-      await pool.query(
-        `UPDATE funding_overview_version
-            SET status = 'signed',
-                signed_at = NOW(),
-                signed_by_participant_id = ?
-          WHERE id = ?
-            AND status <> 'signed'`,
-        [userId, fundingOverviewVersionId]
-      );
-      try {
-        await regenerateSignedFundingOverviewDocument({
-          connection: pool,
-          fundingOverviewVersionId,
-          participantUserId: userId,
-          signedPayload: payload,
-          actorUserId: userId
-        });
-      } catch (signedDocErr) {
-        console.warn('[financial-overview] failed to regenerate signed Financial Overview document', signedDocErr?.message || signedDocErr);
-      }
-    }
-    const caseId = Number(row.case_id);
-    if (Number.isInteger(caseId) && caseId > 0) {
-      const normalizeStatusKey = value =>
-        (value || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
-      const [[caseRow]] = await pool.query(
-        `SELECT a.id AS application_id,
-                a.status AS application_status,
-                a.docs_requested_active AS docs_requested_active,
-                a.docs_requested_at AS docs_requested_at,
-                a.docs_requested_cleared_at AS docs_requested_cleared_at,
-                a.docs_requested_source AS docs_requested_source
-           FROM iset_case c
-           ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
-          WHERE c.id = ?
-          LIMIT 1`,
-        [caseId]
-      );
-      const statusKey = normalizeStatusKey(caseRow?.application_status || '');
-      const resumeStatuses = new Set(['docs_requested', 'action_required', 'action_required_(docs_requested)']);
-      const shouldResumeReview = resumeStatuses.has(statusKey);
-      const docsRequestedActive = Number(caseRow?.docs_requested_active || 0) === 1;
-      const docsRequestedSource = caseRow?.docs_requested_source || null;
-      const shouldClearDocsRequested = docsRequestedActive && docsRequestedSource === 'secure_message';
-      if (shouldResumeReview || shouldClearDocsRequested) {
-        const [[pendingRow]] = await pool.query(
-          `SELECT COUNT(*) AS pending_count
-             FROM signing_request
-            WHERE case_id = ?
-              AND status IN ('pending', 'viewed')
-              AND LOWER(COALESCE(checklist_doc_type, '')) NOT IN ('assessment_approval_letter', 'assessment_denial_letter')`,
-          [caseId]
-        );
-        const pendingCount = Number(pendingRow?.pending_count || 0);
-        if (pendingCount === 0 && caseRow?.application_id) {
-          const updates = [];
-          if (shouldResumeReview) {
-            updates.push(`status = 'in_review'`);
-          }
-          if (shouldClearDocsRequested) {
-            updates.push('docs_requested_active = 0', 'docs_requested_cleared_at = NOW()');
-          }
-          if (updates.length) {
-            updates.push('row_version = row_version + 1');
-            await pool.query(
-              `UPDATE iset_application SET ${updates.join(', ')} WHERE id = ?`,
-              [caseRow.application_id]
-            );
-          }
-          if (shouldClearDocsRequested) {
-            const trackingId = await fetchTrackingIdForCase(caseRow.application_id, caseId);
-            await captureCaseEvent({
-              type: 'document_request_cleared',
-              caseId,
-              actorId: userId,
-              actorType: 'applicant',
-              payload: {
-                tracking_id: trackingId,
-                application_id: caseRow.application_id,
-                case_id: caseId,
-                docs_requested_at: toIsoDateTime(caseRow?.docs_requested_at),
-                docs_requested_cleared_at: new Date().toISOString(),
-                source: docsRequestedSource,
-                message: 'Document request cleared (all forms signed).'
-              },
-              trackingId
-            });
-            try {
-              await cancelDocRequestReminders({ caseId, actorStaffProfileId: null });
-            } catch (reminderErr) {
-              if (!isMissingTableErrorLocal(reminderErr)) {
-                console.warn('[doc-requests] reminder cancel failed', reminderErr?.message || reminderErr);
-              }
-            }
-          }
-        }
-      }
-    }
-    res.json({ id, status: 'signed' });
-  } catch (err) {
-    console.error('POST /api/signing-requests/:id/sign failed', err);
-    res.status(500).json({ error: 'failed_to_sign' });
+async function resolveSigningRequestMessageScope(connection, signingRequestId) {
+  const numericSigningRequestId = normalisePositiveInteger(signingRequestId);
+  if (!numericSigningRequestId) {
+    return { caseId: null, applicationId: null };
   }
+  const [rows] = await connection.query(
+    `SELECT DISTINCT
+            m.case_id AS message_case_id,
+            m.application_id AS application_id,
+            a.case_id AS application_case_id
+       FROM message_signing_request msr
+       JOIN messages m ON m.id = msr.message_id
+       LEFT JOIN iset_application a ON a.id = m.application_id
+      WHERE msr.signing_request_id = ?
+      ORDER BY m.case_id ASC, m.application_id ASC`,
+    [numericSigningRequestId]
+  );
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { caseId: null, applicationId: null };
+  }
+  const scopes = rows.map(row => ({
+    caseId: normalisePositiveInteger(row?.message_case_id),
+    applicationId: normalisePositiveInteger(row?.application_id),
+    applicationCaseId: normalisePositiveInteger(row?.application_case_id),
+  }));
+  const uniqueScopes = new Set(
+    scopes.map(scope => `${scope.caseId || ''}:${scope.applicationId || ''}`)
+  );
+  if (uniqueScopes.size !== 1) {
+    const error = new Error('signing_request_message_scope_conflict');
+    error.code = 'signing_request_message_scope_conflict';
+    throw error;
+  }
+  const [scope] = scopes;
+  if (
+    scope.applicationId &&
+    (!scope.caseId || !scope.applicationCaseId || scope.caseId !== scope.applicationCaseId)
+  ) {
+    const error = new Error('signing_request_application_scope_conflict');
+    error.code = 'signing_request_application_scope_conflict';
+    throw error;
+  }
+  return {
+    caseId: scope.caseId,
+    applicationId: scope.applicationId,
+  };
+}
+
+async function reconcileApplicationDocumentRequestAfterSigning({
+  signingRequestId,
+  caseId,
+  actorUserId = null,
+  connection = pool,
+  captureCaseEventFn = captureCaseEvent,
+  cancelDocRequestRemindersFn = cancelDocRequestReminders,
+} = {}) {
+  const numericSigningRequestId = normalisePositiveInteger(signingRequestId);
+  const numericCaseId = normalisePositiveInteger(caseId);
+  if (!numericSigningRequestId || !numericCaseId) {
+    return { updated: false, reason: 'invalid_scope' };
+  }
+
+  const messageScope = await resolveSigningRequestMessageScope(
+    connection,
+    numericSigningRequestId
+  );
+  if (messageScope.caseId && messageScope.caseId !== numericCaseId) {
+    const error = new Error('signing_request_case_scope_conflict');
+    error.code = 'signing_request_case_scope_conflict';
+    throw error;
+  }
+  const applicationId = normalisePositiveInteger(messageScope.applicationId);
+  if (!applicationId) {
+    return { updated: false, reason: 'application_scope_missing' };
+  }
+
+  const [[applicationRow]] = await connection.query(
+    `SELECT a.id AS application_id,
+            a.status AS application_status,
+            a.lifecycle_status AS application_lifecycle_status,
+            a.decision_outcome AS application_decision_outcome,
+            a.awaiting_reason AS application_awaiting_reason,
+            a.closure_reason AS application_closure_reason,
+            a.docs_requested_active AS docs_requested_active,
+            a.docs_requested_at AS docs_requested_at,
+            a.docs_requested_cleared_at AS docs_requested_cleared_at,
+            a.docs_requested_source AS docs_requested_source,
+            s.reference_number AS tracking_id
+       FROM iset_application a
+       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      WHERE a.id = ?
+        AND a.case_id = ?
+      LIMIT 1`,
+    [applicationId, numericCaseId]
+  );
+  if (!applicationRow) {
+    return { updated: false, reason: 'application_not_found', applicationId };
+  }
+
+  const statusKey = normaliseApplicationStatusValue(applicationRow.application_status);
+  const resumeStatuses = new Set([
+    'docs_requested',
+    'action_required',
+    'action_required_(docs_requested)',
+  ]);
+  const shouldResumeReview = resumeStatuses.has(statusKey);
+  const docsRequestedActive = Number(applicationRow.docs_requested_active || 0) === 1;
+  const docsRequestedSource = applicationRow.docs_requested_source || null;
+  const shouldClearDocsRequested =
+    docsRequestedActive && docsRequestedSource === 'secure_message';
+  const reviewWorkflow = await fetchApplicationAssessmentReviewWorkflow(
+    connection,
+    { applicationId }
+  );
+  const authoritativeReviewState = resolveApplicationAssessmentReviewState(
+    reviewWorkflow?.current_stage
+  );
+  const reviewStateHasDrift = Boolean(
+    authoritativeReviewState &&
+    (
+      statusKey !== authoritativeReviewState.applicationStatus ||
+      normaliseApplicationLifecycleStatusValue(
+        applicationRow.application_lifecycle_status,
+        { preserveUnknown: true }
+      ) !== authoritativeReviewState.lifecycleStatus ||
+      normaliseApplicationDecisionOutcomeValue(
+        applicationRow.application_decision_outcome
+      ) !== authoritativeReviewState.decisionOutcome ||
+      normaliseApplicationAwaitingReasonValue(
+        applicationRow.application_awaiting_reason
+      ) !== authoritativeReviewState.awaitingReason ||
+      normaliseString(applicationRow.application_closure_reason) !==
+        authoritativeReviewState.closureReason
+    )
+  );
+  if (!shouldResumeReview && !shouldClearDocsRequested && !reviewStateHasDrift) {
+    return { updated: false, reason: 'no_reconciliation_required', applicationId };
+  }
+
+  const [[pendingRow]] = await connection.query(
+    `SELECT COUNT(DISTINCT sr.id) AS pending_count
+       FROM signing_request sr
+       JOIN message_signing_request msr ON msr.signing_request_id = sr.id
+       JOIN messages m ON m.id = msr.message_id
+      WHERE m.application_id = ?
+        AND sr.status IN ('pending', 'viewed')
+        AND LOWER(COALESCE(sr.checklist_doc_type, '')) NOT IN ('assessment_approval_letter', 'assessment_denial_letter')`,
+    [applicationId]
+  );
+  const pendingCount = Number(pendingRow?.pending_count || 0);
+  const canClearDocsRequested = shouldClearDocsRequested && pendingCount === 0;
+  const resumeState = authoritativeReviewState || (
+    shouldResumeReview && pendingCount === 0
+      ? buildApplicationStatusPersistence('in_review', {
+          lifecycleStatus: applicationRow.application_lifecycle_status,
+          decisionOutcome: applicationRow.application_decision_outcome,
+          awaitingReason: applicationRow.application_awaiting_reason,
+          closureReason: applicationRow.application_closure_reason,
+        })
+      : null
+  );
+  let applicationUpdated = false;
+  let docsRequestedCleared = false;
+
+  if (resumeState && canClearDocsRequested) {
+    let mutationConnection = connection;
+    let ownedConnection = null;
+    let transactionStarted = false;
+    try {
+      if (typeof connection?.getConnection === 'function') {
+        ownedConnection = await connection.getConnection();
+        mutationConnection = ownedConnection;
+        await mutationConnection.beginTransaction();
+        transactionStarted = true;
+      }
+      const [updateResult] = await mutationConnection.query(
+        `UPDATE iset_application
+            SET status = ?,
+                lifecycle_status = ?,
+                decision_outcome = ?,
+                awaiting_reason = ?,
+                closure_reason = ?,
+                docs_requested_active = 0,
+                docs_requested_cleared_at = NOW(),
+                row_version = row_version + 1
+          WHERE id = ?
+            AND case_id = ?
+            AND docs_requested_active = 1
+            AND docs_requested_source = 'secure_message'`,
+        [
+          resumeState.applicationStatus || resumeState.legacyStatus,
+          resumeState.lifecycleStatus,
+          resumeState.decisionOutcome,
+          resumeState.awaitingReason,
+          resumeState.closureReason,
+          applicationId,
+          numericCaseId,
+        ]
+      );
+      applicationUpdated = Number(updateResult?.affectedRows || 0) > 0;
+      docsRequestedCleared = applicationUpdated;
+      if (docsRequestedCleared) {
+        await cancelDocRequestRemindersFn({
+          caseId: numericCaseId,
+          applicationId,
+          actorStaffProfileId: null,
+          connection: mutationConnection,
+        });
+      }
+      if (transactionStarted) await mutationConnection.commit();
+    } catch (err) {
+      if (transactionStarted) {
+        try {
+          await mutationConnection.rollback();
+        } catch (_) {}
+      }
+      throw err;
+    } finally {
+      if (ownedConnection) ownedConnection.release();
+    }
+  } else if (
+    resumeState &&
+    (
+      reviewStateHasDrift ||
+      (!authoritativeReviewState && pendingCount === 0)
+    )
+  ) {
+    const [updateResult] = await connection.query(
+      `UPDATE iset_application
+          SET status = ?,
+              lifecycle_status = ?,
+              decision_outcome = ?,
+              awaiting_reason = ?,
+              closure_reason = ?,
+              row_version = row_version + 1
+        WHERE id = ?
+          AND case_id = ?`,
+      [
+        resumeState.applicationStatus || resumeState.legacyStatus,
+        resumeState.lifecycleStatus,
+        resumeState.decisionOutcome,
+        resumeState.awaitingReason,
+        resumeState.closureReason,
+        applicationId,
+        numericCaseId,
+      ]
+    );
+    applicationUpdated = Number(updateResult?.affectedRows || 0) > 0;
+  } else if (canClearDocsRequested) {
+    let mutationConnection = connection;
+    let ownedConnection = null;
+    let transactionStarted = false;
+    try {
+      if (typeof connection?.getConnection === 'function') {
+        ownedConnection = await connection.getConnection();
+        mutationConnection = ownedConnection;
+        await mutationConnection.beginTransaction();
+        transactionStarted = true;
+      }
+      const [updateResult] = await mutationConnection.query(
+        `UPDATE iset_application
+            SET docs_requested_active = 0,
+                docs_requested_cleared_at = NOW(),
+                row_version = row_version + 1
+          WHERE id = ?
+            AND case_id = ?
+            AND docs_requested_active = 1
+            AND docs_requested_source = 'secure_message'`,
+        [applicationId, numericCaseId]
+      );
+      applicationUpdated = Number(updateResult?.affectedRows || 0) > 0;
+      docsRequestedCleared = applicationUpdated;
+      if (docsRequestedCleared) {
+        await cancelDocRequestRemindersFn({
+          caseId: numericCaseId,
+          applicationId,
+          actorStaffProfileId: null,
+          connection: mutationConnection,
+        });
+      }
+      if (transactionStarted) await mutationConnection.commit();
+    } catch (err) {
+      if (transactionStarted) {
+        try {
+          await mutationConnection.rollback();
+        } catch (_) {}
+      }
+      throw err;
+    } finally {
+      if (ownedConnection) ownedConnection.release();
+    }
+  }
+
+  if (docsRequestedCleared) {
+    const clearedAtIso = new Date().toISOString();
+    try {
+      await captureCaseEventFn({
+        type: 'document_request_cleared',
+        caseId: numericCaseId,
+        actorId: actorUserId,
+        actorType: 'applicant',
+        payload: {
+          tracking_id: applicationRow.tracking_id || null,
+          application_id: applicationId,
+          case_id: numericCaseId,
+          docs_requested_at: toIsoDateTime(applicationRow.docs_requested_at),
+          docs_requested_cleared_at: clearedAtIso,
+          source: docsRequestedSource,
+          message: 'Document request cleared (all forms signed).',
+        },
+        trackingId: applicationRow.tracking_id || null,
+      });
+    } catch (eventErr) {
+      console.warn('[doc-requests] failed to emit document_request_cleared', eventErr?.message || eventErr);
+    }
+  }
+
+  return {
+    updated: applicationUpdated,
+    applicationId,
+    pendingCount,
+    docsRequestedCleared,
+    reviewStage: reviewWorkflow?.current_stage || null,
+  };
+}
+
+// Participant signing is owned exclusively by the public portal. All admin API
+// routes are staff-authenticated, so retaining a second signing writer here
+// creates an unreachable and independently drifting completion path.
+app.post('/api/signing-requests/:id/sign', (_req, res) => {
+  res.status(404).json({ error: 'not_found' });
 });
 
 // Hard delete a message and its attachments
@@ -88749,6 +89138,13 @@ app.post('/api/cases/:id/assessment/recall', async (req, res) => {
     req.query.applicationId ||
     req.query.application_id
   );
+  if (!requestedApplicationId) {
+    return res.status(400).json({
+      success: false,
+      error: 'application_id_required_for_assessment',
+      message: 'Choose the exact application assessment to recall.',
+    });
+  }
   const expectedRowVersionRaw = body.expectedApplicationRowVersion ?? body.expectedRowVersion;
   let expectedRowVersionNumber = null;
   if (expectedRowVersionRaw !== undefined) {
@@ -88758,9 +89154,6 @@ app.post('/api/cases/:id/assessment/recall', async (req, res) => {
     }
   }
 
-  const applicationJoinSql = requestedApplicationId
-    ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
-    : buildCasePrimaryApplicationJoinSql('c', 'a');
   let conn;
   let eventPayload = null;
   try {
@@ -88785,11 +89178,11 @@ app.post('/api/cases/:id/assessment/recall', async (req, res) => {
               a.closure_reason AS application_closure_reason,
               a.row_version
          FROM iset_case c
-         ${applicationJoinSql}
+         JOIN iset_application a ON a.case_id = c.id AND a.id = ?
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         WHERE c.id = ?
         LIMIT 1 FOR UPDATE`,
-      requestedApplicationId ? [requestedApplicationId, caseId] : [caseId]
+      [requestedApplicationId, caseId]
     );
     if (!row) {
       await conn.rollback();
@@ -89026,6 +89419,13 @@ app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) =>
     req.query.applicationId ||
     req.query.application_id
   );
+  if (!requestedApplicationId) {
+    return res.status(400).json({
+      success: false,
+      error: 'application_id_required_for_assessment',
+      message: 'Choose the exact application assessment to review.',
+    });
+  }
   const requestedAction = normaliseString(body.action || body.reviewAction || body.review_action);
   const allowedActions = new Set([
     REVIEW_ACTIONS.RmReturnToSubmitter,
@@ -89049,9 +89449,6 @@ app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) =>
     }
   }
 
-  const applicationJoinSql = requestedApplicationId
-    ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
-    : buildCasePrimaryApplicationJoinSql('c', 'a');
   let conn;
   let eventPayload = null;
   let eventType = null;
@@ -89094,11 +89491,11 @@ app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) =>
               a.closure_reason AS application_closure_reason,
               a.row_version
          FROM iset_case c
-         ${applicationJoinSql}
+         JOIN iset_application a ON a.case_id = c.id AND a.id = ?
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         WHERE c.id = ?
         LIMIT 1 FOR UPDATE`,
-      requestedApplicationId ? [requestedApplicationId, caseId] : [caseId]
+      [requestedApplicationId, caseId]
     );
     if (!row) {
       await conn.rollback();
@@ -89156,29 +89553,36 @@ app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) =>
       requestedAction === REVIEW_ACTIONS.RmReturnToSubmitter ||
       requestedAction === REVIEW_ACTIONS.RmForwardChangesToSubmitter;
     let statusPersistence = null;
-    if (shouldReturnToSubmitter) {
-      statusPersistence = buildApplicationStatusPersistence('in_review', {
-        lifecycleStatus: row.application_lifecycle_status,
-        decisionOutcome: null,
-        awaitingReason: row.application_awaiting_reason || null,
-        closureReason: row.application_closure_reason || null,
-      });
+    const authoritativeReviewState = resolveApplicationAssessmentReviewState(
+      updatedWorkflow?.current_stage
+    );
+    if (authoritativeReviewState) {
+      statusPersistence = {
+        legacyStatus: authoritativeReviewState.applicationStatus,
+        lifecycleStatus: authoritativeReviewState.lifecycleStatus,
+        decisionOutcome: authoritativeReviewState.decisionOutcome,
+        awaitingReason: authoritativeReviewState.awaitingReason,
+        closureReason: authoritativeReviewState.closureReason,
+      };
       await conn.query(
         `UPDATE iset_application
             SET status = ?,
                 lifecycle_status = ?,
-                decision_outcome = NULL,
+                decision_outcome = ?,
                 awaiting_reason = ?,
                 closure_reason = ?
           WHERE id = ?`,
         [
           statusPersistence.legacyStatus,
           statusPersistence.lifecycleStatus,
+          statusPersistence.decisionOutcome,
           statusPersistence.awaitingReason,
           statusPersistence.closureReason,
           applicationId,
         ]
       );
+    }
+    if (shouldReturnToSubmitter) {
       const existingContext = safeJsonParse(row.case_context_json, null) || {};
       const nextContext = clearApplicationAssessmentDecisionContext(existingContext, applicationId);
       await conn.query(
@@ -89289,12 +89693,14 @@ app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) =>
     }
     const status = Number(error?.status || error?.statusCode) || 500;
     const message = error?.message || String(error);
+    const errorCode = error?.code || message;
     if (status >= 500) {
       console.error('POST /api/cases/:id/assessment/review-workflow/action failed:', error);
     }
     return res.status(status).json({
       success: false,
-      error: message || 'review_workflow_action_failed',
+      error: errorCode || 'review_workflow_action_failed',
+      message: error?.publicMessage || undefined,
     });
   } finally {
     if (conn) conn.release();
@@ -90008,13 +90414,33 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
         conn
       );
-      if (applicationAssessmentReviewWorkflowEnabled) {
-        applicationAssessmentReviewWorkflow = await fetchApplicationAssessmentReviewWorkflow(
-          conn,
-          { applicationId },
-          { forUpdate: assessmentReviewStatusProvided }
-        );
-      }
+      applicationAssessmentReviewWorkflow = await fetchApplicationAssessmentReviewWorkflow(
+        conn,
+        { applicationId },
+        {
+          forUpdate:
+            hasAssessmentPayload ||
+            assessmentReviewStatusProvided ||
+            assessmentSubmittedForWorkflow,
+        }
+      );
+    }
+
+    try {
+      assertApplicationAssessmentReturnedToSubmitterActor({
+        reviewWorkflow: applicationAssessmentReviewWorkflow,
+        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+        actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+        assessmentMutationRequested: hasAssessmentPayload && !eligibilityOnlyAssessmentPayload,
+      });
+    } catch (error) {
+      await conn.rollback();
+      return res.status(Number(error?.status) || 403).json({
+        success: false,
+        error: error?.code || error?.message || 'assessment_returned_to_submitter_actor_forbidden',
+        message: error?.publicMessage || 'This returned assessment cannot be changed by the current staff member.',
+        lock: lockCheck.lock || null,
+      });
     }
 
     const requestedApplicationDecisionStatus = Object.prototype.hasOwnProperty.call(body, 'applicationStatus')
@@ -90350,6 +90776,41 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         applicationDecisionOutcomeToPersist = null;
         applicationAwaitingReasonToPersist = null;
         applicationClosureReasonToPersist = null;
+      }
+    }
+
+    const effectiveApplicationAssessmentReviewWorkflow =
+      applicationAssessmentReviewWorkflowUpdated || applicationAssessmentReviewWorkflow;
+    const authoritativeApplicationAssessmentReviewStage =
+      applicationAssessmentReviewWorkflowEnabled && assessmentSubmittedForWorkflow
+        ? REVIEW_STAGES.RmReview
+        : effectiveApplicationAssessmentReviewWorkflow?.current_stage;
+    const authoritativeReviewState = resolveApplicationAssessmentReviewState(
+      authoritativeApplicationAssessmentReviewStage
+    );
+    if (authoritativeReviewState) {
+      const requestedStateWouldDrift =
+        Boolean(applicationStatusToPersist) &&
+        (
+          applicationStatusToPersist !== authoritativeReviewState.applicationStatus ||
+          applicationLifecycleStatusToPersist !== authoritativeReviewState.lifecycleStatus ||
+          applicationDecisionOutcomeToPersist !== authoritativeReviewState.decisionOutcome ||
+          applicationAwaitingReasonToPersist !== authoritativeReviewState.awaitingReason ||
+          applicationClosureReasonToPersist !== authoritativeReviewState.closureReason
+        );
+      const persistedStateHasDrift =
+        beforeApplicationStatus !== authoritativeReviewState.applicationStatus ||
+        beforeApplicationLifecycleStatus !== authoritativeReviewState.lifecycleStatus ||
+        beforeApplicationDecisionOutcome !== authoritativeReviewState.decisionOutcome ||
+        beforeApplicationAwaitingReason !== authoritativeReviewState.awaitingReason ||
+        beforeApplicationClosureReason !== authoritativeReviewState.closureReason;
+      if (requestedStateWouldDrift || persistedStateHasDrift) {
+        applicationStatusToPersist = authoritativeReviewState.applicationStatus;
+        applicationLifecycleStatusToPersist = authoritativeReviewState.lifecycleStatus;
+        applicationDecisionOutcomeToPersist = authoritativeReviewState.decisionOutcome;
+        applicationAwaitingReasonToPersist = authoritativeReviewState.awaitingReason;
+        applicationClosureReasonToPersist = authoritativeReviewState.closureReason;
+        bumpApplicationRowVersion = true;
       }
     }
 
@@ -91497,7 +91958,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
             actorStaffProfileId: reminderActorId
           });
         } else {
-          await cancelDocRequestReminders({ caseId, actorStaffProfileId: reminderActorId });
+          await cancelDocRequestReminders({
+            caseId,
+            applicationId: caseRow?.application_id || null,
+            actorStaffProfileId: reminderActorId,
+          });
         }
       } catch (reminderErr) {
         if (!isMissingTableErrorLocal(reminderErr)) {
@@ -93661,6 +94126,8 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
 
 const adminRepairExports = {
   pool,
+  applyApplicationAssessmentReviewWorkflowAction,
+  assertApplicationAssessmentReturnedToSubmitterActor,
   createCfaVersionForPlan,
   ensureAutoPlanAndInterventionFromAssessment,
   startInterventionReviewWorkflow,
@@ -93670,6 +94137,10 @@ const adminRepairExports = {
   generateAndStoreRevisionAssessmentPdf,
   fetchInterventionWithCase,
   buildRegionalSnapshotPayload,
+  resolveSigningRequestMessageScope,
+  reconcileApplicationDocumentRequestAfterSigning,
+  isDocsRequestedSigningDocumentType,
+  startApplicationAssessmentReviewWorkflow,
   REVIEW_WORKFLOW_TYPES,
 };
 

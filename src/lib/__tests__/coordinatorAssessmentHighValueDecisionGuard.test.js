@@ -33,15 +33,14 @@ describe('application assessment high-value decision guard', () => {
     expect(source).toContain('Other Decision Maker outcomes can still be recorded.');
   });
 
-  test('regional manager edit access uses application status and exact workflow submitter lineage', () => {
-    expect(source).toContain('const canEditDraftAssessmentAsRegionalManager =');
-    expect(source).toContain('canRegionalManagerEditApplicationAssessment({');
+  test('returned assessment edit access uses exact workflow submitter lineage for every non-admin role', () => {
+    expect(source).toContain('const canEditAssessmentBody = canEditApplicationAssessmentBody({');
+    expect(source).toContain('isAssessor,');
+    expect(source).toContain('isRegionalManager,');
+    expect(source).toContain("isSystemAdministrator: roleKey === 'systemadministrator'");
     expect(source).toContain('applicationStatus: normalizedApplicationStatus');
     expect(source).toContain('reviewWorkflow,');
     expect(source).toContain('currentStaffProfileId,');
-    expect(source).toContain(
-      "const canEditAssessmentBody = isAssessor || roleKey === 'systemadministrator' || canEditDraftAssessmentAsRegionalManager;"
-    );
     expect(source).toContain('including assessments returned to them as the original submitter');
   });
 });

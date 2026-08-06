@@ -1,6 +1,6 @@
 # Browser Workflow Smoke Automation
 
-Status: current guidance from the 2026-05-08/09 application-assessment containment release, updated with the 2026-07-05 live TEST two-step review workflow smoke.
+Status: current guidance from the 2026-05-08/09 application-assessment containment release, updated with the 2026-08-06 post-decision correction-return regression.
 
 Audience: Codex threads and developers building or rehearsing browser-level workflow smokes for PATH.
 
@@ -203,6 +203,8 @@ This smoke loads the real local React bundle at `http://localhost:3001/applicati
 - two-step coordinator and Regional Manager draft assessment submission into Regional Manager review while the workflow flag is enabled;
 - coordinator recall of a pending assessment, including the read-only pending state, recall confirmation, `/api/cases/:id/assessment/recall` request body, and return to an editable resubmission state;
 - two-step Regional Manager review, including RM return to Coordinator with required notes, RM submit to NWAC approval, the Decision Maker's request-changes action returning to RM first, RM forwarding requested changes to the Coordinator, and no direct RM resubmission to NWAC from the returned-to-RM state;
+- exceptional reopened-approved assessment recovery, including the correction-required warning, hidden final-decision escalation, and successful return to the original Coordinator;
+- the feedback `#179` composed path on a non-primary repeat application: Decision Maker request-changes, Financial Overview request/signing, deliberately drifted legacy lifecycle, RM queue visibility, Forward changes, returned-assessment edit/save/resubmit, RM sign-off, and unchanged sibling application/reminder state;
 - NWAC approval decision commit from the approval deep link, including the review status, approved outcome, initiated case status, and selected-application row-version token;
 - approval-letter send with a workflow-generated attachment and application-scoped `caseContext.applicationDecisionLetters[application_id]` sent marker, without leaking the decision-letter state to root context;
 - funding-documents completion for an approved application after the scoped approval-letter sent marker is present.

@@ -1,4 +1,7 @@
-import { canRegionalManagerEditApplicationAssessment } from '../assessmentEditAccess';
+import {
+  canEditApplicationAssessmentBody,
+  canRegionalManagerEditApplicationAssessment,
+} from '../assessmentEditAccess';
 
 describe('canRegionalManagerEditApplicationAssessment', () => {
   test('preserves Regional Manager editing for an unsubmitted in-review draft', () => {
@@ -82,5 +85,81 @@ describe('canRegionalManagerEditApplicationAssessment', () => {
       reviewWorkflow: null,
       currentStaffProfileId: 55,
     })).toBe(false);
+  });
+});
+
+describe('canEditApplicationAssessmentBody', () => {
+  const returnedWorkflow = {
+    current_stage: 'returned_to_submitter',
+    submitted_by_staff_profile_id: 54,
+  };
+
+  test('allows the recorded Coordinator submitter and denies another Coordinator', () => {
+    expect(canEditApplicationAssessmentBody({
+      isAssessor: true,
+      isRegionalManager: false,
+      isSystemAdministrator: false,
+      applicationStatus: 'in_review',
+      reviewWorkflow: returnedWorkflow,
+      currentStaffProfileId: 54,
+    })).toBe(true);
+
+    expect(canEditApplicationAssessmentBody({
+      isAssessor: true,
+      isRegionalManager: false,
+      isSystemAdministrator: false,
+      applicationStatus: 'in_review',
+      reviewWorkflow: returnedWorkflow,
+      currentStaffProfileId: 88,
+    })).toBe(false);
+  });
+
+  test('allows the recorded dual-role Regional Manager submitter and denies another RM', () => {
+    expect(canEditApplicationAssessmentBody({
+      isAssessor: false,
+      isRegionalManager: true,
+      isSystemAdministrator: false,
+      applicationStatus: 'in_review',
+      reviewWorkflow: returnedWorkflow,
+      currentStaffProfileId: 54,
+    })).toBe(true);
+
+    expect(canEditApplicationAssessmentBody({
+      isAssessor: false,
+      isRegionalManager: true,
+      isSystemAdministrator: false,
+      applicationStatus: 'in_review',
+      reviewWorkflow: returnedWorkflow,
+      currentStaffProfileId: 88,
+    })).toBe(false);
+  });
+
+  test('preserves System Administrator support and no-workflow draft editing', () => {
+    expect(canEditApplicationAssessmentBody({
+      isAssessor: false,
+      isRegionalManager: false,
+      isSystemAdministrator: true,
+      applicationStatus: 'in_review',
+      reviewWorkflow: returnedWorkflow,
+      currentStaffProfileId: 999,
+    })).toBe(true);
+
+    expect(canEditApplicationAssessmentBody({
+      isAssessor: true,
+      isRegionalManager: false,
+      isSystemAdministrator: false,
+      applicationStatus: 'in_review',
+      reviewWorkflow: null,
+      currentStaffProfileId: 88,
+    })).toBe(true);
+
+    expect(canEditApplicationAssessmentBody({
+      isAssessor: false,
+      isRegionalManager: true,
+      isSystemAdministrator: false,
+      applicationStatus: 'in_review',
+      reviewWorkflow: null,
+      currentStaffProfileId: 88,
+    })).toBe(true);
   });
 });

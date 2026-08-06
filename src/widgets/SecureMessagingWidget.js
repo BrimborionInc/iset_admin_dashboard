@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
   Alert,
@@ -20,7 +20,6 @@ import {
 import { apiFetch } from '../auth/apiClient';
 import SecureMessagesHelpPanelContent from '../helpPanelContents/secureMessagesHelpPanelContent';
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
-import { resolveApplicationStateFields } from '../utils/applicationStatus';
 import { openSecureMessageCompose, SECURE_MESSAGE_REFRESH_EVENT } from './SecureMessageComposePanel.jsx';
 
 const TAB_IDS = {
@@ -132,10 +131,7 @@ const buildAttachmentUrl = attachment => {
 const SecureMessagingWidget = ({
   actions = {},
   toggleHelpPanel,
-  caseData: propCaseData,
-  refreshCaseData,
-  onCaseUpdate,
-  applicationRowVersion
+  caseData: propCaseData
 }) => {
   const workspace = useCaseWorkspace();
   const workspaceCaseData = workspace && typeof workspace === 'object' ? workspace.caseData || null : null;
@@ -170,88 +166,6 @@ const SecureMessagingWidget = ({
     rawApplicationId == null || rawApplicationId === '' || Number.isNaN(applicationIdNum)
       ? null
       : applicationIdNum;
-
-  const applicationState = useMemo(() => {
-    return resolveApplicationStateFields({
-      applicationStatus:
-        caseData?.applicationStatusRaw ??
-        caseData?.application_status_raw ??
-        caseData?.applicationStatus ??
-        caseData?.application_status ??
-        workspaceCaseData?.applicationStatusRaw ??
-        workspaceCaseData?.application_status_raw ??
-        workspaceCaseData?.applicationStatus ??
-        workspaceCaseData?.application_status ??
-        null,
-      applicationLifecycleStatus:
-        caseData?.applicationLifecycleStatus ??
-        caseData?.application_lifecycle_status ??
-        workspaceCaseData?.applicationLifecycleStatus ??
-        workspaceCaseData?.application_lifecycle_status ??
-        null,
-      decisionOutcome:
-        caseData?.decisionOutcome ??
-        caseData?.decision_outcome ??
-        workspaceCaseData?.decisionOutcome ??
-        workspaceCaseData?.decision_outcome ??
-        null,
-      awaitingReason:
-        caseData?.applicationAwaitingReason ??
-        caseData?.application_awaiting_reason ??
-        workspaceCaseData?.applicationAwaitingReason ??
-        workspaceCaseData?.application_awaiting_reason ??
-        null,
-      closureReason:
-        caseData?.applicationClosureReason ??
-        caseData?.application_closure_reason ??
-        workspaceCaseData?.applicationClosureReason ??
-        workspaceCaseData?.application_closure_reason ??
-        null,
-      caseStatus: caseData?.status ?? workspaceCaseData?.status ?? null,
-      reviewStatus:
-        caseData?.reviewStatus ??
-        caseData?.review_status ??
-        workspaceCaseData?.reviewStatus ??
-        workspaceCaseData?.review_status ??
-        null,
-    });
-  }, [
-    caseData?.applicationStatus,
-    caseData?.applicationStatusRaw,
-    caseData?.application_status,
-    caseData?.application_status_raw,
-    caseData?.applicationLifecycleStatus,
-    caseData?.application_lifecycle_status,
-    caseData?.decisionOutcome,
-    caseData?.decision_outcome,
-    caseData?.applicationAwaitingReason,
-    caseData?.application_awaiting_reason,
-    caseData?.applicationClosureReason,
-    caseData?.application_closure_reason,
-    caseData?.reviewStatus,
-    caseData?.review_status,
-    caseData?.status,
-    workspaceCaseData?.applicationStatus,
-    workspaceCaseData?.applicationStatusRaw,
-    workspaceCaseData?.application_status,
-    workspaceCaseData?.application_status_raw,
-    workspaceCaseData?.applicationLifecycleStatus,
-    workspaceCaseData?.application_lifecycle_status,
-    workspaceCaseData?.decisionOutcome,
-    workspaceCaseData?.decision_outcome,
-    workspaceCaseData?.applicationAwaitingReason,
-    workspaceCaseData?.application_awaiting_reason,
-    workspaceCaseData?.applicationClosureReason,
-    workspaceCaseData?.application_closure_reason,
-    workspaceCaseData?.reviewStatus,
-    workspaceCaseData?.review_status,
-    workspaceCaseData?.status,
-  ]);
-  const canonicalApplicationStatus = applicationState.applicationStatus || null;
-  const rawApplicationStatus =
-    applicationState.applicationStatusRaw ||
-    applicationState.application_status_raw ||
-    canonicalApplicationStatus;
 
   const rawApplicantUserId =
     caseData?.applicant_user_id ??
@@ -322,69 +236,6 @@ const SecureMessagingWidget = ({
   const [showEmptyDeletedModal, setShowEmptyDeletedModal] = useState(false);
   const [emptyConfirmText, setEmptyConfirmText] = useState('');
   const [emptyDeleting, setEmptyDeleting] = useState(false);
-  const reviewResumeInFlight = useRef(false);
-  const resumeReviewStatuses = useMemo(
-    () => new Set(['docs_requested', 'action_required', 'action_required_(docs_requested)']),
-    []
-  );
-
-  const updateStatusToInReview = useCallback(async () => {
-    if (!caseId) return;
-    if (!resumeReviewStatuses.has(rawApplicationStatus || '')) return;
-    if (reviewResumeInFlight.current) return;
-    reviewResumeInFlight.current = true;
-    let releaseLock = false;
-    try {
-      if (applicationId) {
-        const lockResponse = await apiFetch(`/api/locks/application/${applicationId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
-        });
-        if (!lockResponse.ok) {
-          return;
-        }
-        releaseLock = true;
-      }
-      const payload = { applicationStatus: 'in_review' };
-      const rowVersion =
-        Number(caseData?.application_row_version ?? caseData?.applicationRowVersion ?? applicationRowVersion ?? 0) || 0;
-      if (rowVersion > 0) {
-        payload.expectedRowVersion = rowVersion;
-      }
-      const response = await apiFetch(`/api/cases/${caseId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) {
-        return;
-      }
-      if (typeof refreshCaseData === 'function') {
-        try { await refreshCaseData(); } catch (_) {}
-      } else if (typeof onCaseUpdate === 'function') {
-        onCaseUpdate({ applicationStatus: 'in_review', application_status: 'in_review' });
-      }
-    } finally {
-      if (applicationId && releaseLock) {
-        try {
-          await apiFetch(`/api/locks/application/${applicationId}`, { method: 'DELETE' });
-        } catch (_) {}
-      }
-      reviewResumeInFlight.current = false;
-    }
-  }, [
-    caseId,
-    applicationId,
-    rawApplicationStatus,
-    caseData?.applicationRowVersion,
-    caseData?.application_row_version,
-    applicationRowVersion,
-    refreshCaseData,
-    onCaseUpdate,
-    resumeReviewStatuses
-  ]);
-
   useEffect(() => {
     setFilteringText('');
     setActiveTabId(TAB_IDS.inbox);
@@ -421,16 +272,6 @@ const SecureMessagingWidget = ({
             })
           : items;
         setMessages(scopedItems);
-        const signingRequests = scopedItems
-          .flatMap(item => (Array.isArray(item?.attachments) ? item.attachments : []))
-          .filter(att => att && att.workflow_id);
-        if (signingRequests.length) {
-          const allSigned = signingRequests.every(att => String(att.status || '').trim().toLowerCase() === 'signed');
-          if (allSigned) {
-            await updateStatusToInReview();
-          }
-        }
-
       } catch (err) {
         setLoadError(err?.message || 'Failed to load messages');
       } finally {
@@ -441,7 +282,7 @@ const SecureMessagingWidget = ({
         }
       }
     },
-    [caseId, messagingAvailable, updateStatusToInReview]
+    [caseId, messagingAvailable]
   );
 
   useEffect(() => {

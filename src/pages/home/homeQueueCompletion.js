@@ -83,4 +83,5 @@ export const buildPendingCompletionApplicationWorkspacePath = (basePath, row = {
     basePath,
     approvalType: 'application',
     step: resolvePendingCompletionApplicationStep(row),
+    applicationId: row.application_id ?? row.applicationId ?? null,
   });

@@ -316,6 +316,8 @@ function buildReviewWorkflow(stage = REVIEW_STAGES.rmReview, overrides = {}) {
     nwac_decision: null,
     nwacDecisionNote: null,
     nwac_decision_note: null,
+    metadata: {},
+    metadata_json: {},
     ...overrides,
   };
 }
@@ -323,6 +325,9 @@ function buildReviewWorkflow(stage = REVIEW_STAGES.rmReview, overrides = {}) {
 function buildCasePayload({
   status = 'in_review',
   applicationStatus = 'in_review',
+  applicationLifecycleStatus = null,
+  applicationAwaitingReason = null,
+  docsRequestedActive = false,
   rowVersion = 7,
   completeAssessment = false,
   conflictSigned = true,
@@ -371,8 +376,14 @@ function buildCasePayload({
     application_status: applicationStatus,
     applicationStatusRaw: applicationStatus,
     application_status_raw: applicationStatus,
-    application_lifecycle_status: applicationStatus === 'completed' ? 'completed' : 'assessment',
-    applicationLifecycleStatus: applicationStatus === 'completed' ? 'completed' : 'assessment',
+    application_lifecycle_status:
+      applicationLifecycleStatus || (applicationStatus === 'completed' ? 'completed' : 'assessment'),
+    applicationLifecycleStatus:
+      applicationLifecycleStatus || (applicationStatus === 'completed' ? 'completed' : 'assessment'),
+    application_awaiting_reason: applicationAwaitingReason,
+    applicationAwaitingReason,
+    docs_requested_active: docsRequestedActive,
+    docsRequestedActive,
     twoStepReviewEnabled,
     two_step_review_enabled: twoStepReviewEnabled,
     reviewWorkflow,
@@ -629,6 +640,20 @@ function applyReviewWorkflowAction(state, body) {
   const nextVersion = currentVersion + 1;
   const currentWorkflow = state.casePayload.reviewWorkflow || buildReviewWorkflow(REVIEW_STAGES.rmReview);
   const note = typeof body.note === 'string' ? body.note : '';
+  const transition = getReviewTransition({
+    action: body.action,
+    workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+    role: state.role,
+    currentStage: currentWorkflow.currentStage || currentWorkflow.current_stage,
+    workflowMetadata: currentWorkflow.metadata || currentWorkflow.metadata_json,
+  });
+  if (!transition.allowed) {
+    return {
+      success: false,
+      error: transition.blockReason || 'review_workflow_transition_forbidden',
+      _status: transition.blockReason === 'review_workflow_return_required' ? 409 : 403,
+    };
+  }
   let applicationStatus = state.casePayload.applicationStatus || state.casePayload.application_status || 'pending_approval';
   let workflow = currentWorkflow;
   if (body.action === REVIEW_ACTIONS.rmSubmitToNwac) {
@@ -1488,6 +1513,65 @@ function buildScenarios() {
       },
     },
     {
+      name: 'regional-manager-reopened-correction-return-required',
+      role: 'Regional Manager',
+      path: approvalEntryPath('decision'),
+      casePayload: buildCasePayload({
+        status: 'intake',
+        applicationStatus: 'pending_approval',
+        completeAssessment: true,
+        conflictSigned: true,
+        twoStepReviewEnabled: true,
+        reviewWorkflow: buildReviewWorkflow(REVIEW_STAGES.rmReview, {
+          submittedByStaffProfileId: 2,
+          submitted_by_staff_profile_id: 2,
+          metadata: {
+            source: 'system_admin_post_decision_correction',
+            requiresSubmitterCorrectionReturn: true,
+          },
+          metadata_json: JSON.stringify({
+            source: 'system_admin_post_decision_correction',
+            requiresSubmitterCorrectionReturn: true,
+          }),
+        }),
+      }),
+      run: async ({ page, state }) => {
+        await waitForWorkspaceReady(page, 'Regional Manager review');
+        await waitForText(page, 'Coordinator correction required');
+        await waitForText(page, 'Return this reopened assessment to the Coordinator with correction notes.');
+        await waitForText(page, 'Return it to the Coordinator for correction before it can be submitted for another final decision.');
+        await waitForButtonEnabled(page, 'Return to Coordinator');
+
+        await page.screenshot({
+          path: path.join(state.screenshotDir, `${state.name}-before-return.png`),
+          fullPage: true,
+        });
+
+        const submitToNwacVisible = await visibleEnabledButtons(page, 'Submit for final decision');
+        if (submitToNwacVisible.length) {
+          throw new Error(`Reopened correction workflow exposed final-decision escalation: ${JSON.stringify(submitToNwacVisible)}`);
+        }
+        const recallVisible = await visibleEnabledButtons(page, 'Recall submission');
+        if (recallVisible.length) {
+          throw new Error(`Reopened correction workflow exposed submitter-only recall to the RM reviewer: ${JSON.stringify(recallVisible)}`);
+        }
+
+        await fillFirstVisibleTextarea(page, 'Correct the approved funding amounts, then resubmit the assessment.');
+        await clickButtonByText(page, 'Return to Coordinator');
+        const reviewAction = await waitUntil(
+          () => state.mutations.reviewActions.find(entry => entry.body.action === REVIEW_ACTIONS.rmReturnToSubmitter),
+          'required correction return POST'
+        );
+        if (!String(reviewAction.body.note || '').includes('approved funding amounts')) {
+          throw new Error('Required correction return did not send the correction note.');
+        }
+        if (state.casePayload.reviewWorkflow?.currentStage !== REVIEW_STAGES.returnedToSubmitter) {
+          throw new Error(`Required correction return did not reach the Coordinator: ${state.casePayload.reviewWorkflow?.currentStage}`);
+        }
+        await waitForText(page, 'Assessment returned to the Coordinator with notes.');
+      },
+    },
+    {
       name: 'regional-manager-submit-to-nwac',
       role: 'Regional Manager',
       path: approvalEntryPath('decision'),
@@ -1528,7 +1612,9 @@ function buildScenarios() {
       path: approvalEntryPath('decision'),
       casePayload: buildCasePayload({
         status: 'intake',
-        applicationStatus: 'pending_approval',
+        applicationStatus: 'in_review',
+        applicationLifecycleStatus: 'awaiting_applicant',
+        applicationAwaitingReason: 'documents',
         completeAssessment: true,
         conflictSigned: true,
         nwacReviewStatus: 'push_back',
@@ -1550,7 +1636,7 @@ function buildScenarios() {
           () => state.mutations.casePuts.find(entry => entry.body.assessment_nwac_review_status === 'push_back'),
           'NWAC request-changes PUT'
         );
-        if (decisionPut.body.applicationStatus !== 'in_review') {
+        if (decisionPut.body.applicationStatus !== 'pending_approval') {
           throw new Error(`NWAC request-changes UI sent unexpected applicationStatus: ${decisionPut.body.applicationStatus}`);
         }
         if (!String(decisionPut.body.assessment_nwac_reason || '').includes('funding-source')) {
@@ -1571,7 +1657,13 @@ function buildScenarios() {
       path: approvalEntryPath('decision'),
       casePayload: buildCasePayload({
         status: 'intake',
-        applicationStatus: 'pending_approval',
+        // Reproduce feedback #179 exactly: the workflow still belongs to the
+        // RM, while Financial Overview signing left the application lifecycle
+        // at an incompatible applicant-facing state.
+        applicationStatus: 'in_review',
+        applicationLifecycleStatus: 'awaiting_applicant',
+        applicationAwaitingReason: 'documents',
+        docsRequestedActive: false,
         completeAssessment: true,
         conflictSigned: true,
         twoStepReviewEnabled: true,
@@ -1768,6 +1860,7 @@ async function runScenario(browser, args, scenario) {
   const state = {
     name: scenario.name,
     role: scenario.role,
+    screenshotDir: args.screenshotDir,
     casePayload: scenario.casePayload,
     applicationPayload: buildApplicationPayload(scenario.casePayload),
     apiCalls: [],

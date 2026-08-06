@@ -7,6 +7,7 @@ const {
   getReviewTransition,
   isReviewStageLockedForSubmitter,
   isTwoStepReviewEnabled,
+  requiresSubmitterCorrectionReturn,
 } = require('./reviewWorkflow');
 
 describe('reviewWorkflow', () => {
@@ -287,6 +288,59 @@ describe('reviewWorkflow', () => {
       role: 'Regional Manager',
     });
     expect(resubmitWithoutSubmitterChanges.allowed).toBe(false);
+  });
+
+  test('forces a post-decision application correction back to the submitter before another final decision', () => {
+    const metadata = { requiresSubmitterCorrectionReturn: true };
+    expect(
+      requiresSubmitterCorrectionReturn(REVIEW_WORKFLOW_TYPES.ApplicationAssessment, metadata)
+    ).toBe(true);
+    expect(
+      requiresSubmitterCorrectionReturn(
+        REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+        JSON.stringify({ requires_submitter_correction_return: true })
+      )
+    ).toBe(true);
+
+    const blockedSubmit = getReviewTransition({
+      action: REVIEW_ACTIONS.RmSubmitToNwac,
+      currentStage: REVIEW_STAGES.RmReview,
+      role: 'Regional Manager',
+      workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+      workflowMetadata: metadata,
+    });
+    expect(blockedSubmit.allowed).toBe(false);
+    expect(blockedSubmit.blockReason).toBe('review_workflow_return_required');
+
+    const wrongRole = getReviewTransition({
+      action: REVIEW_ACTIONS.RmSubmitToNwac,
+      currentStage: REVIEW_STAGES.RmReview,
+      role: 'ISET Coordinator',
+      workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+      workflowMetadata: metadata,
+    });
+    expect(wrongRole.allowed).toBe(false);
+    expect(wrongRole.blockReason).toBeNull();
+
+    const requiredReturn = getReviewTransition({
+      action: REVIEW_ACTIONS.RmReturnToSubmitter,
+      currentStage: REVIEW_STAGES.RmReview,
+      role: 'Regional Manager',
+      workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+      workflowMetadata: metadata,
+    });
+    expect(requiredReturn.allowed).toBe(true);
+    expect(requiredReturn.nextStage).toBe(REVIEW_STAGES.ReturnedToSubmitter);
+    expect(requiredReturn.requiresNote).toBe(true);
+
+    const unrelatedInterventionSubmit = getReviewTransition({
+      action: REVIEW_ACTIONS.RmSubmitToNwac,
+      currentStage: REVIEW_STAGES.RmReview,
+      role: 'Regional Manager',
+      workflowType: REVIEW_WORKFLOW_TYPES.InterventionProposal,
+      workflowMetadata: metadata,
+    });
+    expect(unrelatedInterventionSubmit.allowed).toBe(true);
   });
 
   test('locks submitter edits while the packet is under RM or NWAC review', () => {

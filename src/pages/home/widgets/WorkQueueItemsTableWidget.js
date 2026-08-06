@@ -105,16 +105,18 @@ const toDate = value => {
   return d && !Number.isNaN(d.getTime()) ? d : null;
 };
 
-const getWorkspacePath = item => {
+export const getWorkspacePath = item => {
   if (item?.workspacePath) return item.workspacePath;
   const caseId = item?.case_id || item?.caseId || null;
   if (!caseId) return null;
+  const applicationId = item?.application_id || item?.applicationId || null;
   const type = (item?.type || '').toString().trim().toLowerCase();
   if (type.includes('interventionapproval')) {
     return buildApprovalWorkspacePath({
       basePath: `/cases/${caseId}`,
       approvalType: 'intervention',
       step: 'decision',
+      applicationId,
       interventionId: item?.interventionId || item?.intervention_id || null,
       planId: item?.actionPlanId || item?.action_plan_id || null,
     });
@@ -124,12 +126,15 @@ const getWorkspacePath = item => {
       basePath: `/application-case/${caseId}`,
       approvalType: 'application',
       step: 'decision',
+      applicationId,
     });
   }
   if (type.includes('intervention') || type.includes('case')) {
     return `/cases/${caseId}`;
   }
-  return `/application-case/${caseId}`;
+  return applicationId
+    ? `/application-case/${caseId}?applicationId=${encodeURIComponent(applicationId)}`
+    : `/application-case/${caseId}`;
 };
 
 const hasAssignedOwner = item =>

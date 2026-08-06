@@ -2,7 +2,7 @@
 
 Purpose: plan the new Regional Manager review stage for assessment and intervention approval workflows.
 Audience: product, engineering, operations, training, and future AI-assisted development threads.
-Last Updated: 2026-07-06
+Last Updated: 2026-08-06
 
 ## Status
 
@@ -11,6 +11,10 @@ Design accepted for a low-risk first pass. The implementation now covers applica
 2026-06-26 update: after PROD feedback `#147` and `#148`, the transition helper now permits a Regional Manager who is acting as the submitter to start the two-step workflow for supported application assessment, intervention proposal, and intervention revision/amendment submissions. This matches the RM-owned draft/edit paths that can exist before a workflow row exists. Under the agreed first-pass rule, the same Regional Manager may submit and then perform the RM review/sign-off so the workflow produces the standard audit trail. NWAC Administrator users do not start workflows; they are Decision Maker final-decision actors only. System Administrator behavior is technical/superuser support only and must not define the business workflow, UX, queue design, or release acceptance criteria. Regional Managers still cannot record the final Decision Maker approval/denial/request-changes decision.
 
 The migration/runtime default is off, but DEV, TEST, and PROD now have the flag enabled for `application_assessment`, `intervention_proposal`, and `intervention_revision`.
+
+2026-08-06 correction-recovery update: feedback `#178` proved that restoring a finally decided application assessment to ordinary `rm_review` is unsafe. The deployed workspace legitimately offered both `Return to Coordinator` and `Submit for final decision`; the Regional Manager selected the latter, and the unchanged assessment was approved again. Exceptional post-decision recovery must therefore be fail-closed. The safe immediate state is `returned_to_submitter`. If an operational repair must temporarily use `rm_review`, its workflow metadata must set `requiresSubmitterCorrectionReturn=true`; the application-assessment UI must show a correction warning and hide escalation, while the backend independently rejects `rm_submit_to_nwac` with `409 review_workflow_return_required`. The marker does not change ordinary two-step review or the intervention workflows. Local caller-boundary tests and the compiled browser workflow prove this guard; it remains a release candidate until the normal TEST and PROD gates complete.
+
+2026-08-06 returned-form invariant: application-assessment review ownership and document-request/signing state are independent state machines. An active review stage is authoritative for queue ownership and assessment edit controls; requesting or signing a Financial Overview must not replace `rm_review`, `nwac_review`, or `returned_to_rm` with an applicant-waiting lifecycle. A signing-form message requires an explicit application id, and its message, signing request, link, and application activation are one database transaction. Signing completion reconciles only the exact message-linked application, excludes decision letters from document-request counts, and clears the application plus its exact reminder only after all participant-input forms are durably complete. At `returned_to_submitter`, only the workflow's recorded submitter may edit/resubmit (System Administrator technical support and the established EI-eligibility-only correction remain narrow exceptions).
 
 Deployment note: release `20260620-rm-two-step-review-rollout` deployed the feature to TEST and PROD on 2026-06-20 with the one-off notification configuration operation applied in both environments. Do not assume future app/schema deployment alone is enough if these rows drift; explicitly verify and normalize the notification rows listed under **TEST/PROD Notification Configuration** below.
 
@@ -64,7 +68,9 @@ Relevant current files:
 - Keep submitted packet bodies read-only during RM and Decision Maker review.
 - RM can return the packet to the submitter with required notes.
 - RM can submit the packet upward for final decision.
+- An exceptionally reopened post-decision application assessment may not be submitted upward until it has first returned to its submitter and been corrected/resubmitted; staff instructions alone are not a control.
 - RM-owned submissions still enter RM review; for the first pass, the same RM may complete the RM review/sign-off on their own submitted item so the audit trail is consistent.
+- If that same Regional Manager was the recorded submitter, forwarding Decision Maker changes to the submitter returns the assessment to that RM in the submitter capacity; they may then edit, resubmit to RM review, complete RM sign-off, and send it back to the Decision Maker.
 - Decision Maker request-changes returns to RM first, not directly to the submitter.
 - RM forwards Decision Maker-requested changes to the submitter with notes.
 - ISET Coordinator edits are allowed only after the workflow is returned to them.
@@ -297,6 +303,7 @@ Backend tests:
 Browser smokes:
 
 - `npm run smoke:application-assessment:workflow:browser` covers the application-assessment first pass, including legacy Coordinator submit, two-step Coordinator submit, RM draft submit, RM return to submitter, RM submit for final decision, Decision Maker request-changes returning to RM, and RM forwarding requested changes to the submitter. Passing local runs: 2026-06-19, 2026-06-26, and 2026-07-05 against the production bundle.
+- The 2026-08-06 application-assessment browser run also covers a reopened final-decision recovery marked `requiresSubmitterCorrectionReturn=true`: the RM sees the correction warning and Return action, cannot see Submit for final decision, and the return reaches the original submitter. The real backend caller-boundary regression separately proves a forged RM escalation request is rejected before any write.
 - `npm run smoke:intervention-assessment:workflow:browser` covers intervention proposal/revision RM draft submit, RM return, RM submit upward, Decision Maker review with RM notes, high-value Shelley warning, Decision Maker request-changes returning through RM, submitter-visible Decision Maker/RM notes, revision decision review, and approved communication/funding-revision letter follow-up entry points. Passing local runs: 2026-06-19, 2026-06-26, and 2026-07-05 against the production bundle.
 - `npm run smoke:two-step-review:prevention` is the focused non-browser guard for the 2026-07-05 prevention fixes. It imports the server in repair-export mode with stubbed DB/S3 I/O and verifies that generated intervention assessment PDFs create `iset_document_intervention` links and that intervention proposal compatibility syncing preserves the original `submitted_at` across final-decision updates. Passing local run: 2026-07-05.
 - Production build verification passed locally on 2026-07-05 with the existing source-map parse warning and bundle-size warning. Full Jest passed locally on 2026-07-05: 48 suites, 203 tests.

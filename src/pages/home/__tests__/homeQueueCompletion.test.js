@@ -25,17 +25,23 @@ describe('homeQueueCompletion', () => {
   it('builds approval-entry workspace links for pending completion applications', () => {
     expect(
       buildPendingCompletionApplicationWorkspacePath('/application-case/1', {
+        application_id: 21,
         decision_outcome: 'approved',
         approval_decision_letter_sent: 0,
       })
-    ).toBe('/application-case/1?entry=approval&approvalType=application&step=communication');
+    ).toBe(
+      '/application-case/1?entry=approval&approvalType=application&step=communication&applicationId=21'
+    );
 
     expect(
       buildPendingCompletionApplicationWorkspacePath('/application-case/1', {
+        application_id: 22,
         decision_outcome: 'approved',
         approval_decision_letter_sent: 1,
       })
-    ).toBe('/application-case/1?entry=approval&approvalType=application&step=fundingDocs');
+    ).toBe(
+      '/application-case/1?entry=approval&approvalType=application&step=fundingDocs&applicationId=22'
+    );
   });
 
   it('keeps denied applications pending completion only until the denial letter is sent', () => {
