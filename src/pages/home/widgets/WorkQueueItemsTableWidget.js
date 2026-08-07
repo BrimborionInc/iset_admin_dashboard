@@ -93,6 +93,32 @@ const NO_ASSIGNMENT_ITEM_TYPES = new Set([
 const normalizeRoleKey = value =>
   String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
 
+export const updateApplicationEligibility = ({ fetcher, caseId, applicationId, value }) => {
+  const exactCaseId = Number(caseId);
+  const exactApplicationId = Number(applicationId);
+  const eligibilityValue = String(value || '').trim();
+  if (typeof fetcher !== 'function') {
+    throw new Error('eligibility_fetcher_required');
+  }
+  if (!Number.isInteger(exactCaseId) || exactCaseId <= 0) {
+    throw new Error('case_id_required');
+  }
+  if (!Number.isInteger(exactApplicationId) || exactApplicationId <= 0) {
+    throw new Error('application_id_required');
+  }
+  if (!eligibilityValue) {
+    throw new Error('eligibility_value_required');
+  }
+  return fetcher(`/api/cases/${exactCaseId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      applicationId: exactApplicationId,
+      assessment_esdc_eligibility: eligibilityValue,
+    }),
+  });
+};
+
 const formatDateOnly = value => {
   if (!value) return null;
   const date = new Date(value);
@@ -1752,7 +1778,15 @@ const WorkQueueItemsTableWidget = ({
       eligibilityTarget?.userId ||
       null;
     const value = selectedEligibility?.value || selectedEligibility?.label;
-    if (!caseId || !value) {
+    if (!caseId) {
+      setEligibilityError('Unable to determine the case for this EI update.');
+      return;
+    }
+    if (!applicationId) {
+      setEligibilityError('Select the exact application before saving EI eligibility.');
+      return;
+    }
+    if (!value) {
       setEligibilityError('Select an eligibility value.');
       return;
     }
@@ -1809,10 +1843,11 @@ const WorkQueueItemsTableWidget = ({
         }
         throw new Error('Failed to upload EI verification document.');
       }
-      const response = await apiFetch(`/api/cases/${caseId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assessment_esdc_eligibility: value })
+      const response = await updateApplicationEligibility({
+        fetcher: apiFetch,
+        caseId,
+        applicationId,
+        value,
       });
       if (!response.ok) {
         throw new Error('eligibility_failed');

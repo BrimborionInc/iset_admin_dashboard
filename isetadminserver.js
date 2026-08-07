@@ -83,7 +83,11 @@ const {
 } = require('./src/lib/backloadParticipantDetailsSeeding');
 const { normaliseIlmpEducationLevelCode } = require('./src/lib/ilmpEducationMapping');
 const { runStartupSharedSchemaMigrations } = require('./src/lib/sharedSchemaMigrationRunner');
-const { SchemaReadinessError, assertRuntimeTableReady } = require('./src/lib/schemaReadiness');
+const {
+  SchemaReadinessError,
+  assertEnumValueReady,
+  assertRuntimeTableReady,
+} = require('./src/lib/schemaReadiness');
 const {
   STAFF_PROFILE_RUNTIME_COLUMNS,
   assertAdminRuntimeSchemaReady,
@@ -2901,7 +2905,8 @@ async function storeAssessmentPdfDocument({
   extraMetadata = null,
   archivePreviousActive = true,
   replaceExistingVersion = false,
-  connection = pool
+  connection = pool,
+  uploadedObjectKeys = null
 }) {
   const runner = connection || pool;
   const normalizedApplicationId = normalisePositiveInteger(applicationId);
@@ -2921,21 +2926,14 @@ async function storeAssessmentPdfDocument({
       .map(id => normalisePositiveInteger(id))
       .filter(Boolean)
   ));
-  let relativePath = null;
-  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-  if (DRIVER !== 's3') {
-    throw new Error('s3_upload_unavailable');
-  }
-  const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
-  const presigned = await presignPut({ key, contentType: 'application/pdf' });
-  await axios.put(presigned.url, pdfBuffer, {
-    headers: {
-      ...(presigned.headers || {}),
-      'Content-Type': 'application/pdf',
-      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-    }
+  const relativePath = await uploadAssessmentGeneratedPdfObject({
+    ownerId: applicantUserId || actorUserId || 'admin',
+    displayName,
+    pdfBuffer,
+    sizeBytes,
+    checksumSha256: checksum,
+    uploadedObjects: uploadedObjectKeys,
   });
-  relativePath = key;
   if (!relativePath) {
     throw new Error('path_resolution_failed');
   }
@@ -3010,6 +3008,13 @@ async function storeAssessmentPdfDocument({
     insertPayload
   );
   const insertedDocumentId = result?.insertId || null;
+  attachAssessmentGeneratedDocumentIdentity(uploadedObjectKeys, relativePath, {
+    documentId: insertedDocumentId,
+    caseId: normalizedCaseId,
+    applicationId: normalizedApplicationId,
+    documentCategory: documentType,
+    checksumSha256: checksum,
+  });
   if (insertedDocumentId && normalizedInterventionIds.length) {
     await updateDocumentInterventionLinks({
       documentId: insertedDocumentId,
@@ -3028,7 +3033,8 @@ async function storeApplicationFormPdfDocument({
   actorUserId,
   referenceNumber,
   pdfBuffer,
-  connection = pool
+  connection = pool,
+  uploadedObjectKeys = null
 }) {
   const runner = connection || pool;
   if (!applicationId || !pdfBuffer) return null;
@@ -3040,21 +3046,14 @@ async function storeApplicationFormPdfDocument({
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
   const normalizedActorUserId = normalisePositiveInteger(actorUserId);
   const normalizedClientId = normalisePositiveInteger(clientId);
-  let relativePath = null;
-  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-  if (DRIVER !== 's3') {
-    throw new Error('s3_upload_unavailable');
-  }
-  const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
-  const presigned = await presignPut({ key, contentType: 'application/pdf' });
-  await axios.put(presigned.url, pdfBuffer, {
-    headers: {
-      ...(presigned.headers || {}),
-      'Content-Type': 'application/pdf',
-      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-    }
+  const relativePath = await uploadAssessmentGeneratedPdfObject({
+    ownerId: applicantUserId || actorUserId || 'admin',
+    displayName,
+    pdfBuffer,
+    sizeBytes,
+    checksumSha256: checksum,
+    uploadedObjects: uploadedObjectKeys,
   });
-  relativePath = key;
   if (!relativePath) {
     throw new Error('path_resolution_failed');
   }
@@ -3090,7 +3089,15 @@ async function storeApplicationFormPdfDocument({
      VALUES (?,?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
     insertPayload
   );
-  return result?.insertId || null;
+  const insertedDocumentId = result?.insertId || null;
+  attachAssessmentGeneratedDocumentIdentity(uploadedObjectKeys, relativePath, {
+    documentId: insertedDocumentId,
+    caseId: normalisePositiveInteger(caseId),
+    applicationId: normalisePositiveInteger(applicationId),
+    documentCategory: documentType,
+    checksumSha256: checksum,
+  });
+  return insertedDocumentId;
 }
 
 async function storeFinancialOverviewPdfDocument({
@@ -3101,7 +3108,8 @@ async function storeFinancialOverviewPdfDocument({
   actorUserId,
   referenceNumber,
   pdfBuffer,
-  connection = pool
+  connection = pool,
+  uploadedObjectKeys = null
 }) {
   const runner = connection || pool;
   if (!applicationId || !pdfBuffer) return null;
@@ -3113,21 +3121,14 @@ async function storeFinancialOverviewPdfDocument({
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
   const normalizedActorUserId = normalisePositiveInteger(actorUserId);
   const normalizedClientId = normalisePositiveInteger(clientId);
-  let relativePath = null;
-  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-  if (DRIVER !== 's3') {
-    throw new Error('s3_upload_unavailable');
-  }
-  const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
-  const presigned = await presignPut({ key, contentType: 'application/pdf' });
-  await axios.put(presigned.url, pdfBuffer, {
-    headers: {
-      ...(presigned.headers || {}),
-      'Content-Type': 'application/pdf',
-      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-    }
+  const relativePath = await uploadAssessmentGeneratedPdfObject({
+    ownerId: applicantUserId || actorUserId || 'admin',
+    displayName,
+    pdfBuffer,
+    sizeBytes,
+    checksumSha256: checksum,
+    uploadedObjects: uploadedObjectKeys,
   });
-  relativePath = key;
   if (!relativePath) {
     throw new Error('path_resolution_failed');
   }
@@ -3158,7 +3159,635 @@ async function storeFinancialOverviewPdfDocument({
      VALUES (?,?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
     insertPayload
   );
-  return result?.insertId || null;
+  const insertedDocumentId = result?.insertId || null;
+  attachAssessmentGeneratedDocumentIdentity(uploadedObjectKeys, relativePath, {
+    documentId: insertedDocumentId,
+    caseId: normalisePositiveInteger(caseId),
+    applicationId: normalisePositiveInteger(applicationId),
+    documentCategory: documentType,
+    checksumSha256: checksum,
+  });
+  return insertedDocumentId;
+}
+
+function resolveS3UploadVersionId(responseHeaders) {
+  if (!responseHeaders) return null;
+  const directValue =
+    responseHeaders['x-amz-version-id'] ??
+    responseHeaders['X-Amz-Version-Id'] ??
+    responseHeaders['X-Amz-Version-ID'];
+  const headerValue = typeof responseHeaders.get === 'function'
+    ? responseHeaders.get('x-amz-version-id') ?? directValue
+    : directValue;
+  return normaliseString(headerValue) || null;
+}
+
+function trackGeneratedObjectUploadAttempt(uploadedObjects, key) {
+  if (!Array.isArray(uploadedObjects)) return null;
+  const record = {
+    key,
+    versionId: null,
+    versionIdentityVerified: false,
+  };
+  uploadedObjects.push(record);
+  return record;
+}
+
+async function verifyGeneratedObjectUploadIdentity({
+  uploadRecord,
+  uploadResponse,
+  headObjectFn,
+  versionCompensationSupported,
+} = {}) {
+  if (!uploadRecord) return null;
+  if (versionCompensationSupported !== true || typeof headObjectFn !== 'function') {
+    throw new Error('s3_version_compensation_unavailable');
+  }
+  const responseVersionId = resolveS3UploadVersionId(uploadResponse?.headers);
+  if (responseVersionId) {
+    uploadRecord.versionId = responseVersionId;
+    uploadRecord.versionIdentityVerified = true;
+    return uploadRecord;
+  }
+  const head = await headObjectFn({ key: uploadRecord.key });
+  if (!head?.exists || !Object.prototype.hasOwnProperty.call(head, 'versionId')) {
+    throw new Error('s3_upload_identity_unverified');
+  }
+  uploadRecord.versionId = normaliseString(head.versionId) || null;
+  uploadRecord.versionIdentityVerified = true;
+  return uploadRecord;
+}
+
+function createAssessmentResubmissionIntegrityError(code, message = code, details = {}) {
+  const error = new Error(message || code);
+  error.code = code;
+  error.publicError = code;
+  error.httpStatus = Number(details.httpStatus || details.status || 503);
+  error.retrySafe = details.retrySafe === true;
+  error.manualReviewRequired = details.manualReviewRequired !== false;
+  Object.assign(error, details);
+  return error;
+}
+
+function resolveAssessmentGeneratedObjectChecksum(metadata) {
+  if (!metadata || typeof metadata !== 'object') return null;
+  return normaliseString(
+    metadata['path-sha256'] ?? metadata.path_sha256 ?? metadata.pathsha256
+  ) || null;
+}
+
+async function inspectAssessmentGeneratedObjectUpload({
+  provider,
+  uploadRecord,
+  responseHeaders = null,
+  sizeBytes,
+  checksumSha256,
+  putAcknowledged = false,
+} = {}) {
+  if (!uploadRecord?.key) {
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_pdf_upload_identity_missing',
+      'The generated assessment document upload has no object identity.'
+    );
+  }
+  if (
+    !provider ||
+    provider.OBJECT_VERSION_COMPENSATION_SUPPORTED !== true ||
+    typeof provider.headObject !== 'function' ||
+    typeof provider.deleteObject !== 'function'
+  ) {
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_pdf_compensation_unavailable',
+      'Exact generated-document rollback is unavailable.'
+    );
+  }
+
+  const responseVersionId = resolveS3UploadVersionId(responseHeaders);
+  if (responseVersionId) {
+    uploadRecord.versionId = responseVersionId;
+    uploadRecord.versionIdentityVerified = true;
+  }
+  let head;
+  try {
+    head = await provider.headObject({
+      key: uploadRecord.key,
+      versionId: responseVersionId || null,
+    });
+  } catch (cause) {
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_pdf_upload_outcome_uncertain',
+      'PATH could not verify the generated assessment document upload.',
+      { cause }
+    );
+  }
+
+  if (!head?.exists) {
+    if (!putAcknowledged && !responseVersionId) {
+      uploadRecord.objectConfirmedAbsent = true;
+      return uploadRecord;
+    }
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_pdf_upload_outcome_uncertain',
+      'PATH could not find the generated assessment document version after upload.'
+    );
+  }
+  if (!Object.prototype.hasOwnProperty.call(head, 'versionId')) {
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_pdf_upload_outcome_uncertain',
+      'S3 did not return the generated assessment document version identity.'
+    );
+  }
+  const headVersionId = normaliseString(head.versionId) || null;
+  if (!headVersionId || (responseVersionId && headVersionId !== responseVersionId)) {
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_pdf_upload_version_mismatch',
+      'The generated assessment document version could not be matched exactly.'
+    );
+  }
+
+  uploadRecord.versionId = responseVersionId || headVersionId;
+  uploadRecord.versionIdentityVerified = true;
+  if (Number(head.size) !== Number(sizeBytes)) {
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_pdf_upload_size_mismatch',
+      'The generated assessment document size did not match the uploaded object.'
+    );
+  }
+  if (resolveAssessmentGeneratedObjectChecksum(head.metadata) !== checksumSha256) {
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_pdf_upload_checksum_mismatch',
+      'The generated assessment document checksum did not match the uploaded object.'
+    );
+  }
+  return uploadRecord;
+}
+
+async function uploadAssessmentGeneratedPdfObject({
+  ownerId,
+  displayName,
+  pdfBuffer,
+  sizeBytes,
+  checksumSha256,
+  uploadedObjects = null,
+} = {}) {
+  const provider = require('../ISET-intake/s3Provider');
+  if (provider.DRIVER !== 's3') {
+    throw new Error('s3_upload_unavailable');
+  }
+  const key = provider.generateKey(ownerId || 'admin', displayName);
+  const requireExactCompensation = Array.isArray(uploadedObjects);
+  if (!requireExactCompensation) {
+    const presigned = await provider.presignPut({ key, contentType: 'application/pdf' });
+    await axios.put(presigned.url, pdfBuffer, {
+      headers: {
+        ...(presigned.headers || {}),
+        'Content-Type': 'application/pdf',
+        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+      }
+    });
+    return key;
+  }
+  if (
+    provider.OBJECT_VERSION_COMPENSATION_SUPPORTED !== true ||
+    typeof provider.headObject !== 'function' ||
+    typeof provider.deleteObject !== 'function'
+  ) {
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_pdf_compensation_unavailable',
+      'Exact generated-document rollback is unavailable.'
+    );
+  }
+
+  const presigned = await provider.presignPut({
+    key,
+    contentType: 'application/pdf',
+    ifNoneMatch: '*',
+    metadata: { 'path-sha256': checksumSha256 },
+  });
+  const uploadRecord = trackGeneratedObjectUploadAttempt(uploadedObjects, key);
+  uploadRecord.sizeBytes = Number(sizeBytes);
+  uploadRecord.checksumSha256 = checksumSha256;
+  let uploadResponse;
+  try {
+    uploadResponse = await axios.put(presigned.url, pdfBuffer, {
+      headers: {
+        ...(presigned.headers || {}),
+        'Content-Type': 'application/pdf',
+        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+      }
+    });
+  } catch (uploadError) {
+    const status = Number(uploadError?.response?.status || uploadError?.response?.statusCode || 0);
+    if (status === 409 || status === 412) {
+      uploadRecord.compensationNotRequired = true;
+      throw createAssessmentResubmissionIntegrityError(
+        'assessment_pdf_upload_key_collision',
+        'The generated assessment document key already exists.',
+        { cause: uploadError, retrySafe: true, manualReviewRequired: false }
+      );
+    }
+    try {
+      await inspectAssessmentGeneratedObjectUpload({
+        provider,
+        uploadRecord,
+        responseHeaders: uploadError?.response?.headers || null,
+        sizeBytes,
+        checksumSha256,
+        putAcknowledged: false,
+      });
+    } catch (inspectionError) {
+      inspectionError.cause = uploadError;
+      throw inspectionError;
+    }
+    if (uploadRecord.objectConfirmedAbsent) throw uploadError;
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_pdf_upload_rejected_after_write',
+      'The generated assessment document upload failed after creating an object version.',
+      { cause: uploadError, retrySafe: true, manualReviewRequired: false }
+    );
+  }
+
+  await inspectAssessmentGeneratedObjectUpload({
+    provider,
+    uploadRecord,
+    responseHeaders: uploadResponse?.headers || null,
+    sizeBytes,
+    checksumSha256,
+    putAcknowledged: true,
+  });
+  return key;
+}
+
+function attachAssessmentGeneratedDocumentIdentity(uploadedObjects, key, identity = {}) {
+  if (!Array.isArray(uploadedObjects) || !key) return null;
+  const record = [...uploadedObjects]
+    .reverse()
+    .find(value => value?.key === key && !value?.documentId);
+  if (!record) return null;
+  record.documentId = normalisePositiveInteger(identity.documentId) || null;
+  record.caseId = normalisePositiveInteger(identity.caseId) || null;
+  record.applicationId = normalisePositiveInteger(identity.applicationId) || null;
+  record.documentCategory = normaliseString(identity.documentCategory) || null;
+  record.checksumSha256 = normaliseString(identity.checksumSha256) || record.checksumSha256 || null;
+  return record;
+}
+
+async function compensateAssessmentGeneratedObjects(
+  uploadedObjects,
+  { provider = null, logger = console } = {}
+) {
+  const records = (Array.isArray(uploadedObjects) ? uploadedObjects : [])
+    .filter(record => record?.key && record.compensationNotRequired !== true)
+    .slice()
+    .reverse();
+  if (!records.length) return { attempted: 0, deleted: 0, failed: 0 };
+  const resolvedProvider = provider || require('../ISET-intake/s3Provider');
+  if (
+    resolvedProvider.DRIVER !== 's3' ||
+    resolvedProvider.OBJECT_VERSION_COMPENSATION_SUPPORTED !== true ||
+    typeof resolvedProvider.deleteObject !== 'function'
+  ) {
+    return { attempted: records.length, deleted: 0, failed: records.length };
+  }
+
+  let attempted = 0;
+  let deleted = 0;
+  let failed = 0;
+  const seen = new Set();
+  for (const record of records) {
+    const identity = `${record.key}\u0000${record.versionId || ''}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    if (record.objectConfirmedAbsent === true) continue;
+    attempted += 1;
+    if (record.versionIdentityVerified !== true || !normaliseString(record.versionId)) {
+      failed += 1;
+      continue;
+    }
+    try {
+      const result = await resolvedProvider.deleteObject({
+        key: record.key,
+        versionId: record.versionId,
+      });
+      if (result?.deleted !== true && result?.notFound !== true) {
+        throw new Error('assessment_pdf_delete_unverified');
+      }
+      deleted += 1;
+    } catch (error) {
+      failed += 1;
+      logger?.error?.(
+        '[assessment-resubmit] exact generated-object compensation failed (%s, version %s): %s',
+        record.key,
+        record.versionId,
+        error?.message || error
+      );
+    }
+  }
+  return { attempted, deleted, failed };
+}
+
+async function lockAssessmentApplicationThenCase(connection, { applicationId, caseId } = {}) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!connection || !normalizedCaseId) {
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_mutation_scope_invalid',
+      'The assessment mutation scope is invalid.',
+      { httpStatus: 422, retrySafe: false, manualReviewRequired: false }
+    );
+  }
+
+  let applicationRow = null;
+  if (normalizedApplicationId) {
+    [[applicationRow]] = await connection.query(
+      `SELECT id, case_id
+         FROM iset_application
+        WHERE id = ?
+        LIMIT 1 FOR UPDATE`,
+      [normalizedApplicationId]
+    );
+    if (!applicationRow) {
+      throw createAssessmentResubmissionIntegrityError(
+        'application_not_found',
+        'Application not found.',
+        { httpStatus: 404, retrySafe: false, manualReviewRequired: false }
+      );
+    }
+    if (normalisePositiveInteger(applicationRow.case_id) !== normalizedCaseId) {
+      throw createAssessmentResubmissionIntegrityError(
+        'application_case_mismatch',
+        'The selected application does not belong to this case.',
+        { httpStatus: 409, retrySafe: false, manualReviewRequired: false }
+      );
+    }
+  }
+
+  const [[caseRow]] = await connection.query(
+    `SELECT id
+       FROM iset_case
+      WHERE id = ?
+      LIMIT 1 FOR UPDATE`,
+    [normalizedCaseId]
+  );
+  if (!caseRow) {
+    throw createAssessmentResubmissionIntegrityError(
+      'case_not_found',
+      'Case not found.',
+      { httpStatus: 404, retrySafe: false, manualReviewRequired: false }
+    );
+  }
+  return { applicationRow, caseRow };
+}
+
+function buildAssessmentResubmissionCommitManifest({
+  caseId,
+  applicationId,
+  uploadedObjects,
+} = {}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const documents = (Array.isArray(uploadedObjects) ? uploadedObjects : [])
+    .filter(record => normalisePositiveInteger(record?.documentId))
+    .map(record => ({
+      id: normalisePositiveInteger(record.documentId),
+      caseId: normalisePositiveInteger(record.caseId) || normalizedCaseId,
+      applicationId: normalisePositiveInteger(record.applicationId) || normalizedApplicationId,
+      filePath: normaliseString(record.key),
+      checksumSha256: normaliseString(record.checksumSha256),
+      documentCategory: normaliseString(record.documentCategory),
+    }));
+  return {
+    caseId: normalizedCaseId,
+    applicationId: normalizedApplicationId,
+    documents,
+  };
+}
+
+async function inspectAssessmentResubmissionCommitOutcome({
+  manifest,
+  connection = pool,
+} = {}) {
+  const documents = Array.isArray(manifest?.documents) ? manifest.documents : [];
+  if (
+    !connection ||
+    !normalisePositiveInteger(manifest?.caseId) ||
+    !normalisePositiveInteger(manifest?.applicationId) ||
+    !documents.length ||
+    documents.some(document => (
+      !normalisePositiveInteger(document?.id) ||
+      !normaliseString(document?.filePath) ||
+      !normaliseString(document?.checksumSha256) ||
+      !normaliseString(document?.documentCategory)
+    ))
+  ) {
+    return { outcome: 'uncertain', reason: 'assessment_commit_manifest_invalid' };
+  }
+
+  try {
+    const ids = documents.map(document => document.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const [rows] = await connection.query(
+      `SELECT id, case_id, application_id, file_path, checksum_sha256, status, document_category
+         FROM iset_document
+        WHERE id IN (${placeholders})`,
+      ids
+    );
+    const rowsById = new Map(
+      (Array.isArray(rows) ? rows : []).map(row => [normalisePositiveInteger(row?.id), row])
+    );
+    const exactMatch = rowsById.size === documents.length && documents.every(document => {
+      const row = rowsById.get(document.id);
+      return row &&
+        normalisePositiveInteger(row.case_id) === normalisePositiveInteger(document.caseId) &&
+        normalisePositiveInteger(row.application_id) === normalisePositiveInteger(document.applicationId) &&
+        normaliseString(row.file_path) === normaliseString(document.filePath) &&
+        normaliseString(row.checksum_sha256) === normaliseString(document.checksumSha256) &&
+        normaliseString(row.status) === 'active' &&
+        normaliseString(row.document_category) === normaliseString(document.documentCategory);
+    });
+    return exactMatch
+      ? { outcome: 'committed', documentIds: ids }
+      : { outcome: 'uncertain', reason: 'assessment_commit_manifest_not_observed', documentIds: ids };
+  } catch (error) {
+    return {
+      outcome: 'uncertain',
+      reason: 'assessment_commit_reconciliation_failed',
+      error,
+    };
+  }
+}
+
+function destroyAssessmentMutationConnection(connection, logger = console) {
+  if (!connection) return;
+  try {
+    connection.destroy?.();
+  } catch (error) {
+    logger?.error?.(
+      '[assessment-resubmit] failed to destroy an unsafe database connection: %s',
+      error?.message || error
+    );
+  }
+}
+
+async function commitAssessmentResubmissionTransaction({
+  connection,
+  manifest,
+  inspectCommitFn = inspectAssessmentResubmissionCommitOutcome,
+  logger = console,
+} = {}) {
+  if (!connection || typeof connection.commit !== 'function') {
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_commit_connection_required',
+      'The assessment transaction connection is unavailable.'
+    );
+  }
+  try {
+    await connection.commit();
+    return { outcome: 'committed', recovered: false, connectionDestroyed: false };
+  } catch (cause) {
+    destroyAssessmentMutationConnection(connection, logger);
+    let inspection;
+    try {
+      inspection = await inspectCommitFn({ manifest });
+    } catch (inspectionError) {
+      inspection = {
+        outcome: 'uncertain',
+        reason: 'assessment_commit_reconciliation_failed',
+        error: inspectionError,
+      };
+    }
+    if (inspection?.outcome === 'committed') {
+      logger?.warn?.(
+        '[assessment-resubmit] recovered an applied COMMIT after acknowledgement loss (application=%s)',
+        manifest?.applicationId || 'unknown'
+      );
+      return {
+        outcome: 'committed',
+        recovered: true,
+        connectionDestroyed: true,
+        inspection,
+      };
+    }
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_resubmit_commit_outcome_uncertain',
+      'PATH could not confirm whether the corrected assessment was resubmitted. Do not try again until support checks the case.',
+      {
+        cause,
+        commitOutcome: 'uncertain',
+        connectionDestroyed: true,
+        inspection,
+        retrySafe: false,
+        manualReviewRequired: true,
+      }
+    );
+  }
+}
+
+async function recoverAssessmentResubmissionFailure({
+  connection,
+  transactionStarted,
+  commitAttempted = false,
+  commitOutcome = 'not_attempted',
+  uploadedObjects,
+  originalError,
+  cleanupFn = compensateAssessmentGeneratedObjects,
+  logger = console,
+} = {}) {
+  const releaseConnection = () => {
+    if (!connection) return;
+    try {
+      connection.release?.();
+    } catch (releaseError) {
+      destroyAssessmentMutationConnection(connection, logger);
+    } finally {
+      connection = null;
+    }
+  };
+  const destroyConnection = () => {
+    if (!connection) return;
+    destroyAssessmentMutationConnection(connection, logger);
+    connection = null;
+  };
+
+  if (commitAttempted || commitOutcome === 'uncertain') {
+    destroyConnection();
+    if (originalError?.manualReviewRequired === true && originalError?.retrySafe === false) {
+      return originalError;
+    }
+    return createAssessmentResubmissionIntegrityError(
+      'assessment_resubmit_commit_outcome_uncertain',
+      'PATH could not confirm whether the corrected assessment was resubmitted. Do not try again until support checks the case.',
+      {
+        cause: originalError,
+        commitOutcome: 'uncertain',
+        retrySafe: false,
+        manualReviewRequired: true,
+      }
+    );
+  }
+
+  if (connection && transactionStarted) {
+    try {
+      await connection.rollback();
+    } catch (rollbackError) {
+      destroyConnection();
+      return createAssessmentResubmissionIntegrityError(
+        'assessment_resubmit_rollback_outcome_uncertain',
+        'PATH could not confirm that the failed assessment resubmission rolled back. Do not try again until support checks the case.',
+        {
+          cause: originalError,
+          rollbackError,
+          commitOutcome: 'uncertain',
+          retrySafe: false,
+          manualReviewRequired: true,
+        }
+      );
+    }
+  }
+  releaseConnection();
+
+  let cleanupResult;
+  try {
+    cleanupResult = await cleanupFn(uploadedObjects, { logger });
+  } catch (cleanupError) {
+    return createAssessmentResubmissionIntegrityError(
+      'assessment_resubmit_cleanup_incomplete',
+      'The assessment transaction rolled back, but PATH could not verify cleanup of its generated files. Do not try again until support checks the case.',
+      {
+        cause: originalError,
+        cleanupError,
+        retrySafe: false,
+        manualReviewRequired: true,
+      }
+    );
+  }
+  if (Number(cleanupResult?.failed || 0) > 0) {
+    return createAssessmentResubmissionIntegrityError(
+      'assessment_resubmit_cleanup_incomplete',
+      'The assessment transaction rolled back, but PATH could not verify cleanup of its generated files. Do not try again until support checks the case.',
+      {
+        cause: originalError,
+        cleanupResult,
+        retrySafe: false,
+        manualReviewRequired: true,
+      }
+    );
+  }
+
+  if (originalError && typeof originalError === 'object') {
+    if (typeof originalError.retrySafe !== 'boolean') originalError.retrySafe = true;
+    if (typeof originalError.manualReviewRequired !== 'boolean') {
+      originalError.manualReviewRequired = false;
+    }
+    originalError.objectCompensated = Number(cleanupResult?.deleted || 0) > 0;
+    originalError.commitOutcome = 'not_attempted';
+    return originalError;
+  }
+  return createAssessmentResubmissionIntegrityError(
+    'assessment_resubmit_failed',
+    String(originalError || 'Assessment resubmission failed.'),
+    { retrySafe: true, manualReviewRequired: false, httpStatus: 500 }
+  );
 }
 
 async function storeFundingOverviewPdfDocument({
@@ -3174,7 +3803,8 @@ async function storeFundingOverviewPdfDocument({
   pdfBuffer,
   isRedline = false,
   signedByClient = false,
-  connection = pool
+  connection = pool,
+  uploadedObjectKeys = null
 }) {
   if (!caseId || !pdfBuffer) return null;
   const normalizedCaseId = normalisePositiveInteger(caseId);
@@ -3207,18 +3837,47 @@ async function storeFundingOverviewPdfDocument({
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
   const normalizedActorUserId = normalisePositiveInteger(actorUserId);
   let relativePath = null;
-  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+  const {
+    generateKey,
+    presignPut,
+    headObject,
+    DRIVER,
+    OBJECT_VERSION_COMPENSATION_SUPPORTED,
+  } = require('../ISET-intake/s3Provider');
   if (DRIVER !== 's3') {
     throw new Error('s3_upload_unavailable');
   }
+  if (
+    Array.isArray(uploadedObjectKeys) &&
+    (OBJECT_VERSION_COMPENSATION_SUPPORTED !== true || typeof headObject !== 'function')
+  ) {
+    throw new Error('s3_version_compensation_unavailable');
+  }
   const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
   const presigned = await presignPut({ key, contentType: 'application/pdf' });
-  await axios.put(presigned.url, pdfBuffer, {
-    headers: {
-      ...(presigned.headers || {}),
-      'Content-Type': 'application/pdf',
-      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+  const uploadRecord = trackGeneratedObjectUploadAttempt(uploadedObjectKeys, key);
+  let uploadResponse = null;
+  try {
+    uploadResponse = await axios.put(presigned.url, pdfBuffer, {
+      headers: {
+        ...(presigned.headers || {}),
+        'Content-Type': 'application/pdf',
+        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+      }
+    });
+  } catch (uploadError) {
+    const rejectedVersionId = resolveS3UploadVersionId(uploadError?.response?.headers);
+    if (uploadRecord && rejectedVersionId) {
+      uploadRecord.versionId = rejectedVersionId;
+      uploadRecord.versionIdentityVerified = true;
     }
+    throw uploadError;
+  }
+  await verifyGeneratedObjectUploadIdentity({
+    uploadRecord,
+    uploadResponse,
+    headObjectFn: headObject,
+    versionCompensationSupported: OBJECT_VERSION_COMPENSATION_SUPPORTED,
   });
   relativePath = key;
   if (!relativePath) {
@@ -3358,7 +4017,8 @@ async function storeFundingAgreementPdfDocument({
   pdfBuffer,
   isRedline = false,
   signedByClient = false,
-  connection = null
+  connection = null,
+  uploadedObjectKeys = null
 }) {
   if (!caseId || !applicationId || !pdfBuffer) return null;
   const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
@@ -3384,18 +4044,47 @@ async function storeFundingAgreementPdfDocument({
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
   const normalizedActorUserId = normalisePositiveInteger(actorUserId);
   let relativePath = null;
-  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+  const {
+    generateKey,
+    presignPut,
+    headObject,
+    DRIVER,
+    OBJECT_VERSION_COMPENSATION_SUPPORTED,
+  } = require('../ISET-intake/s3Provider');
   if (DRIVER !== 's3') {
     throw new Error('s3_upload_unavailable');
   }
+  if (
+    Array.isArray(uploadedObjectKeys) &&
+    (OBJECT_VERSION_COMPENSATION_SUPPORTED !== true || typeof headObject !== 'function')
+  ) {
+    throw new Error('s3_version_compensation_unavailable');
+  }
   const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
   const presigned = await presignPut({ key, contentType: 'application/pdf' });
-  await axios.put(presigned.url, pdfBuffer, {
-    headers: {
-      ...(presigned.headers || {}),
-      'Content-Type': 'application/pdf',
-      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+  const uploadRecord = trackGeneratedObjectUploadAttempt(uploadedObjectKeys, key);
+  let uploadResponse = null;
+  try {
+    uploadResponse = await axios.put(presigned.url, pdfBuffer, {
+      headers: {
+        ...(presigned.headers || {}),
+        'Content-Type': 'application/pdf',
+        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+      }
+    });
+  } catch (uploadError) {
+    const rejectedVersionId = resolveS3UploadVersionId(uploadError?.response?.headers);
+    if (uploadRecord && rejectedVersionId) {
+      uploadRecord.versionId = rejectedVersionId;
+      uploadRecord.versionIdentityVerified = true;
     }
+    throw uploadError;
+  }
+  await verifyGeneratedObjectUploadIdentity({
+    uploadRecord,
+    uploadResponse,
+    headObjectFn: headObject,
+    versionCompensationSupported: OBJECT_VERSION_COMPENSATION_SUPPORTED,
   });
   relativePath = key;
   if (!relativePath) {
@@ -12361,6 +13050,72 @@ const APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS = [
   'fundingDecisionReasonExplanation'
 ];
 
+function canonicalizeCaseContextForComparison(value) {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeCaseContextForComparison);
+  }
+  if (!isPlainObject(value)) return value;
+  return Object.keys(value)
+    .sort()
+    .reduce((result, key) => {
+      result[key] = canonicalizeCaseContextForComparison(value[key]);
+      return result;
+    }, {});
+}
+
+function applicationAssessmentCaseContextMutationKinds(
+  existingContext = {},
+  projectedContext = {},
+  applicationId = null
+) {
+  const applicationKey = normalizeApplicationContextKey(applicationId);
+  const buildViews = rawContext => {
+    const context = isPlainObject(rawContext)
+      ? canonicalizeCaseContextForComparison(rawContext)
+      : rawContext;
+    if (!isPlainObject(context)) {
+      return { content: context, decision: {} };
+    }
+    const content = canonicalizeCaseContextForComparison(context);
+    const decision = {};
+    APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS.forEach(key => {
+      if (Object.prototype.hasOwnProperty.call(content, key)) {
+        decision[key] = content[key];
+        delete content[key];
+      }
+    });
+    if (
+      applicationKey &&
+      isPlainObject(content[APPLICATION_ASSESSMENT_CONTEXT_KEY]) &&
+      isPlainObject(content[APPLICATION_ASSESSMENT_CONTEXT_KEY][applicationKey])
+    ) {
+      const scopedContent = {
+        ...content[APPLICATION_ASSESSMENT_CONTEXT_KEY][applicationKey],
+      };
+      APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS.forEach(key => {
+        if (Object.prototype.hasOwnProperty.call(scopedContent, key)) {
+          decision[key] = scopedContent[key];
+          delete scopedContent[key];
+        }
+      });
+      content[APPLICATION_ASSESSMENT_CONTEXT_KEY] = {
+        ...content[APPLICATION_ASSESSMENT_CONTEXT_KEY],
+        [applicationKey]: scopedContent,
+      };
+    }
+    return {
+      content: canonicalizeCaseContextForComparison(content),
+      decision: canonicalizeCaseContextForComparison(decision),
+    };
+  };
+  const before = buildViews(existingContext);
+  const after = buildViews(projectedContext);
+  return {
+    contentChanged: JSON.stringify(before.content) !== JSON.stringify(after.content),
+    decisionChanged: JSON.stringify(before.decision) !== JSON.stringify(after.decision),
+  };
+}
+
 function clearApplicationAssessmentDecisionContext(context = {}, applicationId = null) {
   if (!isPlainObject(context)) return {};
   const nextContext = stripApplicationAssessmentRootContext(context) || {};
@@ -12678,6 +13433,131 @@ function assertApplicationAssessmentReturnedToSubmitterActor({
   error.status = 403;
   error.publicMessage =
     'Only the staff member who originally submitted this assessment can edit or resubmit it after it is returned for correction.';
+  throw error;
+}
+
+function assertApplicationAssessmentMutationStageAllowed({
+  reviewWorkflow,
+  assessmentMutationRequested = false,
+} = {}) {
+  if (!assessmentMutationRequested) {
+    return { enforced: false, reason: 'no_assessment_mutation' };
+  }
+  const stage = reviewWorkflow?.current_stage || null;
+  const lockedStages = new Set([
+    REVIEW_STAGES.RmReview,
+    REVIEW_STAGES.ReturnedToRm,
+    REVIEW_STAGES.NwacReview,
+    REVIEW_STAGES.FinalDecisionRecorded,
+  ]);
+  if (!lockedStages.has(stage)) {
+    return { enforced: false, reason: 'stage_allows_assessment_mutation' };
+  }
+  const error = new Error('assessment_submission_locked');
+  error.code = 'assessment_submission_locked';
+  error.status = 409;
+  error.publicMessage =
+    stage === REVIEW_STAGES.ReturnedToRm
+      ? 'Forward the requested changes to the original submitter before editing this assessment.'
+      : 'This assessment cannot be edited at its current review stage.';
+  throw error;
+}
+
+const APPLICATION_ASSESSMENT_NWAC_DECISION_PAYLOAD_KEYS = new Set([
+  'assessment_nwac_review_status',
+  'assessment_nwac_review',
+  'assessment_nwac_reason',
+]);
+const APPLICATION_ASSESSMENT_NWAC_AUXILIARY_PAYLOAD_KEYS = new Set([
+  'assessment_intervention_pot_id',
+  'assessment_budget_pot_id',
+]);
+
+function classifyApplicationAssessmentMutationRequest({
+  assessmentPayloadKeysPresent = [],
+  assessmentReviewStatusProvided = false,
+  conflictSignatureRequested = false,
+  caseContextMutationKinds = null,
+} = {}) {
+  const presentKeys = Array.isArray(assessmentPayloadKeysPresent)
+    ? assessmentPayloadKeysPresent
+    : [];
+  const assessmentBodyPayloadKeysPresent = presentKeys.filter(key => (
+    key !== 'assessment_esdc_eligibility' &&
+    !APPLICATION_ASSESSMENT_NWAC_DECISION_PAYLOAD_KEYS.has(key)
+  ));
+  const nwacDecisionAuxiliaryPayloadOnly =
+    assessmentReviewStatusProvided &&
+    assessmentBodyPayloadKeysPresent.every(key => (
+      APPLICATION_ASSESSMENT_NWAC_AUXILIARY_PAYLOAD_KEYS.has(key)
+    ));
+  const assessmentBodyMutationRequested =
+    conflictSignatureRequested ||
+    Boolean(caseContextMutationKinds?.contentChanged) ||
+    (
+      assessmentBodyPayloadKeysPresent.length > 0 &&
+      !nwacDecisionAuxiliaryPayloadOnly
+    );
+  const assessmentDecisionMutationRequested =
+    assessmentReviewStatusProvided ||
+    Boolean(caseContextMutationKinds?.decisionChanged) ||
+    (
+      assessmentReviewStatusProvided &&
+      assessmentBodyPayloadKeysPresent.some(key => (
+        APPLICATION_ASSESSMENT_NWAC_AUXILIARY_PAYLOAD_KEYS.has(key)
+      ))
+    );
+  return {
+    assessmentBodyPayloadKeysPresent,
+    assessmentBodyMutationRequested,
+    assessmentDecisionMutationRequested,
+  };
+}
+
+function assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+  reviewWorkflow,
+  applicationStatusMutationRequested = false,
+  caseStatusMutationRequested = false,
+  assessmentSubmittedForWorkflow = false,
+  assessmentReviewStatusProvided = false,
+  canRecordDecision = false,
+  actorRole = null,
+  beforeApplicationStatus = null,
+  nextApplicationStatus = null,
+} = {}) {
+  if (
+    !reviewWorkflow ||
+    (!applicationStatusMutationRequested && !caseStatusMutationRequested)
+  ) {
+    return { enforced: false, reason: 'no_review_owned_status_mutation' };
+  }
+  const reviewStage = reviewWorkflow.current_stage || null;
+  const systemAdministratorSupport = canonicaliseAccessRole(actorRole) === 'System Administrator';
+  const submitterResubmission =
+    reviewStage === REVIEW_STAGES.ReturnedToSubmitter &&
+    assessmentSubmittedForWorkflow;
+  const decisionMakerTransition =
+    reviewStage === REVIEW_STAGES.NwacReview &&
+    assessmentReviewStatusProvided &&
+    canRecordDecision;
+  const postDecisionCompletion =
+    reviewStage === REVIEW_STAGES.FinalDecisionRecorded &&
+    !caseStatusMutationRequested &&
+    beforeApplicationStatus === 'approved' &&
+    nextApplicationStatus === 'completed';
+  if (
+    systemAdministratorSupport ||
+    submitterResubmission ||
+    decisionMakerTransition ||
+    postDecisionCompletion
+  ) {
+    return { enforced: true, reason: 'authorized_review_owned_status_transition' };
+  }
+  const error = new Error('assessment_review_status_transition_forbidden');
+  error.code = 'assessment_review_status_transition_forbidden';
+  error.status = 409;
+  error.publicMessage =
+    'Use the assessment review action for its current stage instead of changing the application status directly.';
   throw error;
 }
 
@@ -14887,7 +15767,11 @@ async function buildFundingOverviewSnapshot({
     params
   );
   if (!caseRow) throw new Error('case_not_found');
-  const resolvedApplicationId = normalisePositiveInteger(caseRow.application_id) || requestedApplicationId || null;
+  const joinedApplicationId = normalisePositiveInteger(caseRow.application_id);
+  if (requestedApplicationId && joinedApplicationId !== requestedApplicationId) {
+    throw new Error('funding_overview_application_scope_conflict');
+  }
+  const resolvedApplicationId = joinedApplicationId || null;
   let applicationPayload = null;
   if (resolvedApplicationId) {
     applicationPayload = await readApplicationPayload(connection, resolvedApplicationId, { forUpdate: false });
@@ -14895,9 +15779,12 @@ async function buildFundingOverviewSnapshot({
   const payload = applicationPayload?.payload || {};
   const baseAnswers = sanitiseAnswersPayload(payload.answers || {});
   const caseContext = safeJsonParse(caseRow.case_context_json, null) || {};
+  const applicationCaseContext = resolvedApplicationId
+    ? resolveApplicationAssessmentCaseContext(caseContext, resolvedApplicationId)
+    : {};
   const contextAnswers =
-    caseContext.applicationAnswers && typeof caseContext.applicationAnswers === 'object'
-      ? sanitiseAnswersPayload(caseContext.applicationAnswers)
+    applicationCaseContext.applicationAnswers && typeof applicationCaseContext.applicationAnswers === 'object'
+      ? sanitiseAnswersPayload(applicationCaseContext.applicationAnswers)
       : {};
   let answers = {
     ...baseAnswers,
@@ -14910,7 +15797,7 @@ async function buildFundingOverviewSnapshot({
     caseRow,
     payload,
     answers,
-    caseContext
+    caseContext: applicationCaseContext
   });
   const referenceNumber =
     normaliseString(caseRow.reference_number) ||
@@ -15001,14 +15888,490 @@ function buildFundingOverviewRenderSet({
   };
 }
 
-async function ensureFundingOverviewSeries(connection, { caseId, templateKey, createdByStaffProfileId }) {
+function resolveVersionSnapshotApplicationId(rowOrMetadata) {
+  const metadataValue = rowOrMetadata && typeof rowOrMetadata === 'object' &&
+    Object.prototype.hasOwnProperty.call(rowOrMetadata, 'metadata_json')
+    ? rowOrMetadata.metadata_json
+    : rowOrMetadata;
+  const metadata = safeJsonParse(metadataValue, metadataValue) || {};
+  return normalisePositiveInteger(metadata?.case?.applicationId) || null;
+}
+
+function filterApplicationScopedVersionRows(rows, applicationId) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!normalizedApplicationId) return [];
+  return (Array.isArray(rows) ? rows : []).filter(
+    row => resolveVersionSnapshotApplicationId(row) === normalizedApplicationId
+  );
+}
+
+function assertNoUnscopedUnsignedVersionRows(rows, errorCode) {
+  const hasUnscopedUnsignedVersion = (Array.isArray(rows) ? rows : []).some(row => (
+    (row?.status === 'draft' || row?.status === 'sent') &&
+    !resolveVersionSnapshotApplicationId(row)
+  ));
+  if (hasUnscopedUnsignedVersion) {
+    throw new Error(errorCode || 'version_application_scope_unknown');
+  }
+}
+
+async function lockCaseForVersionedSigning(connection, caseId) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!normalizedCaseId) throw new Error('invalid_case_id');
   const [[row]] = await connection.query(
+    `SELECT id
+       FROM iset_case
+      WHERE id = ?
+      LIMIT 1 FOR UPDATE`,
+    [normalizedCaseId]
+  );
+  if (!row?.id) throw new Error('case_not_found');
+  return normalizedCaseId;
+}
+
+async function deleteUploadedObjectKeysBestEffort(
+  uploadedObjects,
+  {
+    deleteObjectFn = null,
+    headObjectFn = null,
+    versionCompensationSupported = null,
+    driver = null,
+    logger = console,
+  } = {}
+) {
+  const recordsByIdentity = new Map();
+  for (const value of Array.isArray(uploadedObjects) ? uploadedObjects : []) {
+    const key = normaliseString(
+      value && typeof value === 'object' ? value.key : value
+    );
+    if (!key) continue;
+    const versionId = normaliseString(
+      value && typeof value === 'object' ? value.versionId : null
+    ) || null;
+    const versionIdentityVerified = Boolean(
+      value && typeof value === 'object' && value.versionIdentityVerified === true
+    );
+    const identityKey = `${key}\u0000${versionIdentityVerified ? versionId || 'unversioned' : 'unresolved'}`;
+    recordsByIdentity.set(identityKey, { key, versionId, versionIdentityVerified });
+  }
+  const records = Array.from(recordsByIdentity.values()).reverse();
+  if (!records.length) return { attempted: 0, deleted: 0, failed: 0 };
+
+  let deleteObject = deleteObjectFn;
+  let headObject = headObjectFn;
+  let supportsVersionCompensation = versionCompensationSupported;
+  let resolvedDriver = driver;
+  if (
+    typeof deleteObject !== 'function' ||
+    typeof headObject !== 'function' ||
+    supportsVersionCompensation === null ||
+    typeof supportsVersionCompensation === 'undefined'
+  ) {
+    try {
+      const s3Provider = require('../ISET-intake/s3Provider');
+      if (typeof deleteObject !== 'function') deleteObject = s3Provider.deleteObject;
+      if (typeof headObject !== 'function') headObject = s3Provider.headObject;
+      if (supportsVersionCompensation === null || typeof supportsVersionCompensation === 'undefined') {
+        supportsVersionCompensation = s3Provider.OBJECT_VERSION_COMPENSATION_SUPPORTED;
+      }
+      if (!resolvedDriver) resolvedDriver = s3Provider.DRIVER;
+    } catch (providerError) {
+      logger?.warn?.(
+        '[messages] rolled-back object cleanup provider unavailable: %s',
+        providerError?.message || providerError
+      );
+      return { attempted: records.length, deleted: 0, failed: records.length };
+    }
+  }
+  if (resolvedDriver && resolvedDriver !== 's3') {
+    return { attempted: 0, deleted: 0, failed: 0 };
+  }
+  if (
+    supportsVersionCompensation !== true ||
+    typeof deleteObject !== 'function' ||
+    typeof headObject !== 'function'
+  ) {
+    logger?.warn?.('[messages] exact rolled-back object version cleanup is unavailable');
+    return { attempted: records.length, deleted: 0, failed: records.length };
+  }
+
+  let deleted = 0;
+  let failed = 0;
+  for (const record of records) {
+    try {
+      if (!record.versionIdentityVerified) {
+        const head = await headObject({ key: record.key });
+        if (!head?.exists) {
+          deleted += 1;
+          continue;
+        }
+        if (!Object.prototype.hasOwnProperty.call(head, 'versionId')) {
+          throw new Error('s3_upload_identity_unverified');
+        }
+        record.versionId = normaliseString(head.versionId) || null;
+        record.versionIdentityVerified = true;
+      }
+      await deleteObject({
+        key: record.key,
+        ...(record.versionId ? { versionId: record.versionId } : {}),
+      });
+      deleted += 1;
+    } catch (cleanupError) {
+      failed += 1;
+      logger?.warn?.(
+        '[messages] failed to remove rolled-back generated object %s version %s: %s',
+        record.key,
+        record.versionId || 'unversioned-or-unresolved',
+        cleanupError?.message || cleanupError
+      );
+    }
+  }
+  return { attempted: records.length, deleted, failed };
+}
+
+async function inspectCaseMessageCommitOutcome({
+  messageId,
+  caseId,
+  applicationId,
+  senderActorType,
+  senderUserId,
+  senderStaffProfileId,
+  recipientUserId,
+  subject,
+  body,
+  urgent,
+  signingRequestIds = [],
+  connection = pool,
+} = {}) {
+  const normalizedMessageId = normalisePositiveInteger(messageId);
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!normalizedMessageId || !normalizedCaseId) {
+    return { outcome: 'uncertain', reason: 'invalid_message_commit_identity' };
+  }
+  try {
+    const [[row]] = await connection.query(
+      `SELECT id, sender_actor_type, sender_user_id, sender_staff_profile_id,
+              recipient_actor_type, recipient_user_id, recipient_staff_profile_id,
+              case_id, application_id, subject, body, status, urgent
+         FROM messages
+        WHERE id = ?
+        LIMIT 1`,
+      [normalizedMessageId]
+    );
+    // A separate connection not seeing the row after COMMIT acknowledgement
+    // loss does not prove rollback: the original server-side COMMIT may still
+    // be completing. Only exact presence proves the applied outcome.
+    if (!row) {
+      return {
+        outcome: 'uncertain',
+        reason: 'message_commit_not_observed',
+        messageId: normalizedMessageId,
+      };
+    }
+    const exactMatch =
+      normalisePositiveInteger(row.id) === normalizedMessageId &&
+      normaliseString(row.sender_actor_type) === normaliseString(senderActorType) &&
+      normalisePositiveInteger(row.sender_user_id) === normalisePositiveInteger(senderUserId) &&
+      normalisePositiveInteger(row.sender_staff_profile_id) === normalisePositiveInteger(senderStaffProfileId) &&
+      normaliseString(row.recipient_actor_type) === 'applicant_user' &&
+      normalisePositiveInteger(row.recipient_user_id) === normalisePositiveInteger(recipientUserId) &&
+      normalisePositiveInteger(row.recipient_staff_profile_id) === null &&
+      normalisePositiveInteger(row.case_id) === normalizedCaseId &&
+      normalisePositiveInteger(row.application_id) === normalizedApplicationId &&
+      String(row.subject ?? '') === String(subject ?? '') &&
+      String(row.body ?? '') === String(body ?? '') &&
+      normaliseString(row.status) === 'unread' &&
+      Boolean(Number(row.urgent || 0)) === Boolean(urgent);
+    if (!exactMatch) {
+      return { outcome: 'uncertain', reason: 'message_commit_identity_mismatch', messageId: normalizedMessageId };
+    }
+    const expectedSigningRequestIds = (Array.isArray(signingRequestIds) ? signingRequestIds : [])
+      .map(normalisePositiveInteger)
+      .filter(Boolean)
+      .sort((left, right) => left - right);
+    if (expectedSigningRequestIds.length) {
+      const [requestRows] = await connection.query(
+        `SELECT msr.signing_request_id, sr.case_id, sr.participant_user_id, sr.status
+           FROM message_signing_request msr
+           JOIN signing_request sr ON sr.id = msr.signing_request_id
+          WHERE msr.message_id = ?
+          ORDER BY msr.signing_request_id ASC`,
+        [normalizedMessageId]
+      );
+      const exactRequestManifest =
+        Array.isArray(requestRows) &&
+        requestRows.length === expectedSigningRequestIds.length &&
+        requestRows.every((requestRow, index) => (
+          normalisePositiveInteger(requestRow.signing_request_id) === expectedSigningRequestIds[index] &&
+          normalisePositiveInteger(requestRow.case_id) === normalizedCaseId &&
+          normalisePositiveInteger(requestRow.participant_user_id) === normalisePositiveInteger(recipientUserId) &&
+          ['pending', 'viewed'].includes(String(requestRow.status || '').trim().toLowerCase())
+        ));
+      if (!exactRequestManifest) {
+        return { outcome: 'uncertain', reason: 'message_commit_request_manifest_mismatch', messageId: normalizedMessageId };
+      }
+    }
+    return { outcome: 'committed', messageId: normalizedMessageId };
+  } catch (error) {
+    return {
+      outcome: 'uncertain',
+      reason: 'message_commit_reconciliation_failed',
+      messageId: normalizedMessageId,
+      error,
+    };
+  }
+}
+
+async function inspectGeneratedVersionCommitOutcome({
+  versionKind,
+  versionId,
+  seriesId,
+  versionNumber,
+  connection = pool,
+} = {}) {
+  const normalizedVersionId = normalisePositiveInteger(versionId);
+  const normalizedSeriesId = normalisePositiveInteger(seriesId);
+  const normalizedVersionNumber = normalisePositiveInteger(versionNumber);
+  if (!normalizedVersionId || !normalizedSeriesId || !normalizedVersionNumber) {
+    return { outcome: 'uncertain', reason: 'invalid_version_commit_identity' };
+  }
+  try {
+    let rows;
+    if (versionKind === 'funding_overview') {
+      [rows] = await connection.query(
+        `SELECT id, series_id, version_number, status
+           FROM funding_overview_version
+          WHERE id = ?
+          LIMIT 1`,
+        [normalizedVersionId]
+      );
+    } else if (versionKind === 'cfa') {
+      [rows] = await connection.query(
+        `SELECT id, series_id, version_number, status
+           FROM cfa_version
+          WHERE id = ?
+          LIMIT 1`,
+        [normalizedVersionId]
+      );
+    } else {
+      return { outcome: 'uncertain', reason: 'invalid_version_commit_kind' };
+    }
+    const row = Array.isArray(rows) ? rows[0] : null;
+    // Exact presence proves an applied COMMIT. Absence on another connection
+    // is not proof that an acknowledgement-lost COMMIT was rolled back.
+    if (!row) {
+      return {
+        outcome: 'uncertain',
+        reason: 'version_commit_not_observed',
+        versionId: normalizedVersionId,
+      };
+    }
+    const exactMatch =
+      normalisePositiveInteger(row.id) === normalizedVersionId &&
+      normalisePositiveInteger(row.series_id) === normalizedSeriesId &&
+      normalisePositiveInteger(row.version_number) === normalizedVersionNumber &&
+      normaliseString(row.status) === 'draft';
+    return exactMatch
+      ? { outcome: 'committed', versionId: normalizedVersionId }
+      : { outcome: 'uncertain', reason: 'version_commit_identity_mismatch', versionId: normalizedVersionId };
+  } catch (error) {
+    return {
+      outcome: 'uncertain',
+      reason: 'version_commit_reconciliation_failed',
+      versionId: normalizedVersionId,
+      error,
+    };
+  }
+}
+
+async function commitCaseMessageWriteTransaction({
+  connection,
+  messageIdentity,
+  signingRequestIds = [],
+  inspectCommitFn = inspectCaseMessageCommitOutcome,
+  logger = console,
+} = {}) {
+  if (!connection || typeof connection.commit !== 'function') {
+    throw new Error('message_write_connection_required');
+  }
+  try {
+    await connection.commit();
+    return { outcome: 'committed', recovered: false };
+  } catch (commitError) {
+    const inspection = await inspectCommitFn({
+      ...(messageIdentity || {}),
+      signingRequestIds,
+    });
+    if (inspection?.outcome === 'committed') {
+      logger?.warn?.(
+        '[messages] recovered an applied message/signing COMMIT after acknowledgement loss (message=%s)',
+        messageIdentity?.messageId || 'unknown'
+      );
+      return { outcome: 'committed', recovered: true, inspection };
+    }
+    const commitOutcome = inspection?.outcome === 'rolled_back' ? 'rolled_back' : 'uncertain';
+    const publicCommitError = createCaseMessageHttpError(
+      503,
+      commitOutcome === 'rolled_back'
+        ? 'message_send_commit_failed'
+        : 'message_send_outcome_uncertain',
+      commitOutcome === 'rolled_back'
+        ? 'The message was not sent. You can safely try again.'
+        : 'PATH could not confirm whether the message was sent. Do not resend it until support checks the case.'
+    );
+    publicCommitError.cause = commitError;
+    publicCommitError.commitOutcome = commitOutcome;
+    publicCommitError.commitInspection = inspection;
+    throw publicCommitError;
+  }
+}
+
+async function commitGeneratedVersionWriteTransaction({
+  connection,
+  versionKind,
+  versionId,
+  seriesId,
+  versionNumber,
+  inspectCommitFn = inspectGeneratedVersionCommitOutcome,
+  logger = console,
+  logLabel = 'generated-version',
+} = {}) {
+  if (!connection || typeof connection.commit !== 'function') {
+    throw new Error('version_write_connection_required');
+  }
+  try {
+    await connection.commit();
+    return { outcome: 'committed', recovered: false };
+  } catch (commitError) {
+    const inspection = await inspectCommitFn({
+      versionKind,
+      versionId,
+      seriesId,
+      versionNumber,
+    });
+    if (inspection?.outcome === 'committed') {
+      logger?.warn?.(
+        '[%s] recovered an applied version COMMIT after acknowledgement loss (version=%s)',
+        logLabel,
+        versionId
+      );
+      return { outcome: 'committed', recovered: true, inspection };
+    }
+    commitError.commitOutcome = inspection?.outcome === 'rolled_back' ? 'rolled_back' : 'uncertain';
+    commitError.commitInspection = inspection;
+    throw commitError;
+  }
+}
+
+async function rollbackCaseMessageWriteTransaction({
+  connection,
+  transactionStarted,
+  commitAttempted = false,
+  commitOutcome = null,
+  uploadedObjectKeys,
+  originalError,
+  cleanupFn = deleteUploadedObjectKeysBestEffort,
+  logger = console,
+} = {}) {
+  const resolvedCommitOutcome = commitOutcome || (commitAttempted ? 'uncertain' : 'not_attempted');
+  const commitOutcomeUncertain = resolvedCommitOutcome === 'uncertain';
+  const shouldRollback = transactionStarted && resolvedCommitOutcome === 'not_attempted';
+  let rollbackConfirmed = !shouldRollback;
+  if (connection && shouldRollback) {
+    try {
+      await connection.rollback();
+      rollbackConfirmed = true;
+    } catch (rollbackError) {
+      logger?.error?.(
+        '[messages] failed to roll back message/signing transaction',
+        rollbackError?.message || rollbackError
+      );
+    }
+  }
+  const rollbackOutcomeUncertain = shouldRollback && !rollbackConfirmed;
+  const connectionOutcomeUncertain = commitOutcomeUncertain || rollbackOutcomeUncertain;
+  const shouldCompensate =
+    resolvedCommitOutcome === 'rolled_back' ||
+    (resolvedCommitOutcome === 'not_attempted' && rollbackConfirmed);
+  if (commitOutcomeUncertain) {
+    logger?.error?.(
+      '[messages] message/signing commit outcome is uncertain; generated objects retained for database reconciliation'
+    );
+  }
+  if (rollbackOutcomeUncertain) {
+    logger?.error?.(
+      '[messages] message/signing rollback outcome is uncertain; generated objects retained for database reconciliation'
+    );
+  }
+  if (connection) {
+    if (connectionOutcomeUncertain) {
+      try {
+        connection.destroy?.();
+      } catch (destroyError) {
+        logger?.error?.(
+          '[messages] failed to destroy connection with uncertain transaction outcome',
+          destroyError?.message || destroyError
+        );
+      }
+    } else {
+      try {
+        connection.release();
+      } catch (releaseError) {
+        logger?.error?.(
+          '[messages] failed to release message/signing connection',
+          releaseError?.message || releaseError
+        );
+      }
+    }
+  }
+  if (shouldCompensate) {
+    try {
+      const cleanupResult = await cleanupFn(uploadedObjectKeys, { logger });
+      if (Number(cleanupResult?.failed || 0) > 0) {
+        const cleanupError = createCaseMessageHttpError(
+          503,
+          'message_send_cleanup_incomplete',
+          'PATH rolled back the message, but could not verify cleanup of its generated files. Do not resend it until support checks the case.'
+        );
+        cleanupError.cause = originalError;
+        cleanupError.cleanupResult = cleanupResult;
+        cleanupError.retrySafe = false;
+        cleanupError.manualReviewRequired = true;
+        return cleanupError;
+      }
+    } catch (cleanupError) {
+      logger?.error?.(
+        '[messages] rolled-back object cleanup failed: %s',
+        cleanupError?.message || cleanupError
+      );
+      const publicCleanupError = createCaseMessageHttpError(
+        503,
+        'message_send_cleanup_incomplete',
+        'PATH rolled back the message, but could not verify cleanup of its generated files. Do not resend it until support checks the case.'
+      );
+      publicCleanupError.cause = originalError;
+      publicCleanupError.cleanupError = cleanupError;
+      publicCleanupError.retrySafe = false;
+      publicCleanupError.manualReviewRequired = true;
+      return publicCleanupError;
+    }
+  }
+  return originalError;
+}
+
+async function ensureFundingOverviewSeries(connection, { caseId, templateKey, createdByStaffProfileId }) {
+  const [rows] = await connection.query(
     `SELECT id
        FROM funding_overview_series
       WHERE case_id = ? AND template_key = ?
-      LIMIT 1`,
+      ORDER BY id ASC`,
     [caseId, templateKey]
   );
+  if (Array.isArray(rows) && rows.length > 1) {
+    throw new Error('funding_overview_series_ambiguous');
+  }
+  const row = Array.isArray(rows) ? rows[0] : null;
   if (row?.id) return Number(row.id);
   const [result] = await connection.query(
     `INSERT INTO funding_overview_series (case_id, template_key, created_by_staff_profile_id)
@@ -15034,6 +16397,22 @@ async function cancelUnsignedFundingOverviewSigningRequests(connection, versionI
   );
 }
 
+async function cancelUnsignedCfaSigningRequests(connection, versionIds = []) {
+  const ids = (Array.isArray(versionIds) ? versionIds : [])
+    .map(normalisePositiveInteger)
+    .filter(Boolean);
+  if (!ids.length) return;
+  const placeholders = ids.map(() => '?').join(',');
+  await connection.query(
+    `UPDATE signing_request
+        SET status = 'cancelled',
+            updated_at = NOW()
+      WHERE status IN ('pending', 'viewed')
+        AND JSON_UNQUOTE(JSON_EXTRACT(resolved_schema_json, '$.meta.cfaVersionId')) IN (${placeholders})`,
+    ids.map(String)
+  );
+}
+
 async function createFundingOverviewVersion({
   caseId,
   applicationId = null,
@@ -15043,63 +16422,30 @@ async function createFundingOverviewVersion({
   staffProfileId,
   preparedByName,
   sourceAnswersOverride = null,
-  connection = null
+  connection = null,
+  uploadedObjectKeys = null
 }) {
   let runner = connection;
   let release = false;
+  let commitAttempted = false;
+  let commitOutcome = 'not_attempted';
+  const createdObjectKeys = Array.isArray(uploadedObjectKeys) ? uploadedObjectKeys : [];
+  const createdObjectKeyStart = createdObjectKeys.length;
   if (!runner) {
     runner = await pool.getConnection();
     release = true;
-    await runner.beginTransaction();
+    try {
+      await runner.beginTransaction();
+    } catch (beginError) {
+      try { runner.release(); } catch (_) {}
+      throw beginError;
+    }
   }
   try {
     const normalizedCaseId = normalisePositiveInteger(caseId);
     if (!normalizedCaseId) throw new Error('invalid_case_id');
-    const seriesId = await ensureFundingOverviewSeries(runner, {
-      caseId: normalizedCaseId,
-      templateKey: FUNDING_OVERVIEW_TEMPLATE_KEY,
-      createdByStaffProfileId: staffProfileId || null
-    });
+    await lockCaseForVersionedSigning(runner, normalizedCaseId);
 
-    const [unsignedRows] = await runner.query(
-      `SELECT id
-         FROM funding_overview_version
-        WHERE series_id = ?
-          AND status IN ('draft', 'sent')`,
-      [seriesId]
-    );
-    const unsignedIds = (Array.isArray(unsignedRows) ? unsignedRows : [])
-      .map(row => normalisePositiveInteger(row.id))
-      .filter(Boolean);
-    if (unsignedIds.length) {
-      const placeholders = unsignedIds.map(() => '?').join(',');
-      await runner.query(
-        `UPDATE funding_overview_version
-            SET status = 'withdrawn'
-          WHERE id IN (${placeholders})`,
-        unsignedIds
-      );
-      await cancelUnsignedFundingOverviewSigningRequests(runner, unsignedIds);
-    }
-
-    const [[maxRow]] = await runner.query(
-      `SELECT MAX(version_number) AS max_version
-         FROM funding_overview_version
-        WHERE series_id = ?`,
-      [seriesId]
-    );
-    const nextVersionNumber = (Number(maxRow?.max_version) || 0) + 1;
-
-    const [[priorSignedRow]] = await runner.query(
-      `SELECT id, metadata_json
-         FROM funding_overview_version
-        WHERE series_id = ?
-          AND status = 'signed'
-        ORDER BY version_number DESC
-        LIMIT 1`,
-      [seriesId]
-    );
-    const previousSnapshot = safeJsonParse(priorSignedRow?.metadata_json, null);
     const snapshot = await buildFundingOverviewSnapshot({
       connection: runner,
       caseId: normalizedCaseId,
@@ -15109,6 +16455,65 @@ async function createFundingOverviewVersion({
       preparedByName,
       sourceAnswersOverride
     });
+    const snapshotApplicationId = resolveVersionSnapshotApplicationId(snapshot);
+    const requestedApplicationId = normalisePositiveInteger(applicationId);
+    if (!snapshotApplicationId || (requestedApplicationId && snapshotApplicationId !== requestedApplicationId)) {
+      throw new Error('funding_overview_application_scope_conflict');
+    }
+
+    const seriesId = await ensureFundingOverviewSeries(runner, {
+      caseId: normalizedCaseId,
+      templateKey: FUNDING_OVERVIEW_TEMPLATE_KEY,
+      createdByStaffProfileId: staffProfileId || null
+    });
+
+    const [versionRows] = await runner.query(
+      `SELECT id, version_number, status, metadata_json
+         FROM funding_overview_version
+        WHERE series_id = ?
+        ORDER BY version_number DESC, id DESC`,
+      [seriesId]
+    );
+    assertNoUnscopedUnsignedVersionRows(
+      versionRows,
+      'funding_overview_version_application_scope_unknown'
+    );
+    const applicationVersionRows = filterApplicationScopedVersionRows(
+      versionRows,
+      snapshotApplicationId
+    );
+    const priorApplicationVersionIds = applicationVersionRows
+      .map(row => normalisePositiveInteger(row.id))
+      .filter(Boolean);
+    const unsignedIds = applicationVersionRows
+      .filter(row => row?.status === 'draft' || row?.status === 'sent')
+      .map(row => normalisePositiveInteger(row.id))
+      .filter(Boolean);
+    if (unsignedIds.length) {
+      const placeholders = unsignedIds.map(() => '?').join(',');
+      const [withdrawResult] = await runner.query(
+        `UPDATE funding_overview_version
+            SET status = 'withdrawn'
+          WHERE id IN (${placeholders})
+            AND status IN ('draft', 'sent')`,
+        unsignedIds
+      );
+      if (Number(withdrawResult?.affectedRows || 0) !== unsignedIds.length) {
+        throw new Error('funding_overview_supersession_conflict');
+      }
+    }
+    await cancelUnsignedFundingOverviewSigningRequests(runner, priorApplicationVersionIds);
+
+    const [[maxRow]] = await runner.query(
+      `SELECT MAX(version_number)
+         FROM funding_overview_version
+        WHERE series_id = ?`,
+      [seriesId]
+    );
+    const nextVersionNumber = (Number(maxRow?.['MAX(version_number)']) || 0) + 1;
+
+    const priorSignedRow = applicationVersionRows.find(row => row?.status === 'signed') || null;
+    const previousSnapshot = safeJsonParse(priorSignedRow?.metadata_json, null);
     const { canonicalJson, hash } = computeFundingOverviewSnapshotSignature(snapshot);
     const [insert] = await runner.query(
       `INSERT INTO funding_overview_version
@@ -15149,15 +16554,15 @@ async function createFundingOverviewVersion({
       fundingOverviewVersionId,
       pdfBuffer: cleanBuffer,
       isRedline: false,
-      connection: runner
+      connection: runner,
+      uploadedObjectKeys: createdObjectKeys
     });
-    if (cleanDocId) {
-      await runner.query(
-        `INSERT INTO funding_overview_version_documents (funding_overview_version_id, document_type, document_id)
-         VALUES (?, 'clean', ?)`,
-        [fundingOverviewVersionId, cleanDocId]
-      );
-    }
+    if (!cleanDocId) throw new Error('funding_overview_document_insert_failed');
+    await runner.query(
+      `INSERT INTO funding_overview_version_documents (funding_overview_version_id, document_type, document_id)
+       VALUES (?, 'clean', ?)`,
+      [fundingOverviewVersionId, cleanDocId]
+    );
 
     let redlineDocId = null;
     if (renderSet.redlineFields) {
@@ -15173,18 +16578,35 @@ async function createFundingOverviewVersion({
         fundingOverviewVersionId,
         pdfBuffer: redlineBuffer,
         isRedline: true,
-        connection: runner
+        connection: runner,
+        uploadedObjectKeys: createdObjectKeys
       });
-      if (redlineDocId) {
-        await runner.query(
-          `INSERT INTO funding_overview_version_documents (funding_overview_version_id, document_type, document_id)
-           VALUES (?, 'redline', ?)`,
-          [fundingOverviewVersionId, redlineDocId]
-        );
-      }
+      if (!redlineDocId) throw new Error('funding_overview_redline_document_insert_failed');
+      await runner.query(
+        `INSERT INTO funding_overview_version_documents (funding_overview_version_id, document_type, document_id)
+         VALUES (?, 'redline', ?)`,
+        [fundingOverviewVersionId, redlineDocId]
+      );
     }
 
-    if (release) await runner.commit();
+    if (release) {
+      commitAttempted = true;
+      commitOutcome = 'uncertain';
+      try {
+        const commitResult = await commitGeneratedVersionWriteTransaction({
+          connection: runner,
+          versionKind: 'funding_overview',
+          versionId: fundingOverviewVersionId,
+          seriesId,
+          versionNumber: nextVersionNumber,
+          logLabel: 'financial-overview',
+        });
+        commitOutcome = commitResult.outcome;
+      } catch (commitError) {
+        commitOutcome = commitError?.commitOutcome || 'uncertain';
+        throw commitError;
+      }
+    }
     return {
       fundingOverviewVersionId,
       versionNumber: nextVersionNumber,
@@ -15197,11 +16619,38 @@ async function createFundingOverviewVersion({
     };
   } catch (error) {
     if (release) {
-      try { await runner.rollback(); } catch (_) {}
+      if (!commitAttempted) {
+        let rollbackConfirmed = false;
+        try {
+          await runner.rollback();
+          rollbackConfirmed = true;
+        } catch (rollbackError) {
+          console.error('[financial-overview] version rollback failed', rollbackError?.message || rollbackError);
+          if (typeof runner.destroy === 'function') {
+            try { runner.destroy(); } catch (_) {}
+          }
+          runner = null;
+        }
+        if (rollbackConfirmed) {
+          const rolledBackObjectKeys = createdObjectKeys.splice(createdObjectKeyStart);
+          await deleteUploadedObjectKeysBestEffort(rolledBackObjectKeys);
+        } else {
+          console.error('[financial-overview] version rollback outcome is uncertain; generated objects retained');
+        }
+      } else if (commitOutcome === 'rolled_back') {
+        const rolledBackObjectKeys = createdObjectKeys.splice(createdObjectKeyStart);
+        await deleteUploadedObjectKeysBestEffort(rolledBackObjectKeys);
+      } else {
+        console.error('[financial-overview] version commit outcome is uncertain; generated objects retained');
+      }
     }
     throw error;
   } finally {
-    if (release && runner) runner.release();
+    if (release && runner) {
+      try { runner.release(); } catch (releaseError) {
+        console.error('[financial-overview] failed to release version connection', releaseError?.message || releaseError);
+      }
+    }
   }
 }
 
@@ -15505,13 +16954,17 @@ async function regenerateSignedCfaDocument({
 }
 
 async function ensureCfaSeries(connection, { caseId, templateKey, createdByStaffProfileId }) {
-  const [[row]] = await connection.query(
+  const [rows] = await connection.query(
     `SELECT id
        FROM cfa_series
       WHERE case_id = ? AND template_key = ?
-      LIMIT 1`,
+      ORDER BY id ASC`,
     [caseId, templateKey]
   );
+  if (Array.isArray(rows) && rows.length > 1) {
+    throw new Error('cfa_series_ambiguous');
+  }
+  const row = Array.isArray(rows) ? rows[0] : null;
   if (row?.id) return Number(row.id);
   const [result] = await connection.query(
     `INSERT INTO cfa_series (case_id, template_key, created_by_staff_profile_id)
@@ -15521,69 +16974,199 @@ async function ensureCfaSeries(connection, { caseId, templateKey, createdByStaff
   return result.insertId;
 }
 
+async function resolveApplicationScopedCfaDraft(connection, { caseId, applicationId }) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!normalizedCaseId || !normalizedApplicationId) {
+    throw new Error('cfa_application_scope_required');
+  }
+  const [seriesRows] = await connection.query(
+    `SELECT id
+       FROM cfa_series
+      WHERE case_id = ?
+        AND template_key = ?
+      ORDER BY id ASC`,
+    [normalizedCaseId, CFA_TEMPLATE_KEY]
+  );
+  if ((seriesRows || []).length > 1) throw new Error('cfa_series_ambiguous');
+  const seriesId = normalisePositiveInteger(seriesRows?.[0]?.id);
+  if (!seriesId) return null;
+
+  const [rows] = await connection.query(
+    `SELECT v.id,
+            v.series_id,
+            v.version_number,
+            v.status,
+            v.metadata_json,
+            v.supersedes_version_id
+       FROM cfa_version v
+      WHERE v.series_id = ?
+      ORDER BY v.version_number DESC, v.id DESC`,
+    [seriesId]
+  );
+  assertNoUnscopedUnsignedVersionRows(rows, 'cfa_version_application_scope_unknown');
+
+  const applicationRows = filterApplicationScopedVersionRows(rows, normalizedApplicationId);
+  const selectedDraft = applicationRows.find(row => row?.status === 'draft') || null;
+  if (!selectedDraft) return null;
+
+  const selectedDraftId = normalisePositiveInteger(selectedDraft.id);
+  const supersededUnsignedIds = applicationRows
+    .filter(row => (
+      (row?.status === 'draft' || row?.status === 'sent') &&
+      normalisePositiveInteger(row?.id) !== selectedDraftId
+    ))
+    .map(row => normalisePositiveInteger(row.id))
+    .filter(Boolean);
+  if (supersededUnsignedIds.length) {
+    const placeholders = supersededUnsignedIds.map(() => '?').join(',');
+    const [withdrawResult] = await connection.query(
+      `UPDATE cfa_version
+          SET status = 'withdrawn'
+        WHERE id IN (${placeholders})
+          AND status IN ('draft', 'sent')`,
+      supersededUnsignedIds
+    );
+    if (Number(withdrawResult?.affectedRows || 0) !== supersededUnsignedIds.length) {
+      throw new Error('cfa_supersession_conflict');
+    }
+  }
+  // No earlier version in this application lineage may retain a pending/viewed
+  // request. This includes the selected draft after an earlier partial send.
+  await cancelUnsignedCfaSigningRequests(
+    connection,
+    applicationRows.map(row => normalisePositiveInteger(row.id)).filter(Boolean)
+  );
+
+  const priorSigned = applicationRows.find(row => row?.status === 'signed') || null;
+  const priorSignedId = normalisePositiveInteger(priorSigned?.id) || null;
+  if ((normalisePositiveInteger(selectedDraft.supersedes_version_id) || null) !== priorSignedId) {
+    const [baselineUpdate] = await connection.query(
+      `UPDATE cfa_version
+          SET supersedes_version_id = ?
+        WHERE id = ?
+          AND status = 'draft'`,
+      [priorSignedId, selectedDraftId]
+    );
+    if (Number(baselineUpdate?.affectedRows || 0) !== 1) {
+      throw new Error('cfa_draft_baseline_conflict');
+    }
+  }
+
+  return {
+    ...selectedDraft,
+    supersedes_version_id: priorSignedId,
+  };
+}
+
 async function createCfaVersionForPlan({
   caseId,
   actionPlanId,
+  applicationId = null,
   changeReason,
   changeSummary,
   actorUserId,
   staffProfileId,
   caseManagerName,
-  connection = null
+  connection = null,
+  uploadedObjectKeys = null
 }) {
   let runner = connection;
   let release = false;
+  let commitAttempted = false;
+  let commitOutcome = 'not_attempted';
+  const createdObjectKeys = Array.isArray(uploadedObjectKeys) ? uploadedObjectKeys : [];
+  const createdObjectKeyStart = createdObjectKeys.length;
   if (!runner) {
     runner = await pool.getConnection();
     release = true;
-    await runner.beginTransaction();
+    try {
+      await runner.beginTransaction();
+    } catch (beginError) {
+      try { runner.release(); } catch (_) {}
+      throw beginError;
+    }
   }
   try {
+    const normalizedCaseId = normalisePositiveInteger(caseId);
+    if (!normalizedCaseId) throw new Error('invalid_case_id');
+    await lockCaseForVersionedSigning(runner, normalizedCaseId);
+
+    const snapshot = await buildCfaSnapshot({
+      connection: runner,
+      caseId: normalizedCaseId,
+      actionPlanId
+    });
+    const snapshotApplicationId = resolveVersionSnapshotApplicationId(snapshot);
+    const expectedApplicationId = normalisePositiveInteger(applicationId);
+    if (!snapshotApplicationId || (expectedApplicationId && snapshotApplicationId !== expectedApplicationId)) {
+      throw new Error('cfa_application_scope_conflict');
+    }
+    if (!snapshot?.interventions?.length) {
+      if (release) {
+        commitAttempted = true;
+        try {
+          await runner.commit();
+        } catch (commitError) {
+          console.warn('[cfa] no-op plan-version COMMIT acknowledgement lost', commitError?.message || commitError);
+        }
+        commitOutcome = 'committed';
+      }
+      return { skipped: true, reason: 'no_interventions' };
+    }
+
     const seriesId = await ensureCfaSeries(runner, {
-      caseId,
+      caseId: normalizedCaseId,
       templateKey: CFA_TEMPLATE_KEY,
       createdByStaffProfileId: staffProfileId || null
     });
 
-    await runner.query(
-      `UPDATE cfa_version
-          SET status = 'withdrawn'
+    const [versionRows] = await runner.query(
+      `SELECT id, version_number, status, metadata_json
+         FROM cfa_version
         WHERE series_id = ?
-          AND status = 'draft'`,
+        ORDER BY version_number DESC, id DESC`,
       [seriesId]
     );
+    assertNoUnscopedUnsignedVersionRows(versionRows, 'cfa_version_application_scope_unknown');
+    const applicationVersionRows = filterApplicationScopedVersionRows(
+      versionRows,
+      snapshotApplicationId
+    );
+    const priorApplicationVersionIds = applicationVersionRows
+      .map(row => normalisePositiveInteger(row.id))
+      .filter(Boolean);
+    const unsignedVersionIds = applicationVersionRows
+      .filter(row => row?.status === 'draft' || row?.status === 'sent')
+      .map(row => normalisePositiveInteger(row.id))
+      .filter(Boolean);
+    if (unsignedVersionIds.length) {
+      const placeholders = unsignedVersionIds.map(() => '?').join(',');
+      const [withdrawResult] = await runner.query(
+        `UPDATE cfa_version
+            SET status = 'withdrawn'
+          WHERE id IN (${placeholders})
+            AND status IN ('draft', 'sent')`,
+        unsignedVersionIds
+      );
+      if (Number(withdrawResult?.affectedRows || 0) !== unsignedVersionIds.length) {
+        throw new Error('cfa_supersession_conflict');
+      }
+    }
+    await cancelUnsignedCfaSigningRequests(runner, priorApplicationVersionIds);
 
     const [[maxRow]] = await runner.query(
-      `SELECT MAX(version_number) AS max_version
+      `SELECT MAX(version_number)
          FROM cfa_version
         WHERE series_id = ?`,
       [seriesId]
     );
-    const nextVersionNumber = (Number(maxRow?.max_version) || 0) + 1;
-
-    const [[priorVersionRow]] = await runner.query(
-      `SELECT id, metadata_json
-         FROM cfa_version
-        WHERE series_id = ?
-        ORDER BY version_number DESC
-        LIMIT 1`,
-      [seriesId]
-    );
-
-    const snapshot = await buildCfaSnapshot({
-      connection: runner,
-      caseId,
-      actionPlanId
-    });
-
-    if (!snapshot?.interventions?.length) {
-      if (release) await runner.commit();
-      return { skipped: true, reason: 'no_interventions' };
-    }
+    const nextVersionNumber = (Number(maxRow?.['MAX(version_number)']) || 0) + 1;
+    const priorVersionRow = applicationVersionRows.find(row => row?.status === 'signed') || null;
 
     const resolvedCaseManager = await resolveFundingAgreementCaseManager({
       connection: runner,
-      caseId,
+      caseId: normalizedCaseId,
       snapshot,
       preferredName: caseManagerName || '',
       createdByUserId: actorUserId || null,
@@ -15636,7 +17219,7 @@ async function createCfaVersionForPlan({
     const cleanTokens = renderSet.cleanTokens;
     const cleanBuffer = await generateFundingAgreementPdfBuffer({ tokens: cleanTokens });
     const cleanDocId = await storeFundingAgreementPdfDocument({
-      caseId,
+      caseId: normalizedCaseId,
       applicationId: snapshotWithSigner?.case?.applicationId || null,
       actionPlanId,
       clientId: snapshotWithSigner?.case?.clientId || null,
@@ -15647,21 +17230,21 @@ async function createCfaVersionForPlan({
       cfaVersionId,
       pdfBuffer: cleanBuffer,
       isRedline: false,
-      connection: runner
+      connection: runner,
+      uploadedObjectKeys: createdObjectKeys
     });
-    if (cleanDocId) {
-      await runner.query(
-        `INSERT INTO cfa_version_documents (cfa_version_id, document_type, document_id)
-         VALUES (?, 'clean', ?)`,
-        [cfaVersionId, cleanDocId]
-      );
-    }
+    if (!cleanDocId) throw new Error('cfa_document_insert_failed');
+    await runner.query(
+      `INSERT INTO cfa_version_documents (cfa_version_id, document_type, document_id)
+       VALUES (?, 'clean', ?)`,
+      [cfaVersionId, cleanDocId]
+    );
 
     if (renderSet.redlineTokens) {
       const redlineTokens = renderSet.redlineTokens;
       const redlineBuffer = await generateFundingAgreementPdfBuffer({ tokens: redlineTokens });
       const redlineDocId = await storeFundingAgreementPdfDocument({
-        caseId,
+        caseId: normalizedCaseId,
         applicationId: snapshotWithSigner?.case?.applicationId || null,
         actionPlanId,
         clientId: snapshotWithSigner?.case?.clientId || null,
@@ -15672,34 +17255,78 @@ async function createCfaVersionForPlan({
         cfaVersionId,
         pdfBuffer: redlineBuffer,
         isRedline: true,
-        connection: runner
+        connection: runner,
+        uploadedObjectKeys: createdObjectKeys
       });
-      if (redlineDocId) {
-        await runner.query(
-          `INSERT INTO cfa_version_documents (cfa_version_id, document_type, document_id)
-           VALUES (?, 'redline', ?)`,
-          [cfaVersionId, redlineDocId]
-        );
-      }
+      if (!redlineDocId) throw new Error('cfa_redline_document_insert_failed');
+      await runner.query(
+        `INSERT INTO cfa_version_documents (cfa_version_id, document_type, document_id)
+         VALUES (?, 'redline', ?)`,
+        [cfaVersionId, redlineDocId]
+      );
     }
 
     if (release) {
-      await runner.commit();
+      commitAttempted = true;
+      commitOutcome = 'uncertain';
+      try {
+        const commitResult = await commitGeneratedVersionWriteTransaction({
+          connection: runner,
+          versionKind: 'cfa',
+          versionId: cfaVersionId,
+          seriesId,
+          versionNumber: nextVersionNumber,
+          logLabel: 'cfa-plan-version',
+        });
+        commitOutcome = commitResult.outcome;
+      } catch (commitError) {
+        commitOutcome = commitError?.commitOutcome || 'uncertain';
+        throw commitError;
+      }
     }
     return {
       cfaVersionId,
       versionNumber: nextVersionNumber,
       seriesId,
       cleanDocId: cleanDocId || null,
-      supersedesVersionId: priorVersionRow?.id || null
+      supersedesVersionId: priorVersionRow?.id || null,
+      applicationId: snapshotApplicationId,
+      snapshot: snapshotWithSigner,
     };
   } catch (error) {
     if (release) {
-      try { await runner.rollback(); } catch (_) {}
+      if (!commitAttempted) {
+        let rollbackConfirmed = false;
+        try {
+          await runner.rollback();
+          rollbackConfirmed = true;
+        } catch (rollbackError) {
+          console.error('[cfa] plan-version rollback failed', rollbackError?.message || rollbackError);
+          if (typeof runner.destroy === 'function') {
+            try { runner.destroy(); } catch (_) {}
+          }
+          runner = null;
+        }
+        if (rollbackConfirmed) {
+          const rolledBackObjectKeys = createdObjectKeys.splice(createdObjectKeyStart);
+          await deleteUploadedObjectKeysBestEffort(rolledBackObjectKeys);
+        } else {
+          console.error('[cfa] plan-version rollback outcome is uncertain; generated objects retained');
+        }
+      } else if (commitOutcome === 'rolled_back') {
+        const rolledBackObjectKeys = createdObjectKeys.splice(createdObjectKeyStart);
+        await deleteUploadedObjectKeysBestEffort(rolledBackObjectKeys);
+      } else {
+        console.error('[cfa] plan-version commit outcome is uncertain; generated objects retained');
+      }
     }
     throw error;
   } finally {
-    if (release && runner) runner.release();
+    if (release && runner) {
+      try { runner.release(); } catch (releaseError) {
+        console.error('[cfa] failed to release plan-version connection', releaseError?.message || releaseError);
+      }
+    }
   }
 }
 
@@ -15711,61 +17338,106 @@ async function createCfaVersionFromAssessment({
   actorUserId,
   staffProfileId,
   caseManagerName,
-  connection = null
+  connection = null,
+  uploadedObjectKeys = null
 }) {
   let runner = connection;
   let release = false;
+  let commitAttempted = false;
+  let commitOutcome = 'not_attempted';
+  const createdObjectKeys = Array.isArray(uploadedObjectKeys) ? uploadedObjectKeys : [];
+  const createdObjectKeyStart = createdObjectKeys.length;
   if (!runner) {
     runner = await pool.getConnection();
     release = true;
-    await runner.beginTransaction();
+    try {
+      await runner.beginTransaction();
+    } catch (beginError) {
+      try { runner.release(); } catch (_) {}
+      throw beginError;
+    }
   }
   try {
+    const normalizedCaseId = normalisePositiveInteger(caseId);
+    const expectedApplicationId = normalisePositiveInteger(applicationId);
+    if (!normalizedCaseId) throw new Error('invalid_case_id');
+    if (!expectedApplicationId) throw new Error('invalid_application_id');
+    await lockCaseForVersionedSigning(runner, normalizedCaseId);
+
+    const snapshot = await buildCfaSnapshotFromAssessment({
+      connection: runner,
+      caseId: normalizedCaseId,
+      applicationId: expectedApplicationId
+    });
+    const snapshotApplicationId = resolveVersionSnapshotApplicationId(snapshot);
+    if (snapshotApplicationId !== expectedApplicationId) {
+      throw new Error('cfa_application_scope_conflict');
+    }
+    if (!snapshot?.interventions?.length) {
+      if (release) {
+        commitAttempted = true;
+        try {
+          await runner.commit();
+        } catch (commitError) {
+          console.warn('[cfa] no-op assessment-version COMMIT acknowledgement lost', commitError?.message || commitError);
+        }
+        commitOutcome = 'committed';
+      }
+      return { skipped: true, reason: 'no_interventions' };
+    }
+
     const seriesId = await ensureCfaSeries(runner, {
-      caseId,
+      caseId: normalizedCaseId,
       templateKey: CFA_TEMPLATE_KEY,
       createdByStaffProfileId: staffProfileId || null
     });
 
-    await runner.query(
-      `UPDATE cfa_version
-          SET status = 'withdrawn'
+    const [versionRows] = await runner.query(
+      `SELECT id, version_number, status, metadata_json
+         FROM cfa_version
         WHERE series_id = ?
-          AND status = 'draft'`,
+        ORDER BY version_number DESC, id DESC`,
       [seriesId]
     );
+    assertNoUnscopedUnsignedVersionRows(versionRows, 'cfa_version_application_scope_unknown');
+    const applicationVersionRows = filterApplicationScopedVersionRows(
+      versionRows,
+      snapshotApplicationId
+    );
+    const priorApplicationVersionIds = applicationVersionRows
+      .map(row => normalisePositiveInteger(row.id))
+      .filter(Boolean);
+    const unsignedVersionIds = applicationVersionRows
+      .filter(row => row?.status === 'draft' || row?.status === 'sent')
+      .map(row => normalisePositiveInteger(row.id))
+      .filter(Boolean);
+    if (unsignedVersionIds.length) {
+      const placeholders = unsignedVersionIds.map(() => '?').join(',');
+      const [withdrawResult] = await runner.query(
+        `UPDATE cfa_version
+            SET status = 'withdrawn'
+          WHERE id IN (${placeholders})
+            AND status IN ('draft', 'sent')`,
+        unsignedVersionIds
+      );
+      if (Number(withdrawResult?.affectedRows || 0) !== unsignedVersionIds.length) {
+        throw new Error('cfa_supersession_conflict');
+      }
+    }
+    await cancelUnsignedCfaSigningRequests(runner, priorApplicationVersionIds);
 
     const [[maxRow]] = await runner.query(
-      `SELECT MAX(version_number) AS max_version
+      `SELECT MAX(version_number)
          FROM cfa_version
         WHERE series_id = ?`,
       [seriesId]
     );
-    const nextVersionNumber = (Number(maxRow?.max_version) || 0) + 1;
-
-    const [[priorVersionRow]] = await runner.query(
-      `SELECT id, metadata_json
-         FROM cfa_version
-        WHERE series_id = ?
-        ORDER BY version_number DESC
-        LIMIT 1`,
-      [seriesId]
-    );
-
-    const snapshot = await buildCfaSnapshotFromAssessment({
-      connection: runner,
-      caseId,
-      applicationId
-    });
-
-    if (!snapshot?.interventions?.length) {
-      if (release) await runner.commit();
-      return { skipped: true, reason: 'no_interventions' };
-    }
+    const nextVersionNumber = (Number(maxRow?.['MAX(version_number)']) || 0) + 1;
+    const priorVersionRow = applicationVersionRows.find(row => row?.status === 'signed') || null;
 
     const resolvedCaseManager = await resolveFundingAgreementCaseManager({
       connection: runner,
-      caseId,
+      caseId: normalizedCaseId,
       snapshot,
       preferredName: caseManagerName || '',
       createdByUserId: actorUserId || null,
@@ -15817,7 +17489,7 @@ async function createCfaVersionFromAssessment({
     const cleanTokens = renderSet.cleanTokens;
     const cleanBuffer = await generateFundingAgreementPdfBuffer({ tokens: cleanTokens });
     const cleanDocId = await storeFundingAgreementPdfDocument({
-      caseId,
+      caseId: normalizedCaseId,
       applicationId: snapshotWithSigner?.case?.applicationId || null,
       actionPlanId: null,
       clientId: snapshotWithSigner?.case?.clientId || null,
@@ -15828,21 +17500,21 @@ async function createCfaVersionFromAssessment({
       cfaVersionId,
       pdfBuffer: cleanBuffer,
       isRedline: false,
-      connection: runner
+      connection: runner,
+      uploadedObjectKeys: createdObjectKeys
     });
-    if (cleanDocId) {
-      await runner.query(
-        `INSERT INTO cfa_version_documents (cfa_version_id, document_type, document_id)
-         VALUES (?, 'clean', ?)`,
-        [cfaVersionId, cleanDocId]
-      );
-    }
+    if (!cleanDocId) throw new Error('cfa_document_insert_failed');
+    await runner.query(
+      `INSERT INTO cfa_version_documents (cfa_version_id, document_type, document_id)
+       VALUES (?, 'clean', ?)`,
+      [cfaVersionId, cleanDocId]
+    );
 
     if (renderSet.redlineTokens) {
       const redlineTokens = renderSet.redlineTokens;
       const redlineBuffer = await generateFundingAgreementPdfBuffer({ tokens: redlineTokens });
       const redlineDocId = await storeFundingAgreementPdfDocument({
-        caseId,
+        caseId: normalizedCaseId,
         applicationId: snapshotWithSigner?.case?.applicationId || null,
         actionPlanId: null,
         clientId: snapshotWithSigner?.case?.clientId || null,
@@ -15853,34 +17525,78 @@ async function createCfaVersionFromAssessment({
         cfaVersionId,
         pdfBuffer: redlineBuffer,
         isRedline: true,
-        connection: runner
+        connection: runner,
+        uploadedObjectKeys: createdObjectKeys
       });
-      if (redlineDocId) {
-        await runner.query(
-          `INSERT INTO cfa_version_documents (cfa_version_id, document_type, document_id)
-           VALUES (?, 'redline', ?)`,
-          [cfaVersionId, redlineDocId]
-        );
-      }
+      if (!redlineDocId) throw new Error('cfa_redline_document_insert_failed');
+      await runner.query(
+        `INSERT INTO cfa_version_documents (cfa_version_id, document_type, document_id)
+         VALUES (?, 'redline', ?)`,
+        [cfaVersionId, redlineDocId]
+      );
     }
 
     if (release) {
-      await runner.commit();
+      commitAttempted = true;
+      commitOutcome = 'uncertain';
+      try {
+        const commitResult = await commitGeneratedVersionWriteTransaction({
+          connection: runner,
+          versionKind: 'cfa',
+          versionId: cfaVersionId,
+          seriesId,
+          versionNumber: nextVersionNumber,
+          logLabel: 'cfa-assessment-version',
+        });
+        commitOutcome = commitResult.outcome;
+      } catch (commitError) {
+        commitOutcome = commitError?.commitOutcome || 'uncertain';
+        throw commitError;
+      }
     }
     return {
       cfaVersionId,
       versionNumber: nextVersionNumber,
       seriesId,
       cleanDocId: cleanDocId || null,
-      supersedesVersionId: priorVersionRow?.id || null
+      supersedesVersionId: priorVersionRow?.id || null,
+      applicationId: snapshotApplicationId,
+      snapshot: snapshotWithSigner,
     };
   } catch (error) {
     if (release) {
-      try { await runner.rollback(); } catch (_) {}
+      if (!commitAttempted) {
+        let rollbackConfirmed = false;
+        try {
+          await runner.rollback();
+          rollbackConfirmed = true;
+        } catch (rollbackError) {
+          console.error('[cfa] assessment-version rollback failed', rollbackError?.message || rollbackError);
+          if (typeof runner.destroy === 'function') {
+            try { runner.destroy(); } catch (_) {}
+          }
+          runner = null;
+        }
+        if (rollbackConfirmed) {
+          const rolledBackObjectKeys = createdObjectKeys.splice(createdObjectKeyStart);
+          await deleteUploadedObjectKeysBestEffort(rolledBackObjectKeys);
+        } else {
+          console.error('[cfa] assessment-version rollback outcome is uncertain; generated objects retained');
+        }
+      } else if (commitOutcome === 'rolled_back') {
+        const rolledBackObjectKeys = createdObjectKeys.splice(createdObjectKeyStart);
+        await deleteUploadedObjectKeysBestEffort(rolledBackObjectKeys);
+      } else {
+        console.error('[cfa] assessment-version commit outcome is uncertain; generated objects retained');
+      }
     }
     throw error;
   } finally {
-    if (release && runner) runner.release();
+    if (release && runner) {
+      try { runner.release(); } catch (releaseError) {
+        console.error('[cfa] failed to release assessment-version connection', releaseError?.message || releaseError);
+      }
+    }
   }
 }
 
@@ -26246,16 +27962,99 @@ async function countProgramAdminInAssessment(pool) {
   return countRowsBySlaWindow(rows, stageTargets, timing => timing.stageKey === 'assessment');
 }
 
+function normalizeApplicationReviewQueueBucket(value) {
+  const normalized = String(value || '').trim().toLowerCase().replace(/_/g, '-');
+  return normalized === 'awaiting-decision' || normalized === 'awaiting-my-approval'
+    ? normalized
+    : null;
+}
+
+function isApplicationAssessmentReviewQueueMember({
+  bucket,
+  applicationLifecycleStatus,
+  reviewWorkflowId = null,
+  reviewWorkflowStage = null,
+} = {}) {
+  const normalizedBucket = normalizeApplicationReviewQueueBucket(bucket);
+  const normalizedLifecycle = normaliseApplicationLifecycleStatusValue(
+    applicationLifecycleStatus,
+    { preserveUnknown: true }
+  );
+  const normalizedStage = String(reviewWorkflowStage || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  const hasActiveWorkflow = normalisePositiveInteger(reviewWorkflowId) !== null || Boolean(normalizedStage);
+
+  if (normalizedBucket === 'awaiting-my-approval') {
+    return hasActiveWorkflow && (
+      normalizedStage === REVIEW_STAGES.RmReview ||
+      normalizedStage === REVIEW_STAGES.ReturnedToRm
+    );
+  }
+  if (normalizedBucket === 'awaiting-decision') {
+    return hasActiveWorkflow
+      ? normalizedStage === REVIEW_STAGES.NwacReview
+      : normalizedLifecycle === 'pending_decision';
+  }
+  return false;
+}
+
+function assertSafeSqlAlias(alias, label) {
+  const normalized = String(alias || '').trim();
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(normalized)) {
+    throw new Error(`invalid_${label}_sql_alias`);
+  }
+  return normalized;
+}
+
+function buildApplicationAssessmentReviewWorkflowJoinSql(applicationAlias = 'a', workflowAlias = 'rw') {
+  const safeApplicationAlias = assertSafeSqlAlias(applicationAlias, 'application');
+  const safeWorkflowAlias = assertSafeSqlAlias(workflowAlias, 'review_workflow');
+  return `LEFT JOIN iset_review_workflow ${safeWorkflowAlias}
+      ON ${safeWorkflowAlias}.workflow_type = 'application_assessment'
+     AND ${safeWorkflowAlias}.application_id = ${safeApplicationAlias}.id
+     AND ${safeWorkflowAlias}.archived_at IS NULL`;
+}
+
+function buildApplicationAssessmentReviewQueueSqlFilter({
+  bucket,
+  applicationAlias = 'a',
+  workflowAlias = 'rw',
+} = {}) {
+  const normalizedBucket = normalizeApplicationReviewQueueBucket(bucket);
+  const safeApplicationAlias = assertSafeSqlAlias(applicationAlias, 'application');
+  const safeWorkflowAlias = assertSafeSqlAlias(workflowAlias, 'review_workflow');
+  if (normalizedBucket === 'awaiting-my-approval') {
+    return {
+      clause: `${safeWorkflowAlias}.current_stage IN (?, ?)`,
+      params: [REVIEW_STAGES.RmReview, REVIEW_STAGES.ReturnedToRm],
+    };
+  }
+  if (normalizedBucket === 'awaiting-decision') {
+    return {
+      clause: `(
+        ${safeWorkflowAlias}.current_stage = ?
+        OR (${safeWorkflowAlias}.id IS NULL AND ${buildApplicationLifecycleStatusExpr(safeApplicationAlias)} = ?)
+      )`,
+      params: [REVIEW_STAGES.NwacReview, 'pending_decision'],
+    };
+  }
+  return null;
+}
+
 
 
 async function countProgramAdminAwaitingDecision(pool) {
   try {
+    const reviewQueueFilter = buildApplicationAssessmentReviewQueueSqlFilter({
+      bucket: 'awaiting-decision',
+    });
     const sql = `SELECT COUNT(*) AS total
          FROM iset_application a
-         JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-        WHERE a.status IS NOT NULL
-          AND REPLACE(LOWER(a.status), ' ', '_') = ?`;
-    const [[row]] = await pool.query(sql, ['pending_approval']);
+         ${buildApplicationAssessmentReviewWorkflowJoinSql()}
+        WHERE ${reviewQueueFilter.clause}`;
+    const [[row]] = await pool.query(sql, reviewQueueFilter.params);
     return Number(row?.total ?? 0);
   } catch (err) {
     if (err && err.code === 'ER_BAD_FIELD_ERROR') {
@@ -28930,15 +30729,16 @@ async function countRegionalPendingApproval(pool, staffIds) {
   const ids = normalizeStaffIdList(staffIds);
   if (!ids.length) return 0;
   const staffPlaceholders = ids.map(() => '?').join(',');
-  const statusValues = ['pending_approval'];
-  const statusPlaceholders = statusValues.map(() => '?').join(',');
-  const params = [...ids, ...statusValues];
-  const sql = `SELECT COUNT(*) AS total
+  const reviewQueueFilter = buildApplicationAssessmentReviewQueueSqlFilter({
+    bucket: 'awaiting-my-approval',
+  });
+  const params = [...ids, ...reviewQueueFilter.params];
+  const sql = `SELECT COUNT(DISTINCT a.id) AS total
          FROM iset_case c
-         ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
+         JOIN iset_application a ON ${APPLICATION_CASE_JOIN_PREDICATE}
+         ${buildApplicationAssessmentReviewWorkflowJoinSql()}
         WHERE c.assigned_staff_profile_id IN (${staffPlaceholders})
-          AND a.status IS NOT NULL
-          AND LOWER(a.status) IN (${statusPlaceholders})`;
+          AND ${reviewQueueFilter.clause}`;
   const [[row]] = await pool.query(sql, params);
   return Number(row?.total ?? 0);
 }
@@ -45911,7 +47711,7 @@ const setDocsRequestedFromSecureMessage = async ({
        FROM iset_application
       WHERE id = ?
         AND case_id = ?
-      LIMIT 1`,
+      LIMIT 1 FOR UPDATE`,
     [numericApplicationId, numericCaseId]
   );
   if (!currentRow) return { updated: false, reason: 'application_not_found' };
@@ -45926,7 +47726,8 @@ const setDocsRequestedFromSecureMessage = async ({
     String(currentRow.status || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
   const reviewWorkflow = await fetchApplicationAssessmentReviewWorkflow(
     runner,
-    { applicationId: numericApplicationId }
+    { applicationId: numericApplicationId },
+    { forUpdate: true }
   );
   const reviewState = resolveApplicationAssessmentReviewState(
     reviewWorkflow?.current_stage
@@ -50227,9 +52028,813 @@ async function emitDocumentUploadedEvent({ req, caseId, applicationId, applicant
   }
 }
 
-function handleAdminDocumentUpload({ requireApplicant = false, applicantIdHint = null, caseIdHint = null } = {}) {
+function createAdminDocumentUploadError(code, message = code, details = {}) {
+  const error = new Error(message);
+  error.code = code;
+  Object.assign(error, details);
+  return error;
+}
+
+function normalizeAdminDocumentUploadMetadata(value) {
+  const parsed = safeJsonParse(value, value);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  return parsed;
+}
+
+function canonicalizeAdminDocumentUploadMetadata(value) {
+  if (Array.isArray(value)) {
+    return value.map(entry => canonicalizeAdminDocumentUploadMetadata(entry));
+  }
+  if (!value || typeof value !== 'object') return value;
+  return Object.keys(value)
+    .sort()
+    .reduce((result, key) => {
+      result[key] = canonicalizeAdminDocumentUploadMetadata(value[key]);
+      return result;
+    }, {});
+}
+
+function sameAdminDocumentUploadNumber(left, right) {
+  const normalize = value => {
+    if (value === null || typeof value === 'undefined' || value === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : value;
+  };
+  return normalize(left) === normalize(right);
+}
+
+function sameAdminDocumentUploadString(left, right) {
+  const normalize = value => (
+    value === null || typeof value === 'undefined' ? null : String(value)
+  );
+  return normalize(left) === normalize(right);
+}
+
+function adminDocumentUploadRowMatchesManifest(row, manifest) {
+  if (!row || !manifest) return false;
+  const metadataMatches = JSON.stringify(canonicalizeAdminDocumentUploadMetadata(
+    normalizeAdminDocumentUploadMetadata(row.metadata)
+  )) === JSON.stringify(canonicalizeAdminDocumentUploadMetadata(
+    normalizeAdminDocumentUploadMetadata(manifest.metadata)
+  ));
+  return (
+    sameAdminDocumentUploadNumber(row.case_id, manifest.caseId) &&
+    sameAdminDocumentUploadNumber(row.application_id, manifest.applicationId) &&
+    sameAdminDocumentUploadNumber(row.action_plan_id, manifest.actionPlanId) &&
+    sameAdminDocumentUploadNumber(row.client_id, manifest.clientId) &&
+    sameAdminDocumentUploadNumber(row.applicant_user_id, manifest.applicantUserId) &&
+    sameAdminDocumentUploadNumber(row.user_id, manifest.uploaderUserId) &&
+    sameAdminDocumentUploadString(row.source, manifest.source) &&
+    sameAdminDocumentUploadString(row.file_name, manifest.fileName) &&
+    sameAdminDocumentUploadString(row.file_path, manifest.filePath) &&
+    sameAdminDocumentUploadString(row.mime_type, manifest.mimeType) &&
+    sameAdminDocumentUploadString(row.label, manifest.label) &&
+    metadataMatches &&
+    sameAdminDocumentUploadNumber(row.size_bytes, manifest.sizeBytes) &&
+    sameAdminDocumentUploadString(row.checksum_sha256, manifest.checksumSha256) &&
+    sameAdminDocumentUploadString(row.status, 'active') &&
+    sameAdminDocumentUploadString(row.document_category, manifest.documentCategory)
+  );
+}
+
+function buildAdminDocumentUploadResponseRow(row, interventionIds = []) {
+  if (!row) return null;
+  const responseRow = {
+    id: row.id,
+    case_id: row.case_id,
+    application_id: row.application_id,
+    action_plan_id: row.action_plan_id,
+    client_id: row.client_id,
+    applicant_user_id: row.applicant_user_id,
+    file_name: row.file_name,
+    file_path: row.file_path,
+    label: row.label,
+    metadata: row.metadata,
+    document_category: row.document_category,
+    source: row.source,
+    mime_type: row.mime_type,
+    size_bytes: row.size_bytes,
+    status: row.status,
+    uploaded_at: row.created_at,
+  };
+  if (interventionIds.length) {
+    responseRow.intervention_ids = [...interventionIds];
+  }
+  return responseRow;
+}
+
+async function fetchAdminDocumentUploadRow(connection, filePath, { forUpdate = false } = {}) {
+  const lockSql = forUpdate ? ' FOR UPDATE' : '';
+  const [[row]] = await connection.query(
+    `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id,
+            user_id, source, file_name, file_path, mime_type, label, metadata,
+            size_bytes, checksum_sha256, status, document_category, created_at, updated_at
+       FROM iset_document
+      WHERE file_path = ?
+      LIMIT 1${lockSql}`,
+    [filePath]
+  );
+  return row || null;
+}
+
+async function inspectAdminDocumentUploadManifest(connection, manifest) {
+  const documentRow = await fetchAdminDocumentUploadRow(connection, manifest.filePath);
+  if (!documentRow) {
+    return { state: 'absent', documentRow: null, reason: 'document_absent' };
+  }
+  if (!adminDocumentUploadRowMatchesManifest(documentRow, manifest)) {
+    return { state: 'partial', documentRow, reason: 'document_manifest_mismatch' };
+  }
+
+  if (manifest.assessment) {
+    const [[assessmentRow]] = await connection.query(
+      `SELECT case_id, application_id, esdc_eligibility
+         FROM iset_application_assessment
+        WHERE application_id = ?
+        LIMIT 1`,
+      [manifest.assessment.applicationId]
+    );
+    if (
+      !assessmentRow ||
+      !sameAdminDocumentUploadNumber(assessmentRow.case_id, manifest.assessment.caseId) ||
+      !sameAdminDocumentUploadNumber(assessmentRow.application_id, manifest.assessment.applicationId) ||
+      !sameAdminDocumentUploadString(assessmentRow.esdc_eligibility, manifest.assessment.esdcEligibility)
+    ) {
+      return { state: 'partial', documentRow, reason: 'assessment_manifest_mismatch' };
+    }
+  }
+
+  const [linkRows] = await connection.query(
+    `SELECT document_id, intervention_id
+       FROM iset_document_intervention
+      WHERE document_id = ?`,
+    [documentRow.id]
+  );
+  const actualInterventionIds = Array.from(new Set(
+    (linkRows || [])
+      .map(row => normalisePositiveInteger(row.intervention_id))
+      .filter(Boolean)
+  )).sort((left, right) => left - right);
+  const expectedInterventionIds = [...manifest.interventionIds].sort((left, right) => left - right);
+  if (
+    actualInterventionIds.length !== expectedInterventionIds.length ||
+    actualInterventionIds.some((id, index) => id !== expectedInterventionIds[index])
+  ) {
+    return { state: 'partial', documentRow, reason: 'intervention_link_manifest_mismatch' };
+  }
+
+  return { state: 'committed', documentRow, reason: null };
+}
+
+async function writeAdminDocumentUploadManifest(connection, manifest) {
+  await connection.query(
+    `INSERT INTO iset_document
+       (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id,
+        source, file_name, file_path, mime_type, label, metadata, size_bytes,
+        checksum_sha256, status, document_category)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?)`,
+    [
+      manifest.caseId,
+      manifest.applicationId,
+      manifest.actionPlanId,
+      manifest.clientId,
+      manifest.applicantUserId,
+      manifest.uploaderUserId,
+      manifest.source,
+      manifest.fileName,
+      manifest.filePath,
+      manifest.mimeType,
+      manifest.label,
+      manifest.metadata,
+      manifest.sizeBytes,
+      manifest.checksumSha256,
+      manifest.documentCategory,
+    ]
+  );
+
+  const documentRow = await fetchAdminDocumentUploadRow(connection, manifest.filePath, { forUpdate: true });
+  if (!documentRow || !adminDocumentUploadRowMatchesManifest(documentRow, manifest)) {
+    throw createAdminDocumentUploadError('document_manifest_write_mismatch');
+  }
+
+  if (manifest.assessment) {
+    await connection.query(
+      `INSERT INTO iset_application_assessment
+         (case_id, application_id, esdc_eligibility)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         case_id = VALUES(case_id),
+         esdc_eligibility = VALUES(esdc_eligibility),
+         updated_at = NOW()`,
+      [
+        manifest.assessment.caseId,
+        manifest.assessment.applicationId,
+        manifest.assessment.esdcEligibility,
+      ]
+    );
+  }
+
+  await updateDocumentInterventionLinks({
+    documentId: documentRow.id,
+    interventionIds: manifest.interventionIds,
+    connection,
+  });
+
+  const inspection = await inspectAdminDocumentUploadManifest(connection, manifest);
+  if (inspection.state !== 'committed') {
+    throw createAdminDocumentUploadError(
+      'document_manifest_write_mismatch',
+      inspection.reason || 'document_manifest_write_mismatch'
+    );
+  }
+  return inspection.documentRow;
+}
+
+function resolveAdminDocumentUploadHeadChecksum(metadata) {
+  if (!metadata || typeof metadata !== 'object') return null;
+  return normaliseString(
+    metadata['path-sha256'] ?? metadata.path_sha256 ?? metadata.pathsha256
+  ) || null;
+}
+
+function buildAdminDocumentUploadedObject({ key, versionId, versionIdentityVerified }) {
+  return {
+    key,
+    versionId: normaliseString(versionId) || null,
+    versionIdentityVerified: versionIdentityVerified === true,
+  };
+}
+
+async function inspectAdminDocumentUploadedObject({
+  provider,
+  key,
+  responseHeaders = null,
+  sizeBytes,
+  checksumSha256,
+  putAcknowledged = false,
+} = {}) {
+  if (
+    !provider ||
+    provider.OBJECT_VERSION_COMPENSATION_SUPPORTED !== true ||
+    typeof provider.headObject !== 'function' ||
+    typeof provider.deleteObject !== 'function'
+  ) {
+    throw createAdminDocumentUploadError('s3_version_compensation_unavailable');
+  }
+  const responseVersionId = resolveS3UploadVersionId(responseHeaders);
+  let head;
+  try {
+    head = await provider.headObject({
+      key,
+      versionId: responseVersionId || null,
+    });
+  } catch (error) {
+    if (responseVersionId) {
+      throw createAdminDocumentUploadError('s3_upload_verification_failed', error.message, {
+        uploadedObject: buildAdminDocumentUploadedObject({
+          key,
+          versionId: responseVersionId,
+          versionIdentityVerified: true,
+        }),
+      });
+    }
+    throw createAdminDocumentUploadError('s3_upload_outcome_ambiguous', error.message, {
+      uploadedObject: buildAdminDocumentUploadedObject({
+        key,
+        versionId: null,
+        versionIdentityVerified: false,
+      }),
+    });
+  }
+  if (!head?.exists) {
+    if (responseVersionId) {
+      throw createAdminDocumentUploadError('s3_upload_verification_failed', 'The uploaded object could not be read back.', {
+        uploadedObject: buildAdminDocumentUploadedObject({
+          key,
+          versionId: responseVersionId,
+          versionIdentityVerified: true,
+        }),
+      });
+    }
+    if (putAcknowledged) {
+      throw createAdminDocumentUploadError('s3_upload_outcome_ambiguous', 'The acknowledged upload could not be read back.', {
+        uploadedObject: buildAdminDocumentUploadedObject({
+          key,
+          versionId: null,
+          versionIdentityVerified: false,
+        }),
+      });
+    }
+    throw createAdminDocumentUploadError('s3_uploaded_object_missing');
+  }
+  if (!Object.prototype.hasOwnProperty.call(head, 'versionId')) {
+    throw createAdminDocumentUploadError('s3_upload_outcome_ambiguous', 'S3 did not return object version identity.', {
+      uploadedObject: buildAdminDocumentUploadedObject({
+        key,
+        versionId: responseVersionId,
+        versionIdentityVerified: Boolean(responseVersionId),
+      }),
+    });
+  }
+  const headVersionId = normaliseString(head.versionId) || null;
+  if (responseVersionId && headVersionId !== responseVersionId) {
+    throw createAdminDocumentUploadError('s3_upload_version_mismatch', 'S3 upload version did not match HEAD.', {
+      uploadedObject: buildAdminDocumentUploadedObject({
+        key,
+        versionId: responseVersionId,
+        versionIdentityVerified: true,
+      }),
+    });
+  }
+  const uploadedObject = buildAdminDocumentUploadedObject({
+    key,
+    versionId: responseVersionId || headVersionId,
+    versionIdentityVerified: true,
+  });
+  if (!uploadedObject.versionId) {
+    throw createAdminDocumentUploadError(
+      's3_upload_outcome_ambiguous',
+      'S3 did not provide an exact object version for safe compensation.',
+      { uploadedObject: { ...uploadedObject, versionIdentityVerified: false } }
+    );
+  }
+  if (Number(head.size) !== Number(sizeBytes)) {
+    throw createAdminDocumentUploadError('s3_upload_size_mismatch', 'S3 upload size did not match the local file.', {
+      uploadedObject,
+    });
+  }
+  if (resolveAdminDocumentUploadHeadChecksum(head.metadata) !== checksumSha256) {
+    throw createAdminDocumentUploadError('s3_upload_checksum_mismatch', 'S3 upload checksum metadata did not match.', {
+      uploadedObject,
+    });
+  }
+  return uploadedObject;
+}
+
+async function uploadAdminDocumentObject({
+  applicantId,
+  uploaderUserId,
+  originalName,
+  fileName,
+  filePath,
+  mimeType,
+  sizeBytes,
+  checksumSha256,
+} = {}) {
+  const provider = require('../ISET-intake/s3Provider');
+  if (provider.DRIVER !== 's3') {
+    throw createAdminDocumentUploadError('s3_driver_not_configured');
+  }
+  if (
+    provider.OBJECT_VERSION_COMPENSATION_SUPPORTED !== true ||
+    typeof provider.headObject !== 'function' ||
+    typeof provider.deleteObject !== 'function'
+  ) {
+    throw createAdminDocumentUploadError('s3_version_compensation_unavailable');
+  }
+  const key = provider.generateKey(applicantId || uploaderUserId || 'admin', originalName || fileName);
+  const contentType = mimeType || 'application/octet-stream';
+  const presigned = await provider.presignPut({
+    key,
+    contentType,
+    ifNoneMatch: '*',
+    metadata: { 'path-sha256': checksumSha256 },
+  });
+  let uploadResponse;
+  try {
+    uploadResponse = await axios.put(presigned.url, fs.createReadStream(filePath), {
+      headers: {
+        ...(presigned.headers || {}),
+        'Content-Type': contentType,
+        ...(Number.isFinite(Number(sizeBytes)) ? { 'Content-Length': Number(sizeBytes) } : {}),
+      },
+    });
+  } catch (uploadError) {
+    const status = Number(uploadError?.response?.status || uploadError?.response?.statusCode || 0);
+    if (status === 409 || status === 412) throw uploadError;
+    try {
+      const uploadedObject = await inspectAdminDocumentUploadedObject({
+        provider,
+        key,
+        responseHeaders: uploadError?.response?.headers || null,
+        sizeBytes,
+        checksumSha256,
+      });
+      throw createAdminDocumentUploadError('s3_upload_rejected_after_write', uploadError.message, {
+        uploadedObject,
+      });
+    } catch (inspectionError) {
+      if (inspectionError?.code === 's3_uploaded_object_missing') throw uploadError;
+      throw inspectionError;
+    }
+  }
+  return inspectAdminDocumentUploadedObject({
+    provider,
+    key,
+    responseHeaders: uploadResponse?.headers || null,
+    sizeBytes,
+    checksumSha256,
+    putAcknowledged: true,
+  });
+}
+
+async function compensateAdminDocumentUploadedObject(uploadedObject) {
+  if (
+    !uploadedObject?.key ||
+    !normaliseString(uploadedObject.versionId) ||
+    uploadedObject.versionIdentityVerified !== true
+  ) {
+    throw createAdminDocumentUploadError('s3_upload_compensation_identity_unverified');
+  }
+  const provider = require('../ISET-intake/s3Provider');
+  if (
+    provider.DRIVER !== 's3' ||
+    provider.OBJECT_VERSION_COMPENSATION_SUPPORTED !== true ||
+    typeof provider.deleteObject !== 'function'
+  ) {
+    throw createAdminDocumentUploadError('s3_version_compensation_unavailable');
+  }
+  const result = await provider.deleteObject({
+    key: uploadedObject.key,
+    versionId: uploadedObject.versionId || null,
+  });
+  if (result?.deleted !== true && result?.notFound !== true) {
+    throw createAdminDocumentUploadError('s3_upload_compensation_unverified');
+  }
+  return result;
+}
+
+async function lockAdminDocumentUploadManifestContext(connection, manifest) {
+  let applicationRow = null;
+  let caseRow = null;
+  let actionPlanRow = null;
+
+  if (manifest.applicationId) {
+    [[applicationRow]] = await connection.query(
+      `SELECT id, case_id, client_id
+         FROM iset_application
+        WHERE id = ?
+        LIMIT 1 FOR UPDATE`,
+      [manifest.applicationId]
+    );
+    if (!applicationRow) {
+      throw createAdminDocumentUploadError('application_not_found');
+    }
+  }
+
+  if (manifest.caseId) {
+    [[caseRow]] = await connection.query(
+      `SELECT id, client_id
+         FROM iset_case
+        WHERE id = ?
+        LIMIT 1 FOR UPDATE`,
+      [manifest.caseId]
+    );
+    if (!caseRow) {
+      throw createAdminDocumentUploadError('case_not_found');
+    }
+  }
+
+  if (applicationRow) {
+    if (!sameAdminDocumentUploadNumber(applicationRow.case_id, manifest.caseId)) {
+      throw createAdminDocumentUploadError('application_case_mismatch');
+    }
+    if (!sameAdminDocumentUploadNumber(applicationRow.client_id, manifest.clientId)) {
+      throw createAdminDocumentUploadError('application_client_mismatch');
+    }
+  }
+  if (caseRow && !sameAdminDocumentUploadNumber(caseRow.client_id, manifest.clientId)) {
+    throw createAdminDocumentUploadError('case_client_mismatch');
+  }
+
+  if (manifest.actionPlanId) {
+    [[actionPlanRow]] = await connection.query(
+      `SELECT id, case_id, application_id
+         FROM iset_case_action_plan
+        WHERE id = ?
+        LIMIT 1 FOR UPDATE`,
+      [manifest.actionPlanId]
+    );
+    if (!actionPlanRow) {
+      throw createAdminDocumentUploadError('action_plan_not_found');
+    }
+    if (!sameAdminDocumentUploadNumber(actionPlanRow.case_id, manifest.caseId)) {
+      throw createAdminDocumentUploadError('action_plan_case_mismatch');
+    }
+    if (
+      manifest.applicationId &&
+      actionPlanRow.application_id &&
+      !sameAdminDocumentUploadNumber(actionPlanRow.application_id, manifest.applicationId)
+    ) {
+      throw createAdminDocumentUploadError('action_plan_application_mismatch');
+    }
+  }
+
+  const interventionIds = Array.from(new Set(
+    (manifest.interventionIds || [])
+      .map(id => normalisePositiveInteger(id))
+      .filter(Boolean)
+  )).sort((left, right) => left - right);
+  if (interventionIds.length) {
+    if (!manifest.actionPlanId) {
+      throw createAdminDocumentUploadError('action_plan_required');
+    }
+    const placeholders = interventionIds.map(() => '?').join(',');
+    const [interventionRows] = await connection.query(
+      `SELECT id, case_id, action_plan_id
+         FROM iset_case_intervention
+        WHERE id IN (${placeholders})
+        FOR UPDATE`,
+      interventionIds
+    );
+    const interventionRowsById = new Map(
+      (interventionRows || []).map(row => [normalisePositiveInteger(row.id), row])
+    );
+    for (const interventionId of interventionIds) {
+      const interventionRow = interventionRowsById.get(interventionId);
+      if (!interventionRow) {
+        throw createAdminDocumentUploadError('interventions_not_found');
+      }
+      if (!sameAdminDocumentUploadNumber(interventionRow.action_plan_id, manifest.actionPlanId)) {
+        throw createAdminDocumentUploadError('interventions_plan_mismatch');
+      }
+      if (!sameAdminDocumentUploadNumber(interventionRow.case_id, manifest.caseId)) {
+        throw createAdminDocumentUploadError('interventions_case_mismatch');
+      }
+    }
+  }
+
+  const [[clientRow]] = await connection.query(
+    `SELECT id, applicant_cognito_sub
+       FROM client
+      WHERE id = ?
+      LIMIT 1 FOR UPDATE`,
+    [manifest.clientId]
+  );
+  if (!clientRow) {
+    throw createAdminDocumentUploadError('client_not_found');
+  }
+
+  let applicantUserRow = null;
+  if (manifest.applicantUserId) {
+    [[applicantUserRow]] = await connection.query(
+      `SELECT id, cognito_sub
+         FROM user
+        WHERE id = ?
+        LIMIT 1 FOR UPDATE`,
+      [manifest.applicantUserId]
+    );
+    if (!applicantUserRow) {
+      throw createAdminDocumentUploadError('applicant_user_not_found');
+    }
+    if (
+      !normaliseString(applicantUserRow.cognito_sub) ||
+      !normaliseString(clientRow.applicant_cognito_sub) ||
+      normaliseString(applicantUserRow.cognito_sub) !== normaliseString(clientRow.applicant_cognito_sub)
+    ) {
+      throw createAdminDocumentUploadError('applicant_client_mismatch');
+    }
+  }
+
+  if (manifest.uploaderUserId) {
+    const [[uploaderUserRow]] = await connection.query(
+      `SELECT id, cognito_sub
+         FROM user
+        WHERE id = ?
+        LIMIT 1 FOR UPDATE`,
+      [manifest.uploaderUserId]
+    );
+    if (!uploaderUserRow) {
+      throw createAdminDocumentUploadError('uploader_user_not_found');
+    }
+  }
+
+  if (manifest.documentCategory) {
+    const [[documentTypeRow]] = await connection.query(
+      `SELECT code, scope, is_active
+         FROM document_type
+        WHERE code = ?
+        LIMIT 1 FOR UPDATE`,
+      [manifest.documentCategory]
+    );
+    if (!documentTypeRow || Number(documentTypeRow.is_active) !== 1) {
+      throw createAdminDocumentUploadError('invalid_document_type');
+    }
+    const liveScope = normaliseString(documentTypeRow.scope) || 'application';
+    if (liveScope !== (manifest.documentTypeScope || 'application')) {
+      throw createAdminDocumentUploadError('document_type_scope_changed');
+    }
+  }
+
+  return {
+    applicationRow,
+    caseRow,
+    actionPlanRow,
+    applicantUserRow,
+    clientRow,
+    interventionIds,
+  };
+}
+
+async function reconcileAdminDocumentUploadCommit(manifest) {
+  let reconciliationConnection = null;
+  try {
+    reconciliationConnection = await pool.getConnection();
+    return await inspectAdminDocumentUploadManifest(reconciliationConnection, manifest);
+  } catch (error) {
+    return { state: 'unavailable', documentRow: null, reason: error?.message || 'reconciliation_unavailable' };
+  } finally {
+    try {
+      reconciliationConnection?.release?.();
+    } catch (_) {}
+  }
+}
+
+async function persistAdminDocumentUploadTransaction(
+  { manifest, uploadedObject } = {},
+  {
+    getConnection = () => pool.getConnection(),
+    lockManifestContext = lockAdminDocumentUploadManifestContext,
+    authorizeManifestContext = null,
+    writeManifest = writeAdminDocumentUploadManifest,
+    reconcileCommit = reconcileAdminDocumentUploadCommit,
+    compensateObject = compensateAdminDocumentUploadedObject,
+  } = {}
+) {
+  if (!manifest || !uploadedObject?.key || uploadedObject.versionIdentityVerified !== true) {
+    throw createAdminDocumentUploadError(
+      'document_upload_object_identity_unverified',
+      'The uploaded object identity was not verified.',
+      { commitOutcome: 'not_attempted', retrySafe: false, manualReviewRequired: true }
+    );
+  }
+
+  let connection = null;
+  let transactionStarted = false;
+  let commitAttempted = false;
+  let connectionDestroyed = false;
+  const releaseConnection = () => {
+    if (!connection || connectionDestroyed) return;
+    try {
+      connection.release?.();
+    } catch (releaseError) {
+      try {
+        connection.destroy?.();
+      } catch (_) {}
+    } finally {
+      connection = null;
+    }
+  };
+  const destroyConnection = () => {
+    if (!connection || connectionDestroyed) return;
+    connectionDestroyed = true;
+    try {
+      connection.destroy?.();
+    } catch (_) {
+      // Never let connection cleanup obscure an already ambiguous commit outcome.
+    } finally {
+      connection = null;
+    }
+  };
+
+  try {
+    connection = await getConnection();
+    await connection.beginTransaction();
+    transactionStarted = true;
+    await lockManifestContext(connection, manifest);
+    if (typeof authorizeManifestContext === 'function') {
+      await authorizeManifestContext(connection, manifest);
+    }
+    await writeManifest(connection, manifest);
+
+    commitAttempted = true;
+    try {
+      await connection.commit();
+      transactionStarted = false;
+      releaseConnection();
+    } catch (commitError) {
+      transactionStarted = false;
+      destroyConnection();
+      let inspection;
+      try {
+        inspection = await reconcileCommit(manifest);
+      } catch (reconciliationError) {
+        inspection = {
+          state: 'unavailable',
+          documentRow: null,
+          reason: reconciliationError?.message || 'reconciliation_unavailable',
+        };
+      }
+      if (inspection?.state === 'committed' && inspection.documentRow) {
+        return {
+          documentRow: inspection.documentRow,
+          recoveredCommit: true,
+        };
+      }
+      throw createAdminDocumentUploadError(
+        'document_upload_commit_outcome_uncertain',
+        'The database did not acknowledge the upload transaction and its outcome is uncertain.',
+        {
+          cause: commitError,
+          commitOutcome: 'uncertain',
+          reconciliationState: inspection?.state || 'unavailable',
+          reconciliationReason: inspection?.reason || null,
+          retrySafe: false,
+          manualReviewRequired: true,
+        }
+      );
+    }
+
+    let inspection;
+    try {
+      inspection = await reconcileCommit(manifest);
+    } catch (reconciliationError) {
+      inspection = {
+        state: 'unavailable',
+        documentRow: null,
+        reason: reconciliationError?.message || 'reconciliation_unavailable',
+      };
+    }
+    if (inspection?.state !== 'committed' || !inspection.documentRow) {
+      throw createAdminDocumentUploadError(
+        'document_upload_post_commit_unverified',
+        'The upload transaction committed but its exact manifest could not be verified.',
+        {
+          commitOutcome: 'committed_unverified',
+          reconciliationState: inspection?.state || 'unavailable',
+          reconciliationReason: inspection?.reason || null,
+          retrySafe: false,
+          manualReviewRequired: true,
+        }
+      );
+    }
+    return {
+      documentRow: inspection.documentRow,
+      recoveredCommit: false,
+    };
+  } catch (error) {
+    let rollbackOutcomeUncertain = false;
+    if (connection && transactionStarted && !commitAttempted) {
+      try {
+        await connection.rollback();
+        transactionStarted = false;
+      } catch (rollbackError) {
+        error.rollbackError = rollbackError;
+        rollbackOutcomeUncertain = true;
+        destroyConnection();
+      }
+    }
+    releaseConnection();
+
+    if (rollbackOutcomeUncertain) {
+      throw createAdminDocumentUploadError(
+        'document_upload_rollback_outcome_uncertain',
+        'The upload transaction failed and PATH could not confirm its rollback.',
+        {
+          cause: error,
+          rollbackError: error.rollbackError,
+          commitOutcome: 'uncertain',
+          retrySafe: false,
+          manualReviewRequired: true,
+        }
+      );
+    }
+
+    if (commitAttempted || error?.commitOutcome === 'uncertain' || error?.commitOutcome === 'committed_unverified') {
+      throw error;
+    }
+
+    try {
+      await compensateObject(uploadedObject);
+    } catch (compensationError) {
+      throw createAdminDocumentUploadError(
+        'document_upload_compensation_failed',
+        'The database transaction failed and exact object cleanup could not be verified.',
+        {
+          cause: error,
+          compensationError,
+          commitOutcome: 'not_attempted',
+          retrySafe: false,
+          manualReviewRequired: true,
+        }
+      );
+    }
+    error.commitOutcome = 'not_attempted';
+    error.objectCompensated = true;
+    error.retrySafe = true;
+    throw error;
+  } finally {
+    releaseConnection();
+  }
+}
+
+function handleAdminDocumentUpload(
+  { requireApplicant = false, applicantIdHint = null, caseIdHint = null } = {},
+  { uploadSingle = null } = {}
+) {
   return (req, res) => {
-  adminDocumentUpload.single('file')(req, res, async err => {
+  const runUpload = uploadSingle || adminDocumentUpload.single('file');
+  runUpload(req, res, async err => {
     if (err) {
       const isMulterError = err instanceof multer.MulterError;
       if (err.code === 'LIMIT_FILE_SIZE' || (isMulterError && err.code === 'LIMIT_FILE_SIZE')) {
@@ -50306,14 +52911,14 @@ function handleAdminDocumentUpload({ requireApplicant = false, applicantIdHint =
     if (docType) {
       try {
         const [[docTypeRow]] = await pool.query(
-          'SELECT COALESCE(scope, \"application\") AS scope FROM document_type WHERE code = ? AND is_active = 1 LIMIT 1',
+          'SELECT code, scope, is_active FROM document_type WHERE code = ? LIMIT 1',
           [docType]
         );
-        if (!docTypeRow) {
+        if (!docTypeRow || Number(docTypeRow.is_active) !== 1) {
           cleanupUploadedFile();
           return res.status(400).json({ error: 'invalid_document_type' });
         }
-        docTypeScope = docTypeRow.scope || 'application';
+        docTypeScope = normaliseString(docTypeRow.scope) || 'application';
       } catch (err) {
         cleanupUploadedFile();
         console.error('[admin:documents:upload] doc type lookup failed', err);
@@ -50419,38 +53024,30 @@ function handleAdminDocumentUpload({ requireApplicant = false, applicantIdHint =
     }
     const metadata = Object.keys(metadataObj).length ? JSON.stringify(metadataObj) : null;
     const source = 'manual_upload';
-    const uploaderUserId = await resolveAdminActorUserId(req, pool);
     const mimeType = file.mimetype || null;
     const sizeBytes = Number.isFinite(Number(file.size)) ? Number(file.size) : null;
-    const checksum = await computeFileSha256(file.path);
     const originalNameRaw = typeof file.originalname === 'string' ? file.originalname.trim() : '';
     const fileNameForDb = (originalNameRaw || file.filename || 'document').slice(0, 255);
-
-    let relativePath = null;
+    let uploaderUserId = null;
+    let checksum = null;
     try {
-      const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-      if (DRIVER !== 's3') {
-        throw new Error('s3 driver not configured');
-      }
-      const key = generateKey(applicantId || uploaderUserId || 'admin', originalNameRaw || fileNameForDb);
-      const contentType = mimeType || 'application/octet-stream';
-      const presigned = await presignPut({ key, contentType });
-      await axios.put(presigned.url, fs.createReadStream(file.path), {
-        headers: {
-          ...(presigned.headers || {}),
-          'Content-Type': contentType,
-          ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-        }
-      });
-      relativePath = key;
+      uploaderUserId = await resolveAdminActorUserId(req, pool);
+      checksum = await computeFileSha256(file.path);
+    } catch (preparationError) {
       cleanupUploadedFile();
-    } catch (uploadErr) {
-      cleanupUploadedFile();
-      console.error('[admin:documents:upload:s3] upload failed', uploadErr);
-      return res.status(500).json({ error: 'object_store_upload_failed' });
+      console.error('[admin:documents:upload] preparation failed', preparationError);
+      return res.status(500).json({ error: 'document_upload_preparation_failed' });
     }
 
-    let insertId = null;
+    if (!checksum) {
+      cleanupUploadedFile();
+      return res.status(500).json({ error: 'file_checksum_failed' });
+    }
+    if (!uploaderUserId) {
+      cleanupUploadedFile();
+      return res.status(500).json({ error: 'actor_user_resolution_failed' });
+    }
+
     let resolvedClientId = null;
     try {
       resolvedClientId = await resolveClientIdForDocument({
@@ -50458,146 +53055,201 @@ function handleAdminDocumentUpload({ requireApplicant = false, applicantIdHint =
         caseId: caseId || caseIdRaw,
         actionPlanId: actionPlanId || actionPlanIdRaw,
         applicationId: applicationId || applicationIdRaw,
+        connection: pool,
       });
       if (!resolvedClientId) {
         cleanupUploadedFile();
         return res.status(422).json({ error: 'client_id_required' });
       }
-    } catch (err) {
+    } catch (clientResolutionError) {
       cleanupUploadedFile();
-      const errorCode = err?.code || 'client_id_resolution_failed';
+      const errorCode = clientResolutionError?.code || 'client_id_resolution_failed';
       return res.status(400).json({ error: errorCode });
     }
 
+    if (isEiVerificationDocument && eiEligibilityStatus && (!applicationId || !caseId)) {
+      cleanupUploadedFile();
+      return res.status(422).json({ error: 'ei_verification_assessment_scope_required' });
+    }
+
+    let relativePath = null;
+    let uploadedObject = null;
     try {
-      const insertPayload = [
-        caseId,
-        applicationId,
-        actionPlanId,
-        resolvedClientId,
+      uploadedObject = await uploadAdminDocumentObject({
         applicantId,
         uploaderUserId,
-        source,
-        fileNameForDb,
-        relativePath,
+        originalName: originalNameRaw,
+        fileName: fileNameForDb,
+        filePath: file.path,
         mimeType,
-        label,
-        metadata,
         sizeBytes,
-        checksum,
-        docType
-      ];
-      const [result] = await pool.query(
-        `INSERT INTO iset_document
-           (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?)
-         ON DUPLICATE KEY UPDATE
-           applicant_user_id = VALUES(applicant_user_id),
-           application_id = VALUES(application_id),
-           action_plan_id = VALUES(action_plan_id),
-           case_id = VALUES(case_id),
-           client_id = VALUES(client_id),
-           user_id = VALUES(user_id),
-           label = VALUES(label),
-           metadata = VALUES(metadata),
-           mime_type = VALUES(mime_type),
-           size_bytes = VALUES(size_bytes),
-           checksum_sha256 = VALUES(checksum_sha256),
-           status = 'active',
-           document_category = VALUES(document_category),
-           updated_at = NOW()`,
-        insertPayload
-      );
-      insertId = result.insertId || null;
-      if (isEiVerificationDocument && eiEligibilityStatus && (applicationId || applicationIdRaw) && (caseId || caseIdRaw)) {
-        await pool.query(
-          `INSERT INTO iset_application_assessment
-             (case_id, application_id, esdc_eligibility)
-           VALUES (?, ?, ?)
-           ON DUPLICATE KEY UPDATE
-             case_id = VALUES(case_id),
-             esdc_eligibility = VALUES(esdc_eligibility),
-             updated_at = NOW()`,
-          [caseId || caseIdRaw, applicationId || applicationIdRaw, eiEligibilityStatus]
-        );
-      }
-    } catch (dbErr) {
-      console.error('[admin:documents:upload] insert failed', dbErr);
+        checksumSha256: checksum,
+      });
+      relativePath = uploadedObject.key;
+    } catch (uploadErr) {
       cleanupUploadedFile();
-      return res.status(500).json({ error: 'document_store_failed' });
-    }
-
-    const documentIdForLinks = insertId || null;
-
-      try {
-        const lookupKey = insertId
-          ? ['id = ?', [insertId]]
-          : ['file_path = ?', [relativePath]];
-        const [rows] = await pool.query(
-        `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
-           FROM iset_document
-         WHERE ${lookupKey[0]}
-         LIMIT 1`,
-        lookupKey[1]
-      );
-        if (!rows || !rows.length) {
-          return res.status(200).json({
-            ok: true,
-            message: 'uploaded',
-            document: null
+      console.error('[admin:documents:upload:s3] upload failed', uploadErr);
+      if (uploadErr?.uploadedObject?.versionIdentityVerified === true) {
+        try {
+          await compensateAdminDocumentUploadedObject(uploadErr.uploadedObject);
+        } catch (compensationError) {
+          console.error('[admin:documents:upload:s3] upload-failure compensation failed', compensationError);
+          return res.status(503).json({
+            error: 'object_store_upload_ambiguous',
+            retrySafe: false,
+            manualReviewRequired: true,
           });
         }
-        const documentRow = rows[0];
-        if (interventionIds.length) {
-          documentRow.intervention_ids = interventionIds;
-        }
-        const resolvedDocId = documentIdForLinks || documentRow?.id || null;
-        if (resolvedDocId && interventionIds.length) {
-          try {
-            await updateDocumentInterventionLinks({
-              documentId: resolvedDocId,
-              interventionIds,
-            });
-          } catch (linkErr) {
-            console.warn('[admin:documents:upload] intervention link failed', linkErr?.message || linkErr);
-          }
-        }
-
-        let resolvedCaseId = caseId || normalisePositiveInteger(documentRow?.case_id);
-        if (!resolvedCaseId && documentRow?.action_plan_id) {
-          resolvedCaseId = await resolveCaseIdForActionPlan(documentRow.action_plan_id);
-        }
-        let resolvedApplicationId = applicationId || normalisePositiveInteger(documentRow?.application_id);
-        if (!resolvedApplicationId && resolvedCaseId) {
-          resolvedApplicationId = await resolveApplicationIdForCaseId(resolvedCaseId);
-        }
-
-        if (resolvedCaseId) {
-          await emitDocumentUploadedEvent({
-            req,
-            caseId: resolvedCaseId,
-            applicationId: resolvedApplicationId,
-            applicantUserId: applicantId,
-            fileName: documentRow?.file_name || label || fileNameForDb,
-            source,
-            sizeBytes,
-            message: `Document uploaded (${source}): ${documentRow?.file_name || fileNameForDb}.`
-          });
-        }
-
-        return res.status(200).json({
-          ok: true,
-          message: 'uploaded',
-          document: documentRow
+      }
+      if (
+        uploadErr?.code === 's3_upload_outcome_ambiguous' &&
+        uploadErr?.uploadedObject?.versionIdentityVerified !== true
+      ) {
+        return res.status(503).json({
+          error: 'object_store_upload_ambiguous',
+          retrySafe: false,
+          manualReviewRequired: true,
         });
-      } catch (lookupErr) {
-        console.warn('[admin:documents:upload] lookup failed', lookupErr);
-        return res.status(200).json({
-          ok: true,
-        message: 'uploaded',
-        document: null
+      }
+      return res.status(500).json({ error: 'object_store_upload_failed', retrySafe: true });
+    }
+    cleanupUploadedFile();
+
+    const manifest = {
+      caseId: caseId || null,
+      applicationId: applicationId || null,
+      actionPlanId: actionPlanId || null,
+      clientId: resolvedClientId,
+      applicantUserId: applicantId || null,
+      uploaderUserId: uploaderUserId || null,
+      source,
+      fileName: fileNameForDb,
+      filePath: relativePath,
+      mimeType,
+      label,
+      metadata,
+      sizeBytes,
+      checksumSha256: checksum,
+      documentCategory: docType,
+      documentTypeScope: normalizedScope,
+      interventionIds: Array.from(new Set(interventionIds)).sort((left, right) => left - right),
+      assessment: isEiVerificationDocument && eiEligibilityStatus
+        ? {
+          caseId,
+          applicationId,
+          esdcEligibility: eiEligibilityStatus,
+        }
+        : null,
+    };
+
+    let persistenceResult;
+    try {
+      persistenceResult = await persistAdminDocumentUploadTransaction({
+        manifest,
+        uploadedObject,
+      }, {
+        authorizeManifestContext: async (connection, lockedManifest) => {
+          if (requireApplicant) {
+            const applicantAccessError = await validateApplicantDocumentContextAccess(req, {
+              applicantId,
+              caseId: lockedManifest.caseId,
+              applicationId: lockedManifest.applicationId,
+              actionPlanId: lockedManifest.actionPlanId,
+              interventionId: lockedManifest.interventionIds[0] || null,
+              requireScopedContext: true,
+              connection,
+            });
+            if (applicantAccessError) {
+              throw createAdminDocumentUploadError(
+                applicantAccessError.body?.detail || applicantAccessError.body?.error || 'document_scope_forbidden',
+                'Document access changed before the upload could be committed.',
+                { httpStatus: applicantAccessError.status }
+              );
+            }
+          }
+          const targetAccessError = await validateDocumentAttachmentContextAccess(req, {
+            caseId: lockedManifest.caseId,
+            applicationId: lockedManifest.applicationId,
+            actionPlanId: lockedManifest.actionPlanId,
+            interventionIds: lockedManifest.interventionIds,
+            requireScopedContext: true,
+            connection,
+          });
+          if (targetAccessError) {
+            throw createAdminDocumentUploadError(
+              targetAccessError.body?.detail || targetAccessError.body?.error || 'document_scope_forbidden',
+              'Document access changed before the upload could be committed.',
+              { httpStatus: targetAccessError.status }
+            );
+          }
+        },
+      });
+    } catch (dbError) {
+      console.error('[admin:documents:upload] transaction failed', dbError);
+      if (dbError?.retrySafe === false || dbError?.manualReviewRequired === true) {
+        return res.status(503).json({
+          error: dbError?.code || 'document_store_outcome_uncertain',
+          retrySafe: false,
+          manualReviewRequired: true,
+        });
+      }
+      if (
+        dbError?.objectCompensated === true &&
+        Number(dbError?.httpStatus) >= 400 &&
+        Number(dbError?.httpStatus) < 500
+      ) {
+        return res.status(Number(dbError.httpStatus)).json({
+          error: dbError?.code || 'document_scope_changed',
+          retrySafe: true,
+        });
+      }
+      return res.status(500).json({
+        error: 'document_store_failed',
+        retrySafe: dbError?.retrySafe === true,
       });
     }
+
+    const documentRow = buildAdminDocumentUploadResponseRow(
+      persistenceResult.documentRow,
+      manifest.interventionIds
+    );
+    if (!documentRow) {
+      return res.status(503).json({
+        error: 'document_upload_post_commit_unverified',
+        retrySafe: false,
+        manualReviewRequired: true,
+      });
+    }
+
+    let eventApplicationId = manifest.applicationId || applicationIdRaw || null;
+    if (!eventApplicationId && manifest.caseId) {
+      try {
+        eventApplicationId = await resolveApplicationIdForCaseId(manifest.caseId);
+      } catch (eventScopeError) {
+        console.warn(
+          '[admin:documents:upload] event application resolution failed',
+          eventScopeError?.message || eventScopeError
+        );
+      }
+    }
+    if (manifest.caseId) {
+      await emitDocumentUploadedEvent({
+        req,
+        caseId: manifest.caseId,
+        applicationId: eventApplicationId,
+        applicantUserId: applicantId,
+        fileName: documentRow.file_name || label || fileNameForDb,
+        source,
+        sizeBytes,
+        message: `Document uploaded (${source}): ${documentRow.file_name || fileNameForDb}.`
+      });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      message: 'uploaded',
+      document: documentRow
+    });
   });
   };
 }
@@ -50891,7 +53543,7 @@ app.post('/api/allocations/evidence/delete', async (req, res) => {
     }
     const { deleteObject, DRIVER } = require('../ISET-intake/s3Provider');
     if (DRIVER === 's3' && typeof deleteObject === 'function') {
-      await deleteObject(key);
+      await deleteObject({ key });
     }
     if (access.pending?.upload_id) {
       await pool.query(
@@ -64543,7 +67195,396 @@ function normalizeFinancialOverviewSendMode(value) {
   return normalized && normalized.toLowerCase() === 'blank' ? 'blank' : 'prefill';
 }
 
-// POST /api/cases/:id/messages  { subject, body, urgent, attachments?: [{ workflow_id, due_at?, checklist_doc_type?, financial_overview_mode? }] }
+function normalizeCaseMessageSigningAttachments(attachments) {
+  if (!Array.isArray(attachments)) return [];
+  return attachments
+    .map((item) => {
+      const workflowIdValue = item?.workflow_id;
+      const workflowId = typeof workflowIdValue === 'number'
+        ? workflowIdValue
+        : /^\d+$/.test(String(workflowIdValue ?? '').trim())
+          ? Number(String(workflowIdValue).trim())
+          : null;
+      if (!Number.isSafeInteger(workflowId) || workflowId < 1) return null;
+      return {
+        workflow_id: workflowId,
+        due_at: item?.due_at || null,
+        financial_overview_mode: normalizeFinancialOverviewSendMode(
+          item?.financial_overview_mode ??
+          item?.financialOverviewMode ??
+          item?.financialOverviewPrefillMode ??
+          null
+        )
+      };
+    })
+    .filter(Boolean);
+}
+
+function validateCaseMessageSigningAttachmentRequest(rawAttachments, normalizedAttachments) {
+  if (rawAttachments === null || typeof rawAttachments === 'undefined') {
+    return { valid: true };
+  }
+  if (!Array.isArray(rawAttachments)) {
+    return { valid: false, error: 'invalid_signing_attachments' };
+  }
+  if (rawAttachments.length !== normalizedAttachments.length) {
+    return { valid: false, error: 'invalid_signing_workflow_id' };
+  }
+  const workflowIds = normalizedAttachments.map(item => Number(item.workflow_id));
+  if (new Set(workflowIds).size !== workflowIds.length) {
+    return { valid: false, error: 'duplicate_signing_workflow_id' };
+  }
+  return { valid: true };
+}
+
+function createCaseMessageHttpError(status, error, message, details = null) {
+  const routeError = new Error(message || error || 'failed_to_send_message');
+  routeError.httpStatus = Number(status) || 500;
+  routeError.publicError = error || 'failed_to_send_message';
+  routeError.publicMessage = message || null;
+  routeError.publicDetails = details && typeof details === 'object' ? details : null;
+  return routeError;
+}
+
+function validateAutoFundingWorkflowAttachmentResolution(workflowResolution) {
+  const rawAttachments = workflowResolution?.attachments;
+  const normalizedAttachments = normalizeCaseMessageSigningAttachments(rawAttachments);
+  const validation = validateCaseMessageSigningAttachmentRequest(
+    rawAttachments,
+    normalizedAttachments
+  );
+  if (!validation.valid || normalizedAttachments.length !== 2) {
+    throw createCaseMessageHttpError(
+      409,
+      'funding_forms_workflows_invalid',
+      'The required funding forms could not be resolved safely.'
+    );
+  }
+  return normalizedAttachments;
+}
+
+function assertUniqueVersionedSigningWorkflowAttachments(workflowRows) {
+  const versionedDocumentTypes = new Set(['funding_agreement', 'financial_overview']);
+  const counts = new Map();
+  for (const workflow of Array.isArray(workflowRows) ? workflowRows : []) {
+    const documentType = normaliseString(workflow?.document_type);
+    if (!versionedDocumentTypes.has(documentType)) continue;
+    counts.set(documentType, (counts.get(documentType) || 0) + 1);
+  }
+  for (const [documentType, count] of counts.entries()) {
+    if (count > 1) {
+      throw createCaseMessageHttpError(
+        422,
+        'duplicate_versioned_signing_form',
+        'Only one versioned funding form of each type can be sent in a message.',
+        { documentType }
+      );
+    }
+  }
+}
+
+function mapCaseMessagePublicError(error) {
+  if (error?.httpStatus && error?.publicError) return error;
+  const code = normaliseString(error?.code) || normaliseString(error?.message);
+  if (
+    code === 's3_version_compensation_unavailable' ||
+    code === 's3_upload_identity_unverified'
+  ) {
+    return createCaseMessageHttpError(
+      503,
+      'signing_artifact_storage_unavailable',
+      'Signing documents are temporarily unavailable. Please try again later.'
+    );
+  }
+  const conflictCodes = new Set([
+    'application_id_required_for_signing_request',
+    'application_scope_conflict',
+    'cfa_application_scope_required',
+    'cfa_application_scope_conflict',
+    'cfa_version_application_scope_unknown',
+    'cfa_series_ambiguous',
+    'cfa_supersession_conflict',
+    'cfa_draft_baseline_conflict',
+    'cfa_document_insert_failed',
+    'cfa_redline_document_insert_failed',
+    'funding_overview_application_scope_conflict',
+    'funding_overview_version_application_scope_unknown',
+    'funding_overview_series_ambiguous',
+    'funding_overview_supersession_conflict',
+    'funding_overview_document_insert_failed',
+    'funding_overview_redline_document_insert_failed',
+    'document_request_activation_failed',
+  ]);
+  if (!conflictCodes.has(code)) return error;
+  return createCaseMessageHttpError(
+    409,
+    'signing_message_state_conflict',
+    'The application or signing forms changed before the message could be sent. Please reload and try again.'
+  );
+}
+
+async function resolveEligibleSigningWorkflowRows(
+  connection,
+  attachmentSpecs,
+  { forUpdate = false } = {}
+) {
+  const specs = Array.isArray(attachmentSpecs) ? attachmentSpecs : [];
+  if (!specs.length) return [];
+  const workflowIds = specs.map(item => Number(item.workflow_id));
+  if (new Set(workflowIds).size !== workflowIds.length) {
+    throw createCaseMessageHttpError(
+      400,
+      'duplicate_signing_workflow_id',
+      'Each signing workflow can be attached only once.'
+    );
+  }
+  const placeholders = workflowIds.map(() => '?').join(',');
+  const [rows] = await connection.query(
+    `SELECT id, name, workflow_type, document_type
+       FROM iset_intake.workflow
+      WHERE id IN (${placeholders})${forUpdate ? '\n      FOR UPDATE' : ''}`,
+    workflowIds
+  );
+  const rowsById = new Map();
+  const requestedWorkflowIds = new Set(workflowIds);
+  for (const row of rows || []) {
+    const workflowId = normalisePositiveInteger(row?.id);
+    if (!workflowId || !requestedWorkflowIds.has(workflowId) || rowsById.has(workflowId)) {
+      throw createCaseMessageHttpError(
+        409,
+        'signing_workflow_resolution_ambiguous',
+        'A selected signing workflow could not be resolved uniquely.'
+      );
+    }
+    rowsById.set(workflowId, row);
+  }
+
+  return specs.map(spec => {
+    const workflowId = Number(spec.workflow_id);
+    const row = rowsById.get(workflowId);
+    if (!row) {
+      throw createCaseMessageHttpError(
+        422,
+        'signing_workflow_not_found',
+        'A selected signing workflow no longer exists.',
+        { workflowId }
+      );
+    }
+    let workflowType = null;
+    try {
+      workflowType = normalizeWorkflowType(row.workflow_type, { required: true });
+    } catch (_) {
+      throw createCaseMessageHttpError(
+        422,
+        'signing_workflow_ineligible',
+        'A selected workflow is not eligible for secure-message signing.',
+        { workflowId }
+      );
+    }
+    if (workflowType !== 'consent-no-prefill' && workflowType !== 'consent-cm-prefill') {
+      throw createCaseMessageHttpError(
+        422,
+        'signing_workflow_ineligible',
+        'A selected workflow is not eligible for secure-message signing.',
+        { workflowId }
+      );
+    }
+    return {
+      id: workflowId,
+      name: normaliseString(row.name) || `Workflow ${workflowId}`,
+      workflow_type: workflowType,
+      document_type: normaliseString(row.document_type) || null,
+    };
+  });
+}
+
+function assertValidSigningWorkflowSchema(schema, workflowId) {
+  const steps = schema?.steps;
+  const hasValidSteps = Array.isArray(steps) &&
+    steps.length > 0 &&
+    steps.every(step => step && typeof step === 'object' && !Array.isArray(step));
+  if (!schema || typeof schema !== 'object' || !hasValidSteps) {
+    throw createCaseMessageHttpError(
+      409,
+      'signing_workflow_schema_invalid',
+      'A selected signing workflow has no usable form schema.',
+      { workflowId: normalisePositiveInteger(workflowId) }
+    );
+  }
+  return schema;
+}
+
+async function buildRequiredSigningWorkflowSchemas(
+  connection,
+  workflowRows,
+  { schemaBuilder = buildWorkflowSchema } = {}
+) {
+  if (!Array.isArray(workflowRows) || !workflowRows.length) return new Map();
+  if (typeof schemaBuilder !== 'function') {
+    throw createCaseMessageHttpError(
+      503,
+      'signing_workflow_schema_unavailable',
+      'Signing forms are temporarily unavailable.'
+    );
+  }
+  const schemas = new Map();
+  for (const workflow of workflowRows) {
+    let built = null;
+    try {
+      built = await schemaBuilder({ pool: connection, workflowId: workflow.id });
+    } catch (schemaError) {
+      throw createCaseMessageHttpError(
+        409,
+        'signing_workflow_schema_invalid',
+        'A selected signing workflow could not be prepared.',
+        { workflowId: workflow.id }
+      );
+    }
+    const schema = assertValidSigningWorkflowSchema(
+      built && typeof built === 'object'
+        ? {
+            steps: built.steps,
+            meta: built.meta && typeof built.meta === 'object' ? built.meta : {},
+          }
+        : null,
+      workflow.id
+    );
+    schemas.set(workflow.id, schema);
+  }
+  return schemas;
+}
+
+function prepareCaseMessageSigningSchema({
+  workflow,
+  requiredSchema,
+  decisionLetterSchemaOverride = null,
+  decisionLetterTokens = null,
+  fundingAgreementTokens = null,
+  fundingAgreementDraft = null,
+  fundingAgreementVariant = 'clean',
+  fundingOverviewTokens = null,
+  fundingOverviewDraft = null,
+  fundingOverviewVariant = 'clean',
+  attendanceReportInitialValues = null,
+} = {}) {
+  const workflowId = normalisePositiveInteger(workflow?.id);
+  let resolvedSchema = assertValidSigningWorkflowSchema(
+    requiredSchema ? JSON.parse(JSON.stringify(requiredSchema)) : null,
+    workflowId
+  );
+  if (decisionLetterSchemaOverride) {
+    resolvedSchema = buildDecisionLetterSchemaFromMessageBody(
+      resolvedSchema,
+      decisionLetterSchemaOverride?.body || '',
+      decisionLetterSchemaOverride?.meta || {}
+    );
+  } else if (decisionLetterTokens) {
+    resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, decisionLetterTokens);
+    resolvedSchema = pruneDecisionLetterSchema(resolvedSchema);
+  }
+  if (
+    fundingAgreementTokens &&
+    workflow?.workflow_type === 'consent-cm-prefill' &&
+    workflow?.document_type === 'funding_agreement'
+  ) {
+    resolvedSchema = applyPrefillTokensToSchema(
+      resolvedSchema,
+      fundingAgreementTokens,
+      { preserveMissingTokens: true }
+    );
+  }
+  if (
+    fundingOverviewTokens &&
+    workflow?.workflow_type === 'consent-cm-prefill' &&
+    workflow?.document_type === 'financial_overview'
+  ) {
+    resolvedSchema = applyPrefillTokensToSchema(
+      resolvedSchema,
+      fundingOverviewTokens,
+      { preserveMissingTokens: true }
+    );
+  }
+  if (fundingOverviewDraft && workflow?.document_type === 'financial_overview') {
+    const editableFinancialOverviewSchema = buildFinancialOverviewEditableSchema({
+      mode: fundingOverviewDraft.mode,
+      initialValues: fundingOverviewDraft.initialValues || {}
+    });
+    resolvedSchema = {
+      ...resolvedSchema,
+      steps: editableFinancialOverviewSchema.steps,
+      meta: {
+        ...(resolvedSchema?.meta || {}),
+        ...(editableFinancialOverviewSchema.meta || {}),
+        initialValues: editableFinancialOverviewSchema.initialValues || {}
+      }
+    };
+  }
+  if (
+    attendanceReportInitialValues &&
+    workflow?.workflow_type === 'consent-cm-prefill' &&
+    workflow?.document_type === ATTENDANCE_REPORT_DOCUMENT_TYPE
+  ) {
+    resolvedSchema = applyAttendanceReportInitialValues(
+      resolvedSchema,
+      attendanceReportInitialValues
+    );
+  }
+  if (fundingAgreementDraft && workflow?.document_type === 'funding_agreement') {
+    resolvedSchema = {
+      ...resolvedSchema,
+      meta: {
+        ...(resolvedSchema?.meta || {}),
+        cfaVersionId: fundingAgreementDraft.id,
+        cfaVersionNumber: fundingAgreementDraft.versionNumber,
+        cfaSeriesId: fundingAgreementDraft.seriesId,
+        cfaRenderVariant: fundingAgreementVariant,
+      }
+    };
+  }
+  if (fundingOverviewDraft && workflow?.document_type === 'financial_overview') {
+    resolvedSchema = {
+      ...resolvedSchema,
+      meta: {
+        ...(resolvedSchema?.meta || {}),
+        fundingOverviewVersionId: fundingOverviewDraft.id,
+        fundingOverviewVersionNumber: fundingOverviewDraft.versionNumber,
+        fundingOverviewSeriesId: fundingOverviewDraft.seriesId,
+        fundingOverviewRenderVariant: fundingOverviewVariant,
+        fundingOverviewSupersedesVersionId: fundingOverviewDraft.supersedesVersionId,
+        fundingOverviewChangedFields: fundingOverviewDraft.changedFields,
+        fundingOverviewAttestation: FUNDING_OVERVIEW_ATTESTATION_TEXT,
+        fundingOverviewEditable: true,
+        fundingOverviewMode: fundingOverviewDraft.mode || 'prefill',
+        initialValues: fundingOverviewDraft.initialValues || {},
+      }
+    };
+  }
+  return assertValidSigningWorkflowSchema(resolvedSchema, workflowId);
+}
+
+function resolveAuthoritativeSigningRequestDocumentType({
+  workflowDocumentType,
+  serverFallbackDocumentType = null,
+  workflowName,
+  workflowType,
+} = {}) {
+  return (
+    normaliseString(workflowDocumentType) ||
+    normaliseString(serverFallbackDocumentType) ||
+    slugifyName(workflowName) ||
+    normaliseString(workflowType) ||
+    'signing-form'
+  );
+}
+
+function resolveWorkflowDecisionLetterDocumentType(workflowDocumentType) {
+  const documentType = normaliseString(workflowDocumentType);
+  return documentType === 'assessment_approval_letter' || documentType === 'assessment_denial_letter'
+    ? documentType
+    : null;
+}
+
+// POST /api/cases/:id/messages  { subject, body, urgent, attachments?: [{ workflow_id, due_at?, financial_overview_mode? }] }
 const handlePostCaseSecureMessage = async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   const {
@@ -64562,26 +67603,12 @@ const handlePostCaseSecureMessage = async (req, res) => {
   const bodyValue = typeof body === 'string' ? body.trim() : '';
   const toNameValue = typeof toDisplayName === 'string' ? toDisplayName.trim() : '';
   const fromNameValue = typeof fromDisplayName === 'string' ? fromDisplayName.trim() : '';
-  const attachmentSpecs = Array.isArray(attachments)
-    ? attachments
-        .map((item) => {
-          const workflowId = parseInt(item?.workflow_id, 10);
-          if (!Number.isInteger(workflowId) || workflowId < 1) return null;
-          return {
-            workflow_id: workflowId,
-            due_at: item?.due_at || null,
-            checklist_doc_type: item?.checklist_doc_type || null,
-            financial_overview_mode: normalizeFinancialOverviewSendMode(
-              item?.financial_overview_mode ??
-              item?.financialOverviewMode ??
-              item?.financialOverviewPrefillMode ??
-              null
-            )
-          };
-        })
-        .filter(Boolean)
-    : [];
+	  const attachmentSpecs = normalizeCaseMessageSigningAttachments(attachments);
+  const attachmentValidation = validateCaseMessageSigningAttachmentRequest(attachments, attachmentSpecs);
   const requestedApplicationId = normalisePositiveInteger(applicationId || application_id);
+  if (!attachmentValidation.valid) {
+    return res.status(400).json({ error: attachmentValidation.error });
+  }
   if (!subjectValue || !bodyValue) return res.status(400).json({ error: 'missing_required_fields' });
   if (!toNameValue || !fromNameValue) {
     return res.status(400).json({ error: 'recipient_and_sender_names_required' });
@@ -64594,6 +67621,11 @@ const handlePostCaseSecureMessage = async (req, res) => {
   }
   let messageWriteConnection = null;
   let messageWriteTransactionStarted = false;
+  let messageWriteCommitAttempted = false;
+  let messageWriteCommitOutcome = 'not_attempted';
+  let messageCommitIdentity = null;
+  const createdSigningRequestIds = [];
+  const generatedObjectKeys = [];
   try {
     const accessError = await validateCaseAccessByCaseId(req, caseId);
     if (accessError) return res.status(accessError.status).json(accessError.body);
@@ -64613,6 +67645,14 @@ const handlePostCaseSecureMessage = async (req, res) => {
     }
 	    const recipientId = caseRow?.applicant_user_id || null;
 	    if (!recipientId) return res.status(404).json({ error: 'applicant_not_found' });
+	    const caseApplicationId = normalisePositiveInteger(caseRow?.application_id);
+	    const messageApplicationId = caseApplicationId || null;
+	    if (requestedApplicationId && requestedApplicationId !== messageApplicationId) {
+	      return res.status(409).json({
+	        error: 'application_scope_conflict',
+	        message: 'The selected application does not belong to this case.',
+	      });
+	    }
 	    const caseContext = safeJsonParse(caseRow?.case_context_json, null) || {};
 	    const applicationAssessmentContext = resolveApplicationAssessmentCaseContext(
 	      caseContext,
@@ -64652,29 +67692,12 @@ const handlePostCaseSecureMessage = async (req, res) => {
     const decisionLetterTokensByWorkflowId = new Map();
     const decisionLetterSchemaOverridesByWorkflowId = new Map();
     const decisionLetterDocs = [];
+    const serverDocumentTypeFallbackByWorkflowId = new Map();
     let denialLetterCompletionResult = null;
-    const letterDocTypes = new Set(['assessment_approval_letter', 'assessment_denial_letter']);
     const requestedInterventionId = normalisePositiveInteger(interventionId);
     let requestedInterventionLetterEligibility = null;
     if (attachmentSpecs.length) {
-      const wfIds = attachmentSpecs
-        .map(a => a.workflow_id)
-        .filter(n => Number.isInteger(n) && n > 0);
-      if (wfIds.length) {
-        const placeholders = wfIds.map(() => '?').join(',');
-        const [wfRows] = await pool.query(
-          `SELECT id, name, workflow_type, document_type FROM iset_intake.workflow WHERE id IN (${placeholders})`,
-          wfIds
-        );
-        attachmentRows = wfRows
-          .map(r => ({
-            id: r.id,
-            name: r.name || `Workflow ${r.id}`,
-            workflow_type: normalizeWorkflowType(r.workflow_type || 'consent-no-prefill', { required: true }),
-            document_type: r.document_type || null
-          }))
-          .filter(r => r.workflow_type === 'consent-no-prefill' || r.workflow_type === 'consent-cm-prefill');
-      }
+      attachmentRows = await resolveEligibleSigningWorkflowRows(pool, attachmentSpecs);
     }
     const hasApprovalLetterAttachment = attachmentRows.some(
       row => row.document_type === 'assessment_approval_letter'
@@ -64723,10 +67746,65 @@ const handlePostCaseSecureMessage = async (req, res) => {
             missing: workflowResolution.missing
           });
         }
+        const normalizedAutoAttachments = validateAutoFundingWorkflowAttachmentResolution(
+          workflowResolution
+        );
+        const autoAttachmentRows = await resolveEligibleSigningWorkflowRows(
+          pool,
+          normalizedAutoAttachments
+        );
+        if (!autoAttachmentRows.some(row => row.document_type === 'funding_agreement')) {
+          throw createCaseMessageHttpError(
+            409,
+            'funding_forms_workflows_invalid',
+            'The required funding agreement workflow could not be resolved safely.'
+          );
+        }
+        const autoEftRows = autoAttachmentRows.filter(
+          row => row.document_type !== 'funding_agreement'
+        );
+        const autoEftRow = autoEftRows.length === 1 ? autoEftRows[0] : null;
+        const autoEftSource = autoEftRow
+          ? workflowResolution.attachments.find(
+              item => Number(item?.workflow_id) === Number(autoEftRow.id)
+            )
+          : null;
+        const autoEftDocumentType = (normaliseString(autoEftRow?.document_type) || '').toLowerCase();
+        const autoEftFallbackType = (
+          normaliseString(autoEftSource?.server_fallback_document_type) || ''
+        ).toLowerCase();
+        if (
+          !autoEftRow ||
+          (autoEftDocumentType !== 'eft_form' && autoEftFallbackType !== 'eft_form')
+        ) {
+          throw createCaseMessageHttpError(
+            409,
+            'funding_forms_workflows_invalid',
+            'The required EFT workflow could not be resolved safely.'
+          );
+        }
+        const autoRowsById = new Map(
+          autoAttachmentRows.map(row => [Number(row.id), row])
+        );
         const existingIds = new Set(attachmentSpecs.map(item => item.workflow_id));
-        const requiredFormAttachments = workflowResolution.attachments.filter(item => {
+        workflowResolution.attachments.forEach(item => {
           const workflowId = Number(item?.workflow_id);
-          return Number.isInteger(workflowId) && workflowId > 0 && !existingIds.has(workflowId);
+          const serverFallbackDocumentType = normaliseString(item?.server_fallback_document_type);
+          if (Number.isInteger(workflowId) && workflowId > 0 && serverFallbackDocumentType) {
+            serverDocumentTypeFallbackByWorkflowId.set(workflowId, serverFallbackDocumentType);
+          }
+        });
+        const existingFundingAgreement = attachmentRows.some(
+          row => row.document_type === 'funding_agreement'
+        );
+        const requiredFormAttachments = normalizedAutoAttachments.filter(item => {
+          const workflowId = Number(item.workflow_id);
+          const autoRow = autoRowsById.get(workflowId);
+          if (existingIds.has(workflowId)) return false;
+          if (autoRow?.document_type === 'funding_agreement' && existingFundingAgreement) {
+            return false;
+          }
+          return true;
         });
         if (requiredFormAttachments.length) {
           requiredFormAttachments.forEach(item => {
@@ -64734,34 +67812,14 @@ const handlePostCaseSecureMessage = async (req, res) => {
             existingIds.add(workflowId);
             attachmentSpecs.push({
               workflow_id: workflowId,
-              due_at: item?.due_at || null,
-              checklist_doc_type: item?.checklist_doc_type || null
+              due_at: item?.due_at || null
             });
           });
-          const additionalIds = requiredFormAttachments
-            .map(item => Number(item.workflow_id))
-            .filter(id => Number.isInteger(id) && id > 0);
-          if (additionalIds.length) {
-            const placeholders = additionalIds.map(() => '?').join(',');
-            const [additionalRows] = await pool.query(
-              `SELECT id, name, workflow_type, document_type FROM iset_intake.workflow WHERE id IN (${placeholders})`,
-              additionalIds
-            );
-            const existingRowIds = new Set(attachmentRows.map(row => Number(row.id)));
-            const normalizedAdditionalRows = (additionalRows || [])
-              .map(r => ({
-                id: r.id,
-                name: r.name || `Workflow ${r.id}`,
-                workflow_type: normalizeWorkflowType(r.workflow_type || 'consent-no-prefill', { required: true }),
-                document_type: r.document_type || null
-              }))
-              .filter(r => (r.workflow_type === 'consent-no-prefill' || r.workflow_type === 'consent-cm-prefill'))
-              .filter(r => !existingRowIds.has(Number(r.id)));
-            attachmentRows = [...attachmentRows, ...normalizedAdditionalRows];
-          }
         }
+        attachmentRows = await resolveEligibleSigningWorkflowRows(pool, attachmentSpecs);
       }
     }
+    assertUniqueVersionedSigningWorkflowAttachments(attachmentRows);
     if (attachmentRows.length) {
       const approvedCaseStatuses = new Set([
         'initiated',
@@ -64799,7 +67857,9 @@ const handlePostCaseSecureMessage = async (req, res) => {
         }
         return null;
       };
-      const letterAttachments = attachmentRows.filter(row => letterDocTypes.has(row.document_type));
+      const letterAttachments = attachmentRows.filter(row => (
+        Boolean(resolveWorkflowDecisionLetterDocumentType(row.document_type))
+      ));
       if (letterAttachments.length) {
         let allowedDocTypes = new Set();
         if (requestedInterventionId) {
@@ -64882,6 +67942,10 @@ const handlePostCaseSecureMessage = async (req, res) => {
       }
     }
 
+    let requiredSigningSchemasByWorkflowId = await buildRequiredSigningWorkflowSchemas(
+      pool,
+      attachmentRows
+    );
     const needsFundingAgreementPrefill = attachmentRows.some(
       row => row.workflow_type === 'consent-cm-prefill' && row.document_type === 'funding_agreement'
     );
@@ -64925,152 +67989,154 @@ const handlePostCaseSecureMessage = async (req, res) => {
     const resolvedSenderStaffProfileIdForForms =
       resolveActiveStaffProfileId(req) ||
       await findStaffProfileIdByUserId(pool, Number(senderId));
+
+    await ensureCaseMessageItemTable();
+    messageWriteConnection = await pool.getConnection();
+    await messageWriteConnection.beginTransaction();
+    messageWriteTransactionStarted = true;
+    if (attachmentRows.length) {
+      const [[lockedApplicationRow]] = await messageWriteConnection.query(
+        `SELECT id
+           FROM iset_application
+          WHERE id = ?
+            AND case_id = ?
+          LIMIT 1 FOR UPDATE`,
+        [caseApplicationId, caseId]
+      );
+      if (!lockedApplicationRow?.id) {
+        throw createCaseMessageHttpError(
+          409,
+          'application_scope_conflict',
+          'The selected application no longer belongs to this case.'
+        );
+      }
+      await lockCaseForVersionedSigning(messageWriteConnection, caseId);
+
+      // The catalogue was preflighted before starting expensive PDF work, but
+      // it is mutable configuration. Lock and re-read the exact selected rows
+      // inside the write transaction so a concurrent workflow edit cannot make
+      // the prepared decision/schema disagree with the persisted request.
+      const lockedAttachmentRows = await resolveEligibleSigningWorkflowRows(
+        messageWriteConnection,
+        attachmentSpecs,
+        { forUpdate: true }
+      );
+      const workflowManifest = rows => rows.map(row => ({
+        id: normalisePositiveInteger(row?.id),
+        workflowType: normaliseString(row?.workflow_type),
+        documentType: normaliseString(row?.document_type),
+      }));
+      if (
+        JSON.stringify(workflowManifest(lockedAttachmentRows)) !==
+        JSON.stringify(workflowManifest(attachmentRows))
+      ) {
+        throw createCaseMessageHttpError(
+          409,
+          'signing_workflow_changed',
+          'A selected signing workflow changed while the message was being prepared. Please reload and try again.'
+        );
+      }
+      attachmentRows = lockedAttachmentRows;
+      assertUniqueVersionedSigningWorkflowAttachments(attachmentRows);
+      requiredSigningSchemasByWorkflowId = await buildRequiredSigningWorkflowSchemas(
+        messageWriteConnection,
+        attachmentRows
+      );
+    }
+
     let cfaDraft = null;
     let cfaSnapshot = null;
     let fundingAgreementTokens = null;
     let fundingAgreementVariant = 'clean';
     if (needsFundingAgreementPrefill) {
-      let cfaDraftRow = null;
-      [[cfaDraftRow]] = await pool.query(
-        `SELECT v.id, v.version_number, v.metadata_json, v.supersedes_version_id, s.id AS series_id
-           FROM cfa_series s
-           JOIN cfa_version v ON v.series_id = s.id
-          WHERE s.case_id = ?
-            AND v.status = 'draft'
-          ORDER BY v.version_number DESC
-          LIMIT 1`,
-        [caseId]
-      );
+      let cfaDraftRow = await resolveApplicationScopedCfaDraft(messageWriteConnection, {
+        caseId,
+        applicationId: caseApplicationId,
+      });
       if (!cfaDraftRow) {
-        try {
-          const staffProfileId = resolveActiveStaffProfileId(req);
-          const requesterDisplayName = await resolveStaffDisplayName(pool, req);
-          const caseManager = await resolveFundingAgreementCaseManager({
-            connection: pool,
-            caseId,
-            preferredName: requesterDisplayName,
-            createdByUserId: senderId,
-          });
-          let created = null;
-          let createdSource = null;
-          if (requestedInterventionId) {
-            try {
-              const [[interventionDraftSourceRow]] = await pool.query(
-                `SELECT i.id,
-                        i.action_plan_id,
-                        i.intervention_code,
-                        i.metadata_json,
-                        p.title AS proposal_title
-                   FROM iset_case_intervention i
-                   LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = i.id
-                  WHERE i.id = ?
-                    AND i.case_id = ?
-                  LIMIT 1`,
-                [requestedInterventionId, caseId]
-              );
-              const actionPlanId = normalisePositiveInteger(interventionDraftSourceRow?.action_plan_id);
-              if (actionPlanId) {
-                const sourceMetadata = safeJsonParse(interventionDraftSourceRow?.metadata_json, {}) || {};
-                const isInterventionRevisionCfaDraft =
-                  requestedInterventionLetterEligibility?.proposalKind === 'revision' ||
-                  hasAppliedInterventionRevisionMetadata(sourceMetadata);
-                const interventionTitle =
-                  normaliseString(sourceMetadata?.lastAppliedRevision?.sourceTitle) ||
-                  normaliseString(sourceMetadata?.title) ||
-                  normaliseString(interventionDraftSourceRow?.proposal_title) ||
-                  (interventionDraftSourceRow?.intervention_code
-                    ? `Intervention ${interventionDraftSourceRow.intervention_code}`
-                    : 'intervention');
-                const changeSummary = (
-                  isInterventionRevisionCfaDraft
-                    ? `Approved intervention revision: ${interventionTitle}`
-                    : `New intervention approved: ${interventionTitle}`
-                ).slice(0, 255);
-                created = await createCfaVersionForPlan({
-                  caseId,
-                  actionPlanId,
-                  changeReason: isInterventionRevisionCfaDraft ? 'INTERVENTION_CHANGED' : 'NEW_INTERVENTION_APPROVED',
-                  changeSummary,
-                  actorUserId: senderId,
-                  staffProfileId,
-                  caseManagerName: caseManager.name || requesterDisplayName || ''
-                });
-                if (!created || created.skipped) {
-                  console.warn(
-                    '[cfa] plan draft skipped for case %s action plan %s (reason=%s)',
-                    caseId,
-                    actionPlanId,
-                    created?.reason || 'unknown'
-                  );
-                } else {
-                  console.info(
-                    '[cfa] plan draft created for case %s action plan %s (version=%s)',
-                    caseId,
-                    actionPlanId,
-                    created.versionNumber ?? 'n/a'
-                  );
-                  createdSource = 'plan';
-                }
-              }
-            } catch (err) {
-              console.warn(
-                '[cfa] plan draft failed for case %s intervention %s (code=%s, message=%s)',
-                caseId,
-                requestedInterventionId,
-                err?.code || 'n/a',
-                err?.message || err
-              );
-            }
-          }
-          if (!created || created.skipped) {
-            created = await createCfaVersionFromAssessment({
+        const staffProfileId = resolveActiveStaffProfileId(req);
+        const requesterDisplayName = await resolveStaffDisplayName(messageWriteConnection, req);
+        const caseManager = await resolveFundingAgreementCaseManager({
+          connection: messageWriteConnection,
+          caseId,
+          preferredName: requesterDisplayName,
+          createdByUserId: senderId,
+        });
+        let created = null;
+        if (requestedInterventionId) {
+          const [[interventionDraftSourceRow]] = await messageWriteConnection.query(
+            `SELECT i.id,
+                    i.action_plan_id,
+                    i.intervention_code,
+                    i.metadata_json,
+                    p.title AS proposal_title
+               FROM iset_case_intervention i
+               LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = i.id
+              WHERE i.id = ?
+                AND i.case_id = ?
+              LIMIT 1`,
+            [requestedInterventionId, caseId]
+          );
+          const actionPlanId = normalisePositiveInteger(interventionDraftSourceRow?.action_plan_id);
+          if (actionPlanId) {
+            const sourceMetadata = safeJsonParse(interventionDraftSourceRow?.metadata_json, {}) || {};
+            const isInterventionRevisionCfaDraft =
+              requestedInterventionLetterEligibility?.proposalKind === 'revision' ||
+              hasAppliedInterventionRevisionMetadata(sourceMetadata);
+            const interventionTitle =
+              normaliseString(sourceMetadata?.lastAppliedRevision?.sourceTitle) ||
+              normaliseString(sourceMetadata?.title) ||
+              normaliseString(interventionDraftSourceRow?.proposal_title) ||
+              (interventionDraftSourceRow?.intervention_code
+                ? `Intervention ${interventionDraftSourceRow.intervention_code}`
+                : 'intervention');
+            const changeSummary = (
+              isInterventionRevisionCfaDraft
+                ? `Approved intervention revision: ${interventionTitle}`
+                : `New intervention approved: ${interventionTitle}`
+            ).slice(0, 255);
+            created = await createCfaVersionForPlan({
               caseId,
-              applicationId: caseRow?.application_id || null,
-              changeReason: 'NEW_INTERVENTION_APPROVED',
-              changeSummary: 'Initial funding agreement',
+              actionPlanId,
+              applicationId: caseApplicationId,
+              changeReason: isInterventionRevisionCfaDraft ? 'INTERVENTION_CHANGED' : 'NEW_INTERVENTION_APPROVED',
+              changeSummary,
               actorUserId: senderId,
               staffProfileId,
-              caseManagerName: caseManager.name || requesterDisplayName || ''
+              caseManagerName: caseManager.name || requesterDisplayName || '',
+              connection: messageWriteConnection,
+              uploadedObjectKeys: generatedObjectKeys,
             });
-            if (created && !created.skipped) {
-              createdSource = 'assessment';
-            }
           }
-          if (!created || created.skipped) {
-            console.warn(
-              '[cfa] draft skipped for case %s (reason=%s)',
-              caseId,
-              created?.reason || 'unknown'
-            );
-          } else if (createdSource === 'assessment') {
-            console.info(
-              '[cfa] assessment draft created for case %s (version=%s)',
-              caseId,
-              created.versionNumber ?? 'n/a'
-            );
-          }
-        } catch (err) {
-          console.warn(
-            '[cfa] assessment draft failed for case %s (code=%s, message=%s)',
+        }
+        if (!created || created.skipped) {
+          created = await createCfaVersionFromAssessment({
             caseId,
-            err?.code || 'n/a',
-            err?.message || err
+            applicationId: caseApplicationId,
+            changeReason: 'NEW_INTERVENTION_APPROVED',
+            changeSummary: 'Initial funding agreement',
+            actorUserId: senderId,
+            staffProfileId,
+            caseManagerName: caseManager.name || requesterDisplayName || '',
+            connection: messageWriteConnection,
+            uploadedObjectKeys: generatedObjectKeys,
+          });
+        }
+        if (!created || created.skipped) {
+          throw createCaseMessageHttpError(
+            409,
+            'cfa_draft_missing',
+            'No draft funding agreement is available for this application.'
           );
         }
-        [[cfaDraftRow]] = await pool.query(
-          `SELECT v.id, v.version_number, v.metadata_json, v.supersedes_version_id, s.id AS series_id
-             FROM cfa_series s
-             JOIN cfa_version v ON v.series_id = s.id
-            WHERE s.case_id = ?
-              AND v.status = 'draft'
-            ORDER BY v.version_number DESC
-            LIMIT 1`,
-          [caseId]
-        );
+        cfaDraftRow = await resolveApplicationScopedCfaDraft(messageWriteConnection, {
+          caseId,
+          applicationId: caseApplicationId,
+        });
       }
       if (!cfaDraftRow) {
         try {
-          const assessmentDebug = await fetchApplicationAssessmentRow(pool, {
+          const assessmentDebug = await fetchApplicationAssessmentRow(messageWriteConnection, {
             caseId,
             applicationId: caseRow?.application_id || null,
           });
@@ -65096,10 +68162,11 @@ const handlePostCaseSecureMessage = async (req, res) => {
             err?.message || err
           );
         }
-        return res.status(409).json({
-          error: 'cfa_draft_missing',
-          message: 'No draft funding agreement is available for this case.'
-        });
+        throw createCaseMessageHttpError(
+          409,
+          'cfa_draft_missing',
+          'No draft funding agreement is available for this application.'
+        );
       }
       cfaDraft = {
         id: Number(cfaDraftRow.id),
@@ -65109,15 +68176,20 @@ const handlePostCaseSecureMessage = async (req, res) => {
         supersedesVersionId: normalisePositiveInteger(cfaDraftRow.supersedes_version_id) || null,
       };
       cfaSnapshot = safeJsonParse(cfaDraftRow.metadata_json, null);
-      if (!cfaSnapshot || !Array.isArray(cfaSnapshot.interventions) || !cfaSnapshot.interventions.length) {
-        return res.status(409).json({
-          error: 'cfa_draft_invalid',
-          message: 'Funding agreement draft is missing intervention details.'
-        });
+      if (
+        resolveVersionSnapshotApplicationId(cfaSnapshot) !== caseApplicationId ||
+        !Array.isArray(cfaSnapshot?.interventions) ||
+        !cfaSnapshot.interventions.length
+      ) {
+        throw createCaseMessageHttpError(
+          409,
+          'cfa_draft_invalid',
+          'The funding agreement draft does not match this application.'
+        );
       }
-      const requesterDisplayName = await resolveStaffDisplayName(pool, req);
+      const requesterDisplayName = await resolveStaffDisplayName(messageWriteConnection, req);
       const caseManager = await resolveFundingAgreementCaseManager({
-        connection: pool,
+        connection: messageWriteConnection,
         caseId,
         snapshot: cfaSnapshot,
         preferredName: requesterDisplayName,
@@ -65125,13 +68197,13 @@ const handlePostCaseSecureMessage = async (req, res) => {
       });
       const caseManagerName = caseManager.name || requesterDisplayName || '';
       const caseManagerSignedDate = formatFundingDate(new Date());
-      const assessmentRow = await fetchApplicationAssessmentRow(pool, {
+      const assessmentRow = await fetchApplicationAssessmentRow(messageWriteConnection, {
         caseId,
         applicationId: caseRow?.application_id || null,
       });
       let interventionRow = null;
       if (requestedInterventionId) {
-        const [[selectedIntervention]] = await pool.query(
+        const [[selectedIntervention]] = await messageWriteConnection.query(
           `SELECT id, status, start_date, end_date, intervention_cost, budget_amount, approved_amount,
                   intervention_code, metadata_json, esdc_intervention_json, created_at
              FROM iset_case_intervention
@@ -65150,7 +68222,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
         }
       }
       if (!interventionRow) {
-        const [interventionRows] = await pool.query(
+        const [interventionRows] = await messageWriteConnection.query(
           `SELECT id, status, start_date, end_date, intervention_cost, budget_amount, approved_amount,
                   intervention_code, metadata_json, esdc_intervention_json, created_at
              FROM iset_case_intervention
@@ -65174,7 +68246,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
         null;
       let interventionLabel = null;
       if (interventionCodeRaw !== null && typeof interventionCodeRaw !== 'undefined') {
-        interventionLabel = await fetchInterventionCodeLabel(pool, interventionCodeRaw);
+        interventionLabel = await fetchInterventionCodeLabel(messageWriteConnection, interventionCodeRaw);
       }
       if (!interventionLabel) {
         const title = normaliseString(interventionMetadata?.title || '');
@@ -65191,7 +68263,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
         const proposedInterventions = normalizeAssessmentProposedInterventions(proposedInterventionsRaw);
         const codes = proposedInterventions.map(entry => entry?.code).filter(Boolean);
         if (codes.length) {
-          interventionLabelLookup = await fetchInterventionCodeLabels(pool, codes);
+          interventionLabelLookup = await fetchInterventionCodeLabels(messageWriteConnection, codes);
         }
       } catch (err) {
         console.warn('[messages] failed to resolve intervention labels:', err?.message || err);
@@ -65204,7 +68276,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
       }
       let submissionPayload = null;
       if (caseRow?.application_id) {
-        const [[submissionRow]] = await pool.query(
+        const [[submissionRow]] = await messageWriteConnection.query(
           `SELECT s.intake_payload
              FROM iset_application a
              JOIN iset_application_submission s ON s.id = a.submission_id
@@ -65240,7 +68312,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
       });
       if (cfaSnapshot) {
         const renderSet = await buildCfaRenderSet({
-          connection: pool,
+          connection: messageWriteConnection,
           snapshot: cfaSnapshot,
           applicantName: cfaSnapshot?.client?.name || applicantName || '',
           caseManagerName,
@@ -65266,22 +68338,25 @@ const handlePostCaseSecureMessage = async (req, res) => {
     let fundingOverviewVariant = 'clean';
     if (needsFundingOverviewPrefill) {
       try {
-        const requesterDisplayName = await resolveStaffDisplayName(pool, req);
+        const requesterDisplayName = await resolveStaffDisplayName(messageWriteConnection, req);
         const created = await createFundingOverviewVersion({
           caseId,
-          applicationId: caseRow?.application_id || null,
+          applicationId: caseApplicationId,
           changeReason: 'FINANCIAL_OVERVIEW_SIGNATURE_REQUESTED',
           changeSummary: 'Financial overview sent for client signature',
           actorUserId: senderId,
           staffProfileId: resolvedSenderStaffProfileIdForForms || null,
           preparedByName: requesterDisplayName || fromNameValue || '',
-          sourceAnswersOverride: fundingOverviewSendMode === 'blank' ? {} : null
+          sourceAnswersOverride: fundingOverviewSendMode === 'blank' ? {} : null,
+          connection: messageWriteConnection,
+          uploadedObjectKeys: generatedObjectKeys,
         });
         if (!created?.fundingOverviewVersionId) {
-          return res.status(409).json({
-            error: 'funding_overview_draft_missing',
-            message: 'No financial overview draft could be created for this case.'
-          });
+          throw createCaseMessageHttpError(
+            409,
+            'funding_overview_draft_missing',
+            'No financial overview draft could be created for this application.'
+          );
         }
         const renderSet = buildFundingOverviewRenderSet({
           snapshot: created.snapshot,
@@ -65313,20 +68388,17 @@ const handlePostCaseSecureMessage = async (req, res) => {
           err?.code || 'n/a',
           err?.message || err
         );
-        return res.status(409).json({
-          error: 'funding_overview_draft_failed',
-          message: 'No financial overview draft could be created for this case.'
-        });
+        if (err?.publicError) throw err;
+        const storageError = mapCaseMessagePublicError(err);
+        if (storageError !== err) throw storageError;
+        const draftError = createCaseMessageHttpError(
+          409,
+          'funding_overview_draft_failed',
+          'No financial overview draft could be created for this application.'
+        );
+        draftError.cause = err;
+        throw draftError;
       }
-    }
-
-    const caseApplicationId = normalisePositiveInteger(caseRow?.application_id);
-    const messageApplicationId = caseApplicationId || null;
-    if (requestedApplicationId && requestedApplicationId !== messageApplicationId) {
-      return res.status(409).json({
-        error: 'application_scope_conflict',
-        message: 'The selected application does not belong to this case.',
-      });
     }
 
     const { actorId: requestActorId, actorName } = resolveRequestActor(req);
@@ -65337,13 +68409,37 @@ const handlePostCaseSecureMessage = async (req, res) => {
       req?.auth?.name ||
       null;
 
-    await ensureCaseMessageItemTable();
-    messageWriteConnection = await pool.getConnection();
-    await messageWriteConnection.beginTransaction();
-    messageWriteTransactionStarted = true;
-
     const senderStaffProfileId = resolvedSenderStaffProfileIdForForms;
     const senderActorType = senderStaffProfileId ? 'staff_profile' : 'local_user';
+    const resolvedSigningSchemasByWorkflowId = new Map();
+    for (const workflow of attachmentRows) {
+      try {
+        resolvedSigningSchemasByWorkflowId.set(
+          workflow.id,
+          prepareCaseMessageSigningSchema({
+            workflow,
+            requiredSchema: requiredSigningSchemasByWorkflowId.get(workflow.id),
+            decisionLetterSchemaOverride: decisionLetterSchemaOverridesByWorkflowId.get(workflow.id) || null,
+            decisionLetterTokens: decisionLetterTokensByWorkflowId.get(workflow.id) || null,
+            fundingAgreementTokens,
+            fundingAgreementDraft: cfaDraft,
+            fundingAgreementVariant,
+            fundingOverviewTokens,
+            fundingOverviewDraft,
+            fundingOverviewVariant,
+            attendanceReportInitialValues,
+          })
+        );
+      } catch (schemaError) {
+        if (schemaError?.publicError) throw schemaError;
+        throw createCaseMessageHttpError(
+          409,
+          'signing_workflow_schema_invalid',
+          'A selected signing workflow could not be prepared.',
+          { workflowId: workflow.id }
+        );
+      }
+    }
     const [result] = await messageWriteConnection.query(
       `INSERT INTO messages
          (sender_actor_type, sender_user_id, sender_staff_profile_id, recipient_actor_type, recipient_user_id, recipient_staff_profile_id, case_id, application_id, subject, body, status, deleted, urgent, created_at)
@@ -65360,6 +68456,18 @@ const handlePostCaseSecureMessage = async (req, res) => {
         !!urgent,
       ]
     );
+    messageCommitIdentity = {
+      messageId: result.insertId,
+      caseId,
+      applicationId: messageApplicationId,
+      senderActorType,
+      senderUserId: senderId,
+      senderStaffProfileId: senderStaffProfileId || null,
+      recipientUserId: recipientId,
+      subject: subjectValue,
+      body: bodyValue,
+      urgent: !!urgent,
+    };
     const deliveryRows = [];
     deliveryRows.push([
       result.insertId,
@@ -65399,105 +68507,18 @@ const handlePostCaseSecureMessage = async (req, res) => {
     let createdSigningRequestCount = 0;
     const createdSigningRequestDocTypes = new Set();
     if (attachmentRows.length) {
-      const schemaCache = new Map();
       for (const wf of attachmentRows) {
-        let resolvedSchema = null;
-        if (buildWorkflowSchema) {
-          try {
-            if (schemaCache.has(wf.id)) {
-              resolvedSchema = schemaCache.get(wf.id);
-            } else {
-              const schema = await buildWorkflowSchema({ pool, workflowId: wf.id });
-              resolvedSchema = { steps: schema.steps, meta: schema.meta };
-              schemaCache.set(wf.id, resolvedSchema);
-            }
-          } catch (schemaErr) {
-            console.warn('[signing_request] failed to build schema for workflow', wf.id, schemaErr?.message || schemaErr);
-          }
-        }
-        if (resolvedSchema && decisionLetterSchemaOverridesByWorkflowId.has(wf.id)) {
-          const override = decisionLetterSchemaOverridesByWorkflowId.get(wf.id);
-          resolvedSchema = buildDecisionLetterSchemaFromMessageBody(resolvedSchema, override?.body || '', override?.meta || {});
-        } else if (resolvedSchema && decisionLetterTokensByWorkflowId.has(wf.id)) {
-          resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, decisionLetterTokensByWorkflowId.get(wf.id));
-          resolvedSchema = pruneDecisionLetterSchema(resolvedSchema);
-        }
-        if (
-          resolvedSchema &&
-          fundingAgreementTokens &&
-          wf.workflow_type === 'consent-cm-prefill' &&
-          wf.document_type === 'funding_agreement'
-        ) {
-          resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, fundingAgreementTokens, { preserveMissingTokens: true });
-        }
-        if (
-          resolvedSchema &&
-          fundingOverviewTokens &&
-          wf.workflow_type === 'consent-cm-prefill' &&
-          wf.document_type === 'financial_overview'
-        ) {
-          resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, fundingOverviewTokens, { preserveMissingTokens: true });
-        }
-        if (resolvedSchema && fundingOverviewDraft && wf.document_type === 'financial_overview') {
-          const editableFinancialOverviewSchema = buildFinancialOverviewEditableSchema({
-            mode: fundingOverviewDraft.mode,
-            initialValues: fundingOverviewDraft.initialValues || {}
-          });
-          resolvedSchema = {
-            ...resolvedSchema,
-            steps: editableFinancialOverviewSchema.steps,
-            meta: {
-              ...(resolvedSchema?.meta || {}),
-              ...(editableFinancialOverviewSchema.meta || {}),
-              initialValues: editableFinancialOverviewSchema.initialValues || {}
-            }
-          };
-        }
-        if (
-          resolvedSchema &&
-          attendanceReportInitialValues &&
-          wf.workflow_type === 'consent-cm-prefill' &&
-          wf.document_type === ATTENDANCE_REPORT_DOCUMENT_TYPE
-        ) {
-          resolvedSchema = applyAttendanceReportInitialValues(resolvedSchema, attendanceReportInitialValues);
-        }
-        if (resolvedSchema && cfaDraft && wf.document_type === 'funding_agreement') {
-          resolvedSchema = {
-            ...resolvedSchema,
-            meta: {
-              ...(resolvedSchema?.meta || {}),
-              cfaVersionId: cfaDraft.id,
-              cfaVersionNumber: cfaDraft.versionNumber,
-              cfaSeriesId: cfaDraft.seriesId,
-              cfaRenderVariant: fundingAgreementVariant,
-            }
-          };
-        }
-        if (resolvedSchema && fundingOverviewDraft && wf.document_type === 'financial_overview') {
-          resolvedSchema = {
-            ...resolvedSchema,
-            meta: {
-              ...(resolvedSchema?.meta || {}),
-              fundingOverviewVersionId: fundingOverviewDraft.id,
-              fundingOverviewVersionNumber: fundingOverviewDraft.versionNumber,
-              fundingOverviewSeriesId: fundingOverviewDraft.seriesId,
-              fundingOverviewRenderVariant: fundingOverviewVariant,
-              fundingOverviewSupersedesVersionId: fundingOverviewDraft.supersedesVersionId,
-              fundingOverviewChangedFields: fundingOverviewDraft.changedFields,
-              fundingOverviewAttestation: FUNDING_OVERVIEW_ATTESTATION_TEXT,
-              fundingOverviewEditable: true,
-              fundingOverviewMode: fundingOverviewDraft.mode || 'prefill',
-              initialValues: fundingOverviewDraft.initialValues || {},
-            }
-          };
-        }
+        const resolvedSchema = assertValidSigningWorkflowSchema(
+          resolvedSigningSchemasByWorkflowId.get(wf.id),
+          wf.id
+        );
         const attachmentMeta = attachmentSpecs.find(a => Number(a?.workflow_id) === Number(wf.id)) || {};
-        const docType =
-          attachmentMeta.checklist_doc_type ||
-          wf.document_type ||
-          slugifyName(wf.name) ||
-          wf.workflow_type ||
-          'signing-form';
+        const docType = resolveAuthoritativeSigningRequestDocumentType({
+          workflowDocumentType: wf.document_type,
+          serverFallbackDocumentType: serverDocumentTypeFallbackByWorkflowId.get(Number(wf.id)) || null,
+          workflowName: wf.name,
+          workflowType: wf.workflow_type,
+        });
         const [ins] = await messageWriteConnection.query(
           `INSERT INTO signing_request
              (workflow_id, workflow_name, workflow_type, case_id, participant_user_id, created_by_user_id, status, due_at, checklist_doc_type, resolved_schema_json)
@@ -65511,10 +68532,11 @@ const handlePostCaseSecureMessage = async (req, res) => {
             senderId,
             attachmentMeta.due_at || null,
             docType,
-            resolvedSchema ? JSON.stringify(resolvedSchema) : null
+            JSON.stringify(resolvedSchema)
           ]
         );
         const signingRequestId = ins.insertId;
+        createdSigningRequestIds.push(signingRequestId);
         createdSigningRequestCount += 1;
         if (docType) {
           createdSigningRequestDocTypes.add(String(docType).trim().toLowerCase());
@@ -65523,10 +68545,11 @@ const handlePostCaseSecureMessage = async (req, res) => {
           `INSERT INTO message_signing_request (message_id, signing_request_id) VALUES (?, ?)`,
           [result.insertId, signingRequestId]
         );
-        if (letterDocTypes.has(docType) && resolvedSchema) {
+        const decisionLetterDocumentType = resolveWorkflowDecisionLetterDocumentType(wf.document_type);
+        if (decisionLetterDocumentType && resolvedSchema) {
           decisionLetterDocs.push({
             workflowName: wf.name,
-            docType,
+            docType: decisionLetterDocumentType,
             schema: resolvedSchema,
             signingRequestId
           });
@@ -65538,7 +68561,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
       Array.from(createdSigningRequestDocTypes).some(isDocsRequestedSigningDocumentType);
     if (cfaDraft) {
       const staffProfileId = resolveActiveStaffProfileId(req);
-      await messageWriteConnection.query(
+      const [cfaSentResult] = await messageWriteConnection.query(
         `UPDATE cfa_version
             SET status = 'sent',
                 sent_at = NOW(),
@@ -65547,9 +68570,16 @@ const handlePostCaseSecureMessage = async (req, res) => {
             AND status = 'draft'`,
         [staffProfileId, cfaDraft.id]
       );
+      if (Number(cfaSentResult?.affectedRows || 0) !== 1) {
+        throw createCaseMessageHttpError(
+          409,
+          'cfa_draft_send_conflict',
+          'The funding agreement changed before it could be sent. Please reload and try again.'
+        );
+      }
     }
     if (fundingOverviewDraft) {
-      await messageWriteConnection.query(
+      const [fundingOverviewSentResult] = await messageWriteConnection.query(
         `UPDATE funding_overview_version
             SET status = 'sent',
                 sent_at = NOW(),
@@ -65558,6 +68588,13 @@ const handlePostCaseSecureMessage = async (req, res) => {
             AND status = 'draft'`,
         [senderStaffProfileId || null, fundingOverviewDraft.id]
       );
+      if (Number(fundingOverviewSentResult?.affectedRows || 0) !== 1) {
+        throw createCaseMessageHttpError(
+          409,
+          'funding_overview_draft_send_conflict',
+          'The financial overview changed before it could be sent. Please reload and try again.'
+        );
+      }
     }
     let docsRequestedActivation = null;
     if (hasDocsRequestedSigningForms) {
@@ -65577,28 +68614,55 @@ const handlePostCaseSecureMessage = async (req, res) => {
         !docsRequestedActivation?.updated &&
         docsRequestedActivation?.reason !== 'already_active'
       ) {
-        const activationError = new Error(
-          docsRequestedActivation?.reason || 'document_request_activation_failed'
+        throw createCaseMessageHttpError(
+          409,
+          'document_request_activation_failed',
+          'The document-request state changed before the forms could be sent. Please reload and try again.'
         );
-        activationError.code = docsRequestedActivation?.reason || 'document_request_activation_failed';
-        throw activationError;
       }
     }
-    await messageWriteConnection.commit();
+    messageWriteCommitAttempted = true;
+    messageWriteCommitOutcome = 'uncertain';
+    try {
+      const commitResult = await commitCaseMessageWriteTransaction({
+        connection: messageWriteConnection,
+        messageIdentity: messageCommitIdentity,
+        signingRequestIds: createdSigningRequestIds,
+      });
+      messageWriteCommitOutcome = commitResult.outcome;
+    } catch (commitError) {
+      messageWriteCommitOutcome = commitError?.commitOutcome || 'uncertain';
+      throw commitError;
+    }
     messageWriteTransactionStarted = false;
-    messageWriteConnection.release();
+    generatedObjectKeys.length = 0;
+    try {
+      messageWriteConnection.release();
+    } catch (releaseError) {
+      console.error(
+        '[messages] failed to release committed message/signing connection',
+        releaseError?.message || releaseError
+      );
+    }
     messageWriteConnection = null;
 
     if (docsRequestedActivation?.updated) {
-      await syncDocsRequestedLifecycleSideEffects({
-        caseId,
-        applicationId: caseApplicationId,
-        docsRequestedAt: docsRequestedActivation.docsRequestedAt,
-        docsRequestedSource: docsRequestedActivation.source,
-        actorUserId: senderId,
-        actorName: assessorDisplayName || fromNameValue || null,
-        actorStaffProfileId: senderStaffProfileId,
-      });
+      try {
+        await syncDocsRequestedLifecycleSideEffects({
+          caseId,
+          applicationId: caseApplicationId,
+          docsRequestedAt: docsRequestedActivation.docsRequestedAt,
+          docsRequestedSource: docsRequestedActivation.source,
+          actorUserId: senderId,
+          actorName: assessorDisplayName || fromNameValue || null,
+          actorStaffProfileId: senderStaffProfileId,
+        });
+      } catch (sideEffectError) {
+        console.error(
+          '[messages] committed document-request side effects failed',
+          sideEffectError?.message || sideEffectError
+        );
+      }
     }
     if (decisionLetterDocs.length) {
       const decisionApplicationId = normalisePositiveInteger(caseRow?.application_id) || null;
@@ -65651,26 +68715,40 @@ const handlePostCaseSecureMessage = async (req, res) => {
       caseApplicationId &&
       decisionLetterDocs.some(letter => letter?.docType === 'assessment_denial_letter')
     ) {
-      denialLetterCompletionResult = await completeDeniedApplicationAfterDenialLetterSent({
-        caseId,
-        applicationId: caseApplicationId,
-      });
+      try {
+        denialLetterCompletionResult = await completeDeniedApplicationAfterDenialLetterSent({
+          caseId,
+          applicationId: caseApplicationId,
+        });
+      } catch (completionError) {
+        console.error(
+          '[decision-letter] committed denial completion failed',
+          completionError?.message || completionError
+        );
+      }
     }
     if (
       requestedInterventionId &&
       decisionLetterDocs.some(letter => letter?.docType === 'assessment_approval_letter')
     ) {
-      await markApprovedInterventionProposalLetterSent({
-        connection: pool,
-        caseId,
-        interventionId: requestedInterventionId,
-        messageId: result.insertId,
-        signingRequestIds: decisionLetterDocs
-          .map(letter => normalisePositiveInteger(letter?.signingRequestId))
-          .filter(Boolean),
-        actorStaffProfileId: senderStaffProfileId || null,
-        actorUserId: senderId || null,
-      });
+      try {
+        await markApprovedInterventionProposalLetterSent({
+          connection: pool,
+          caseId,
+          interventionId: requestedInterventionId,
+          messageId: result.insertId,
+          signingRequestIds: decisionLetterDocs
+            .map(letter => normalisePositiveInteger(letter?.signingRequestId))
+            .filter(Boolean),
+          actorStaffProfileId: senderStaffProfileId || null,
+          actorUserId: senderId || null,
+        });
+      } catch (proposalLetterError) {
+        console.error(
+          '[decision-letter] committed intervention letter tracking failed',
+          proposalLetterError?.message || proposalLetterError
+        );
+      }
     }
     const effectiveApplicantName =
       contextApplicantName ||
@@ -65716,19 +68794,25 @@ const handlePostCaseSecureMessage = async (req, res) => {
         : {})
     });
   } catch (e) {
-    if (messageWriteConnection && messageWriteTransactionStarted) {
-      try {
-        await messageWriteConnection.rollback();
-      } catch (rollbackError) {
-        console.error('[messages] failed to roll back message/signing transaction', rollbackError?.message || rollbackError);
-      }
-    }
-    if (messageWriteConnection) {
-      messageWriteConnection.release();
-      messageWriteConnection = null;
-    }
-    console.error('POST /api/cases/:id/messages failed:', e.message);
-    res.status(500).json({ error: 'failed_to_send_message' });
+    const resolvedWriteError = await rollbackCaseMessageWriteTransaction({
+      connection: messageWriteConnection,
+      transactionStarted: messageWriteTransactionStarted,
+      commitAttempted: messageWriteCommitAttempted,
+      commitOutcome: messageWriteCommitOutcome,
+      uploadedObjectKeys: generatedObjectKeys,
+      originalError: e,
+    });
+    messageWriteConnection = null;
+    messageWriteTransactionStarted = false;
+    console.error('POST /api/cases/:id/messages failed:', resolvedWriteError?.message || e.message);
+    const publicError = mapCaseMessagePublicError(resolvedWriteError || e);
+    const status = Number(publicError?.httpStatus) || 500;
+    const responsePayload = {
+      error: publicError?.publicError || 'failed_to_send_message',
+      ...(publicError?.publicMessage ? { message: publicError.publicMessage } : {}),
+      ...(publicError?.publicDetails ? { details: publicError.publicDetails } : {}),
+    };
+    res.status(status).json(responsePayload);
   }
 };
 
@@ -65784,10 +68868,15 @@ async function resolveAutoFundingFormsAttachments(connection = pool) {
 
   const attachments = [];
   if (selected.funding?.id) {
-    attachments.push({ workflow_id: Number(selected.funding.id), checklist_doc_type: 'funding_agreement' });
+    attachments.push({ workflow_id: Number(selected.funding.id) });
   }
   if (selected.eft?.id) {
-    attachments.push({ workflow_id: Number(selected.eft.id), checklist_doc_type: EFT_CHECKLIST_DOC_TYPE });
+    attachments.push({
+      workflow_id: Number(selected.eft.id),
+      ...(!normaliseString(selected.eft.document_type)
+        ? { server_fallback_document_type: EFT_CHECKLIST_DOC_TYPE }
+        : {})
+    });
   }
 
   const missing = [];
@@ -87756,10 +90845,14 @@ app.get('/api/applications', async (req, res) => {
           addNormalizedStatusFilter(clauses, values, ['on_hold']);
           break;
         case 'awaiting-decision':
-        case 'awaiting-my-approval':
-          clauses.push(`${applicationLifecycleStatusExpr} = ?`);
-          values.push('pending_decision');
+        case 'awaiting-my-approval': {
+          const reviewQueueFilter = buildApplicationAssessmentReviewQueueSqlFilter({
+            bucket: workQueueBucket,
+          });
+          clauses.push(reviewQueueFilter.clause);
+          values.push(...reviewQueueFilter.params);
           break;
+        }
         case 'decisions-made':
           clauses.push(`((${normalizedDecisionOutcomeExpr} IN (?, ?) OR ${normalizedApplicationStatusExpr} IN (?, ?, ?, ?)) AND COALESCE(a.updated_at, a.created_at) >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY))`);
           values.push('approved', 'denied', 'approved', 'completed', 'rejected', 'declined');
@@ -87797,6 +90890,8 @@ app.get('/api/applications', async (req, res) => {
     // We'll attempt to select a.tracking_id; if schema lacks it, COALESCE will choose JSON extracted value.
     let baseSql = `SELECT c.id AS case_id, a.id AS application_id, a.status AS application_status,
       ${applicationLifecycleStatusExpr} AS application_lifecycle_status,
+      rw.id AS review_workflow_id,
+      rw.current_stage AS review_workflow_stage,
       a.decision_outcome AS decision_outcome,
       ${applicationAwaitingReasonExpr} AS application_awaiting_reason,
       a.closure_reason AS application_closure_reason,
@@ -87856,6 +90951,7 @@ app.get('/api/applications', async (req, res) => {
       0 AS is_unassigned_submission
       FROM iset_case c
       JOIN iset_application a ON ${buildApplicationCaseJoinPredicate('c', 'a')}
+      ${buildApplicationAssessmentReviewWorkflowJoinSql()}
       LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
@@ -87954,6 +91050,8 @@ app.get('/api/applications', async (req, res) => {
       finalSql = `(${baseSql})\nUNION ALL\n(
         SELECT NULL AS case_id, a.id AS application_id, a.status AS application_status,
         ${applicationLifecycleStatusExpr} AS application_lifecycle_status,
+        rw.id AS review_workflow_id,
+        rw.current_stage AS review_workflow_stage,
         a.decision_outcome AS decision_outcome,
         ${applicationAwaitingReasonExpr} AS application_awaiting_reason,
         a.closure_reason AS application_closure_reason,
@@ -88001,6 +91099,7 @@ app.get('/api/applications', async (req, res) => {
         0 AS sort_watch,
         1 AS is_unassigned_submission
         FROM iset_application a
+        ${buildApplicationAssessmentReviewWorkflowJoinSql()}
         LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
         LEFT JOIN iset_case c2 ON ${buildApplicationCaseJoinPredicate('c2', 'a')}
         ${unassignedWhereSql}
@@ -88034,7 +91133,7 @@ app.get('/api/applications', async (req, res) => {
     let count = rows.length;
     try {
       if (role === 'NWAC Administrator' || role === 'System Administrator') {
-        let countCaseSql = `SELECT COUNT(DISTINCT a.id) AS cnt FROM iset_case c JOIN iset_application a ON ${buildApplicationCaseJoinPredicate('c', 'a')} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id`;
+        let countCaseSql = `SELECT COUNT(DISTINCT a.id) AS cnt FROM iset_case c JOIN iset_application a ON ${buildApplicationCaseJoinPredicate('c', 'a')} ${buildApplicationAssessmentReviewWorkflowJoinSql()} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id`;
         if (where.length) countCaseSql += ' WHERE ' + where.join(' AND ');
         const [[caseCnt]] = await pool.query(countCaseSql, params);
         const unassignedWhereClauses = ['c2.id IS NULL'];
@@ -88056,11 +91155,11 @@ app.get('/api/applications', async (req, res) => {
           unassignedParams.push(...inactiveLifecycleStatuses);
         }
         const unassignedSql =
-          `SELECT COUNT(*) AS cnt FROM iset_application a LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN iset_case c2 ON ${buildApplicationCaseJoinPredicate('c2', 'a')} WHERE ${unassignedWhereClauses.join(' AND ')}`;
+          `SELECT COUNT(*) AS cnt FROM iset_application a ${buildApplicationAssessmentReviewWorkflowJoinSql()} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN iset_case c2 ON ${buildApplicationCaseJoinPredicate('c2', 'a')} WHERE ${unassignedWhereClauses.join(' AND ')}`;
         const [[unassignedCnt]] = await pool.query(unassignedSql, unassignedParams);
         count = (caseCnt?.cnt || 0) + (unassignedCnt?.cnt || 0);
       } else {
-        let countSql = `SELECT COUNT(DISTINCT a.id) AS cnt FROM iset_case c JOIN iset_application a ON ${buildApplicationCaseJoinPredicate('c', 'a')} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id`;
+        let countSql = `SELECT COUNT(DISTINCT a.id) AS cnt FROM iset_case c JOIN iset_application a ON ${buildApplicationCaseJoinPredicate('c', 'a')} ${buildApplicationAssessmentReviewWorkflowJoinSql()} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id`;
         if (where.length) countSql += ' WHERE ' + where.join(' AND ');
         const [[cRow]] = await pool.query(countSql, params);
         if (cRow && typeof cRow.cnt === 'number') count = cRow.cnt;
@@ -88112,6 +91211,8 @@ app.get('/api/applications', async (req, res) => {
         status: appStatus,
         application_status: appStatus,
         application_lifecycle_status: applicationLifecycleStatus,
+        review_workflow_id: normalisePositiveInteger(r.review_workflow_id),
+        review_workflow_stage: normaliseString(r.review_workflow_stage) || null,
         decision_outcome: decisionOutcome,
         application_awaiting_reason: applicationAwaitingReason,
         application_closure_reason: normaliseString(r.application_closure_reason) || null,
@@ -89478,6 +92579,24 @@ app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) =>
       });
     }
 
+    // All application-assessment correction writers lock the exact
+    // application before the case. Keeping that order here prevents a
+    // concurrent applicant signing completion from taking the inverse lock
+    // order while the RM forwards or resubmits the same assessment.
+    const [[lockedApplicationScope]] = await conn.query(
+      `SELECT id, case_id
+         FROM iset_application
+        WHERE id = ?
+          AND case_id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [requestedApplicationId, caseId]
+    );
+    if (!lockedApplicationScope) {
+      await conn.rollback();
+      return res.status(404).json({ success: false, error: 'case_not_found' });
+    }
+
     const [[row]] = await conn.query(
 	      `SELECT c.id AS case_id,
 	              COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
@@ -89707,6 +92826,46 @@ app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) =>
   }
 });
 
+function requestHasApplicationScopedCaseMutation(body = {}) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  const exactKeys = new Set([
+    'applicationStatus',
+    'applicationAwaitingReason',
+    'application_awaiting_reason',
+    'docsRequested',
+    'docsRequestedSource',
+    'expectedApplicationRowVersion',
+    'expectedRowVersion',
+    'resolveOpenEscalation',
+    'resolveEscalation',
+    'case_summary',
+    'postingContext',
+    'interventionPotId',
+    'potId',
+  ]);
+  const rawCaseContext = Object.prototype.hasOwnProperty.call(body, 'caseContext')
+    ? body.caseContext
+    : body.case_context;
+  let parsedCaseContext = rawCaseContext;
+  if (typeof rawCaseContext === 'string' && rawCaseContext.trim()) {
+    try {
+      parsedCaseContext = JSON.parse(rawCaseContext);
+    } catch (_) {
+      parsedCaseContext = null;
+    }
+  }
+  const hasApplicationAssessmentContext = isPlainObject(parsedCaseContext) && (
+    isPlainObject(parsedCaseContext[APPLICATION_ASSESSMENT_CONTEXT_KEY]) ||
+    APPLICATION_ASSESSMENT_CONTEXT_ROOT_KEYS.some(key => (
+      Object.prototype.hasOwnProperty.call(parsedCaseContext, key)
+    ))
+  );
+  return (
+    hasApplicationAssessmentContext ||
+    Object.keys(body).some(key => exactKeys.has(key) || key.startsWith('assessment_'))
+  );
+}
+
 // Update assessment fields for a case
 app.put('/api/cases/:id', async (req, res) => {
   const caseId = Number(req.params.id);
@@ -89721,6 +92880,14 @@ app.put('/api/cases/:id', async (req, res) => {
     req.query.applicationId ||
     req.query.application_id
   );
+  if (requestHasApplicationScopedCaseMutation(body) && !requestedApplicationId) {
+    return res.status(422).json({
+      success: false,
+      error: 'application_id_required_for_application_mutation',
+      message: 'Application-scoped changes must include the exact selected application id.',
+      lock: null,
+    });
+  }
   const resolveOpenEscalationRequested = parseBooleanFlag(
     body.resolveOpenEscalation ?? body.resolveEscalation,
     false
@@ -89815,6 +92982,11 @@ app.put('/api/cases/:id', async (req, res) => {
   };
 
   let conn;
+  let assessmentTransactionStarted = false;
+  let assessmentResubmissionIntegrityBoundaryActive = false;
+  let assessmentResubmissionCommitAttempted = false;
+  let assessmentResubmissionCommitOutcome = 'not_attempted';
+  const assessmentGeneratedObjectUploads = [];
   let beforeStatus = null;
   let beforeCaseLifecycleStatus = null;
   let beforeCaseClosureReason = null;
@@ -89893,6 +93065,13 @@ app.put('/api/cases/:id', async (req, res) => {
 
     conn = await pool.getConnection();
     await conn.beginTransaction();
+    assessmentTransactionStarted = true;
+    if (requestedApplicationId) {
+      await lockAssessmentApplicationThenCase(conn, {
+        applicationId: requestedApplicationId,
+        caseId,
+      });
+    }
     await ensureAssessmentBudgetPotColumn(conn);
 
     const [[existingCase]] = await conn.query(
@@ -90339,10 +93518,38 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
   const conflictSignatureRequested = Object.prototype.hasOwnProperty.call(body, 'assessment_conflict_declaration_signed');
   const assessmentPayloadKeysPresent = assessmentKeys.filter(key => Object.prototype.hasOwnProperty.call(body, key));
   hasAssessmentPayload = assessmentPayloadKeysPresent.length > 0;
+  const hasCaseContextPayload =
+    Object.prototype.hasOwnProperty.call(body, 'caseContext') ||
+    Object.prototype.hasOwnProperty.call(body, 'case_context');
+  const providedCaseContextPayload = Object.prototype.hasOwnProperty.call(body, 'caseContext')
+    ? body.caseContext
+    : body.case_context;
+  const parsedCaseContextPayload = hasCaseContextPayload
+    ? toParsedJsonValue(providedCaseContextPayload)
+    : undefined;
+  let projectedCaseContextPayload = existingCaseContext;
+  if (hasCaseContextPayload) {
+    if (parsedCaseContextPayload && typeof parsedCaseContextPayload === 'object' && !Array.isArray(parsedCaseContextPayload)) {
+      const scopedContext = scopeApplicationAssessmentCaseContextPatch(parsedCaseContextPayload, applicationId);
+      const baseContext = hasApplicationAssessmentScopedContext(scopedContext, applicationId)
+        ? stripApplicationAssessmentRootContext(existingCaseContext)
+        : existingCaseContext;
+      projectedCaseContextPayload = mergeCaseContext(baseContext, scopedContext);
+    } else {
+      projectedCaseContextPayload = parsedCaseContextPayload ?? null;
+    }
+  }
+  const caseContextMutationKinds = hasCaseContextPayload
+    ? applicationAssessmentCaseContextMutationKinds(
+      existingCaseContext,
+      projectedCaseContextPayload,
+      applicationId
+    )
+    : { contentChanged: false, decisionChanged: false };
   eligibilityOnlyAssessmentPayload =
     assessmentPayloadKeysPresent.length === 1 &&
     assessmentPayloadKeysPresent[0] === 'assessment_esdc_eligibility';
-  if (hasAssessmentPayload && applicationId && !requestedApplicationId) {
+  if ((hasAssessmentPayload || hasCaseContextPayload) && applicationId && !requestedApplicationId) {
     const [[applicationCountRow]] = await conn.query(
       'SELECT COUNT(*) AS application_count FROM iset_application WHERE case_id = ?',
       [caseId]
@@ -90351,16 +93558,14 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       await conn.rollback();
       return res.status(422).json({
         success: false,
-        error: 'application_id_required_for_assessment',
-        message: 'Assessment changes for repeat-application cases must include the selected application id.',
+        error: hasAssessmentPayload
+          ? 'application_id_required_for_assessment'
+          : 'application_id_required_for_application_mutation',
+        message: 'Application-scoped changes for repeat-application cases must include the selected application id.',
         lock: lockCheck.lock || null
       });
     }
   }
-  const hasCaseContextPayload =
-    Object.prototype.hasOwnProperty.call(body, 'caseContext') ||
-    Object.prototype.hasOwnProperty.call(body, 'case_context');
-
   if (hasAssessmentPayload) {
     existingAssessmentRow = await fetchApplicationAssessmentRow(conn, { caseId, applicationId });
     beforeAssessmentBudgetPotId = normalisePositiveInteger(existingAssessmentRow?.intervention_budget_pot_id);
@@ -90409,6 +93614,16 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         (typeof body.status !== 'undefined' && body.status !== null && body.status !== '')
       );
 
+    const {
+      assessmentBodyMutationRequested,
+      assessmentDecisionMutationRequested,
+    } = classifyApplicationAssessmentMutationRequest({
+      assessmentPayloadKeysPresent,
+      assessmentReviewStatusProvided,
+      conflictSignatureRequested,
+      caseContextMutationKinds,
+    });
+
     if (applicationId) {
       applicationAssessmentReviewWorkflowEnabled = await isReviewWorkflowEnabledForType(
         REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
@@ -90420,6 +93635,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         {
           forUpdate:
             hasAssessmentPayload ||
+            hasCaseContextPayload ||
+            Boolean(applicationStatusToPersist) ||
+            statusChanged ||
             assessmentReviewStatusProvided ||
             assessmentSubmittedForWorkflow,
         }
@@ -90427,11 +93645,17 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     }
 
     try {
+      assertApplicationAssessmentMutationStageAllowed({
+        reviewWorkflow: applicationAssessmentReviewWorkflow,
+        assessmentMutationRequested: assessmentBodyMutationRequested,
+      });
       assertApplicationAssessmentReturnedToSubmitterActor({
         reviewWorkflow: applicationAssessmentReviewWorkflow,
         actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
         actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
-        assessmentMutationRequested: hasAssessmentPayload && !eligibilityOnlyAssessmentPayload,
+        assessmentMutationRequested:
+          assessmentBodyMutationRequested ||
+          assessmentSubmittedForWorkflow,
       });
     } catch (error) {
       await conn.rollback();
@@ -90441,6 +93665,32 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         message: error?.publicMessage || 'This returned assessment cannot be changed by the current staff member.',
         lock: lockCheck.lock || null,
       });
+    }
+
+    if (assessmentDecisionMutationRequested) {
+      const reviewStage = applicationAssessmentReviewWorkflow?.current_stage || null;
+      const decisionStageAllowed =
+        !applicationAssessmentReviewWorkflow ||
+        reviewStage === REVIEW_STAGES.NwacReview ||
+        reviewStage === REVIEW_STAGES.FinalDecisionRecorded;
+      if (!decisionStageAllowed) {
+        await conn.rollback();
+        return res.status(409).json({
+          success: false,
+          error: 'review_workflow_not_ready_for_nwac',
+          message: 'The Regional Manager must submit this assessment for final decision before Decision Maker fields can be changed.',
+          lock: lockCheck.lock || null,
+        });
+      }
+      if (!canRecordApplicationDecision(req)) {
+        await conn.rollback();
+        return res.status(403).json({
+          success: false,
+          error: 'application_decision_forbidden',
+          message: 'Only Decision Makers can change application decision fields.',
+          lock: lockCheck.lock || null,
+        });
+      }
     }
 
     const requestedApplicationDecisionStatus = Object.prototype.hasOwnProperty.call(body, 'applicationStatus')
@@ -90488,6 +93738,31 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       applicationDecisionOutcomeToPersist = null;
       applicationAwaitingReasonToPersist = null;
       applicationClosureReasonToPersist = null;
+    }
+
+    const applicationStatusMutationRequested = Boolean(
+      applicationStatusToPersist && applicationStatusToPersist !== beforeApplicationStatus
+    );
+    try {
+      assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+        reviewWorkflow: applicationAssessmentReviewWorkflow,
+        applicationStatusMutationRequested,
+        caseStatusMutationRequested: statusChanged,
+        assessmentSubmittedForWorkflow,
+        assessmentReviewStatusProvided,
+        canRecordDecision: canRecordApplicationDecision(req),
+        actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+        beforeApplicationStatus,
+        nextApplicationStatus: applicationStatusToPersist,
+      });
+    } catch (error) {
+      await conn.rollback();
+      return res.status(Number(error?.status) || 409).json({
+        success: false,
+        error: error?.code || error?.message || 'assessment_review_status_transition_forbidden',
+        message: error?.publicMessage || 'The application status cannot be changed at its current assessment review stage.',
+        lock: lockCheck.lock || null,
+      });
     }
 
     const beforeApplicationPendingDecision =
@@ -90690,29 +93965,22 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
   }
 
     if (hasCaseContextPayload) {
-      const providedContext =
-        Object.prototype.hasOwnProperty.call(body, 'caseContext') ? body.caseContext : body.case_context;
-      const parsedContext = toParsedJsonValue(providedContext);
       let jsonValue = null;
-      if (typeof parsedContext === 'undefined') {
+      if (projectedCaseContextPayload === null || typeof projectedCaseContextPayload === 'undefined') {
         jsonValue = null;
-      } else if (parsedContext === null) {
-        jsonValue = null;
-	      } else if (parsedContext && typeof parsedContext === 'object' && !Array.isArray(parsedContext)) {
-	        const existingContext = safeJsonParse(existingCase.case_context_json, null);
-	        const scopedContext = scopeApplicationAssessmentCaseContextPatch(parsedContext, applicationId);
-	        const baseContext = hasApplicationAssessmentScopedContext(scopedContext, applicationId)
-	          ? stripApplicationAssessmentRootContext(existingContext)
-	          : existingContext;
-	        const mergedContext = mergeCaseContext(baseContext, scopedContext);
-	        const hydratedContext = await ensureCaseContextHasParticipantDetails(
-	          conn,
+      } else if (
+        projectedCaseContextPayload &&
+        typeof projectedCaseContextPayload === 'object' &&
+        !Array.isArray(projectedCaseContextPayload)
+      ) {
+        const hydratedContext = await ensureCaseContextHasParticipantDetails(
+          conn,
           applicationId,
-          mergedContext
+          projectedCaseContextPayload
         );
         jsonValue = JSON.stringify(hydratedContext);
       } else {
-        jsonValue = JSON.stringify(parsedContext);
+        jsonValue = JSON.stringify(projectedCaseContextPayload);
       }
       await conn.query('UPDATE iset_case SET case_context_json = ? WHERE id = ?', [jsonValue, caseId]);
       shouldMarkSubmissionNeedsReview = true;
@@ -91125,6 +94393,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       );
 
     if (shouldGenerateRequiredAssessmentDocs) {
+      assessmentResubmissionIntegrityBoundaryActive = true;
       const normalizeAssessmentDocumentCaseRow = (row) => {
         if (!row) return row;
         const parseArray = value => {
@@ -91379,7 +94648,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         snapshot: currentSnapshot,
         archivePreviousActive: false,
         replaceExistingVersion: true,
-        connection: conn
+        connection: conn,
+        uploadedObjectKeys: assessmentGeneratedObjectUploads
       });
       if (!assessmentDocId) {
         throw new Error('assessment_required_documents_failed');
@@ -91415,7 +94685,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           snapshot: currentSnapshot,
           archivePreviousActive: false,
           replaceExistingVersion: true,
-          connection: conn
+          connection: conn,
+          uploadedObjectKeys: assessmentGeneratedObjectUploads
         });
       }
 
@@ -91445,7 +94716,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
             actorUserId: actorId,
             referenceNumber,
             pdfBuffer: appPdfBuffer,
-            connection: conn
+            connection: conn,
+            uploadedObjectKeys: assessmentGeneratedObjectUploads
           });
           if (!appDocId) {
             throw new Error('assessment_required_documents_failed');
@@ -91468,7 +94740,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
             actorUserId: actorId,
             referenceNumber,
             pdfBuffer: financialPdfBuffer,
-            connection: conn
+            connection: conn,
+            uploadedObjectKeys: assessmentGeneratedObjectUploads
           });
           if (!financialDocId) {
             throw new Error('assessment_required_documents_failed');
@@ -91511,16 +94784,75 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       });
     }
 
-    await conn.commit();
+    if (assessmentResubmissionIntegrityBoundaryActive) {
+      const commitManifest = buildAssessmentResubmissionCommitManifest({
+        caseId,
+        applicationId,
+        uploadedObjects: assessmentGeneratedObjectUploads,
+      });
+      if (
+        !commitManifest.documents.length ||
+        assessmentGeneratedObjectUploads.some(record => (
+          record?.compensationNotRequired !== true &&
+          (
+            record?.versionIdentityVerified !== true ||
+            !normaliseString(record?.versionId) ||
+            !normalisePositiveInteger(record?.documentId)
+          )
+        ))
+      ) {
+        throw createAssessmentResubmissionIntegrityError(
+          'assessment_resubmit_manifest_incomplete',
+          'The generated assessment document manifest is incomplete.'
+        );
+      }
+      assessmentResubmissionCommitAttempted = true;
+      let commitResult;
+      try {
+        commitResult = await commitAssessmentResubmissionTransaction({
+          connection: conn,
+          manifest: commitManifest,
+        });
+      } catch (commitError) {
+        if (commitError?.connectionDestroyed) conn = null;
+        throw commitError;
+      }
+      assessmentTransactionStarted = false;
+      assessmentResubmissionCommitOutcome = commitResult.outcome;
+      if (commitResult.connectionDestroyed) conn = null;
+    } else {
+      await conn.commit();
+      assessmentTransactionStarted = false;
+    }
   } catch (error) {
-    if (conn) {
+    let responseError = error;
+    if (assessmentResubmissionIntegrityBoundaryActive) {
+      responseError = await recoverAssessmentResubmissionFailure({
+        connection: conn,
+        transactionStarted: assessmentTransactionStarted,
+        commitAttempted: assessmentResubmissionCommitAttempted,
+        commitOutcome: error?.commitOutcome || assessmentResubmissionCommitOutcome,
+        uploadedObjects: assessmentGeneratedObjectUploads,
+        originalError: error,
+      });
+      conn = null;
+      assessmentTransactionStarted = false;
+    } else if (conn) {
       try { await conn.rollback(); } catch (_) {}
       conn.release();
       conn = null;
+      assessmentTransactionStarted = false;
     }
-    console.error('Error updating assessment:', error);
-    const status = Number(error?.status || error?.statusCode) || 500;
-    return res.status(status).json({ success: false, error: error.message, lock: lockCheck.lock || null });
+    console.error('Error updating assessment:', responseError);
+    const status = Number(responseError?.httpStatus || responseError?.status || responseError?.statusCode) || 500;
+    return res.status(status).json({
+      success: false,
+      error: responseError?.publicError || responseError?.code || responseError?.message,
+      message: responseError?.publicError ? responseError.message : undefined,
+      retrySafe: responseError?.retrySafe === true,
+      manualReviewRequired: responseError?.manualReviewRequired === true,
+      lock: lockCheck.lock || null,
+    });
   } finally {
     if (conn) conn.release();
   }
@@ -94127,6 +97459,10 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
 const adminRepairExports = {
   pool,
   applyApplicationAssessmentReviewWorkflowAction,
+  applicationAssessmentCaseContextMutationKinds,
+  classifyApplicationAssessmentMutationRequest,
+  assertApplicationAssessmentReviewOwnedStatusMutationAllowed,
+  assertApplicationAssessmentMutationStageAllowed,
   assertApplicationAssessmentReturnedToSubmitterActor,
   createCfaVersionForPlan,
   ensureAutoPlanAndInterventionFromAssessment,
@@ -94140,6 +97476,52 @@ const adminRepairExports = {
   resolveSigningRequestMessageScope,
   reconcileApplicationDocumentRequestAfterSigning,
   isDocsRequestedSigningDocumentType,
+  setDocsRequestedFromSecureMessage,
+  normalizeCaseMessageSigningAttachments,
+  validateCaseMessageSigningAttachmentRequest,
+  validateAutoFundingWorkflowAttachmentResolution,
+  assertUniqueVersionedSigningWorkflowAttachments,
+  resolveEligibleSigningWorkflowRows,
+  assertValidSigningWorkflowSchema,
+  buildRequiredSigningWorkflowSchemas,
+  prepareCaseMessageSigningSchema,
+  mapCaseMessagePublicError,
+  resolveS3UploadVersionId,
+  trackGeneratedObjectUploadAttempt,
+  verifyGeneratedObjectUploadIdentity,
+  inspectAssessmentGeneratedObjectUpload,
+  uploadAssessmentGeneratedPdfObject,
+  compensateAssessmentGeneratedObjects,
+  lockAssessmentApplicationThenCase,
+  buildAssessmentResubmissionCommitManifest,
+  inspectAssessmentResubmissionCommitOutcome,
+  commitAssessmentResubmissionTransaction,
+  recoverAssessmentResubmissionFailure,
+  adminDocumentUploadRowMatchesManifest,
+  inspectAdminDocumentUploadManifest,
+  writeAdminDocumentUploadManifest,
+  inspectAdminDocumentUploadedObject,
+  lockAdminDocumentUploadManifestContext,
+  persistAdminDocumentUploadTransaction,
+  buildAdminDocumentUploadResponseRow,
+  handleAdminDocumentUpload,
+  resolveVersionSnapshotApplicationId,
+  filterApplicationScopedVersionRows,
+  resolveApplicationScopedCfaDraft,
+  deleteUploadedObjectKeysBestEffort,
+  inspectCaseMessageCommitOutcome,
+  inspectGeneratedVersionCommitOutcome,
+  commitCaseMessageWriteTransaction,
+  commitGeneratedVersionWriteTransaction,
+  rollbackCaseMessageWriteTransaction,
+  resolveAuthoritativeSigningRequestDocumentType,
+  resolveWorkflowDecisionLetterDocumentType,
+  requestHasApplicationScopedCaseMutation,
+  isApplicationAssessmentReviewQueueMember,
+  buildApplicationAssessmentReviewWorkflowJoinSql,
+  buildApplicationAssessmentReviewQueueSqlFilter,
+  countProgramAdminAwaitingDecision,
+  countRegionalPendingApproval,
   startApplicationAssessmentReviewWorkflow,
   REVIEW_WORKFLOW_TYPES,
 };

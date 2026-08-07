@@ -4,6 +4,8 @@ This is the first and non-negotiable instruction for every agent working in this
 
 ## STOP AGAIN: CHECK THE FINISHED SQL AGAINST LIVE SCHEMA BEFORE EXECUTION
 
+- **TESTS, SMOKES, FIXTURE SEEDERS, AND CLEANUP SCRIPTS ARE NOT EXEMPT.** Any release or workflow harness that issues SQL must prove the exact live target identity and DDL first, then route every non-metadata statement through a fail-closed per-statement identifier check. A preflight failure must close the connection without attempting fixture cleanup or any other non-metadata SQL.
+- **OUTPUT ALIASES AND METADATA PROBES ARE NOT EXEMPT.** Never invent an unverified alias in an identity or DDL query; it may be a reserved word on the live engine. Prefer native result labels. After a metadata-probe syntax failure, prove that no write ran and remain in metadata-only discovery until the exact target and required DDL are established.
 - Retrieving live DDL is not enough. Immediately before executing every non-metadata SQL statement, compare every identifier in the finished SQL text against the live metadata captured for that exact target environment.
 - Check one table at a time and explicitly confirm that every selected, filtered, joined, ordered, inserted, or updated column belongs to that table. Never carry a similarly named column from another table into the statement.
 - If even one identifier, function, enum value, collation, or relationship cannot be pointed to in the current live metadata output, do not run the statement. Return to metadata-only discovery.

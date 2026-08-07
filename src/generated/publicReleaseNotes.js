@@ -1,37 +1,37 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-08-01T10:39:04.928Z",
-  "releaseId": "20260801-assessment-document-lineage-r2",
-  "releaseLabel": "Release 20260801-assessment-document-lineage-r2",
-  "releaseDateEn": "1st August 2026",
-  "releaseDateFr": "1 aout 2026",
+  "generatedAt": "2026-08-07T03:02:25.566Z",
+  "releaseId": "20260806-assessment-correction-hotfix-r2",
+  "releaseLabel": "Release 20260806-assessment-correction-hotfix-r2",
+  "releaseDateEn": "7th August 2026",
+  "releaseDateFr": "7 aout 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",
     "featuresHeading": "What changed",
     "features": [
-      "Fixed a bug that could block submission of a repeat application assessment by treating documents from an older application as if they belonged to the current one.",
-      "Newly approved repeat applications now use their own action plan and intervention details when PATH creates a Client Funding Agreement."
+      "Returned Application Assessments now stay in the correct review queue while Financial Overview requests are completed, so Regional Managers can forward changes and the original submitter can correct and resubmit the assessment.",
+      "Client Funding Agreement signing now completes the signed file, document links, agreement version, and request state together, without leaving a partial completion if any step fails."
     ],
     "featurePackages": [
       {
-        "title": "Release 20260801-assessment-document-lineage-r2",
+        "title": "Release 20260806-assessment-correction-hotfix-r2",
         "items": [
-          "Repeat application assessments now preserve Application Forms and Financial Overviews only when the document belongs to the application being submitted.",
-          "Documents from an older application or the general case file no longer prevent PATH from generating the required documents for the current application."
+          "Financial Overview requests and signing no longer replace the active Application Assessment review stage or hide a returned assessment from the correct queue.",
+          "A returned assessment can be edited and resubmitted only by the staff member recorded as its original submitter; a correction-required reopened assessment must be returned for correction before it can move forward again.",
+          "Client Funding Agreement signing now commits the exact application, agreement version, signed document, request, message, and audit event as one protected operation, with safe retry and rollback behavior."
         ]
       },
       {
-        "title": "Release 20260730-feedback-173-cfa-hotfix",
+        "title": "Release 20260805-cfa-signing-hotfix-r3",
         "items": [
-          "Newly approved repeat applications now create and use an application-linked action plan, so historical plan information cannot replace the current intervention details in a Client Funding Agreement.",
-          "When a participant signs a versioned Client Funding Agreement, PATH now links the signed PDF to that exact version and records the version as signed."
+          "Fixed Client Funding Agreement signing so PATH carries the agreement's verified application link into the signed PDF, agreement version, document record, and case event.",
+          "Repeated submission of an already signed agreement remains safe and does not create duplicate documents or events."
         ]
       },
       {
-        "title": "Release 20260728-regional-snapshot-data-quality-funding",
+        "title": "Release 20260801-returned-assessment-edit",
         "items": [
-          "Regional Snapshot data-quality issues now name the participant, application, and intervention type and explain the problem and corrective action in plain English.",
-          "Section C now retains valid positive approved funding from non-manual interventions when an application link is missing or conflicting. Section B application activity remains excluded until the lineage is corrected, and the report continues to flag the data issue."
+          "Regional Managers can now edit an Application Assessment returned to them when they were the staff member who originally submitted it."
         ]
       }
     ],
@@ -45,29 +45,29 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
-      "Correction d'un problème qui pouvait bloquer la soumission de l'évaluation d'une demande répétée en traitant les documents d'une ancienne demande comme s'ils appartenaient à la demande actuelle.",
-      "Les nouvelles demandes approuvees utilisent maintenant leur propre plan d'action et leurs propres details d'intervention lorsque PATH cree une entente de financement du client."
+      "Les évaluations de demande retournées restent maintenant dans la bonne file de révision pendant le traitement des demandes d'aperçu financier. Les gestionnaires régionaux peuvent donc transmettre les changements et la personne ayant soumis l'évaluation peut la corriger et la soumettre de nouveau.",
+      "La signature d'une entente de financement du client finalise maintenant ensemble le fichier signé, les liens de document, la version de l'entente et l'état de la demande, sans laisser de traitement partiel en cas d'échec."
     ],
     "featurePackages": [
       {
-        "title": "Release 20260801-assessment-document-lineage-r2",
+        "title": "Release 20260806-assessment-correction-hotfix-r2",
         "items": [
-          "Les évaluations de demandes répétées conservent maintenant les formulaires de demande et les aperçus financiers uniquement lorsque le document appartient à la demande soumise.",
-          "Les documents d'une ancienne demande ou du dossier général ne bloquent plus la production des documents requis pour la demande actuelle."
+          "Les demandes et signatures d'aperçu financier ne remplacent plus l'étape active de révision d'une évaluation de demande et ne masquent plus une évaluation retournée dans la mauvaise file.",
+          "Une évaluation retournée peut être modifiée et soumise de nouveau uniquement par la personne enregistrée comme l'ayant soumise initialement. Une évaluation rouverte pour correction doit être retournée avant de pouvoir progresser de nouveau.",
+          "La signature d'une entente de financement du client enregistre maintenant la demande exacte, la version de l'entente, le document signé, la demande de signature, le message et l'événement d'audit dans une seule opération protégée, avec une reprise et une annulation sécuritaires."
         ]
       },
       {
-        "title": "Release 20260730-feedback-173-cfa-hotfix",
+        "title": "Release 20260805-cfa-signing-hotfix-r3",
         "items": [
-          "Les nouvelles demandes approuvees creent et utilisent maintenant un plan d'action lie a la demande, afin que l'information d'un ancien plan ne remplace pas les details d'intervention actuels dans une entente de financement du client.",
-          "Lorsqu'une participante ou un participant signe une entente de financement du client geree par version, PATH lie maintenant le PDF signe a cette version precise et enregistre la version comme signee."
+          "Correction de la signature des ententes de financement du client : PATH transmet maintenant le lien vérifié de la demande au PDF signé, à la version de l'entente, au document et à l'événement du dossier.",
+          "Une nouvelle soumission d'une entente déjà signée demeure sans danger et ne crée pas de documents ni d'événements en double."
         ]
       },
       {
-        "title": "Release 20260728-regional-snapshot-data-quality-funding",
+        "title": "Release 20260801-returned-assessment-edit",
         "items": [
-          "Les problèmes de qualité des données de l'instantané régional indiquent maintenant la participante ou le participant, la demande et le type d'intervention, puis expliquent en langage clair le problème et la correction requise.",
-          "La section C conserve maintenant le financement approuvé positif et valide des interventions non manuelles lorsqu'un lien de demande est absent ou contradictoire. L'activité des demandes de la section B reste exclue jusqu'à la correction de la filiation, et le rapport continue de signaler le problème de données."
+          "Les gestionnaires régionaux peuvent maintenant modifier une évaluation de demande qui leur est retournée lorsqu'ils l'avaient initialement soumise."
         ]
       }
     ],

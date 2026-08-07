@@ -44,6 +44,11 @@ const roleProfiles = {
     name: 'Regional Manager',
     groups: ['Regional_Manager'],
   },
+  'NWAC Administrator': {
+    email: 'decision.maker@nwac.ca',
+    name: 'Decision Maker',
+    groups: ['NWAC_Administrator'],
+  },
 };
 
 const REVIEW_STAGES = {
@@ -554,7 +559,12 @@ function applyCaseMutation(state, body) {
   if (twoStepEnabled) {
     next.twoStepReviewEnabled = true;
     next.two_step_review_enabled = true;
-    if (body.applicationStatus === 'pending_approval' && body.assessment_recommendation && body.assessment_justification) {
+    if (
+      !body.assessment_nwac_review_status &&
+      body.applicationStatus === 'pending_approval' &&
+      body.assessment_recommendation &&
+      body.assessment_justification
+    ) {
       const transition = getReviewTransition({
         action: REVIEW_WORKFLOW_ACTIONS.SubmitForRmReview,
         workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
@@ -1608,7 +1618,7 @@ function buildScenarios() {
     },
     {
       name: 'nwac-request-changes-to-rm',
-      role: 'System Administrator',
+      role: 'NWAC Administrator',
       path: approvalEntryPath('decision'),
       casePayload: buildCasePayload({
         status: 'intake',
@@ -1719,7 +1729,7 @@ function buildScenarios() {
     },
     {
       name: 'nwac-approval-decision',
-      role: 'System Administrator',
+      role: 'NWAC Administrator',
       path: approvalEntryPath('decision'),
       casePayload: buildCasePayload({
         status: 'intake',

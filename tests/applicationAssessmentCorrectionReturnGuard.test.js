@@ -23,6 +23,10 @@ jest.mock('axios', () => ({
 describe('application assessment correction-return caller guard', () => {
   const previousRepairExports = process.env.PATH_REPAIR_EXPORTS;
   let applyApplicationAssessmentReviewWorkflowAction;
+  let applicationAssessmentCaseContextMutationKinds;
+  let classifyApplicationAssessmentMutationRequest;
+  let assertApplicationAssessmentReviewOwnedStatusMutationAllowed;
+  let assertApplicationAssessmentMutationStageAllowed;
   let assertApplicationAssessmentReturnedToSubmitterActor;
   let startApplicationAssessmentReviewWorkflow;
 
@@ -31,6 +35,10 @@ describe('application assessment correction-return caller guard', () => {
     process.env.PATH_REPAIR_EXPORTS = '1';
     ({
       applyApplicationAssessmentReviewWorkflowAction,
+      applicationAssessmentCaseContextMutationKinds,
+      classifyApplicationAssessmentMutationRequest,
+      assertApplicationAssessmentReviewOwnedStatusMutationAllowed,
+      assertApplicationAssessmentMutationStageAllowed,
       assertApplicationAssessmentReturnedToSubmitterActor,
       startApplicationAssessmentReviewWorkflow,
     } = require('../isetadminserver'));
@@ -209,6 +217,145 @@ describe('application assessment correction-return caller guard', () => {
     ).toEqual({ enforced: true, reason: 'original_submitter' });
   });
 
+  test.each([
+    ['rm_review'],
+    ['returned_to_rm'],
+    ['nwac_review'],
+    ['final_decision_recorded'],
+  ])('authoritative review stage %s blocks body edits despite lifecycle drift', currentStage => {
+    let error = null;
+    try {
+      assertApplicationAssessmentMutationStageAllowed({
+        reviewWorkflow: {
+          ...buildReturnedWorkflowRow(),
+          current_stage: currentStage,
+        },
+        assessmentMutationRequested: true,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: 'assessment_submission_locked',
+      status: 409,
+    });
+  });
+
+  test('returned-to-submitter remains editable before the original-submitter actor guard runs', () => {
+    expect(assertApplicationAssessmentMutationStageAllowed({
+      reviewWorkflow: buildReturnedWorkflowRow(),
+      assessmentMutationRequested: true,
+    })).toEqual({ enforced: false, reason: 'stage_allows_assessment_mutation' });
+  });
+
+  test('field ownership keeps Decision Maker payloads out of the submitter-body guard', () => {
+    expect(classifyApplicationAssessmentMutationRequest({
+      assessmentPayloadKeysPresent: [
+        'assessment_nwac_review_status',
+        'assessment_nwac_review',
+        'assessment_nwac_reason',
+        'assessment_intervention_pot_id',
+      ],
+      assessmentReviewStatusProvided: true,
+      caseContextMutationKinds: { contentChanged: false, decisionChanged: false },
+    })).toMatchObject({
+      assessmentBodyMutationRequested: false,
+      assessmentDecisionMutationRequested: true,
+    });
+
+    expect(classifyApplicationAssessmentMutationRequest({
+      assessmentPayloadKeysPresent: [
+        'assessment_nwac_review_status',
+        'assessment_employment_goals',
+      ],
+      assessmentReviewStatusProvided: true,
+      caseContextMutationKinds: { contentChanged: false, decisionChanged: false },
+    })).toMatchObject({
+      assessmentBodyMutationRequested: true,
+      assessmentDecisionMutationRequested: true,
+    });
+  });
+
+  test('case-context ownership distinguishes decision metadata from assessment content', () => {
+    const existing = {
+      applicationAnswers: { goal: 'Existing goal' },
+      applicationDecisionLetters: {
+        123: {
+          assessmentOtherFunding: { involved: false },
+          decisionLetterDrafts: { approval: { decision_intro: 'Old draft' } },
+        },
+      },
+    };
+    const decisionOnly = {
+      ...existing,
+      applicationDecisionLetters: {
+        123: {
+          ...existing.applicationDecisionLetters[123],
+          decisionLetterDrafts: { approval: { decision_intro: 'New draft' } },
+        },
+      },
+    };
+    expect(applicationAssessmentCaseContextMutationKinds(existing, decisionOnly, 123)).toEqual({
+      contentChanged: false,
+      decisionChanged: true,
+    });
+
+    const changedAssessment = {
+      ...decisionOnly,
+      applicationDecisionLetters: {
+        123: {
+          ...decisionOnly.applicationDecisionLetters[123],
+          assessmentOtherFunding: { involved: true },
+        },
+      },
+    };
+    expect(applicationAssessmentCaseContextMutationKinds(existing, changedAssessment, 123)).toEqual({
+      contentChanged: true,
+      decisionChanged: true,
+    });
+  });
+
+  test('review-owned status transitions allow only the stage owner or explicit support path', () => {
+    const base = {
+      applicationStatusMutationRequested: true,
+      caseStatusMutationRequested: true,
+      beforeApplicationStatus: 'pending_approval',
+      nextApplicationStatus: 'approved',
+      actorRole: 'NWAC Administrator',
+    };
+    expect(() => assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      ...base,
+      reviewWorkflow: { current_stage: 'rm_review' },
+      assessmentReviewStatusProvided: true,
+      canRecordDecision: true,
+    })).toThrow(expect.objectContaining({ code: 'assessment_review_status_transition_forbidden' }));
+
+    expect(assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      ...base,
+      reviewWorkflow: { current_stage: 'nwac_review' },
+      assessmentReviewStatusProvided: true,
+      canRecordDecision: true,
+    })).toEqual({ enforced: true, reason: 'authorized_review_owned_status_transition' });
+
+    expect(() => assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      applicationStatusMutationRequested: true,
+      reviewWorkflow: { current_stage: 'returned_to_submitter' },
+      assessmentSubmittedForWorkflow: false,
+      actorRole: 'Regional Manager',
+      beforeApplicationStatus: 'in_review',
+      nextApplicationStatus: 'pending_approval',
+    })).toThrow(expect.objectContaining({ code: 'assessment_review_status_transition_forbidden' }));
+
+    expect(assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      applicationStatusMutationRequested: true,
+      reviewWorkflow: { current_stage: 'returned_to_submitter' },
+      assessmentSubmittedForWorkflow: true,
+      actorRole: 'Regional Manager',
+      beforeApplicationStatus: 'in_review',
+      nextApplicationStatus: 'pending_approval',
+    })).toEqual({ enforced: true, reason: 'authorized_review_owned_status_transition' });
+  });
+
   test('generic assessment mutation guard leaves docs-only follow-up outside the submitter restriction', () => {
     expect(
       assertApplicationAssessmentReturnedToSubmitterActor({
@@ -220,16 +367,15 @@ describe('application assessment correction-return caller guard', () => {
     ).toEqual({ enforced: false, reason: 'no_assessment_mutation' });
   });
 
-  test('the generic PUT caller preserves the established eligibility-only correction exception', () => {
-    const fs = require('fs');
-    const source = fs.readFileSync(
-      require('path').join(process.cwd(), 'isetadminserver.js'),
-      'utf8'
-    );
-
-    expect(source).toContain(
-      'assessmentMutationRequested: hasAssessmentPayload && !eligibilityOnlyAssessmentPayload'
-    );
+  test('the generic PUT classifier preserves the established eligibility-only correction exception', () => {
+    expect(classifyApplicationAssessmentMutationRequest({
+      assessmentPayloadKeysPresent: ['assessment_esdc_eligibility'],
+      assessmentReviewStatusProvided: false,
+      caseContextMutationKinds: { contentChanged: false, decisionChanged: false },
+    })).toMatchObject({
+      assessmentBodyMutationRequested: false,
+      assessmentDecisionMutationRequested: false,
+    });
   });
 
   test('real application start-review boundary denies a different staff actor before any write', async () => {

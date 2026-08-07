@@ -8340,8 +8340,14 @@ ${JSON.stringify(aiContext, null, 2)}`;
       if (!lockCheck.ok) return;
       const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
       const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
+      const completeAssessmentPayload = buildAssessmentPayload({ includeDecisionFields: true });
       const payload = {
-        ...buildAssessmentPayload({ includeDecisionFields: true }),
+        applicationId: applicationId || null,
+        assessment_nwac_review_status: completeAssessmentPayload.assessment_nwac_review_status,
+        assessment_nwac_review: completeAssessmentPayload.assessment_nwac_review,
+        assessment_nwac_reason: completeAssessmentPayload.assessment_nwac_reason,
+        assessment_intervention_pot_id: completeAssessmentPayload.assessment_intervention_pot_id,
+        postingContext: completeAssessmentPayload.postingContext,
         assessment_submit_action: true,
         status: nextCaseStatus,
         applicationStatus: nextApplicationStatus
@@ -8496,11 +8502,25 @@ ${JSON.stringify(aiContext, null, 2)}`;
       expectedRowVersion = null
     } = {}) => {
       if (!caseId || !nextStatus) return { ok: false };
+      const exactApplicationId = Number(applicationId);
+      if (!Number.isInteger(exactApplicationId) || exactApplicationId <= 0) {
+        setAlert({
+          type: 'error',
+          content: 'The selected application could not be identified. Reload the client file before changing its status.',
+          dismissible: true,
+          statusIconAriaLabel: 'Error'
+        });
+        scrollAfterAction();
+        return { ok: false };
+      }
       const lockCheck = await ensureLockForOperation();
       if (!lockCheck.ok) return { ok: false };
       const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
       const versionToken = Number(expectedRowVersion || applicationRowVersionState || caseData?.application_row_version || 0);
-      const payload = { applicationStatus: nextStatus };
+      const payload = {
+        applicationId: exactApplicationId,
+        applicationStatus: nextStatus
+      };
       if (versionToken > 0) {
         payload.expectedRowVersion = versionToken;
       }
@@ -8578,6 +8598,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
     },
     [
       actions,
+      applicationId,
       applicationRowVersionState,
       caseData?.application_row_version,
       caseId,
@@ -11315,7 +11336,9 @@ ${JSON.stringify(aiContext, null, 2)}`;
   const rmReviewNote = String(reviewWorkflow?.rmReviewNote || reviewWorkflow?.rm_review_note || '').trim();
   const nwacDecisionNote = String(reviewWorkflow?.nwacDecisionNote || reviewWorkflow?.nwac_decision_note || '').trim();
   const reviewWorkflowNotice = (() => {
-    if (!twoStepReviewEnabled || !hasReviewWorkflow || !isPendingApprovalStatus) return null;
+    // The review workflow owns reviewer routing. Document/signing lifecycle
+    // drift must not hide the active reviewer-stage notice.
+    if (!twoStepReviewEnabled || !hasReviewWorkflow) return null;
     if (isReviewWithNwac) {
       return {
         key: `assessment-${reviewStage}`,

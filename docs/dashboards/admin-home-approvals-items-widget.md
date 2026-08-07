@@ -2,7 +2,7 @@
 
 Purpose: document the live pending-decision/review-mode behavior of the shared homepage `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-06-19
+Last Updated: 2026-08-06
 
 ## Scope
 
@@ -20,9 +20,10 @@ Last Updated: 2026-06-19
 
 - Submitted application assessments waiting for program decision or RM review
   - sourced from `GET /api/dashboard/awaiting-approval-items`
-  - current application status filter is `pending_approval`
+  - active `iset_review_workflow.current_stage` is authoritative even when the compatibility application status/lifecycle has drifted
   - Regional Managers receive rows only when the review workflow is `rm_review` or `returned_to_rm`
   - NWAC Administrators receive rows when the review workflow is `nwac_review`, plus legacy/off-toggle pending decisions with no review-workflow row
+  - the Application Work Queue drilldowns use the same contract through `/api/applications?bucket=awaiting-my-approval` and `/api/applications?bucket=awaiting-decision`; their tile counts and list predicates must remain aligned
 - New and revised intervention proposals waiting for review
   - sourced from `GET /api/dashboard/intervention-approval-items`
   - current intervention status filter is `submitted` or `in_review`
@@ -85,3 +86,4 @@ Last Updated: 2026-06-19
 - Do not infer budget-pot assignment for application decisions when no explicit pot is stored. The table uses `EI status` instead of a derived budget guess.
 - Do not show unfunded proposed intervention rows in the `Item` breakdown.
 - Keep this table as a launch point into the real record. Detailed review and the final decision action belong in the workspace, not in the homepage table.
+- Preserve `application_id` on every application queue row and workspace link. A case can have multiple applications, so a queue route must never reopen whichever application happens to be primary for the case.

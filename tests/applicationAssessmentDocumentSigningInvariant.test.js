@@ -25,6 +25,11 @@ describe('application assessment document-signing invariant', () => {
   let reconcileApplicationDocumentRequestAfterSigning;
   let resolveSigningRequestMessageScope;
   let isDocsRequestedSigningDocumentType;
+  let setDocsRequestedFromSecureMessage;
+  let normalizeCaseMessageSigningAttachments;
+  let resolveAuthoritativeSigningRequestDocumentType;
+  let resolveWorkflowDecisionLetterDocumentType;
+  let requestHasApplicationScopedCaseMutation;
 
   beforeAll(() => {
     process.env.NODE_ENV = 'test';
@@ -33,6 +38,11 @@ describe('application assessment document-signing invariant', () => {
       reconcileApplicationDocumentRequestAfterSigning,
       resolveSigningRequestMessageScope,
       isDocsRequestedSigningDocumentType,
+      setDocsRequestedFromSecureMessage,
+      normalizeCaseMessageSigningAttachments,
+      resolveAuthoritativeSigningRequestDocumentType,
+      resolveWorkflowDecisionLetterDocumentType,
+      requestHasApplicationScopedCaseMutation,
     } = require('../isetadminserver'));
   });
 
@@ -41,6 +51,113 @@ describe('application assessment document-signing invariant', () => {
     expect(isDocsRequestedSigningDocumentType('assessment_approval_letter')).toBe(false);
     expect(isDocsRequestedSigningDocumentType('assessment_denial_letter')).toBe(false);
     expect(isDocsRequestedSigningDocumentType('')).toBe(false);
+  });
+
+  test('caller document-type labels cannot override the workflow catalogue', () => {
+    expect(normalizeCaseMessageSigningAttachments([{
+      workflow_id: '52',
+      due_at: '2026-08-20',
+      checklist_doc_type: 'assessment_approval_letter',
+      financial_overview_mode: 'blank',
+    }])).toEqual([{
+      workflow_id: 52,
+      due_at: '2026-08-20',
+      financial_overview_mode: 'blank',
+    }]);
+
+    expect(resolveAuthoritativeSigningRequestDocumentType({
+      workflowDocumentType: 'financial_overview',
+      serverFallbackDocumentType: 'EFT_form',
+      workflowName: 'Financial Overview',
+      workflowType: 'consent-cm-prefill',
+      checklistDocType: 'assessment_approval_letter',
+    })).toBe('financial_overview');
+    expect(resolveWorkflowDecisionLetterDocumentType('financial_overview')).toBeNull();
+    expect(resolveWorkflowDecisionLetterDocumentType('assessment_approval_letter'))
+      .toBe('assessment_approval_letter');
+  });
+
+  test('only a private server fallback can classify a catalogue-untyped EFT workflow', () => {
+    expect(resolveAuthoritativeSigningRequestDocumentType({
+      workflowDocumentType: null,
+      serverFallbackDocumentType: 'EFT_form',
+      workflowName: 'Electronic funds transfer',
+      workflowType: 'consent-no-prefill',
+    })).toBe('EFT_form');
+  });
+
+  test('direct application-owned case mutations require an exact application id', () => {
+    expect(requestHasApplicationScopedCaseMutation({ applicationStatus: 'completed' })).toBe(true);
+    expect(requestHasApplicationScopedCaseMutation({ docsRequested: true })).toBe(true);
+    expect(requestHasApplicationScopedCaseMutation({ assessment_recommendation: 'recommend' })).toBe(true);
+    expect(requestHasApplicationScopedCaseMutation({ caseContext: { decisionLetterDrafts: {} } })).toBe(true);
+    expect(requestHasApplicationScopedCaseMutation({ expectedRowVersion: 9 })).toBe(true);
+    expect(requestHasApplicationScopedCaseMutation({ status: 'active' })).toBe(false);
+  });
+
+  test('request activation locks application then workflow and derives from the fresh workflow stage', async () => {
+    const calls = [];
+    const connection = {
+      query: jest.fn(async (sql, params = []) => {
+        const normalizedSql = String(sql).replace(/\s+/g, ' ').trim();
+        calls.push({ sql: normalizedSql, params });
+        if (normalizedSql.includes('FROM iset_application') && normalizedSql.endsWith('LIMIT 1 FOR UPDATE')) {
+          return [[{
+            status: 'pending_approval',
+            docs_requested_active: 0,
+            docs_requested_at: null,
+            docs_requested_cleared_at: null,
+            docs_requested_source: null,
+          }], []];
+        }
+        if (normalizedSql.includes('FROM iset_review_workflow') && normalizedSql.endsWith('LIMIT 1 FOR UPDATE')) {
+          return [[{
+            id: 56,
+            workflow_type: 'application_assessment',
+            application_id: 123,
+            current_stage: 'returned_to_submitter',
+            archived_at: null,
+          }], []];
+        }
+        if (normalizedSql.startsWith('UPDATE iset_application')) {
+          return [{ affectedRows: 1 }, []];
+        }
+        if (normalizedSql.includes('FROM iset_application') && normalizedSql.endsWith('LIMIT 1')) {
+          return [[{
+            status: 'in_review',
+            docs_requested_active: 1,
+            docs_requested_at: '2026-08-06 18:30:00',
+            docs_requested_cleared_at: null,
+            docs_requested_source: 'secure_message',
+          }], []];
+        }
+        throw new Error(`unexpected_query:${normalizedSql}`);
+      }),
+    };
+
+    await expect(setDocsRequestedFromSecureMessage({
+      caseId: 76,
+      applicationId: 123,
+      connection,
+      syncSideEffects: false,
+    })).resolves.toMatchObject({
+      updated: true,
+      status: 'in_review',
+      source: 'secure_message',
+    });
+
+    expect(calls[0].sql).toContain('FROM iset_application');
+    expect(calls[0].sql).toMatch(/FOR UPDATE$/);
+    expect(calls[1].sql).toContain('FROM iset_review_workflow');
+    expect(calls[1].sql).toMatch(/FOR UPDATE$/);
+    const updateCall = calls.find(call => call.sql.startsWith('UPDATE iset_application'));
+    expect(updateCall.params.slice(0, 5)).toEqual([
+      'in_review',
+      'in_review',
+      null,
+      'none',
+      null,
+    ]);
   });
 
   afterAll(() => {

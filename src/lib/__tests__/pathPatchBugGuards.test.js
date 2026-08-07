@@ -11,6 +11,11 @@ const portalServerSource = fs.readFileSync(
   'utf8'
 );
 
+const s3ProviderSource = fs.readFileSync(
+  path.join(process.cwd(), '..', 'ISET-intake', 's3Provider.js'),
+  'utf8'
+);
+
 const secureMessagingWidgetSource = fs.readFileSync(
   path.join(process.cwd(), 'src/widgets/SecureMessagingWidget.js'),
   'utf8'
@@ -71,21 +76,105 @@ describe('PATH patch bug guards', () => {
     expect(handlerEnd).toBeGreaterThan(handlerStart);
     const routeSource = adminServerSource.slice(handlerStart, handlerEnd);
     const beginIndex = routeSource.indexOf('await messageWriteConnection.beginTransaction()');
+    const schemaBuildIndex = routeSource.indexOf('await buildRequiredSigningWorkflowSchemas(');
+    const applicationLockIndex = routeSource.indexOf('FROM iset_application', beginIndex);
+    const caseLockIndex = routeSource.indexOf('await lockCaseForVersionedSigning(', beginIndex);
+    const cfaCreateIndex = routeSource.indexOf('created = await createCfaVersionForPlan({');
+    const fundingOverviewCreateIndex = routeSource.indexOf('await createFundingOverviewVersion({');
+    const finalSchemaIndex = routeSource.indexOf('prepareCaseMessageSigningSchema({');
     const messageInsertIndex = routeSource.indexOf('INSERT INTO messages');
     const signingInsertIndex = routeSource.indexOf('INSERT INTO signing_request');
     const activationIndex = routeSource.indexOf('await setDocsRequestedFromSecureMessage({');
-    const commitIndex = routeSource.indexOf('await messageWriteConnection.commit()');
+    const commitIndex = routeSource.indexOf('await commitCaseMessageWriteTransaction({');
 
     expect(routeSource).toContain('application_id_required_for_signing_request');
     expect(routeSource).toContain('connection: messageWriteConnection');
+    expect(routeSource).toContain('uploadedObjectKeys: generatedObjectKeys');
     expect(routeSource).toContain('syncSideEffects: false');
-    expect(routeSource).toContain('await messageWriteConnection.rollback()');
+    expect(routeSource).toContain('await rollbackCaseMessageWriteTransaction({');
+    expect(routeSource).toContain("messageWriteCommitOutcome = 'uncertain'");
+    expect(routeSource).toContain('await commitCaseMessageWriteTransaction({');
+    expect(routeSource).toContain('messageIdentity: messageCommitIdentity');
+    expect(routeSource).toContain('signingRequestIds: createdSigningRequestIds');
+    expect(routeSource).toContain('commitOutcome: messageWriteCommitOutcome');
+    expect(schemaBuildIndex).toBeGreaterThanOrEqual(0);
+    expect(schemaBuildIndex).toBeLessThan(beginIndex);
     expect(beginIndex).toBeGreaterThanOrEqual(0);
+    expect(applicationLockIndex).toBeGreaterThan(beginIndex);
+    expect(caseLockIndex).toBeGreaterThan(applicationLockIndex);
+    expect(cfaCreateIndex).toBeGreaterThan(caseLockIndex);
+    expect(fundingOverviewCreateIndex).toBeGreaterThan(caseLockIndex);
+    expect(finalSchemaIndex).toBeGreaterThan(cfaCreateIndex);
+    expect(finalSchemaIndex).toBeGreaterThan(fundingOverviewCreateIndex);
     expect(messageInsertIndex).toBeGreaterThan(beginIndex);
+    expect(messageInsertIndex).toBeGreaterThan(finalSchemaIndex);
     expect(signingInsertIndex).toBeGreaterThan(messageInsertIndex);
     expect(activationIndex).toBeGreaterThan(signingInsertIndex);
     expect(commitIndex).toBeGreaterThan(activationIndex);
+    expect(routeSource.slice(beginIndex, commitIndex)).not.toMatch(/return\s+res\./);
+    expect(routeSource.slice(beginIndex, commitIndex)).not.toContain('buildWorkflowSchema');
+    expect(routeSource).toContain('Number(cfaSentResult?.affectedRows || 0) !== 1');
+    expect(routeSource).toContain('Number(fundingOverviewSentResult?.affectedRows || 0) !== 1');
     expect(routeSource).not.toContain('failed to set docs requested from secure message');
+  });
+
+  test('CFA and financial-overview version creation is serialized and application-scoped', () => {
+    const cfaPlanSource = extractAdminFunction('createCfaVersionForPlan');
+    const cfaAssessmentSource = extractAdminFunction('createCfaVersionFromAssessment');
+    const fundingOverviewSource = extractAdminFunction('createFundingOverviewVersion');
+
+    for (const creatorSource of [cfaPlanSource, cfaAssessmentSource, fundingOverviewSource]) {
+      const lockIndex = creatorSource.indexOf('await lockCaseForVersionedSigning(');
+      const seriesIndex = creatorSource.indexOf('await ensure');
+      const maxIndex = creatorSource.indexOf('SELECT MAX(version_number)');
+      expect(lockIndex).toBeGreaterThanOrEqual(0);
+      expect(seriesIndex).toBeGreaterThan(lockIndex);
+      expect(maxIndex).toBeGreaterThan(seriesIndex);
+      expect(creatorSource).toContain('filterApplicationScopedVersionRows(');
+      expect(creatorSource).toContain("row?.status === 'signed'");
+      expect(creatorSource).toContain('uploadedObjectKeys: createdObjectKeys');
+      expect(creatorSource).toContain('await commitGeneratedVersionWriteTransaction({');
+      expect(creatorSource).toContain("commitOutcome = 'uncertain'");
+    }
+
+    const scopedDraftSource = extractAdminFunction('resolveApplicationScopedCfaDraft');
+    expect(scopedDraftSource).toContain('filterApplicationScopedVersionRows(rows, normalizedApplicationId)');
+    expect(scopedDraftSource).toContain('applicationRows.map(row => normalisePositiveInteger(row.id)).filter(Boolean)');
+    expect(scopedDraftSource).not.toContain('buildCasePrimaryApplicationJoinSql');
+  });
+
+  test('generated CFA and financial-overview uploads retain an exact compensatable object version', () => {
+    for (const storeFunctionName of [
+      'storeFundingAgreementPdfDocument',
+      'storeFundingOverviewPdfDocument',
+    ]) {
+      const storeSource = extractAdminFunction(storeFunctionName);
+      const keyTrackIndex = storeSource.indexOf('trackGeneratedObjectUploadAttempt(uploadedObjectKeys, key)');
+      const uploadIndex = storeSource.indexOf('uploadResponse = await axios.put(');
+      const identityIndex = storeSource.indexOf('await verifyGeneratedObjectUploadIdentity({');
+      expect(keyTrackIndex).toBeGreaterThanOrEqual(0);
+      expect(uploadIndex).toBeGreaterThan(keyTrackIndex);
+      expect(identityIndex).toBeGreaterThan(uploadIndex);
+      expect(storeSource).toContain('OBJECT_VERSION_COMPENSATION_SUPPORTED !== true');
+    }
+
+    expect(s3ProviderSource).toContain('const OBJECT_VERSION_COMPENSATION_SUPPORTED = true');
+    expect(s3ProviderSource).toContain('versionId: res.VersionId || null');
+    expect(s3ProviderSource).toContain('...(versionId ? { VersionId: versionId } : {})');
+
+    const cleanupSource = extractAdminFunction('deleteUploadedObjectKeysBestEffort');
+    expect(cleanupSource).toContain('versionIdentityVerified');
+    expect(cleanupSource).toContain("...(record.versionId ? { versionId: record.versionId } : {})");
+    const rollbackSource = extractAdminFunction('rollbackCaseMessageWriteTransaction');
+    expect(rollbackSource.indexOf('await connection.rollback()'))
+      .toBeLessThan(rollbackSource.indexOf('await cleanupFn(uploadedObjectKeys'));
+    expect(rollbackSource).toContain('return originalError;');
+  });
+
+  test('finance evidence deletion passes the provider object contract', () => {
+    const route = extractRoute(adminServerSource, 'post', '/api/allocations/evidence/delete');
+    expect(route).toContain('await deleteObject({ key });');
+    expect(route).not.toContain('await deleteObject(key);');
   });
 
   test('application review queue is exact-application and workflow-stage driven', () => {

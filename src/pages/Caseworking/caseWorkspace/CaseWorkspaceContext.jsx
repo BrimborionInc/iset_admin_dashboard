@@ -1973,7 +1973,10 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       const response = await apiFetch(`/api/cases/${caseId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ caseContext: payload ?? null }),
+        body: JSON.stringify({
+          ...(applicationId ? { applicationId } : {}),
+          caseContext: payload ?? null,
+        }),
       });
       if (!response.ok) {
         let details = null;

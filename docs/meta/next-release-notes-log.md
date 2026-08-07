@@ -485,9 +485,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Participants can now complete and sign versioned Client Funding Agreements without PATH failing during final document creation.
+- Returned Application Assessments now stay in the correct review queue while Financial Overview requests are completed, so Regional Managers can forward changes and the original submitter can correct and resubmit the assessment.
+- Client Funding Agreement signing now completes the signed file, document links, agreement version, and request state together, without leaving a partial completion if any step fails.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260806-assessment-correction-hotfix-r2
+
+- Financial Overview requests and signing no longer replace the active Application Assessment review stage or hide a returned assessment from the correct queue.
+- A returned assessment can be edited and resubmitted only by the staff member recorded as its original submitter; a correction-required reopened assessment must be returned for correction before it can move forward again.
+- Client Funding Agreement signing now commits the exact application, agreement version, signed document, request, message, and audit event as one protected operation, with safe retry and rollback behavior.
 
 #### Release 20260805-cfa-signing-hotfix-r3
 
@@ -498,20 +505,22 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Regional Managers can now edit an Application Assessment returned to them when they were the staff member who originally submitted it.
 
-#### Release 20260801-assessment-document-lineage-r2
-
-- Repeat application assessments now preserve Application Forms and Financial Overviews only when the document belongs to the application being submitted.
-- Documents from an older application or the general case file no longer prevent PATH from generating the required documents for the current application.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Les participantes et participants peuvent maintenant remplir et signer les ententes de financement du client gérées par version sans échec de PATH lors de la création du document final.
+- Les évaluations de demande retournées restent maintenant dans la bonne file de révision pendant le traitement des demandes d'aperçu financier. Les gestionnaires régionaux peuvent donc transmettre les changements et la personne ayant soumis l'évaluation peut la corriger et la soumettre de nouveau.
+- La signature d'une entente de financement du client finalise maintenant ensemble le fichier signé, les liens de document, la version de l'entente et l'état de la demande, sans laisser de traitement partiel en cas d'échec.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260806-assessment-correction-hotfix-r2
+
+- Les demandes et signatures d'aperçu financier ne remplacent plus l'étape active de révision d'une évaluation de demande et ne masquent plus une évaluation retournée dans la mauvaise file.
+- Une évaluation retournée peut être modifiée et soumise de nouveau uniquement par la personne enregistrée comme l'ayant soumise initialement. Une évaluation rouverte pour correction doit être retournée avant de pouvoir progresser de nouveau.
+- La signature d'une entente de financement du client enregistre maintenant la demande exacte, la version de l'entente, le document signé, la demande de signature, le message et l'événement d'audit dans une seule opération protégée, avec une reprise et une annulation sécuritaires.
 
 #### Release 20260805-cfa-signing-hotfix-r3
 
@@ -521,11 +530,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 #### Release 20260801-returned-assessment-edit
 
 - Les gestionnaires régionaux peuvent maintenant modifier une évaluation de demande qui leur est retournée lorsqu'ils l'avaient initialement soumise.
-
-#### Release 20260801-assessment-document-lineage-r2
-
-- Les évaluations de demandes répétées conservent maintenant les formulaires de demande et les aperçus financiers uniquement lorsque le document appartient à la demande soumise.
-- Les documents d'une ancienne demande ou du dossier général ne bloquent plus la production des documents requis pour la demande actuelle.
 
 ### Problemes connus (brouillon - FR)
 

@@ -4,6 +4,10 @@ This rule outranks task momentum and applies to every environment, including rea
 
 ## STOP AGAIN: LIVE DDL MUST MATCH THE FINAL SQL TEXT
 
+**Release qualification SQL is not a special case.** Tests, browser smokes, fixture seeders, verification reads, and cleanup paths must use the same live-identity, full-DDL, and immediate finished-statement proof as operational SQL. Keep raw driver execution confined to metadata discovery and one guarded execution wrapper. If schema preflight fails before a fixture mutation begins, close the connection and do not invoke cleanup SQL.
+
+Metadata discovery itself must remain literal and minimal. Output aliases are SQL identifiers too: do not invent an unquoted alias for an identity or DDL probe, and prefer the engine's native result labels. If a metadata probe fails syntax validation, first prove that no write ran, then continue with metadata-only discovery; the failure is never permission to attempt an ordinary query or cleanup.
+
 Live DDL discovery is only the first half of the control. Immediately before every non-metadata SQL execution, compare the finished statement identifier by identifier with the current target's live metadata. Confirm separately for each table that every selected, filtered, joined, ordered, inserted, or updated column actually belongs to that table; a column verified on a related table is not proof. If any identifier, function, enum value, collation, or relationship is not directly supported by the captured metadata, do not run the statement and return to metadata-only discovery. For PROD repairs, write reviewed non-metadata SQL under `sql/ops/` rather than improvising multi-table statements in a shell command.
 
 # Project Memory Standing Directive
