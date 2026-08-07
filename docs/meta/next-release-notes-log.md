@@ -490,7 +490,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What Changed Packages (draft - EN)
 
-#### Release 20260806-assessment-correction-hotfix-r2
+#### Release 20260806-assessment-correction-hotfix-r3
 
 - Financial Overview requests and signing no longer replace the active Application Assessment review stage or hide a returned assessment from the correct queue.
 - A returned assessment can be edited and resubmitted only by the staff member recorded as its original submitter; a correction-required reopened assessment must be returned for correction before it can move forward again.
@@ -516,7 +516,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Lots de changements (brouillon - FR)
 
-#### Release 20260806-assessment-correction-hotfix-r2
+#### Release 20260806-assessment-correction-hotfix-r3
 
 - Les demandes et signatures d'aperçu financier ne remplacent plus l'étape active de révision d'une évaluation de demande et ne masquent plus une évaluation retournée dans la mauvaise file.
 - Une évaluation retournée peut être modifiée et soumise de nouveau uniquement par la personne enregistrée comme l'ayant soumise initialement. Une évaluation rouverte pour correction doit être retournée avant de pouvoir progresser de nouveau.
