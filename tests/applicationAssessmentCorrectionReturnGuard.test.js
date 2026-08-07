@@ -276,6 +276,44 @@ describe('application assessment correction-return caller guard', () => {
     });
   });
 
+  test('returned-to-RM correction lock permits only the separate conflict declaration operation', () => {
+    const returnedToRmWorkflow = {
+      ...buildReturnedWorkflowRow(),
+      current_stage: 'returned_to_rm',
+    };
+    const declarationOnly = classifyApplicationAssessmentMutationRequest({
+      assessmentPayloadKeysPresent: [],
+      assessmentReviewStatusProvided: false,
+      conflictSignatureRequested: true,
+      caseContextMutationKinds: { contentChanged: false, decisionChanged: false },
+    });
+
+    expect(declarationOnly).toMatchObject({
+      assessmentBodyMutationRequested: false,
+      assessmentDecisionMutationRequested: false,
+      conflictDeclarationMutationRequested: true,
+    });
+    expect(assertApplicationAssessmentMutationStageAllowed({
+      reviewWorkflow: returnedToRmWorkflow,
+      assessmentMutationRequested: declarationOnly.assessmentBodyMutationRequested,
+    })).toEqual({ enforced: false, reason: 'no_assessment_mutation' });
+
+    const declarationWithAssessmentEdit = classifyApplicationAssessmentMutationRequest({
+      assessmentPayloadKeysPresent: ['assessment_employment_goals'],
+      assessmentReviewStatusProvided: false,
+      conflictSignatureRequested: true,
+      caseContextMutationKinds: { contentChanged: false, decisionChanged: false },
+    });
+    expect(declarationWithAssessmentEdit).toMatchObject({
+      assessmentBodyMutationRequested: true,
+      conflictDeclarationMutationRequested: true,
+    });
+    expect(() => assertApplicationAssessmentMutationStageAllowed({
+      reviewWorkflow: returnedToRmWorkflow,
+      assessmentMutationRequested: declarationWithAssessmentEdit.assessmentBodyMutationRequested,
+    })).toThrow(expect.objectContaining({ code: 'assessment_submission_locked' }));
+  });
+
   test('case-context ownership distinguishes decision metadata from assessment content', () => {
     const existing = {
       applicationAnswers: { goal: 'Existing goal' },

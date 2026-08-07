@@ -13630,7 +13630,6 @@ function classifyApplicationAssessmentMutationRequest({
       APPLICATION_ASSESSMENT_NWAC_AUXILIARY_PAYLOAD_KEYS.has(key)
     ));
   const assessmentBodyMutationRequested =
-    conflictSignatureRequested ||
     Boolean(caseContextMutationKinds?.contentChanged) ||
     (
       assessmentBodyPayloadKeysPresent.length > 0 &&
@@ -13649,6 +13648,7 @@ function classifyApplicationAssessmentMutationRequest({
     assessmentBodyPayloadKeysPresent,
     assessmentBodyMutationRequested,
     assessmentDecisionMutationRequested,
+    conflictDeclarationMutationRequested: Boolean(conflictSignatureRequested),
   };
 }
 
