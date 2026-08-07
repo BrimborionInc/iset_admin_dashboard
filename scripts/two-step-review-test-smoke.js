@@ -3086,10 +3086,46 @@ function remoteRunner() {
       if (!response.ok()) {
         throw new Error(`Returned assessment Save Progress returned ${response.status()}: ${responseText.slice(0, 500)}`);
       }
-      expect('application assessment: dual-role RM edits and saves the exact returned application in deployed UI', (
+      const assessmentContext =
+        requestBody.caseContext?.applicationDecisionLetters?.[String(applicationId)] ||
+        {};
+      const decisionContextKeys = [
+        'assessment_nwac_review_status',
+        'decisionLetterDrafts',
+        'decision_letter_drafts',
+        'decisionLetter',
+        'decision_letter',
+        'decisionLetterPackDrafts',
+        'decision_letter_pack_drafts',
+        'decisionLetterSent',
+        'decision_letter_sent',
+        'fundingDecisionReasonCode',
+        'fundingDecisionReasonLabel',
+        'fundingDecisionReasonExplanation',
+      ];
+      const hasDirectDecisionFields = [
+        'assessment_nwac_review_status',
+        'assessment_nwac_review',
+        'assessment_nwac_reason',
+      ].some(key => Object.prototype.hasOwnProperty.call(requestBody, key));
+      const hasDecisionContext = decisionContextKeys.some(key => (
+        Object.prototype.hasOwnProperty.call(assessmentContext, key)
+      ));
+      expect('application assessment: dual-role RM edits and saves the exact returned application in deployed UI without Decision Maker mutations', (
         Number(requestBody.applicationId) === Number(applicationId) &&
-        requestBody.case_summary === revisedOverview
-      ), { routePath, applicationId, requestApplicationId: requestBody.applicationId, status: response.status() });
+        requestBody.case_summary === revisedOverview &&
+        !hasDirectDecisionFields &&
+        !hasDecisionContext
+      ), {
+        routePath,
+        applicationId,
+        requestApplicationId: requestBody.applicationId,
+        status: response.status(),
+        hasDirectDecisionFields,
+        decisionContextKeysPresent: decisionContextKeys.filter(key => (
+          Object.prototype.hasOwnProperty.call(assessmentContext, key)
+        )),
+      });
       await waitForBodyText(page, 'Assessment saved successfully');
       return revisedOverview;
     } catch (error) {

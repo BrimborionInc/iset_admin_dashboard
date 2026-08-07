@@ -66,4 +66,30 @@ describe('application assessment reviewer-stage notice', () => {
     expect(submitBlock).toContain(': validateAssessment(assessment);');
     expect(submitBlock).toContain('if (Object.keys(errors).length > 0)');
   });
+
+  test('keeps staff assessment saves separate from Decision Maker fields and context', () => {
+    const source = readSource('src/widgets/CoordinatorAssessmentWidget.js');
+    const payloadBuilder = extractBetween(
+      source,
+      'const buildAssessmentPayload = useCallback',
+      'const handlePostingContextErrors = useCallback'
+    );
+    const saveBlock = extractBetween(
+      source,
+      'const handleSave = async',
+      '// Lock editing state if final decision has been recorded'
+    );
+    const decisionBlock = extractBetween(
+      source,
+      'const handleComplete = async',
+      'const handleApproveClick = async'
+    );
+
+    expect(payloadBuilder).toContain('if (includeDecisionFields)');
+    expect(payloadBuilder).toContain('buildApplicationAssessmentCaseContext(null, applicationId');
+    expect(payloadBuilder).not.toContain('assessmentOtherFunding: normalizedOtherFunding,\n        ...');
+    expect(saveBlock).toContain('const payload = buildAssessmentPayload();');
+    expect(saveBlock).not.toContain('includeDecisionFields: true');
+    expect(decisionBlock).toContain('buildAssessmentPayload({ includeDecisionFields: true })');
+  });
 });

@@ -3790,11 +3790,21 @@ const CoordinatorAssessmentWidget = forwardRef(
       payload.assessment_nwac_reason = assessment.nwacReason || null;
     }
     const baseContext = caseData?.caseContext && typeof caseData.caseContext === 'object' ? caseData.caseContext : null;
-    const includeLetterDrafts = letterDrafts && typeof letterDrafts === 'object';
-    if (baseContext || includeLetterDrafts || normalizedOtherFunding.involved || normalizedOtherFunding.sources.length || normalizedOtherFunding.nwacCoverage || normalizedOtherFunding.notes) {
-      payload.caseContext = buildApplicationAssessmentCaseContext(baseContext, applicationId, {
-        assessmentOtherFunding: normalizedOtherFunding,
-        ...(includeLetterDrafts ? { decisionLetterDrafts: letterDrafts } : {})
+    const existingAssessmentContext = getApplicationAssessmentContext(
+      baseContext,
+      applicationId,
+      { allowLegacyFallback: true }
+    );
+    const hasExistingOtherFundingContext = Object.prototype.hasOwnProperty.call(
+      existingAssessmentContext,
+      'assessmentOtherFunding'
+    );
+    if (hasExistingOtherFundingContext || normalizedOtherFunding.involved || normalizedOtherFunding.sources.length || normalizedOtherFunding.nwacCoverage || normalizedOtherFunding.notes) {
+      // Assessment saves must be a content-only context patch. Re-sending the full
+      // case context can reshape legacy Decision Maker fields and be classified as
+      // an unauthorised decision mutation for a returned submitter.
+      payload.caseContext = buildApplicationAssessmentCaseContext(null, applicationId, {
+        assessmentOtherFunding: normalizedOtherFunding
       });
     }
     return payload;
@@ -3803,7 +3813,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     assessment,
     caseData?.caseContext,
     isEligibilityAdmin,
-    letterDrafts,
     overallCostTotal,
     proposedInterventions,
     serializeProposedInterventions

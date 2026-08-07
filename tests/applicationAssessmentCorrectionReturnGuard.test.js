@@ -338,6 +338,20 @@ describe('application assessment correction-return caller guard', () => {
       decisionChanged: true,
     });
 
+    const contentOnly = {
+      ...existing,
+      applicationDecisionLetters: {
+        123: {
+          ...existing.applicationDecisionLetters[123],
+          assessmentOtherFunding: { involved: true },
+        },
+      },
+    };
+    expect(applicationAssessmentCaseContextMutationKinds(existing, contentOnly, 123)).toEqual({
+      contentChanged: true,
+      decisionChanged: false,
+    });
+
     const changedAssessment = {
       ...decisionOnly,
       applicationDecisionLetters: {
