@@ -82,7 +82,8 @@ describe('release qualification contract', () => {
       path.resolve(__dirname, '..', 'scripts', 'two-step-review-test-smoke.js'),
       'utf8'
     );
-    expect(twoStepSmoke).toContain('for (let attempt = 0; attempt < 31; attempt += 1)');
+    expect(twoStepSmoke).toContain('TWO_STEP_REVIEW_NOTIFICATION_WAIT_ATTEMPTS');
+    expect(twoStepSmoke).toContain('attempt < config.notificationWaitAttempts');
     expect(twoStepSmoke).toContain('two-step-review-route-failure-');
     expect(twoStepSmoke).toContain('pageText');
   });
