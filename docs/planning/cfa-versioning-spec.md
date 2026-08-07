@@ -73,6 +73,8 @@ Store a full snapshot of the agreement data needed to render the CFA without re-
 - totals by funding stream (if needed)
 
 ## Versioning Rules
+
+Object-store versioning is an environment capability, not a prerequisite for participant signing. A request-specific conditional key is always SHA-256 and length verified. If S3 returns a `VersionId`, rollback compensation deletes only that exact version. If no `VersionId` exists, PATH retains the checksum-verified object after database rollback and reuses it on the next claim; key-only deletion after transaction locks are released is prohibited because it can race a retry. Uncertain commits and unconfirmed rollbacks retain the artifact in either mode.
 - New intervention approval OR edit to existing intervention -> create a new draft CFA version.
 - If a draft exists when a new change occurs:
   - Create a new draft version and mark the previous draft as withdrawn.
