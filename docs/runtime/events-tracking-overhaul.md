@@ -13,7 +13,7 @@
 - **Performance**: Efficient querying for timeline widgets and notification feeds.
 - **Security**: Enforce scoping so staff only see events tied to cases they manage.
 
-## Current State Summary (updated 2026-07-11)
+## Current State Summary (updated 2026-08-07)
 - Admin and portal instantiate the shared event service from `../shared/events`; canonical events are persisted in `iset_event_entry`.
 - `emitEvent()` validates types/subjects/payloads, honours capture toggles, persists the canonical event synchronously, and creates one durable `fanout` delivery. A reconciliation pass recovers a committed queued event if the process failed between those writes.
 - `/api/cases/:case_id/events`, `/api/events/feed`, `/api/events` (POST), and `/api/events/:eventId/read` now proxy to the shared service with filter/receipt support and consistent error handling.
@@ -21,6 +21,7 @@
 - Frontend widgets (`src/widgets/ApplicationEvents.js`, `src/widgets/caseUpdates.js`) consume the new endpoints, rendering severity badges, read-state indicators, and filter/sort controls against the normalized event payloads.
 - The unfinished `iset_event_outbox` scaffold remains retired. Migration `20260711_0003_add_durable_event_delivery.sql` introduces the distinct, fully consumed `iset_event_delivery` queue for notification fan-out and recipient email outcomes.
 - Assessment recall now emits `assessment_recalled` from the application-assessment and intervention-proposal recall endpoints. The event records the case/application/proposal scope, recalled assessment version, archived document ids, and status transition so withdrawn submissions remain auditable without staying in the active approver document stream.
+- The delivery poller is a required long-lived service. Its schedule and owner remain strongly referenced and its timer remains event-loop referenced; deployed acceptance must create a queued event after startup and prove the worker claims and delivers it rather than treating the immediate startup pass as sufficient evidence.
 
 ## Progress Log
 
@@ -45,6 +46,10 @@
 - Fan-out retries template, audience, and bell planning failures with bounded exponential backoff. Recipient emails are unique by `(event_id, channel, audience_key)` and retry only known provider failures.
 - An email whose provider outcome is uncertain is quarantined as `ambiguous` and is never resent automatically. System Administrators can inspect delivery counts/items and replay dead-letter or ambiguous rows through `/api/admin/event-deliveries` with a required reason and recorded staff identity.
 - Successful delivery rows are retained for 90 days; dead-letter and ambiguous rows remain until reviewed.
+
+### 2026-08-07 - Delivery-worker liveness hardening
+- r6 deployed TEST acceptance created multiple valid queued admin events whose fan-out rows remained `pending` with `attempt_count=0`, proving the worker had completed no post-startup poll. Candidate r7 retains the worker owner and keeps its timer referenced instead of discarding an unreferenced background schedule.
+- Regression coverage drives the scheduled callback after startup and proves a newly enqueued fan-out reaches `delivered`. The deployed two-step journey remains the release gate because only it proves the long-lived TEST process continues polling real queued rows.
 
 ### 2025-09-30 - Admin endpoints & widgets upgraded
 - Hardened `/api/cases/:case_id/events`, `/api/events/feed`, and `/api/events` with filter parsing, validation (types, categories, date bounds), and consistent error codes.
@@ -321,7 +326,6 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 - Finalise scope for Step 2 (legacy code removal) and create tracking tasks.
 - Draft schema migration scripts and event service interface skeletons.
 - Define API contracts (OpenAPI/TypeScript types) for frontend and portal teams.
-
 
 
 

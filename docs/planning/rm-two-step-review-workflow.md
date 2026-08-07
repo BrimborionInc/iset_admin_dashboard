@@ -2,7 +2,7 @@
 
 Purpose: plan the new Regional Manager review stage for assessment and intervention approval workflows.
 Audience: product, engineering, operations, training, and future AI-assisted development threads.
-Last Updated: 2026-08-06
+Last Updated: 2026-08-07
 
 ## Status
 
@@ -15,6 +15,8 @@ The migration/runtime default is off, but DEV, TEST, and PROD now have the flag 
 2026-08-06 correction-recovery update: feedback `#178` proved that restoring a finally decided application assessment to ordinary `rm_review` is unsafe. The deployed workspace legitimately offered both `Return to Coordinator` and `Submit for final decision`; the Regional Manager selected the latter, and the unchanged assessment was approved again. Exceptional post-decision recovery must therefore be fail-closed. The safe immediate state is `returned_to_submitter`. If an operational repair must temporarily use `rm_review`, its workflow metadata must set `requiresSubmitterCorrectionReturn=true`; the application-assessment UI must show a correction warning and hide escalation, while the backend independently rejects `rm_submit_to_nwac` with `409 review_workflow_return_required`. The marker does not change ordinary two-step review or the intervention workflows. Local caller-boundary tests and the compiled browser workflow prove this guard; it remains a release candidate until the normal TEST and PROD gates complete.
 
 2026-08-06 returned-form invariant: application-assessment review ownership and document-request/signing state are independent state machines. An active review stage is authoritative for queue ownership and assessment edit controls; requesting or signing a Financial Overview must not replace `rm_review`, `nwac_review`, or `returned_to_rm` with an applicant-waiting lifecycle. A signing-form message requires an explicit application id, and its message, signing request, link, and application activation are one database transaction. Signing completion reconciles only the exact message-linked application, excludes decision letters from document-request counts, and clears the application plus its exact reminder only after all participant-input forms are durably complete. At `returned_to_submitter`, only the workflow's recorded submitter may edit/resubmit (System Administrator technical support and the established EI-eligibility-only correction remain narrow exceptions).
+
+2026-08-07 qualification finding: r6 deployed TEST acceptance proved the ordinary Coordinator return/edit/resubmit path reaches the Regional Manager again. Its later final-decision 409 came from an over-broad synthetic smoke payload that included `assessment_intervention_cost_total`; the real Decision Maker UI sends only decision fields, budget-pot/posting selection, statuses, and the row-version token. The harness now reproduces that exact caller payload and current RM review wording. This finding does not weaken the assessment-body lock: Decision Makers still cannot edit submitter-owned assessment content while recording a final decision. Candidate r7 must still pass the full dual-role Financial Overview overlap journey in deployed TEST before PROD.
 
 Deployment note: release `20260620-rm-two-step-review-rollout` deployed the feature to TEST and PROD on 2026-06-20 with the one-off notification configuration operation applied in both environments. Do not assume future app/schema deployment alone is enough if these rows drift; explicitly verify and normalize the notification rows listed under **TEST/PROD Notification Configuration** below.
 

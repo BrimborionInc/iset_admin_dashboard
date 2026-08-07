@@ -1605,6 +1605,7 @@ async function main() {
           `TWO_STEP_REVIEW_EVIDENCE_BUCKET=${shellQuote(expectedObjectBucket)}`,
           `TWO_STEP_REVIEW_EVIDENCE_KEY=${shellQuote(remoteEvidenceKey)}`,
           `TWO_STEP_REVIEW_CREDENTIAL_KEY_PATH=${shellQuote(credentialKeyPath)}`,
+          `TWO_STEP_REVIEW_NOTIFICATION_WAIT_ATTEMPTS=${shellQuote(process.env.TWO_STEP_REVIEW_NOTIFICATION_WAIT_ATTEMPTS || '31')}`,
           `LOCAL_BASE_URL=${shellQuote(DEFAULT_LOCAL_BASE_URL)}`,
           `PORTAL_LOCAL_BASE_URL=${shellQuote(DEFAULT_PORTAL_LOCAL_BASE_URL)}`,
           ...(preflightOnly ? [] : [
@@ -1815,6 +1816,10 @@ function remoteRunner() {
     evidenceKey: requiredEnv('TWO_STEP_REVIEW_EVIDENCE_KEY'),
     regionOverride: String(process.env.TWO_STEP_REVIEW_REGION_ID || '').trim(),
     budgetPotOverride: String(process.env.TWO_STEP_REVIEW_BUDGET_POT_ID || '').trim(),
+    notificationWaitAttempts: Math.max(
+      1,
+      Math.min(31, Number(process.env.TWO_STEP_REVIEW_NOTIFICATION_WAIT_ATTEMPTS || 31) || 31)
+    ),
     regionId: null,
     budgetPotId: null,
     financialOverviewWorkflowId: null,
@@ -2474,7 +2479,11 @@ function remoteRunner() {
       body = { raw: text.slice(0, 500) };
     }
     if (!response.ok) {
-      const error = new Error(`${response.status} ${body?.error || body?.message || body?.raw || response.statusText}`);
+      const errorCode = body?.error || response.statusText;
+      const errorMessage = body?.message || body?.raw || null;
+      const error = new Error(
+        `${response.status} ${errorCode}${errorMessage ? `: ${errorMessage}` : ''}`
+      );
       error.status = response.status;
       error.body = body;
       throw error;
@@ -5330,7 +5339,7 @@ function remoteRunner() {
     await assertRouteText(
       auth.manager,
       `/application-case/${caseId}?applicationId=${applicationId}&entry=approval&approvalType=application&step=decision`,
-      ['Regional Manager review', 'Submit to NWAC approval', 'Submit for final decision'],
+      ['Review the submitted assessment and either return it with notes or submit it for final decision.'],
       'application assessment RM review'
     );
 
@@ -5435,7 +5444,6 @@ function remoteRunner() {
         assessment_nwac_review_status: 'approve',
         assessment_nwac_review: 'yes',
         assessment_nwac_reason: 'Approved by Decision Maker.',
-        assessment_intervention_cost_total: '100',
         assessment_intervention_pot_id: String(config.budgetPotId),
         postingContext: 'external',
         applicationStatus: 'approved',
@@ -6026,7 +6034,7 @@ function remoteRunner() {
       params.push(interventionId, interventionId);
     }
     let rows = [];
-    for (let attempt = 0; attempt < 31; attempt += 1) {
+    for (let attempt = 0; attempt < config.notificationWaitAttempts; attempt += 1) {
       [rows] = await query(
         `SELECT id, event_key, title, audience_type, audience_role, audience_staff_profile_id, metadata
            FROM iset_internal_notification
@@ -6036,13 +6044,39 @@ function remoteRunner() {
         params
       );
       if (rows.length) break;
-      if (attempt < 30) await delay(1000);
+      if (attempt < config.notificationWaitAttempts - 1) await delay(1000);
+    }
+    const [eventRows] = await query(
+      `SELECT id, event_type, subject_type, subject_id, source,
+              notification_delivery_mode, captured_at
+         FROM iset_event_entry
+        WHERE event_type = ?
+          AND subject_type = 'case'
+          AND subject_id = ?
+        ORDER BY captured_at DESC
+        LIMIT 5`,
+      [eventKey, String(caseId)]
+    );
+    let deliveryRows = [];
+    const eventIds = eventRows.map(row => row.id).filter(Boolean);
+    if (eventIds.length) {
+      const placeholders = eventIds.map(() => '?').join(',');
+      [deliveryRows] = await query(
+        `SELECT id, event_id, channel, audience_key, worker_scope, status,
+                attempt_count, last_error, last_attempt_at, delivered_at
+           FROM iset_event_delivery
+          WHERE event_id IN (${placeholders})
+          ORDER BY id`,
+        eventIds
+      );
     }
     const audienceLabel = audienceRole || `staff ${audienceStaffProfileId}`;
     expect(`notification ${eventKey} routed to ${audienceLabel}`, rows.length > 0, {
       caseId,
       applicationId,
       interventionId,
+      events: eventRows,
+      deliveries: deliveryRows,
       rows: rows.map(row => ({
         id: row.id,
         title: row.title,

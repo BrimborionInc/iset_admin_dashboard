@@ -7,6 +7,7 @@ const {
   purgeDeliveredEventDeliveries,
   replayEventDelivery,
   runEventDeliveryWorkerOnce,
+  startEventDeliveryWorker,
 } = require('../../../../shared/events/deliveryQueue');
 const {
   buildReminderLifecycleEventId,
@@ -144,6 +145,48 @@ describe('durable event delivery and reminder lifecycle', () => {
     });
     expect(calls).toBe(2);
     expect(store.deliveries[0].status).toBe('delivered');
+  });
+
+  test('the long-lived worker retains its schedule and processes fanout after startup', async () => {
+    const store = createDeliveryStore();
+    const scheduled = [];
+    const cleared = [];
+    const handler = jest.fn();
+    const scheduleToken = { unref: jest.fn() };
+    const worker = startEventDeliveryWorker({
+      pool: store.pool,
+      workerScope: 'admin',
+      handler,
+      sendEmail: jest.fn(),
+      logger: { warn: jest.fn(), error: jest.fn() },
+      scheduleInterval: (callback, intervalMs) => {
+        scheduled.push({ callback, intervalMs });
+        return scheduleToken;
+      },
+      clearScheduledInterval: token => cleared.push(token),
+    });
+
+    await worker.initialRun;
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0].intervalMs).toBe(15000);
+    expect(scheduleToken.unref).not.toHaveBeenCalled();
+
+    const event = { id: 'event-after-startup', source: 'admin' };
+    store.events.set(event.id, {
+      id: event.id,
+      event_type: 'rm_review_requested',
+      source: 'admin',
+      subject_type: 'case',
+      subject_id: '76',
+      payload_json: '{}',
+    });
+    await enqueueEventFanout(store.pool, event);
+    await scheduled[0].callback();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(store.deliveries[0].status).toBe('delivered');
+    worker.stop();
+    expect(cleared).toEqual([scheduleToken]);
   });
 
   test('recipient email retries a known failure and succeeds once', async () => {
