@@ -3494,12 +3494,15 @@ function remoteRunner() {
         onForwardedRequest: async request => {
           if (request.method !== 'POST' || request.pathname !== signingPath) return;
           signingRequestHookCount += 1;
-          if (signingRequestHookCount !== 1) {
-            throw new Error(`unexpected_browser_signing_request_count:${signingRequestHookCount}`);
-          }
           const parsedPayload = parseJsonObject(request.postData);
           if (!request.postData || !Object.keys(parsedPayload).length) {
             throw new Error('browser_signing_payload_missing');
+          }
+          if (signingRequestHookCount > 1) {
+            if (request.postData !== serializedPayload) {
+              throw new Error('browser_signing_retry_payload_changed');
+            }
+            return;
           }
           serializedPayload = request.postData;
           concurrentStartedAt = new Date().toISOString();
@@ -3623,7 +3626,8 @@ function remoteRunner() {
         ['signing_in_progress', 'signing_retry_required'].includes(item.body?.error)
       );
       requireInvariant('application assessment: true concurrent normal portal signing calls converge without a server failure', (
-        signingRequestHookCount === 1 &&
+        signingRequestHookCount >= 1 &&
+        signingRequestHookCount <= 3 &&
         typeof serializedPayload === 'string' &&
         serializedPayload.length > 0 &&
         concurrentResponses.some(signingSucceeded) &&
@@ -3753,6 +3757,10 @@ function remoteRunner() {
         addedObjectVersions,
       });
 
+      await waitForBodyText(page, 'Submitted');
+      requireInvariant('application assessment: participant browser converges to the submitted state after a retryable signing conflict', (
+        signingRequestHookCount >= 1 && signingRequestHookCount <= 3
+      ), { signingRequestId, signingRequestHookCount });
       await page.reload({ waitUntil: 'networkidle2', timeout: 60_000 });
       await waitForBodyText(page, 'Submitted');
       const signedRequest = await fetchAndReadBounded(
@@ -3790,6 +3798,7 @@ function remoteRunner() {
           state: replayBody?.status || replayBody?.error || null,
           alreadySigned: replayBody?.alreadySigned === true,
         },
+        browserSigningRequestCount: signingRequestHookCount,
         canonicalObjectKeySha256: nodeCrypto.createHash('sha256').update(canonicalObjectKey).digest('hex'),
         canonicalDocumentId: Number(convergedDocumentRows[0]?.id) || null,
         canonicalEventId: convergedSigningRow?.completion_event_id || null,

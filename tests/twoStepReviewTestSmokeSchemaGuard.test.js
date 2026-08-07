@@ -423,6 +423,8 @@ describe('two-step TEST smoke live-schema guard', () => {
     expect(source).toContain('application assessment: concurrent applicant signing and RM forward serialize to returned-to-submitter');
     expect(source).toContain('application assessment: exact normal signing replay returns the canonical signed result');
     expect(source).toContain('application assessment: normal success/concurrency/replay produces one canonical signed artifact');
+    expect(source).toContain('application assessment: participant browser converges to the submitted state after a retryable signing conflict');
+    expect(source).toContain('browser_signing_retry_payload_changed');
     expect(source).toContain('application assessment: deployed UI supplies the exact scoped optimistic resubmit payload');
     expect(source).toContain('application assessment: exact concurrent resubmit copies serialize to one commit and one stale conflict');
     expect(source).toContain('application assessment: applicant signing overlaps resubmit and completes without deadlock or server failure');
