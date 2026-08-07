@@ -278,7 +278,7 @@
       "id": "operations-provenance",
       "description": "Build, package, migration, maintenance, rollback and deployment control plane.",
       "matches": {
-        "admin": ["^(scripts/(path-|write-build|local-dev|release|real-mysql|prod-repair-)|src/lib/releaseQualification|src/lib/__tests__/feedback[1-9][0-9]*RepairContract\\.test\\.js$|tests/(releaseAdmission|releaseQualification)|(?:scripts/)?bootstrap/|sql/ops/|infra/|package(-lock)?\\.json$|docs/ops/)"],
+        "admin": ["^(scripts/(path-|write-build|local-dev|release|real-mysql|prod-repair-)|src/lib/releaseQualification|src/lib/__tests__/(?:feedback[1-9][0-9]*RepairContract|pathPatchBugGuards)\\.test\\.js$|tests/(releaseAdmission|releaseQualification|twoStepReviewTestSmokeSchemaGuard)|(?:scripts/)?bootstrap/|sql/ops/|infra/|package(-lock)?\\.json$|docs/ops/)"],
         "portal": ["^(scripts/(write-build|deploy)|package(-lock)?\\.json$)"],
         "shared": ["^(AGENTS\\.md|package(-lock)?\\.json$)"]
       },
