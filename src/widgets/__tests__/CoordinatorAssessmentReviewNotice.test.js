@@ -65,6 +65,10 @@ describe('application assessment reviewer-stage notice', () => {
     expect(submitBlock).toContain('const errors = denyFundingFlowActive');
     expect(submitBlock).toContain(': validateAssessment(assessment);');
     expect(submitBlock).toContain('if (Object.keys(errors).length > 0)');
+    expect(submitBlock).toContain('...buildAssessmentPayload()');
+    expect(submitBlock).toContain('assessment_submit_action: true');
+    expect(submitBlock).not.toContain('includeDecisionFields: true');
+    expect(source).toContain('!preserveReturnedAssessmentEligibility');
   });
 
   test('keeps staff assessment saves separate from Decision Maker fields and context', () => {
@@ -89,6 +93,8 @@ describe('application assessment reviewer-stage notice', () => {
     expect(payloadBuilder).toContain('buildApplicationAssessmentCaseContext(null, applicationId');
     expect(payloadBuilder).not.toContain('assessmentOtherFunding: normalizedOtherFunding,\n        ...');
     expect(saveBlock).toContain('const payload = buildAssessmentPayload();');
+    expect(saveBlock).toContain('isReturnedAssessmentEligibilityChangeUnverified({');
+    expect(saveBlock).toContain("reason: 'ei_verification_required'");
     expect(saveBlock).not.toContain('includeDecisionFields: true');
     expect(decisionBlock).toContain('buildAssessmentPayload({ includeDecisionFields: true })');
   });

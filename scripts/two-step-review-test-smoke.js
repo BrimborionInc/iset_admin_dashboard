@@ -3373,6 +3373,31 @@ function remoteRunner() {
         item.body?.success === false &&
         item.body?.error === 'row_version_conflict'
       ));
+      const resubmitAssessmentContext =
+        capturedRequestPayload?.caseContext?.applicationDecisionLetters?.[String(applicationId)] ||
+        {};
+      const resubmitDecisionContextKeys = [
+        'assessment_nwac_review_status',
+        'decisionLetterDrafts',
+        'decision_letter_drafts',
+        'decisionLetter',
+        'decision_letter',
+        'decisionLetterPackDrafts',
+        'decision_letter_pack_drafts',
+        'decisionLetterSent',
+        'decision_letter_sent',
+        'fundingDecisionReasonCode',
+        'fundingDecisionReasonLabel',
+        'fundingDecisionReasonExplanation',
+      ];
+      const resubmitHasDirectDecisionFields = [
+        'assessment_nwac_review_status',
+        'assessment_nwac_review',
+        'assessment_nwac_reason',
+      ].some(key => Object.prototype.hasOwnProperty.call(capturedRequestPayload || {}, key));
+      const resubmitHasDecisionContext = resubmitDecisionContextKeys.some(key => (
+        Object.prototype.hasOwnProperty.call(resubmitAssessmentContext, key)
+      ));
       requireInvariant('application assessment: deployed UI supplies the exact scoped optimistic resubmit payload', (
         submitInterceptCount === 1 &&
         Number(capturedRequestPayload?.applicationId) === Number(applicationId) &&
@@ -3380,12 +3405,18 @@ function remoteRunner() {
         capturedRequestPayload?.applicationStatus === 'pending_approval' &&
         Number(capturedRequestPayload?.expectedRowVersion) === Number(baseline.application.row_version) &&
         !Object.prototype.hasOwnProperty.call(capturedRequestPayload, 'assessment_preserve_existing_application_form') &&
-        !Object.prototype.hasOwnProperty.call(capturedRequestPayload, 'assessment_preserve_existing_financial_overview')
+        !Object.prototype.hasOwnProperty.call(capturedRequestPayload, 'assessment_preserve_existing_financial_overview') &&
+        !resubmitHasDirectDecisionFields &&
+        !resubmitHasDecisionContext
       ), {
         routePath,
         applicationId,
         requestApplicationId: capturedRequestPayload?.applicationId,
         expectedRowVersion: capturedRequestPayload?.expectedRowVersion,
+        resubmitHasDirectDecisionFields,
+        decisionContextKeysPresent: resubmitDecisionContextKeys.filter(key => (
+          Object.prototype.hasOwnProperty.call(resubmitAssessmentContext, key)
+        )),
       });
       requireInvariant('application assessment: exact concurrent resubmit copies serialize to one commit and one stale conflict', (
         successfulAdmin.length === 1 &&

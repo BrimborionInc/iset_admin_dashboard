@@ -938,7 +938,7 @@ async function installApiStubs(page, state) {
       return;
     }
     if (pathname === `/api/applicants/${APPLICANT_USER_ID}/documents` || pathname === '/api/cases/1/documents') {
-      request.respond(jsonResponse(buildDocuments()));
+      request.respond(jsonResponse(state.documents || buildDocuments()));
       return;
     }
     if (pathname === '/api/document-types') {
@@ -1237,6 +1237,7 @@ function buildScenarios() {
       role: 'ISET Coordinator',
       path: FRONTEND_CASE_PATH,
       forceCoordinatorOnlyLayout: true,
+      documents: buildDocuments().filter(row => row.document_type !== 'ei_verification'),
       casePayload: buildCasePayload({
         status: 'submitted',
         applicationStatus: 'submitted',
@@ -1445,6 +1446,53 @@ function buildScenarios() {
           throw new Error(`Returned assessment save changed workflow stage: ${state.casePayload.reviewWorkflow?.currentStage}`);
         }
         await waitForText(page, 'Assessment saved successfully');
+
+        for (let index = 0; index < 9; index += 1) {
+          await waitForButtonEnabled(page, 'Next');
+          await clickButtonByText(page, 'Next');
+          await delay(index === 7 ? 1000 : 250);
+          if (index === 7) {
+            await waitForText(page, 'All required checklist items are complete.');
+          }
+        }
+        await waitForButtonEnabled(page, 'Resubmit for review');
+        await clickButtonByText(page, 'Resubmit for review');
+        const resubmitPut = await waitUntil(
+          () => state.mutations.casePuts.find(entry => entry.body.assessment_submit_action === true),
+          'returned Regional Manager assessment resubmit PUT'
+        );
+        const decisionFields = [
+          'assessment_nwac_review_status',
+          'assessment_nwac_review',
+          'assessment_nwac_reason',
+        ];
+        const scopedContext =
+          resubmitPut.body.caseContext?.applicationDecisionLetters?.[String(APPLICATION_ID)] ||
+          {};
+        const decisionContextFields = [
+          'assessment_nwac_review_status',
+          'decisionLetterDrafts',
+          'decision_letter_drafts',
+          'decisionLetter',
+          'decision_letter',
+          'decisionLetterPackDrafts',
+          'decision_letter_pack_drafts',
+          'decisionLetterSent',
+          'decision_letter_sent',
+          'fundingDecisionReasonCode',
+          'fundingDecisionReasonLabel',
+          'fundingDecisionReasonExplanation',
+        ];
+        if (decisionFields.some(key => Object.prototype.hasOwnProperty.call(resubmitPut.body, key))) {
+          throw new Error('Returned assessment resubmit leaked direct Decision Maker fields.');
+        }
+        if (decisionContextFields.some(key => Object.prototype.hasOwnProperty.call(scopedContext, key))) {
+          throw new Error('Returned assessment resubmit leaked Decision Maker context.');
+        }
+        if (state.casePayload.reviewWorkflow?.currentStage !== REVIEW_STAGES.rmReview) {
+          throw new Error(`Returned assessment resubmit did not reach RM review: ${state.casePayload.reviewWorkflow?.currentStage}`);
+        }
+        await waitForText(page, 'Assessment submitted to Regional Manager review.');
       },
     },
     {
@@ -1872,6 +1920,7 @@ async function runScenario(browser, args, scenario) {
     role: scenario.role,
     screenshotDir: args.screenshotDir,
     casePayload: scenario.casePayload,
+    documents: scenario.documents || null,
     applicationPayload: buildApplicationPayload(scenario.casePayload),
     apiCalls: [],
     mutations: {

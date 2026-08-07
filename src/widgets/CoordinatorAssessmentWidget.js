@@ -20,7 +20,11 @@ import {
   deriveAssessmentReviewStatusSelection,
   deriveApplicationDecisionOutcome,
 } from '../utils/applicationStatus';
-import { canEditApplicationAssessmentBody } from '../utils/assessmentEditAccess';
+import {
+  canEditApplicationAssessmentBody,
+  canPreserveReturnedAssessmentEligibility,
+  isReturnedAssessmentEligibilityChangeUnverified,
+} from '../utils/assessmentEditAccess';
 
 const BARRIERS = [
   'None', 'Education', 'Lack of Marketable Skills', 'Lack of Work Experience', 'Remoteness', 'Lack of Transportation', 'Economic', 'Language', 'Lack of Labour Force Attachment', 'Dependent Care', 'Physical, Emotional, or Mental Health', 'Other'
@@ -4573,6 +4577,11 @@ const CoordinatorAssessmentWidget = forwardRef(
   const isReviewComplete = APPLICATION_FINAL_STATUSES.has(normalizedApplicationStatus);
   const isReturnedToSubmitterStage =
     twoStepReviewEnabled && reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToSubmitter;
+  const preserveReturnedAssessmentEligibility = canPreserveReturnedAssessmentEligibility({
+    reviewWorkflow,
+    currentEligibility: assessment.esdcEligibility,
+    initialEligibility: initialAssessment.esdcEligibility,
+  });
   const shouldUnlockWizardNavigation =
     !isEditingAssessment &&
     (
@@ -5345,7 +5354,12 @@ const CoordinatorAssessmentWidget = forwardRef(
       if (!assessment.esdcEligibility) {
         errors.esdcEligibility = 'Employment Insurance status is required.';
       }
-      if (canUploadEiVerification && !eiVerificationFile && !eiVerificationDocuments.length) {
+      if (
+        canUploadEiVerification &&
+        !preserveReturnedAssessmentEligibility &&
+        !eiVerificationFile &&
+        !eiVerificationDocuments.length
+      ) {
         errors.eiVerification = 'An EI verification document is required before continuing.';
       }
       // 5. Proposed interventions + dates
@@ -5474,7 +5488,8 @@ const CoordinatorAssessmentWidget = forwardRef(
       canUploadEiVerification,
       eiVerificationDocuments.length,
       eiVerificationFile,
-      getRecurrenceModeForType
+      getRecurrenceModeForType,
+      preserveReturnedAssessmentEligibility
     ]
   );
 
@@ -7004,6 +7019,7 @@ const CoordinatorAssessmentWidget = forwardRef(
           ...buildAssessmentPayload(),
           dateOfAssessment,
           assessment_date_of_assessment: dateOfAssessment,
+          assessment_submit_action: true,
         };
         if (!APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus)) {
           payload.status = 'intake';
@@ -7918,7 +7934,32 @@ ${JSON.stringify(aiContext, null, 2)}`;
       setAlert(null);
     }
     try {
-      await uploadEiVerificationIfSelected();
+      const eligibilityUploadOk = await uploadEiVerificationIfSelected();
+      if (!eligibilityUploadOk) {
+        return { ok: false, reason: 'ei_verification_upload' };
+      }
+      if (isReturnedAssessmentEligibilityChangeUnverified({
+        reviewWorkflow,
+        currentEligibility: assessment.esdcEligibility,
+        initialEligibility: initialAssessment.esdcEligibility,
+        hasVerificationDocument: eiVerificationDocuments.length > 0,
+        hasSelectedVerificationFile: Boolean(eiVerificationFile),
+      })) {
+        setFieldErrors(prev => ({
+          ...prev,
+          eiVerification: 'Upload an EI verification document before saving a changed EI status.',
+        }));
+        if (!silent) {
+          setAlert({
+            type: 'warning',
+            content: 'Upload an EI verification document before saving a changed EI status.',
+            dismissible: true,
+            statusIconAriaLabel: 'Warning'
+          });
+          scrollAfterAction();
+        }
+        return { ok: false, reason: 'ei_verification_required' };
+      }
       const payload = buildAssessmentPayload();
       const lockCheck = await ensureLockForOperation();
       if (!lockCheck.ok) return { ok: false, reason: 'lock' };
@@ -8750,16 +8791,21 @@ ${JSON.stringify(aiContext, null, 2)}`;
         if (!valid && !canNavigateReturnedCorrection) {
           return;
         }
-        if (valid && canManageEligibilityDuringAssessment && currentStep === 'eligibility') {
+        if (
+          valid &&
+          canManageEligibilityDuringAssessment &&
+          currentStep === 'eligibility' &&
+          !preserveReturnedAssessmentEligibility
+        ) {
           if (!autoSaveOk) {
             const eligibilitySaved = await persistEligibilitySelection();
             if (!eligibilitySaved.ok) {
               return;
             }
-          }
-          const uploadOk = await uploadEiVerificationIfSelected();
-          if (!uploadOk) {
-            return;
+            const uploadOk = await uploadEiVerificationIfSelected();
+            if (!uploadOk) {
+              return;
+            }
           }
           const checklistOk = await runDocumentChecklist(null, {
             allowBypass: false,

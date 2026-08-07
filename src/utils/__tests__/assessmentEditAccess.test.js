@@ -1,7 +1,54 @@
 import {
   canEditApplicationAssessmentBody,
+  canPreserveReturnedAssessmentEligibility,
   canRegionalManagerEditApplicationAssessment,
+  isReturnedAssessmentEligibilityChangeUnverified,
 } from '../assessmentEditAccess';
+
+describe('canPreserveReturnedAssessmentEligibility', () => {
+  test('preserves the accepted EI status for a returned correction when it is unchanged', () => {
+    expect(canPreserveReturnedAssessmentEligibility({
+      reviewWorkflow: { current_stage: 'returned_to_submitter' },
+      currentEligibility: 'CRF',
+      initialEligibility: 'crf',
+    })).toBe(true);
+  });
+
+  test.each([
+    [{ current_stage: 'rm_review' }, 'CRF', 'CRF'],
+    [{ current_stage: 'returned_to_submitter' }, 'EI Active Claim', 'CRF'],
+    [{ current_stage: 'returned_to_submitter' }, '', ''],
+  ])('does not preserve eligibility outside an unchanged returned correction', (
+    reviewWorkflow,
+    currentEligibility,
+    initialEligibility
+  ) => {
+    expect(canPreserveReturnedAssessmentEligibility({
+      reviewWorkflow,
+      currentEligibility,
+      initialEligibility,
+    })).toBe(false);
+  });
+});
+
+describe('isReturnedAssessmentEligibilityChangeUnverified', () => {
+  test('blocks an EI status change on a returned legacy assessment until evidence exists', () => {
+    expect(isReturnedAssessmentEligibilityChangeUnverified({
+      reviewWorkflow: { current_stage: 'returned_to_submitter' },
+      currentEligibility: 'EI Active Claim',
+      initialEligibility: 'CRF',
+    })).toBe(true);
+  });
+
+  test.each([
+    { reviewWorkflow: { current_stage: 'rm_review' }, currentEligibility: 'EI Active Claim', initialEligibility: 'CRF' },
+    { reviewWorkflow: { current_stage: 'returned_to_submitter' }, currentEligibility: 'CRF', initialEligibility: 'CRF' },
+    { reviewWorkflow: { current_stage: 'returned_to_submitter' }, currentEligibility: 'EI Active Claim', initialEligibility: 'CRF', hasVerificationDocument: true },
+    { reviewWorkflow: { current_stage: 'returned_to_submitter' }, currentEligibility: 'EI Active Claim', initialEligibility: 'CRF', hasSelectedVerificationFile: true },
+  ])('allows unchanged, evidenced, selected-file, and non-returned eligibility states', options => {
+    expect(isReturnedAssessmentEligibilityChangeUnverified(options)).toBe(false);
+  });
+});
 
 describe('canRegionalManagerEditApplicationAssessment', () => {
   test('preserves Regional Manager editing for an unsubmitted in-review draft', () => {

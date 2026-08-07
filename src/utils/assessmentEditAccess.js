@@ -7,6 +7,45 @@ const normalizePositiveId = value => {
 const normalizeWorkflowStage = value =>
   String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
 
+const normalizeEligibility = value => String(value || '').trim().toLowerCase();
+
+export const canPreserveReturnedAssessmentEligibility = ({
+  reviewWorkflow,
+  currentEligibility,
+  initialEligibility,
+} = {}) => {
+  const reviewStage = normalizeWorkflowStage(
+    reviewWorkflow?.currentStage ?? reviewWorkflow?.current_stage
+  );
+  const current = normalizeEligibility(currentEligibility);
+  const initial = normalizeEligibility(initialEligibility);
+  return Boolean(
+    reviewStage === 'returned_to_submitter' &&
+    current &&
+    current === initial
+  );
+};
+
+export const isReturnedAssessmentEligibilityChangeUnverified = ({
+  reviewWorkflow,
+  currentEligibility,
+  initialEligibility,
+  hasVerificationDocument = false,
+  hasSelectedVerificationFile = false,
+} = {}) => {
+  const reviewStage = normalizeWorkflowStage(
+    reviewWorkflow?.currentStage ?? reviewWorkflow?.current_stage
+  );
+  const current = normalizeEligibility(currentEligibility);
+  const initial = normalizeEligibility(initialEligibility);
+  return Boolean(
+    reviewStage === 'returned_to_submitter' &&
+    current !== initial &&
+    !hasVerificationDocument &&
+    !hasSelectedVerificationFile
+  );
+};
+
 export const isCurrentApplicationAssessmentWorkflowSubmitter = ({
   reviewWorkflow,
   currentStaffProfileId,

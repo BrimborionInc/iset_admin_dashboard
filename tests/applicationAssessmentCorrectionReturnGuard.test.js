@@ -25,6 +25,7 @@ describe('application assessment correction-return caller guard', () => {
   let applyApplicationAssessmentReviewWorkflowAction;
   let applicationAssessmentCaseContextMutationKinds;
   let classifyApplicationAssessmentMutationRequest;
+  let projectApplicationAssessmentCaseContextPatch;
   let assertApplicationAssessmentReviewOwnedStatusMutationAllowed;
   let assertApplicationAssessmentMutationStageAllowed;
   let assertApplicationAssessmentReturnedToSubmitterActor;
@@ -37,6 +38,7 @@ describe('application assessment correction-return caller guard', () => {
       applyApplicationAssessmentReviewWorkflowAction,
       applicationAssessmentCaseContextMutationKinds,
       classifyApplicationAssessmentMutationRequest,
+      projectApplicationAssessmentCaseContextPatch,
       assertApplicationAssessmentReviewOwnedStatusMutationAllowed,
       assertApplicationAssessmentMutationStageAllowed,
       assertApplicationAssessmentReturnedToSubmitterActor,
@@ -365,6 +367,55 @@ describe('application assessment correction-return caller guard', () => {
       contentChanged: true,
       decisionChanged: true,
     });
+  });
+
+  test('content-only scoped patches preserve legacy reviewer metadata without claiming a reviewer mutation', () => {
+    const existing = {
+      applicationAnswers: { goal: 'Existing goal' },
+      assessment_nwac_review_status: 'push_back',
+      decisionLetterDrafts: { approval: { decision_intro: 'Legacy draft' } },
+      applicationDecisionLetters: {
+        123: {
+          assessmentOtherFunding: { involved: false },
+        },
+      },
+    };
+    const incoming = {
+      applicationDecisionLetters: {
+        123: {
+          assessmentOtherFunding: { involved: true },
+        },
+      },
+    };
+    const projected = projectApplicationAssessmentCaseContextPatch(existing, incoming, 123);
+
+    expect(projected.assessment_nwac_review_status).toBe('push_back');
+    expect(projected.decisionLetterDrafts).toEqual(existing.decisionLetterDrafts);
+    expect(projected.applicationDecisionLetters[123].assessmentOtherFunding).toEqual({ involved: true });
+    expect(applicationAssessmentCaseContextMutationKinds(existing, projected, 123)).toEqual({
+      contentChanged: true,
+      decisionChanged: false,
+    });
+  });
+
+  test('an explicit scoped reviewer patch remains classified as a reviewer mutation', () => {
+    const existing = {
+      assessment_nwac_review_status: 'push_back',
+      applicationDecisionLetters: {
+        123: { assessmentOtherFunding: { involved: false } },
+      },
+    };
+    const incoming = {
+      applicationDecisionLetters: {
+        123: {
+          decisionLetterDrafts: { approval: { decision_intro: 'New draft' } },
+        },
+      },
+    };
+    const projected = projectApplicationAssessmentCaseContextPatch(existing, incoming, 123);
+
+    expect(projected).not.toHaveProperty('assessment_nwac_review_status');
+    expect(applicationAssessmentCaseContextMutationKinds(existing, projected, 123).decisionChanged).toBe(true);
   });
 
   test('review-owned status transitions allow only the stage owner or explicit support path', () => {

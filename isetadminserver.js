@@ -13188,6 +13188,35 @@ const APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS = [
   'fundingDecisionReasonExplanation'
 ];
 
+function applicationAssessmentCaseContextPatchTouchesDecision(context = {}, applicationId = null) {
+  if (!isPlainObject(context)) return false;
+  if (APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS.some(key => (
+    Object.prototype.hasOwnProperty.call(context, key)
+  ))) {
+    return true;
+  }
+  const scopedContext = resolveApplicationAssessmentCaseContext(context, applicationId);
+  return APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS.some(key => (
+    Object.prototype.hasOwnProperty.call(scopedContext, key)
+  ));
+}
+
+function projectApplicationAssessmentCaseContextPatch(
+  existingContext = {},
+  incomingContext = {},
+  applicationId = null
+) {
+  if (!isPlainObject(incomingContext)) return incomingContext;
+  const scopedContext = scopeApplicationAssessmentCaseContextPatch(incomingContext, applicationId);
+  const shouldRetireLegacyDecisionContext =
+    hasApplicationAssessmentScopedContext(scopedContext, applicationId) &&
+    applicationAssessmentCaseContextPatchTouchesDecision(scopedContext, applicationId);
+  const baseContext = shouldRetireLegacyDecisionContext
+    ? stripApplicationAssessmentRootContext(existingContext)
+    : existingContext;
+  return mergeCaseContext(baseContext, scopedContext);
+}
+
 function canonicalizeCaseContextForComparison(value) {
   if (Array.isArray(value)) {
     return value.map(canonicalizeCaseContextForComparison);
@@ -93723,11 +93752,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
   let projectedCaseContextPayload = existingCaseContext;
   if (hasCaseContextPayload) {
     if (parsedCaseContextPayload && typeof parsedCaseContextPayload === 'object' && !Array.isArray(parsedCaseContextPayload)) {
-      const scopedContext = scopeApplicationAssessmentCaseContextPatch(parsedCaseContextPayload, applicationId);
-      const baseContext = hasApplicationAssessmentScopedContext(scopedContext, applicationId)
-        ? stripApplicationAssessmentRootContext(existingCaseContext)
-        : existingCaseContext;
-      projectedCaseContextPayload = mergeCaseContext(baseContext, scopedContext);
+      projectedCaseContextPayload = projectApplicationAssessmentCaseContextPatch(
+        existingCaseContext,
+        parsedCaseContextPayload,
+        applicationId
+      );
     } else {
       projectedCaseContextPayload = parsedCaseContextPayload ?? null;
     }
@@ -97653,6 +97682,7 @@ const adminRepairExports = {
   applyApplicationAssessmentReviewWorkflowAction,
   applicationAssessmentCaseContextMutationKinds,
   classifyApplicationAssessmentMutationRequest,
+  projectApplicationAssessmentCaseContextPatch,
   assertApplicationAssessmentReviewOwnedStatusMutationAllowed,
   assertApplicationAssessmentMutationStageAllowed,
   assertApplicationAssessmentReturnedToSubmitterActor,
