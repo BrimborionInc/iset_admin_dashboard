@@ -16,6 +16,11 @@ const EXPECTED_AWS_ACCOUNT = '124355655255';
 const DEFAULT_PROFILE = 'nwac-test';
 const DEFAULT_REGION = 'ca-central-1';
 const DEFAULT_BUCKET = 'nwac-test-artifacts';
+const EXPECTED_TEST_DB_HOST = 'nwac-test-db.cluster-cn4yoy2s4w5t.ca-central-1.rds.amazonaws.com';
+const EXPECTED_TEST_DB_USER = 'app_admin';
+const EXPECTED_TEST_DB_SERVER_HOSTNAME = 'ip-172-16-0-199';
+const EXPECTED_TEST_DB_PORT = 3306;
+const EXPECTED_TEST_DB_PRINCIPAL = 'app_admin@10.48.%';
 
 function parseArgs(argv) {
   const args = {
@@ -185,11 +190,36 @@ async function main() {
   if (!fs.existsSync(sourceScript)) throw new Error(`CFA signing smoke source not found: ${sourceScript}`);
   const remoteKey = `ssm-scripts/cfa-signing-smoke-${suffix}.js`;
   const remotePath = `/opt/nwac/portal/scripts/cfa-signing-smoke-${suffix}.js`;
+  const instanceId = discoverInstanceId(options);
   let report = null;
+  let scriptUploaded = false;
   try {
+    const preflightCommandId = sendCommand(instanceId, [
+      'set -euo pipefail',
+      [
+        'node', shellQuote('/opt/nwac/admin-dashboard/scripts/cfa-signing-schema-preflight.js'),
+        '--env-file', shellQuote('/opt/nwac/portal/.env.test'),
+        '--expected-database', shellQuote('iset_intake'),
+        '--expected-db-host', shellQuote(EXPECTED_TEST_DB_HOST),
+        '--expected-db-user', shellQuote(EXPECTED_TEST_DB_USER),
+        '--expected-db-server-hostname', shellQuote(EXPECTED_TEST_DB_SERVER_HOSTNAME),
+        '--expected-db-port', shellQuote(EXPECTED_TEST_DB_PORT),
+        '--expected-db-principal', shellQuote(EXPECTED_TEST_DB_PRINCIPAL),
+        '--json',
+      ].join(' '),
+    ], options);
+    const preflightInvocation = waitForCommand(instanceId, preflightCommandId, options);
+    if (preflightInvocation.Status !== 'Success') {
+      throw new Error(`Remote TEST schema preflight failed (${preflightInvocation.Status}): ${String(preflightInvocation.Stderr || preflightInvocation.Stdout || '').slice(0, 4000)}`);
+    }
+    const preflight = parseSmokeJson(preflightInvocation.Stdout);
+    if (preflight.status !== 'PASS' || Number(preflight.verifiedStatementCount) !== 0) {
+      throw new Error(`Remote TEST schema preflight did not fail closed: ${JSON.stringify(preflight).slice(0, 1000)}`);
+    }
+
     applicant.sub = createApplicant({ ...applicant, poolId }, options);
     aws(['s3', 'cp', sourceScript, `s3://${options.bucket}/${remoteKey}`, '--only-show-errors'], options);
-    const instanceId = discoverInstanceId(options);
+    scriptUploaded = true;
     const commands = [
       'set -euo pipefail',
       'mkdir -p /opt/nwac/portal/scripts',
@@ -201,6 +231,11 @@ async function main() {
         '--env-file', shellQuote('/opt/nwac/portal/.env.test'),
         '--base-url', shellQuote('http://127.0.0.1:5000'),
         '--expected-database', shellQuote('iset_intake'),
+        '--expected-db-host', shellQuote(EXPECTED_TEST_DB_HOST),
+        '--expected-db-user', shellQuote(EXPECTED_TEST_DB_USER),
+        '--expected-db-server-hostname', shellQuote(EXPECTED_TEST_DB_SERVER_HOSTNAME),
+        '--expected-db-port', shellQuote(EXPECTED_TEST_DB_PORT),
+        '--expected-db-principal', shellQuote(EXPECTED_TEST_DB_PRINCIPAL),
         '--expected-aws-account', shellQuote(EXPECTED_AWS_ACCOUNT),
         '--applicant-email', shellQuote(applicant.email),
         '--applicant-password', shellQuote(applicant.password),
@@ -215,12 +250,20 @@ async function main() {
     }
     report = parseSmokeJson(invocation.Stdout);
     if (!report.ok) throw new Error('Remote TEST CFA signing smoke returned ok=false');
-    report.test = { instanceId, commandId, operatorArn: identity.Arn };
+    report.test = {
+      instanceId,
+      commandId,
+      preflightCommandId,
+      preflight,
+      operatorArn: identity.Arn,
+    };
   } finally {
-    try {
-      aws(['s3', 'rm', `s3://${options.bucket}/${remoteKey}`, '--only-show-errors'], options);
-    } catch (_) {}
-    deleteApplicant(applicant.email, poolId, options);
+    if (scriptUploaded) {
+      try {
+        aws(['s3', 'rm', `s3://${options.bucket}/${remoteKey}`, '--only-show-errors'], options);
+      } catch (_) {}
+    }
+    if (applicant.sub) deleteApplicant(applicant.email, poolId, options);
   }
 
   if (options.json) console.log(JSON.stringify(report, null, 2));

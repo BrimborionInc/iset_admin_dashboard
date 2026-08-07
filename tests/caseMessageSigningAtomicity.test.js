@@ -312,8 +312,17 @@ describe('case secure-message signing atomicity', () => {
 
   test('generated upload identity captures the exact S3 version from the PUT response', async () => {
     const uploads = [];
-    const record = trackGeneratedObjectUploadAttempt(uploads, 'generated/a.pdf');
-    const headObjectFn = jest.fn();
+    const record = trackGeneratedObjectUploadAttempt(uploads, 'generated/a.pdf', {
+      requestOwnedKey: true,
+      sizeBytes: 12,
+      checksumSha256: 'checksum-a',
+    });
+    const headObjectFn = jest.fn(async () => ({
+      exists: true,
+      versionId: 'version-a',
+      size: 12,
+      metadata: { 'path-sha256': 'checksum-a' },
+    }));
     expect(resolveS3UploadVersionId({ 'x-amz-version-id': 'version-a' }))
       .toBe('version-a');
 
@@ -322,27 +331,42 @@ describe('case secure-message signing atomicity', () => {
       uploadResponse: { headers: { 'x-amz-version-id': 'version-a' } },
       headObjectFn,
       versionCompensationSupported: true,
+      sizeBytes: 12,
+      checksumSha256: 'checksum-a',
     })).resolves.toBe(record);
 
-    expect(record).toEqual({
+    expect(record).toMatchObject({
       key: 'generated/a.pdf',
       versionId: 'version-a',
       versionIdentityVerified: true,
+      objectIdentityVerified: true,
+      identityMode: 'version',
     });
-    expect(headObjectFn).not.toHaveBeenCalled();
+    expect(headObjectFn).toHaveBeenCalledWith({
+      key: 'generated/a.pdf',
+      versionId: 'version-a',
+    });
   });
 
   test('missing PUT version headers are resolved through version-aware HeadObject or fail closed', async () => {
-    const record = trackGeneratedObjectUploadAttempt([], 'generated/b.pdf');
+    const record = trackGeneratedObjectUploadAttempt([], 'generated/b.pdf', {
+      requestOwnedKey: true,
+      sizeBytes: 12,
+      checksumSha256: 'checksum-b',
+    });
     const headObjectFn = jest.fn(async () => ({
       exists: true,
       versionId: 'version-b',
+      size: 12,
+      metadata: { 'path-sha256': 'checksum-b' },
     }));
     await expect(verifyGeneratedObjectUploadIdentity({
       uploadRecord: record,
       uploadResponse: { headers: {} },
       headObjectFn,
       versionCompensationSupported: true,
+      sizeBytes: 12,
+      checksumSha256: 'checksum-b',
     })).resolves.toMatchObject({
       versionId: 'version-b',
       versionIdentityVerified: true,
@@ -361,6 +385,48 @@ describe('case secure-message signing atomicity', () => {
       headObjectFn,
       versionCompensationSupported: false,
     })).rejects.toThrow('s3_version_compensation_unavailable');
+  });
+
+  test('generated upload identity supports a checksum-verified request-owned key in an unversioned bucket', async () => {
+    const record = trackGeneratedObjectUploadAttempt([], 'generated/unversioned.pdf', {
+      requestOwnedKey: true,
+      sizeBytes: 12,
+      checksumSha256: 'checksum-u',
+    });
+    await expect(verifyGeneratedObjectUploadIdentity({
+      uploadRecord: record,
+      uploadResponse: { headers: {} },
+      headObjectFn: async () => ({
+        exists: true,
+        versionId: null,
+        size: 12,
+        metadata: { 'path-sha256': 'checksum-u' },
+      }),
+      versionCompensationSupported: true,
+      sizeBytes: 12,
+      checksumSha256: 'checksum-u',
+    })).resolves.toMatchObject({
+      key: 'generated/unversioned.pdf',
+      versionId: null,
+      versionIdentityVerified: false,
+      objectIdentityVerified: true,
+      identityMode: 'request_owned_key_checksum',
+    });
+
+    const deleteObjectFn = jest.fn(async () => ({ deleted: true, versionId: null }));
+    await expect(deleteUploadedObjectKeysBestEffort([record], {
+      driver: 's3',
+      versionCompensationSupported: true,
+      headObjectFn: async () => ({
+        exists: true,
+        versionId: null,
+        size: 12,
+        metadata: { 'path-sha256': 'checksum-u' },
+      }),
+      deleteObjectFn,
+      logger: { warn: jest.fn() },
+    })).resolves.toEqual({ attempted: 1, deleted: 1, failed: 0 });
+    expect(deleteObjectFn).toHaveBeenCalledWith({ key: 'generated/unversioned.pdf' });
   });
 
   test('rolled-back uploads delete only exact generated keys and cleanup failures require manual review', async () => {

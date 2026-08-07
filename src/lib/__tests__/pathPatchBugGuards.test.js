@@ -143,19 +143,23 @@ describe('PATH patch bug guards', () => {
     expect(scopedDraftSource).not.toContain('buildCasePrimaryApplicationJoinSql');
   });
 
-  test('generated CFA and financial-overview uploads retain an exact compensatable object version', () => {
+  test('generated CFA and financial-overview uploads retain versioned or request-owned checksum identity', () => {
     for (const storeFunctionName of [
       'storeFundingAgreementPdfDocument',
       'storeFundingOverviewPdfDocument',
     ]) {
       const storeSource = extractAdminFunction(storeFunctionName);
-      const keyTrackIndex = storeSource.indexOf('trackGeneratedObjectUploadAttempt(uploadedObjectKeys, key)');
+      const keyTrackIndex = storeSource.indexOf('trackGeneratedObjectUploadAttempt(uploadedObjectKeys, key, {');
       const uploadIndex = storeSource.indexOf('uploadResponse = await axios.put(');
       const identityIndex = storeSource.indexOf('await verifyGeneratedObjectUploadIdentity({');
       expect(keyTrackIndex).toBeGreaterThanOrEqual(0);
       expect(uploadIndex).toBeGreaterThan(keyTrackIndex);
       expect(identityIndex).toBeGreaterThan(uploadIndex);
       expect(storeSource).toContain('OBJECT_VERSION_COMPENSATION_SUPPORTED !== true');
+      expect(storeSource).toContain("ifNoneMatch: '*'");
+      expect(storeSource).toContain("metadata: { 'path-sha256': checksum }");
+      expect(storeSource).toContain('requestOwnedKey: true');
+      expect(storeSource).toContain('checksumSha256: checksum');
     }
 
     expect(s3ProviderSource).toContain('const OBJECT_VERSION_COMPENSATION_SUPPORTED = true');
@@ -164,6 +168,8 @@ describe('PATH patch bug guards', () => {
 
     const cleanupSource = extractAdminFunction('deleteUploadedObjectKeysBestEffort');
     expect(cleanupSource).toContain('versionIdentityVerified');
+    expect(cleanupSource).toContain("identityMode === 'request_owned_key_checksum'");
+    expect(cleanupSource).toContain('resolveAssessmentGeneratedObjectChecksum(head.metadata) === record.checksumSha256');
     expect(cleanupSource).toContain("...(record.versionId ? { versionId: record.versionId } : {})");
     const rollbackSource = extractAdminFunction('rollbackCaseMessageWriteTransaction');
     expect(rollbackSource.indexOf('await connection.rollback()'))

@@ -10,6 +10,7 @@ This is the first and non-negotiable instruction for every agent working in this
 - Check one table at a time and explicitly confirm that every selected, filtered, joined, ordered, inserted, or updated column belongs to that table. Never carry a similarly named column from another table into the statement.
 - If even one identifier, function, enum value, collation, or relationship cannot be pointed to in the current live metadata output, do not run the statement. Return to metadata-only discovery.
 - For PROD repair work, put reviewed non-metadata SQL in an artifact under `sql/ops/`; do not improvise multi-table inventory or mutation SQL directly in a shell command.
+- Acceptance fixtures must reproduce every live-schema-proven relationship enforced by the product. Resolve environment-owned references as one compatible set; never select the first row from one table and assume its related mapping exists.
 
 - Never compose or execute SQL that references a table, column, index, constraint, relationship, enum, collation, function, or database object that has not been verified against the exact target environment in the current task. This prohibition includes read-only `SELECT` statements and applies to DEV, TEST, and PROD.
 - Before any SQL, verify the target account/environment, database, host, and current user. Discover object names through live metadata. Before any mutation, inspect the full live DDL (`SHOW CREATE TABLE` plus any required `SHOW FULL COLUMNS`/index/constraint metadata) for every table touched and every joined or compared field.

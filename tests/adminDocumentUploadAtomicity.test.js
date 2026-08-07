@@ -20,6 +20,7 @@ const mockS3State = {
   checksum: null,
   size: null,
   key: 'uploads/2026/08/06/admin/route-proof.pdf',
+  versionId: 'route-version-1',
 };
 
 const mockS3Provider = {
@@ -37,7 +38,7 @@ const mockS3Provider = {
     exists: key === mockS3State.key,
     size: mockS3State.size,
     metadata: { 'path-sha256': mockS3State.checksum },
-    versionId: versionId || 'route-version-1',
+    versionId: versionId || mockS3State.versionId,
   })),
   deleteObject: jest.fn(async ({ versionId }) => ({ deleted: true, versionId })),
 };
@@ -54,7 +55,11 @@ jest.mock('axios', () => ({
         stream.resume();
       });
     }
-    return { headers: { 'x-amz-version-id': 'route-version-1' } };
+    return {
+      headers: mockS3State.versionId
+        ? { 'x-amz-version-id': mockS3State.versionId }
+        : {},
+    };
   }),
 }));
 
@@ -263,6 +268,7 @@ describe('admin manual supporting-document upload atomicity', () => {
     routeEvents.length = 0;
     mockS3State.checksum = null;
     mockS3State.size = null;
+    mockS3State.versionId = 'route-version-1';
     jest.clearAllMocks();
   });
 
@@ -688,10 +694,12 @@ describe('admin manual supporting-document upload atomicity', () => {
       responseHeaders: { 'x-amz-version-id': 'v1' },
       sizeBytes: 12,
       checksumSha256: 'abc123',
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       key: 'uploads/proof.pdf',
       versionId: 'v1',
       versionIdentityVerified: true,
+      objectIdentityVerified: true,
+      identityMode: 'version',
     });
   });
 
@@ -743,6 +751,37 @@ describe('admin manual supporting-document upload atomicity', () => {
         versionId: null,
         versionIdentityVerified: false,
       },
+    });
+  });
+
+  test('accepts an acknowledged request-owned unversioned upload after checksum and size verification', async () => {
+    const provider = {
+      OBJECT_VERSION_COMPENSATION_SUPPORTED: true,
+      deleteObject: jest.fn(),
+      headObject: jest.fn(async () => ({
+        exists: true,
+        size: 12,
+        metadata: { 'path-sha256': 'abc123' },
+        versionId: null,
+      })),
+    };
+    await expect(inspectAdminDocumentUploadedObject({
+      provider,
+      key: 'uploads/proof.pdf',
+      responseHeaders: {},
+      sizeBytes: 12,
+      checksumSha256: 'abc123',
+      putAcknowledged: true,
+      requestOwnedKey: true,
+    })).resolves.toMatchObject({
+      key: 'uploads/proof.pdf',
+      versionId: null,
+      versionIdentityVerified: false,
+      objectIdentityVerified: true,
+      identityMode: 'request_owned_key_checksum',
+      requestOwnedKey: true,
+      sizeBytes: 12,
+      checksumSha256: 'abc123',
     });
   });
 
@@ -798,6 +837,34 @@ describe('admin manual supporting-document upload atomicity', () => {
       expect(mockS3Provider.deleteObject).toHaveBeenCalledWith({
         key: mockS3State.key,
         versionId: 'route-version-1',
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  test('the real parsed route accepts an unversioned request-owned upload and key-compensates a confirmed rollback', async () => {
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockS3State.versionId = null;
+    routeState.failDocumentInsert = true;
+    try {
+      const { response } = await invokeParsedRoute('unversioned-precommit-failure');
+      expect(response).toEqual({
+        status: 500,
+        body: {
+          error: 'document_store_failed',
+          retrySafe: true,
+        },
+      });
+      expect(routeEvents.some(event => event.type === 'rollback')).toBe(true);
+      expect(mockS3Provider.headObject).toHaveBeenCalledWith({
+        key: mockS3State.key,
+        versionId: null,
+      });
+      expect(mockS3Provider.headObject).toHaveBeenCalledWith({ key: mockS3State.key });
+      expect(mockS3Provider.deleteObject).toHaveBeenCalledWith({
+        key: mockS3State.key,
+        versionId: null,
       });
     } finally {
       consoleError.mockRestore();

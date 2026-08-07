@@ -3182,12 +3182,64 @@ function resolveS3UploadVersionId(responseHeaders) {
   return normaliseString(headerValue) || null;
 }
 
-function trackGeneratedObjectUploadAttempt(uploadedObjects, key) {
+function hasVerifiedAdminUploadedObjectIdentity(record) {
+  if (!record?.key) return false;
+  if (
+    record.versionIdentityVerified === true &&
+    Boolean(normaliseString(record.versionId))
+  ) {
+    return true;
+  }
+  return Boolean(
+    record.objectIdentityVerified === true &&
+    record.identityMode === 'request_owned_key_checksum' &&
+    !normaliseString(record.versionId) &&
+    normaliseString(record.checksumSha256) &&
+    Number.isFinite(Number(record.sizeBytes)) &&
+    Number(record.sizeBytes) >= 0
+  );
+}
+
+function markRequestOwnedUnversionedObjectIdentity(uploadRecord, { sizeBytes, checksumSha256 } = {}) {
+  if (!uploadRecord?.requestOwnedKey || !normaliseString(checksumSha256)) {
+    throw new Error('s3_upload_identity_unverified');
+  }
+  const normalizedSizeBytes = Number(sizeBytes);
+  if (!Number.isFinite(normalizedSizeBytes) || normalizedSizeBytes < 0) {
+    throw new Error('s3_upload_identity_unverified');
+  }
+  uploadRecord.versionId = null;
+  uploadRecord.versionIdentityVerified = false;
+  uploadRecord.objectIdentityVerified = true;
+  uploadRecord.identityMode = 'request_owned_key_checksum';
+  uploadRecord.sizeBytes = normalizedSizeBytes;
+  uploadRecord.checksumSha256 = normaliseString(checksumSha256);
+  return uploadRecord;
+}
+
+function markVersionedObjectIdentity(uploadRecord, versionId) {
+  const normalizedVersionId = normaliseString(versionId);
+  if (!uploadRecord?.key || !normalizedVersionId) {
+    throw new Error('s3_upload_identity_unverified');
+  }
+  uploadRecord.versionId = normalizedVersionId;
+  uploadRecord.versionIdentityVerified = true;
+  uploadRecord.objectIdentityVerified = true;
+  uploadRecord.identityMode = 'version';
+  return uploadRecord;
+}
+
+function trackGeneratedObjectUploadAttempt(uploadedObjects, key, identity = {}) {
   if (!Array.isArray(uploadedObjects)) return null;
   const record = {
     key,
     versionId: null,
     versionIdentityVerified: false,
+    objectIdentityVerified: false,
+    identityMode: null,
+    requestOwnedKey: identity.requestOwnedKey === true,
+    sizeBytes: Number.isFinite(Number(identity.sizeBytes)) ? Number(identity.sizeBytes) : null,
+    checksumSha256: normaliseString(identity.checksumSha256) || null,
   };
   uploadedObjects.push(record);
   return record;
@@ -3198,6 +3250,8 @@ async function verifyGeneratedObjectUploadIdentity({
   uploadResponse,
   headObjectFn,
   versionCompensationSupported,
+  sizeBytes,
+  checksumSha256,
 } = {}) {
   if (!uploadRecord) return null;
   if (versionCompensationSupported !== true || typeof headObjectFn !== 'function') {
@@ -3205,16 +3259,30 @@ async function verifyGeneratedObjectUploadIdentity({
   }
   const responseVersionId = resolveS3UploadVersionId(uploadResponse?.headers);
   if (responseVersionId) {
-    uploadRecord.versionId = responseVersionId;
-    uploadRecord.versionIdentityVerified = true;
-    return uploadRecord;
+    markVersionedObjectIdentity(uploadRecord, responseVersionId);
   }
-  const head = await headObjectFn({ key: uploadRecord.key });
+  const head = await headObjectFn({
+    key: uploadRecord.key,
+    ...(responseVersionId ? { versionId: responseVersionId } : {}),
+  });
   if (!head?.exists || !Object.prototype.hasOwnProperty.call(head, 'versionId')) {
     throw new Error('s3_upload_identity_unverified');
   }
-  uploadRecord.versionId = normaliseString(head.versionId) || null;
-  uploadRecord.versionIdentityVerified = true;
+  const headVersionId = normaliseString(head.versionId) || null;
+  if (responseVersionId && headVersionId !== responseVersionId) {
+    throw new Error('s3_upload_version_mismatch');
+  }
+  if (Number(head.size) !== Number(sizeBytes)) {
+    throw new Error('s3_upload_size_mismatch');
+  }
+  if (resolveAssessmentGeneratedObjectChecksum(head.metadata) !== checksumSha256) {
+    throw new Error('s3_upload_checksum_mismatch');
+  }
+  if (headVersionId) {
+    markVersionedObjectIdentity(uploadRecord, responseVersionId || headVersionId);
+  } else {
+    markRequestOwnedUnversionedObjectIdentity(uploadRecord, { sizeBytes, checksumSha256 });
+  }
   return uploadRecord;
 }
 
@@ -3264,8 +3332,7 @@ async function inspectAssessmentGeneratedObjectUpload({
 
   const responseVersionId = resolveS3UploadVersionId(responseHeaders);
   if (responseVersionId) {
-    uploadRecord.versionId = responseVersionId;
-    uploadRecord.versionIdentityVerified = true;
+    markVersionedObjectIdentity(uploadRecord, responseVersionId);
   }
   let head;
   try {
@@ -3298,15 +3365,13 @@ async function inspectAssessmentGeneratedObjectUpload({
     );
   }
   const headVersionId = normaliseString(head.versionId) || null;
-  if (!headVersionId || (responseVersionId && headVersionId !== responseVersionId)) {
+  if (responseVersionId && headVersionId !== responseVersionId) {
     throw createAssessmentResubmissionIntegrityError(
       'assessment_pdf_upload_version_mismatch',
       'The generated assessment document version could not be matched exactly.'
     );
   }
 
-  uploadRecord.versionId = responseVersionId || headVersionId;
-  uploadRecord.versionIdentityVerified = true;
   if (Number(head.size) !== Number(sizeBytes)) {
     throw createAssessmentResubmissionIntegrityError(
       'assessment_pdf_upload_size_mismatch',
@@ -3317,6 +3382,24 @@ async function inspectAssessmentGeneratedObjectUpload({
     throw createAssessmentResubmissionIntegrityError(
       'assessment_pdf_upload_checksum_mismatch',
       'The generated assessment document checksum did not match the uploaded object.'
+    );
+  }
+  if (responseVersionId || headVersionId) {
+    markVersionedObjectIdentity(uploadRecord, responseVersionId || headVersionId);
+  } else if (putAcknowledged) {
+    try {
+      markRequestOwnedUnversionedObjectIdentity(uploadRecord, { sizeBytes, checksumSha256 });
+    } catch (cause) {
+      throw createAssessmentResubmissionIntegrityError(
+        'assessment_pdf_upload_outcome_uncertain',
+        'PATH could not prove ownership of the generated assessment document.',
+        { cause }
+      );
+    }
+  } else {
+    throw createAssessmentResubmissionIntegrityError(
+      'assessment_pdf_upload_outcome_uncertain',
+      'PATH could not prove ownership of the generated assessment document.'
     );
   }
   return uploadRecord;
@@ -3364,9 +3447,11 @@ async function uploadAssessmentGeneratedPdfObject({
     ifNoneMatch: '*',
     metadata: { 'path-sha256': checksumSha256 },
   });
-  const uploadRecord = trackGeneratedObjectUploadAttempt(uploadedObjects, key);
-  uploadRecord.sizeBytes = Number(sizeBytes);
-  uploadRecord.checksumSha256 = checksumSha256;
+  const uploadRecord = trackGeneratedObjectUploadAttempt(uploadedObjects, key, {
+    requestOwnedKey: true,
+    sizeBytes,
+    checksumSha256,
+  });
   let uploadResponse;
   try {
     uploadResponse = await axios.put(presigned.url, pdfBuffer, {
@@ -3445,7 +3530,8 @@ async function compensateAssessmentGeneratedObjects(
   if (
     resolvedProvider.DRIVER !== 's3' ||
     resolvedProvider.OBJECT_VERSION_COMPENSATION_SUPPORTED !== true ||
-    typeof resolvedProvider.deleteObject !== 'function'
+    typeof resolvedProvider.deleteObject !== 'function' ||
+    typeof resolvedProvider.headObject !== 'function'
   ) {
     return { attempted: records.length, deleted: 0, failed: records.length };
   }
@@ -3460,14 +3546,30 @@ async function compensateAssessmentGeneratedObjects(
     seen.add(identity);
     if (record.objectConfirmedAbsent === true) continue;
     attempted += 1;
-    if (record.versionIdentityVerified !== true || !normaliseString(record.versionId)) {
+    if (!hasVerifiedAdminUploadedObjectIdentity(record)) {
       failed += 1;
       continue;
     }
     try {
+      const versionId = normaliseString(record.versionId) || null;
+      if (!versionId) {
+        const head = await resolvedProvider.headObject({ key: record.key });
+        if (!head?.exists) {
+          deleted += 1;
+          continue;
+        }
+        if (
+          !Object.prototype.hasOwnProperty.call(head, 'versionId') ||
+          normaliseString(head.versionId) ||
+          Number(head.size) !== Number(record.sizeBytes) ||
+          resolveAssessmentGeneratedObjectChecksum(head.metadata) !== record.checksumSha256
+        ) {
+          throw new Error('assessment_pdf_unversioned_identity_changed');
+        }
+      }
       const result = await resolvedProvider.deleteObject({
         key: record.key,
-        versionId: record.versionId,
+        versionId,
       });
       if (result?.deleted !== true && result?.notFound !== true) {
         throw new Error('assessment_pdf_delete_unverified');
@@ -3478,7 +3580,7 @@ async function compensateAssessmentGeneratedObjects(
       logger?.error?.(
         '[assessment-resubmit] exact generated-object compensation failed (%s, version %s): %s',
         record.key,
-        record.versionId,
+        record.versionId || 'request-owned-unversioned',
         error?.message || error
       );
     }
@@ -3854,8 +3956,21 @@ async function storeFundingOverviewPdfDocument({
     throw new Error('s3_version_compensation_unavailable');
   }
   const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
-  const presigned = await presignPut({ key, contentType: 'application/pdf' });
-  const uploadRecord = trackGeneratedObjectUploadAttempt(uploadedObjectKeys, key);
+  const presigned = await presignPut({
+    key,
+    contentType: 'application/pdf',
+    ...(Array.isArray(uploadedObjectKeys)
+      ? {
+        ifNoneMatch: '*',
+        metadata: { 'path-sha256': checksum },
+      }
+      : {}),
+  });
+  const uploadRecord = trackGeneratedObjectUploadAttempt(uploadedObjectKeys, key, {
+    requestOwnedKey: true,
+    sizeBytes,
+    checksumSha256: checksum,
+  });
   let uploadResponse = null;
   try {
     uploadResponse = await axios.put(presigned.url, pdfBuffer, {
@@ -3866,10 +3981,13 @@ async function storeFundingOverviewPdfDocument({
       }
     });
   } catch (uploadError) {
+    const status = Number(uploadError?.response?.status || uploadError?.response?.statusCode || 0);
+    if (uploadRecord && (status === 409 || status === 412)) {
+      uploadRecord.compensationNotRequired = true;
+    }
     const rejectedVersionId = resolveS3UploadVersionId(uploadError?.response?.headers);
     if (uploadRecord && rejectedVersionId) {
-      uploadRecord.versionId = rejectedVersionId;
-      uploadRecord.versionIdentityVerified = true;
+      markVersionedObjectIdentity(uploadRecord, rejectedVersionId);
     }
     throw uploadError;
   }
@@ -3878,6 +3996,8 @@ async function storeFundingOverviewPdfDocument({
     uploadResponse,
     headObjectFn: headObject,
     versionCompensationSupported: OBJECT_VERSION_COMPENSATION_SUPPORTED,
+    sizeBytes,
+    checksumSha256: checksum,
   });
   relativePath = key;
   if (!relativePath) {
@@ -4061,8 +4181,21 @@ async function storeFundingAgreementPdfDocument({
     throw new Error('s3_version_compensation_unavailable');
   }
   const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
-  const presigned = await presignPut({ key, contentType: 'application/pdf' });
-  const uploadRecord = trackGeneratedObjectUploadAttempt(uploadedObjectKeys, key);
+  const presigned = await presignPut({
+    key,
+    contentType: 'application/pdf',
+    ...(Array.isArray(uploadedObjectKeys)
+      ? {
+        ifNoneMatch: '*',
+        metadata: { 'path-sha256': checksum },
+      }
+      : {}),
+  });
+  const uploadRecord = trackGeneratedObjectUploadAttempt(uploadedObjectKeys, key, {
+    requestOwnedKey: true,
+    sizeBytes,
+    checksumSha256: checksum,
+  });
   let uploadResponse = null;
   try {
     uploadResponse = await axios.put(presigned.url, pdfBuffer, {
@@ -4073,10 +4206,13 @@ async function storeFundingAgreementPdfDocument({
       }
     });
   } catch (uploadError) {
+    const status = Number(uploadError?.response?.status || uploadError?.response?.statusCode || 0);
+    if (uploadRecord && (status === 409 || status === 412)) {
+      uploadRecord.compensationNotRequired = true;
+    }
     const rejectedVersionId = resolveS3UploadVersionId(uploadError?.response?.headers);
     if (uploadRecord && rejectedVersionId) {
-      uploadRecord.versionId = rejectedVersionId;
-      uploadRecord.versionIdentityVerified = true;
+      markVersionedObjectIdentity(uploadRecord, rejectedVersionId);
     }
     throw uploadError;
   }
@@ -4085,6 +4221,8 @@ async function storeFundingAgreementPdfDocument({
     uploadResponse,
     headObjectFn: headObject,
     versionCompensationSupported: OBJECT_VERSION_COMPENSATION_SUPPORTED,
+    sizeBytes,
+    checksumSha256: checksum,
   });
   relativePath = key;
   if (!relativePath) {
@@ -15941,6 +16079,7 @@ async function deleteUploadedObjectKeysBestEffort(
 ) {
   const recordsByIdentity = new Map();
   for (const value of Array.isArray(uploadedObjects) ? uploadedObjects : []) {
+    if (value && typeof value === 'object' && value.compensationNotRequired === true) continue;
     const key = normaliseString(
       value && typeof value === 'object' ? value.key : value
     );
@@ -15951,8 +16090,28 @@ async function deleteUploadedObjectKeysBestEffort(
     const versionIdentityVerified = Boolean(
       value && typeof value === 'object' && value.versionIdentityVerified === true
     );
-    const identityKey = `${key}\u0000${versionIdentityVerified ? versionId || 'unversioned' : 'unresolved'}`;
-    recordsByIdentity.set(identityKey, { key, versionId, versionIdentityVerified });
+    const objectIdentityVerified = Boolean(
+      value && typeof value === 'object' && value.objectIdentityVerified === true
+    );
+    const identityMode = normaliseString(
+      value && typeof value === 'object' ? value.identityMode : null
+    ) || null;
+    const checksumSha256 = normaliseString(
+      value && typeof value === 'object' ? value.checksumSha256 : null
+    ) || null;
+    const sizeBytes = Number(
+      value && typeof value === 'object' ? value.sizeBytes : NaN
+    );
+    const identityKey = `${key}\u0000${versionIdentityVerified ? versionId : identityMode || 'unresolved'}`;
+    recordsByIdentity.set(identityKey, {
+      key,
+      versionId,
+      versionIdentityVerified,
+      objectIdentityVerified,
+      identityMode,
+      checksumSha256,
+      sizeBytes: Number.isFinite(sizeBytes) ? sizeBytes : null,
+    });
   }
   const records = Array.from(recordsByIdentity.values()).reverse();
   if (!records.length) return { attempted: 0, deleted: 0, failed: 0 };
@@ -16009,7 +16168,18 @@ async function deleteUploadedObjectKeysBestEffort(
           throw new Error('s3_upload_identity_unverified');
         }
         record.versionId = normaliseString(head.versionId) || null;
-        record.versionIdentityVerified = true;
+        if (record.versionId) {
+          record.versionIdentityVerified = true;
+        } else if (
+          record.objectIdentityVerified === true &&
+          record.identityMode === 'request_owned_key_checksum' &&
+          Number(head.size) === Number(record.sizeBytes) &&
+          resolveAssessmentGeneratedObjectChecksum(head.metadata) === record.checksumSha256
+        ) {
+          record.versionIdentityVerified = false;
+        } else {
+          throw new Error('s3_upload_identity_unverified');
+        }
       }
       await deleteObject({
         key: record.key,
@@ -52257,11 +52427,25 @@ function resolveAdminDocumentUploadHeadChecksum(metadata) {
   ) || null;
 }
 
-function buildAdminDocumentUploadedObject({ key, versionId, versionIdentityVerified }) {
+function buildAdminDocumentUploadedObject({
+  key,
+  versionId,
+  versionIdentityVerified,
+  objectIdentityVerified,
+  identityMode,
+  requestOwnedKey,
+  sizeBytes,
+  checksumSha256,
+}) {
   return {
     key,
     versionId: normaliseString(versionId) || null,
     versionIdentityVerified: versionIdentityVerified === true,
+    objectIdentityVerified: objectIdentityVerified === true,
+    identityMode: normaliseString(identityMode) || null,
+    requestOwnedKey: requestOwnedKey === true,
+    sizeBytes: Number.isFinite(Number(sizeBytes)) ? Number(sizeBytes) : null,
+    checksumSha256: normaliseString(checksumSha256) || null,
   };
 }
 
@@ -52272,6 +52456,7 @@ async function inspectAdminDocumentUploadedObject({
   sizeBytes,
   checksumSha256,
   putAcknowledged = false,
+  requestOwnedKey = false,
 } = {}) {
   if (
     !provider ||
@@ -52282,6 +52467,17 @@ async function inspectAdminDocumentUploadedObject({
     throw createAdminDocumentUploadError('s3_version_compensation_unavailable');
   }
   const responseVersionId = resolveS3UploadVersionId(responseHeaders);
+  const buildIdentity = overrides => buildAdminDocumentUploadedObject({
+    key,
+    versionId: responseVersionId,
+    versionIdentityVerified: Boolean(responseVersionId),
+    objectIdentityVerified: Boolean(responseVersionId),
+    identityMode: responseVersionId ? 'version' : null,
+    requestOwnedKey,
+    sizeBytes,
+    checksumSha256,
+    ...overrides,
+  });
   let head;
   try {
     head = await provider.headObject({
@@ -52291,73 +52487,44 @@ async function inspectAdminDocumentUploadedObject({
   } catch (error) {
     if (responseVersionId) {
       throw createAdminDocumentUploadError('s3_upload_verification_failed', error.message, {
-        uploadedObject: buildAdminDocumentUploadedObject({
-          key,
-          versionId: responseVersionId,
-          versionIdentityVerified: true,
-        }),
+        uploadedObject: buildIdentity(),
       });
     }
     throw createAdminDocumentUploadError('s3_upload_outcome_ambiguous', error.message, {
-      uploadedObject: buildAdminDocumentUploadedObject({
-        key,
-        versionId: null,
-        versionIdentityVerified: false,
-      }),
+      uploadedObject: buildIdentity(),
     });
   }
   if (!head?.exists) {
     if (responseVersionId) {
       throw createAdminDocumentUploadError('s3_upload_verification_failed', 'The uploaded object could not be read back.', {
-        uploadedObject: buildAdminDocumentUploadedObject({
-          key,
-          versionId: responseVersionId,
-          versionIdentityVerified: true,
-        }),
+        uploadedObject: buildIdentity(),
       });
     }
     if (putAcknowledged) {
       throw createAdminDocumentUploadError('s3_upload_outcome_ambiguous', 'The acknowledged upload could not be read back.', {
-        uploadedObject: buildAdminDocumentUploadedObject({
-          key,
-          versionId: null,
-          versionIdentityVerified: false,
-        }),
+        uploadedObject: buildIdentity(),
       });
     }
     throw createAdminDocumentUploadError('s3_uploaded_object_missing');
   }
   if (!Object.prototype.hasOwnProperty.call(head, 'versionId')) {
     throw createAdminDocumentUploadError('s3_upload_outcome_ambiguous', 'S3 did not return object version identity.', {
-      uploadedObject: buildAdminDocumentUploadedObject({
-        key,
-        versionId: responseVersionId,
-        versionIdentityVerified: Boolean(responseVersionId),
-      }),
+      uploadedObject: buildIdentity(),
     });
   }
   const headVersionId = normaliseString(head.versionId) || null;
   if (responseVersionId && headVersionId !== responseVersionId) {
     throw createAdminDocumentUploadError('s3_upload_version_mismatch', 'S3 upload version did not match HEAD.', {
-      uploadedObject: buildAdminDocumentUploadedObject({
-        key,
-        versionId: responseVersionId,
-        versionIdentityVerified: true,
-      }),
+      uploadedObject: buildIdentity(),
     });
   }
-  const uploadedObject = buildAdminDocumentUploadedObject({
-    key,
-    versionId: responseVersionId || headVersionId,
-    versionIdentityVerified: true,
+  const resolvedVersionId = responseVersionId || headVersionId;
+  const uploadedObject = buildIdentity({
+    versionId: resolvedVersionId,
+    versionIdentityVerified: Boolean(resolvedVersionId),
+    objectIdentityVerified: Boolean(resolvedVersionId),
+    identityMode: resolvedVersionId ? 'version' : null,
   });
-  if (!uploadedObject.versionId) {
-    throw createAdminDocumentUploadError(
-      's3_upload_outcome_ambiguous',
-      'S3 did not provide an exact object version for safe compensation.',
-      { uploadedObject: { ...uploadedObject, versionIdentityVerified: false } }
-    );
-  }
   if (Number(head.size) !== Number(sizeBytes)) {
     throw createAdminDocumentUploadError('s3_upload_size_mismatch', 'S3 upload size did not match the local file.', {
       uploadedObject,
@@ -52367,6 +52534,17 @@ async function inspectAdminDocumentUploadedObject({
     throw createAdminDocumentUploadError('s3_upload_checksum_mismatch', 'S3 upload checksum metadata did not match.', {
       uploadedObject,
     });
+  }
+  if (!resolvedVersionId) {
+    if (!putAcknowledged || !requestOwnedKey) {
+      throw createAdminDocumentUploadError(
+        's3_upload_outcome_ambiguous',
+        'S3 did not provide an exact object version or an acknowledged request-owned key.',
+        { uploadedObject }
+      );
+    }
+    uploadedObject.objectIdentityVerified = true;
+    uploadedObject.identityMode = 'request_owned_key_checksum';
   }
   return uploadedObject;
 }
@@ -52419,6 +52597,7 @@ async function uploadAdminDocumentObject({
         responseHeaders: uploadError?.response?.headers || null,
         sizeBytes,
         checksumSha256,
+        requestOwnedKey: true,
       });
       throw createAdminDocumentUploadError('s3_upload_rejected_after_write', uploadError.message, {
         uploadedObject,
@@ -52435,14 +52614,14 @@ async function uploadAdminDocumentObject({
     sizeBytes,
     checksumSha256,
     putAcknowledged: true,
+    requestOwnedKey: true,
   });
 }
 
 async function compensateAdminDocumentUploadedObject(uploadedObject) {
   if (
     !uploadedObject?.key ||
-    !normaliseString(uploadedObject.versionId) ||
-    uploadedObject.versionIdentityVerified !== true
+    !hasVerifiedAdminUploadedObjectIdentity(uploadedObject)
   ) {
     throw createAdminDocumentUploadError('s3_upload_compensation_identity_unverified');
   }
@@ -52450,13 +52629,27 @@ async function compensateAdminDocumentUploadedObject(uploadedObject) {
   if (
     provider.DRIVER !== 's3' ||
     provider.OBJECT_VERSION_COMPENSATION_SUPPORTED !== true ||
-    typeof provider.deleteObject !== 'function'
+    typeof provider.deleteObject !== 'function' ||
+    typeof provider.headObject !== 'function'
   ) {
     throw createAdminDocumentUploadError('s3_version_compensation_unavailable');
   }
+  const versionId = normaliseString(uploadedObject.versionId) || null;
+  if (!versionId) {
+    const head = await provider.headObject({ key: uploadedObject.key });
+    if (!head?.exists) return { deleted: false, notFound: true, versionId: null };
+    if (
+      !Object.prototype.hasOwnProperty.call(head, 'versionId') ||
+      normaliseString(head.versionId) ||
+      Number(head.size) !== Number(uploadedObject.sizeBytes) ||
+      resolveAdminDocumentUploadHeadChecksum(head.metadata) !== uploadedObject.checksumSha256
+    ) {
+      throw createAdminDocumentUploadError('s3_upload_compensation_identity_changed');
+    }
+  }
   const result = await provider.deleteObject({
     key: uploadedObject.key,
-    versionId: uploadedObject.versionId || null,
+    versionId,
   });
   if (result?.deleted !== true && result?.notFound !== true) {
     throw createAdminDocumentUploadError('s3_upload_compensation_unverified');
@@ -52661,7 +52854,7 @@ async function persistAdminDocumentUploadTransaction(
     compensateObject = compensateAdminDocumentUploadedObject,
   } = {}
 ) {
-  if (!manifest || !uploadedObject?.key || uploadedObject.versionIdentityVerified !== true) {
+  if (!manifest || !hasVerifiedAdminUploadedObjectIdentity(uploadedObject)) {
     throw createAdminDocumentUploadError(
       'document_upload_object_identity_unverified',
       'The uploaded object identity was not verified.',
@@ -53089,7 +53282,7 @@ function handleAdminDocumentUpload(
     } catch (uploadErr) {
       cleanupUploadedFile();
       console.error('[admin:documents:upload:s3] upload failed', uploadErr);
-      if (uploadErr?.uploadedObject?.versionIdentityVerified === true) {
+      if (hasVerifiedAdminUploadedObjectIdentity(uploadErr?.uploadedObject)) {
         try {
           await compensateAdminDocumentUploadedObject(uploadErr.uploadedObject);
         } catch (compensationError) {
@@ -53102,8 +53295,8 @@ function handleAdminDocumentUpload(
         }
       }
       if (
-        uploadErr?.code === 's3_upload_outcome_ambiguous' &&
-        uploadErr?.uploadedObject?.versionIdentityVerified !== true
+        uploadErr?.uploadedObject &&
+        !hasVerifiedAdminUploadedObjectIdentity(uploadErr?.uploadedObject)
       ) {
         return res.status(503).json({
           error: 'object_store_upload_ambiguous',
@@ -94795,8 +94988,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         assessmentGeneratedObjectUploads.some(record => (
           record?.compensationNotRequired !== true &&
           (
-            record?.versionIdentityVerified !== true ||
-            !normaliseString(record?.versionId) ||
+            !hasVerifiedAdminUploadedObjectIdentity(record) ||
             !normalisePositiveInteger(record?.documentId)
           )
         ))
@@ -97468,6 +97660,8 @@ const adminRepairExports = {
   ensureAutoPlanAndInterventionFromAssessment,
   startInterventionReviewWorkflow,
   storeAssessmentPdfDocument,
+  storeFundingOverviewPdfDocument,
+  storeFundingAgreementPdfDocument,
   syncInterventionProposalCompatibility,
   generateAndStoreInterventionAssessmentPdf,
   generateAndStoreRevisionAssessmentPdf,

@@ -52,7 +52,9 @@ const mockAxios = {
   get: jest.fn(),
   post: jest.fn(),
   put: jest.fn(async () => ({
-    headers: { 'x-amz-version-id': objectState.versionId },
+    headers: objectState.versionId
+      ? { 'x-amz-version-id': objectState.versionId }
+      : {},
   })),
 };
 
@@ -64,6 +66,8 @@ const compactSql = value => String(value || '').replace(/\s+/g, ' ').trim();
 describe('application assessment resubmission atomicity', () => {
   const previousRepairExports = process.env.PATH_REPAIR_EXPORTS;
   let storeAssessmentPdfDocument;
+  let storeFundingOverviewPdfDocument;
+  let storeFundingAgreementPdfDocument;
   let inspectAssessmentGeneratedObjectUpload;
   let compensateAssessmentGeneratedObjects;
   let lockAssessmentApplicationThenCase;
@@ -77,6 +81,8 @@ describe('application assessment resubmission atomicity', () => {
     process.env.PATH_REPAIR_EXPORTS = '1';
     ({
       storeAssessmentPdfDocument,
+      storeFundingOverviewPdfDocument,
+      storeFundingAgreementPdfDocument,
       inspectAssessmentGeneratedObjectUpload,
       compensateAssessmentGeneratedObjects,
       lockAssessmentApplicationThenCase,
@@ -152,7 +158,12 @@ describe('application assessment resubmission atomicity', () => {
   });
 
   test('an acknowledged upload without a version header is accepted only after exact HEAD verification', async () => {
-    const uploadRecord = { key: objectState.key, versionId: null, versionIdentityVerified: false };
+    const uploadRecord = {
+      key: objectState.key,
+      versionId: null,
+      versionIdentityVerified: false,
+      requestOwnedKey: true,
+    };
     objectState.size = 12;
     objectState.checksum = 'checksum-12';
     await expect(inspectAssessmentGeneratedObjectUpload({
@@ -170,6 +181,113 @@ describe('application assessment resubmission atomicity', () => {
       key: objectState.key,
       versionId: null,
     });
+  });
+
+  test('the real assessment PDF writer accepts a checksum-verified request-owned key in an unversioned bucket', async () => {
+    const pdfBuffer = Buffer.from('corrected assessment unversioned');
+    objectState.versionId = null;
+    objectState.size = pdfBuffer.length;
+    const uploads = [];
+    const connection = {
+      query: jest.fn(async sqlValue => {
+        const sql = compactSql(sqlValue);
+        if (sql.startsWith('INSERT INTO iset_document')) {
+          return [{ insertId: 8804, affectedRows: 1 }, []];
+        }
+        throw new Error(`unexpected_query:${sql}`);
+      }),
+    };
+
+    await expect(storeAssessmentPdfDocument({
+      applicationId: 123,
+      caseId: 76,
+      clientId: 9,
+      applicantUserId: 44,
+      actorUserId: 71,
+      trackingId: 'PATH-123',
+      pdfBuffer,
+      documentType: 'case_assessment',
+      versionNumber: 2,
+      archivePreviousActive: false,
+      replaceExistingVersion: false,
+      connection,
+      uploadedObjectKeys: uploads,
+    })).resolves.toBe(8804);
+
+    expect(uploads).toEqual([expect.objectContaining({
+      key: objectState.key,
+      versionId: null,
+      versionIdentityVerified: false,
+      objectIdentityVerified: true,
+      identityMode: 'request_owned_key_checksum',
+      requestOwnedKey: true,
+      sizeBytes: pdfBuffer.length,
+      checksumSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      documentId: 8804,
+    })]);
+  });
+
+  test.each([
+    ['Financial Overview', async ({ pdfBuffer, uploads, connection }) => storeFundingOverviewPdfDocument({
+      caseId: 76,
+      applicationId: 123,
+      actionPlanId: 88,
+      clientId: 9,
+      applicantUserId: 44,
+      actorUserId: 71,
+      versionNumber: 2,
+      trackingId: 'PATH-123',
+      fundingOverviewVersionId: 902,
+      pdfBuffer,
+      connection,
+      uploadedObjectKeys: uploads,
+    })],
+    ['CFA', async ({ pdfBuffer, uploads, connection }) => storeFundingAgreementPdfDocument({
+      caseId: 76,
+      applicationId: 123,
+      actionPlanId: 88,
+      clientId: 9,
+      applicantUserId: 44,
+      actorUserId: 71,
+      versionNumber: 2,
+      trackingId: 'PATH-123',
+      cfaVersionId: 903,
+      pdfBuffer,
+      connection,
+      uploadedObjectKeys: uploads,
+    })],
+  ])('the real %s writer signs and verifies unversioned rollback identity', async (_label, writeDocument) => {
+    const pdfBuffer = Buffer.from(`generated ${_label} unversioned`);
+    objectState.versionId = null;
+    objectState.size = pdfBuffer.length;
+    const uploads = [];
+    const connection = {
+      query: jest.fn(async sqlValue => {
+        const sql = compactSql(sqlValue);
+        if (sql.startsWith('INSERT INTO iset_document')) {
+          return [{ insertId: 8810, affectedRows: 1 }, []];
+        }
+        throw new Error(`unexpected_query:${sql}`);
+      }),
+    };
+
+    await expect(writeDocument({ pdfBuffer, uploads, connection })).resolves.toBe(8810);
+    const checksumSha256 = uploads[0]?.checksumSha256;
+    expect(mockS3Provider.presignPut).toHaveBeenCalledWith(expect.objectContaining({
+      key: objectState.key,
+      ifNoneMatch: '*',
+      metadata: { 'path-sha256': checksumSha256 },
+    }));
+    expect(uploads).toEqual([expect.objectContaining({
+      key: objectState.key,
+      versionId: null,
+      versionIdentityVerified: false,
+      objectIdentityVerified: true,
+      identityMode: 'request_owned_key_checksum',
+      requestOwnedKey: true,
+      sizeBytes: pdfBuffer.length,
+      checksumSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    })]);
   });
 
   test('confirmed rollback compensates only the exact uploaded version and remains safely retryable', async () => {
@@ -201,6 +319,48 @@ describe('application assessment resubmission atomicity', () => {
       versionId: objectState.versionId,
     });
     expect(responseError).toBe(originalError);
+    expect(responseError).toMatchObject({
+      retrySafe: true,
+      manualReviewRequired: false,
+      objectCompensated: true,
+      commitOutcome: 'not_attempted',
+    });
+  });
+
+  test('confirmed rollback rechecks and removes only its request-owned unversioned object', async () => {
+    objectState.versionId = null;
+    objectState.size = 12;
+    objectState.checksum = 'checksum-12';
+    const connection = {
+      rollback: jest.fn(async () => {}),
+      release: jest.fn(),
+      destroy: jest.fn(),
+    };
+    const originalError = new Error('document insert failed');
+    const uploads = [{
+      key: objectState.key,
+      versionId: null,
+      versionIdentityVerified: false,
+      objectIdentityVerified: true,
+      identityMode: 'request_owned_key_checksum',
+      requestOwnedKey: true,
+      sizeBytes: 12,
+      checksumSha256: 'checksum-12',
+    }];
+
+    const responseError = await recoverAssessmentResubmissionFailure({
+      connection,
+      transactionStarted: true,
+      commitAttempted: false,
+      uploadedObjects: uploads,
+      originalError,
+    });
+
+    expect(mockS3Provider.headObject).toHaveBeenCalledWith({ key: objectState.key });
+    expect(mockS3Provider.deleteObject).toHaveBeenCalledWith({
+      key: objectState.key,
+      versionId: null,
+    });
     expect(responseError).toMatchObject({
       retrySafe: true,
       manualReviewRequired: false,

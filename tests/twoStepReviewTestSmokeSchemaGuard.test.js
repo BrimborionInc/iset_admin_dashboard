@@ -39,6 +39,9 @@ function createDriver({
   };
   if (omitTable) delete tables[omitTable];
   const query = jest.fn(async (sql) => {
+    if (['START TRANSACTION', 'COMMIT', 'ROLLBACK'].includes(sql)) {
+      return [{ affectedRows: 0 }, []];
+    }
     if (sql.startsWith('SELECT DATABASE()')) {
       return [[{
         'DATABASE()': database,
@@ -289,6 +292,20 @@ describe('two-step TEST smoke live-schema guard', () => {
     expect(guard.evidence().verifiedStatementCount).toBe(1);
   });
 
+  test('transaction controls remain guarded but use the supported text protocol', async () => {
+    const connection = createDriver();
+    const guard = makeGuard(connection);
+    await guard.preflight();
+
+    await guard.execute('START TRANSACTION');
+    await guard.execute('ROLLBACK');
+
+    expect(connection.query).toHaveBeenCalledWith('START TRANSACTION');
+    expect(connection.query).toHaveBeenCalledWith('ROLLBACK');
+    expect(connection.execute).not.toHaveBeenCalled();
+    expect(guard.evidence().verifiedStatementCount).toBe(2);
+  });
+
   test('unquoted output aliases fail closed while quoted aliases and CAST target types are accepted', async () => {
     const connection = createDriver();
     const guard = makeGuard(connection);
@@ -343,15 +360,20 @@ describe('two-step TEST smoke live-schema guard', () => {
       'utf8'
     );
 
-    expect(source.match(/connection\.query\(/g) || []).toHaveLength(1);
+    expect(source.match(/connection\.query\(/g) || []).toHaveLength(2);
     expect(source.match(/connection\.execute\(/g) || []).toHaveLength(1);
     expect(source).toContain('return connection.query(sql);');
+    expect(source).toContain('return connection.query(String(sql).trim());');
     expect(source).toContain('return schemaGuard.execute(sql, params);');
     expect(source).not.toMatch(/connection\.(?:beginTransaction|commit|rollback)\(/);
     expect(source).not.toContain("process.env.DB_NAME || 'iset_intake'");
     expect(source).not.toContain('1780058672308');
     expect(source).not.toContain('workflow_id: 52');
     expect(source).not.toMatch(/regionId:\s*1\b/);
+    expect(source).not.toContain('config.regionId = Number(regionRows[0].region_id)');
+    expect(source).toContain('for (const candidate of regionCandidates)');
+    expect(source).toContain('const fundedCandidates = [];');
+    expect(source).toContain('TEST has no verified region with an active chargeable CRF funding-stream budget pot');
     const remoteRunnerSource = source.slice(source.indexOf('function remoteRunner()'));
     expect(remoteRunnerSource).not.toMatch(/\b(?:LEFT|RIGHT|INNER|OUTER)?\s*JOIN\s+[A-Za-z_]/i);
     expect(remoteRunnerSource.match(/\bfetch\(/g) || []).toHaveLength(1);

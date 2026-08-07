@@ -763,6 +763,10 @@ function createLiveSchemaGuard({
       tables: proof?.tables || [],
       functions: proof?.functions || [],
     });
+    const control = String(sql || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    if (['START TRANSACTION', 'COMMIT', 'ROLLBACK'].includes(control)) {
+      return connection.query(String(sql).trim());
+    }
     return connection.execute(sql, params);
   }
 
@@ -3772,12 +3776,17 @@ function remoteRunner() {
       throw new Error(`TEST region override ${regionOverride} was not found exactly once.`);
     }
     if (!regionRows.length) throw new Error('TEST has no verified canada_region row for the fixture.');
-    config.regionId = Number(regionRows[0].region_id);
-    if (!Number.isSafeInteger(config.regionId) || config.regionId < 1) {
-      throw new Error('Resolved TEST region id is invalid.');
+    const regionCandidates = regionRows.map(row => ({
+      regionId: Number(row.region_id),
+      regionCode: String(row.code || '').trim(),
+    }));
+    if (regionCandidates.some(candidate => (
+      !Number.isSafeInteger(candidate.regionId) ||
+      candidate.regionId < 1 ||
+      !candidate.regionCode
+    ))) {
+      throw new Error('Resolved TEST region candidate is invalid.');
     }
-    const regionCode = String(regionRows[0].code || '').trim();
-    if (!regionCode) throw new Error('Resolved TEST region has no verified region code.');
 
     const [workflowRows] = await query(
       `SELECT id, status, workflow_type, document_type
@@ -3804,56 +3813,64 @@ function remoteRunner() {
     const now = new Date();
     const fiscalStartYear = now.getUTCMonth() >= 3 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
     const fiscalYear = `${fiscalStartYear}-${fiscalStartYear + 1}`;
-    const [regionPotRows] = await query(
-      `SELECT pot_id
-         FROM budget_pot_region
-        WHERE region_code = ?
-          ${budgetPotOverride ? 'AND pot_id = ?' : ''}
-        ORDER BY pot_id ASC`,
-      budgetPotOverride ? [regionCode, budgetPotOverride] : [regionCode]
-    );
-    const regionPotIds = Array.from(new Set(
-      regionPotRows.map(row => Number(row.pot_id)).filter(value => Number.isSafeInteger(value) && value > 0)
-    ));
-    if (!regionPotIds.length) {
-      throw new Error(`TEST has no verified budget-pot mapping for region ${regionCode}.`);
+    const fundedCandidates = [];
+    for (const candidate of regionCandidates) {
+      const [regionPotRows] = await query(
+        `SELECT pot_id
+           FROM budget_pot_region
+          WHERE region_code = ?
+            ${budgetPotOverride ? 'AND pot_id = ?' : ''}
+          ORDER BY pot_id ASC`,
+        budgetPotOverride ? [candidate.regionCode, budgetPotOverride] : [candidate.regionCode]
+      );
+      const regionPotIds = Array.from(new Set(
+        regionPotRows.map(row => Number(row.pot_id)).filter(value => Number.isSafeInteger(value) && value > 0)
+      ));
+      if (!regionPotIds.length) continue;
+      const potPlaceholders = regionPotIds.map(() => '?').join(',');
+      const [budgetPotRows] = await query(
+        `SELECT id, is_active, pot_type, funding_source, gl_project_code_external,
+                fiscal_year, fiscal_year_tag, adjusted_amount, committed_amount, actual_amount
+           FROM budget_pot
+          WHERE id IN (${potPlaceholders})
+            AND is_active = 1
+            AND pot_type = 'Funding stream'
+            AND funding_source = 'CRF'
+            AND gl_project_code_external IS NOT NULL
+            AND gl_project_code_external <> ''
+            AND (fiscal_year = ? OR fiscal_year_tag = ?)
+          ORDER BY id ASC`,
+        [...regionPotIds, fiscalYear, fiscalYear]
+      );
+      for (const budgetPot of budgetPotRows) {
+        const budgetPotId = Number(budgetPot.id);
+        const availableAmount = Number(budgetPot.adjusted_amount || 0)
+          - Number(budgetPot.committed_amount || 0)
+          - Number(budgetPot.actual_amount || 0);
+        if (
+          Number.isSafeInteger(budgetPotId) &&
+          budgetPotId > 0 &&
+          Number.isFinite(availableAmount) &&
+          availableAmount >= 100
+        ) {
+          fundedCandidates.push({ ...candidate, budgetPotId, availableAmount });
+        }
+      }
     }
-    const potPlaceholders = regionPotIds.map(() => '?').join(',');
-    const [budgetPotRows] = await query(
-      `SELECT id, is_active, pot_type, funding_source, gl_project_code_external,
-              fiscal_year, fiscal_year_tag, adjusted_amount, committed_amount, actual_amount
-         FROM budget_pot
-        WHERE id IN (${potPlaceholders})
-          AND is_active = 1
-          AND pot_type = 'Funding stream'
-          AND funding_source = 'CRF'
-          AND gl_project_code_external IS NOT NULL
-          AND gl_project_code_external <> ''
-          AND (fiscal_year = ? OR fiscal_year_tag = ?)
-        ORDER BY id ASC`,
-      [...regionPotIds, fiscalYear, fiscalYear]
-    );
-    if (budgetPotRows.length !== 1) {
-      const qualifier = budgetPotOverride ? `override ${budgetPotOverride}` : `${regionCode}/${fiscalYear}`;
-      throw new Error(`Expected exactly one active chargeable CRF funding-stream budget pot for ${qualifier}; found ${budgetPotRows.length}.`);
+    if (!fundedCandidates.length) {
+      const qualifier = budgetPotOverride ? `budget pot override ${budgetPotOverride}` : fiscalYear;
+      throw new Error(`TEST has no verified region with an active chargeable CRF funding-stream budget pot and $100 capacity for ${qualifier}.`);
     }
-    config.budgetPotId = Number(budgetPotRows[0].id);
-    if (!Number.isSafeInteger(config.budgetPotId) || config.budgetPotId < 1) {
-      throw new Error('Resolved TEST budget pot id is invalid.');
-    }
-    const availableAmount = Number(budgetPotRows[0].adjusted_amount || 0)
-      - Number(budgetPotRows[0].committed_amount || 0)
-      - Number(budgetPotRows[0].actual_amount || 0);
-    if (!Number.isFinite(availableAmount) || availableAmount < 100) {
-      throw new Error(`Resolved TEST budget pot ${config.budgetPotId} lacks the $100 smoke capacity.`);
-    }
+    const selected = fundedCandidates[0];
+    config.regionId = selected.regionId;
+    config.budgetPotId = selected.budgetPotId;
     result.evidence.fixtureReferences = {
       regionId: config.regionId,
-      regionCode,
+      regionCode: selected.regionCode,
       fiscalYear,
       financialOverviewWorkflowId: config.financialOverviewWorkflowId,
       budgetPotId: config.budgetPotId,
-      budgetPotAvailableAmount: availableAmount,
+      budgetPotAvailableAmount: selected.availableAmount,
     };
     pass('TEST fixture references resolved from verified live rows', result.evidence.fixtureReferences);
   }
