@@ -790,6 +790,36 @@ function createLiveSchemaGuard({
   };
 }
 
+function orderSelfReferencingVersionDeleteBatches(versionIds, relationshipRows) {
+  const remaining = new Set(
+    (versionIds || [])
+      .map(value => Number(value))
+      .filter(value => Number.isSafeInteger(value) && value > 0)
+  );
+  const relationships = (relationshipRows || []).map(row => ({
+    id: Number(row.id),
+    supersedesVersionId: row.supersedes_version_id == null
+      ? null
+      : Number(row.supersedes_version_id),
+  }));
+  if (relationships.some(row => !remaining.has(row.id))) {
+    throw new Error('fixture_version_scope_escape');
+  }
+  const batches = [];
+  while (remaining.size) {
+    const referencedParents = new Set(
+      relationships
+        .filter(row => remaining.has(row.id) && remaining.has(row.supersedesVersionId))
+        .map(row => row.supersedesVersionId)
+    );
+    const leaves = Array.from(remaining).filter(id => !referencedParents.has(id));
+    if (!leaves.length) throw new Error('fixture_version_dependency_cycle');
+    batches.push(leaves);
+    leaves.forEach(id => remaining.delete(id));
+  }
+  return batches;
+}
+
 function parseArgs(argv) {
   const args = {
     profile: process.env.AWS_PROFILE || DEFAULT_PROFILE,
@@ -800,6 +830,7 @@ function parseArgs(argv) {
     portalEnv: process.env.TWO_STEP_REVIEW_SMOKE_PORTAL_ENV || DEFAULT_PORTAL_ENV,
     keepFixture: false,
     schemaPreflightOnly: false,
+    cleanupStamp: '',
     json: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -814,6 +845,10 @@ function parseArgs(argv) {
       throw new Error('--keep-fixture is disabled: release smoke must prove zero TEST residue.');
     }
     else if (token === '--schema-preflight-only') args.schemaPreflightOnly = true;
+    else if (token === '--cleanup-stamp') {
+      if (index + 1 >= argv.length) throw new Error('--cleanup-stamp requires a value.');
+      args.cleanupStamp = argv[++index];
+    }
     else if (token === '--json') args.json = true;
     else if (token === '--help' || token === '-h') {
       usage();
@@ -835,6 +870,7 @@ function usage() {
     'Options:',
     '  --instance-id ID   Run on a specific online nwac-test-app instance.',
     '  --schema-preflight-only  Prove live TEST identities/DDL without creating fixtures.',
+    '  --cleanup-stamp STAMP  Recover and verify cleanup for one exact interrupted smoke stamp.',
     '  --profile NAME     AWS profile. Default: nwac-test.',
     '  --region REGION    AWS region. Default: ca-central-1.',
     '  --bucket NAME      Temporary S3 bucket. Default: nwac-test-artifacts.',
@@ -1506,8 +1542,15 @@ async function main() {
     throw new Error(`OBJECT_BUCKET ${expectedObjectBucket} did not match authorized TEST bucket ${EXPECTED_TEST_OBJECT_BUCKET}.`);
   }
 
-  const suffix = randomSuffix();
-  const stamp = `two-step-${Date.now()}-${suffix}`;
+  const cleanupStamp = String(options.cleanupStamp || '').trim();
+  if (cleanupStamp && !/^two-step-[0-9]+-[a-z0-9]+$/.test(cleanupStamp)) {
+    throw new Error('--cleanup-stamp must be one exact smoke-owned stamp.');
+  }
+  if (cleanupStamp && options.schemaPreflightOnly) {
+    throw new Error('--cleanup-stamp cannot be combined with --schema-preflight-only.');
+  }
+  const suffix = cleanupStamp ? cleanupStamp.split('-').at(-1) : randomSuffix();
+  const stamp = cleanupStamp || `two-step-${Date.now()}-${suffix}`;
   const credentialKeyPath = `/tmp/two-step-review-smoke-${stamp}.credential.pem`;
   const staffUsers = [
     {
@@ -1562,12 +1605,14 @@ async function main() {
 
     remoteKey = `ssm-scripts/two-step-review-smoke-${stamp}.js`;
     uploadRemoteScript(
-      `const createLiveSchemaGuard = ${createLiveSchemaGuard.toString()};\n(${remoteRunner.toString()})();\n`,
+      `const createLiveSchemaGuard = ${createLiveSchemaGuard.toString()};\n` +
+      `const orderSelfReferencingVersionDeleteBatches = ${orderSelfReferencingVersionDeleteBatches.toString()};\n` +
+      `(${remoteRunner.toString()})();\n`,
       remoteKey,
       options
     );
 
-    const runRemote = ({ preflightOnly = false } = {}) => {
+    const runRemote = ({ preflightOnly = false, cleanupOnly = false } = {}) => {
       const remotePath = `/tmp/two-step-review-smoke-${stamp}${preflightOnly ? '-preflight' : ''}.js`;
       const remoteConfigPath = `/tmp/two-step-review-smoke-${stamp}.config.enc.json`;
       const remoteEvidenceKey = `smoke-evidence/two-step-review-smoke-${stamp}${preflightOnly ? '-preflight' : ''}.json`;
@@ -1575,7 +1620,7 @@ async function main() {
       const commandLines = [
         'set -euo pipefail',
         `aws s3 cp ${shellQuote(`s3://${options.bucket}/${remoteKey}`)} ${shellQuote(remotePath)} --region ${shellQuote(options.region)} --only-show-errors`,
-        ...(preflightOnly ? [] : [
+        ...(preflightOnly || cleanupOnly ? [] : [
           `aws s3 cp ${shellQuote(`s3://${options.bucket}/${remoteConfigKey}`)} ${shellQuote(remoteConfigPath)} --region ${shellQuote(options.region)} --only-show-errors`,
           `chmod 600 ${shellQuote(remoteConfigPath)}`,
         ]),
@@ -1584,6 +1629,7 @@ async function main() {
         [
           `FIXTURE_STAMP=${shellQuote(preflightOnly ? `${stamp}-preflight` : stamp)}`,
           `SCHEMA_PREFLIGHT_ONLY=${preflightOnly ? '1' : '0'}`,
+          `TWO_STEP_REVIEW_CLEANUP_ONLY=${cleanupOnly ? '1' : '0'}`,
           `KEEP_FIXTURE=${options.keepFixture ? '1' : '0'}`,
           `TWO_STEP_REVIEW_EXPECTED_DB_NAME=${shellQuote(expectedDbName)}`,
           `TWO_STEP_REVIEW_EXPECTED_DB_HOST=${shellQuote(expectedDbHost)}`,
@@ -1608,7 +1654,7 @@ async function main() {
           `TWO_STEP_REVIEW_NOTIFICATION_WAIT_ATTEMPTS=${shellQuote(process.env.TWO_STEP_REVIEW_NOTIFICATION_WAIT_ATTEMPTS || '31')}`,
           `LOCAL_BASE_URL=${shellQuote(DEFAULT_LOCAL_BASE_URL)}`,
           `PORTAL_LOCAL_BASE_URL=${shellQuote(DEFAULT_PORTAL_LOCAL_BASE_URL)}`,
-          ...(preflightOnly ? [] : [
+          ...(preflightOnly || cleanupOnly ? [] : [
             `TWO_STEP_REVIEW_CONFIG_ENVELOPE_FILE=${shellQuote(remoteConfigPath)}`,
           ]),
           `node ${shellQuote(remotePath)}`,
@@ -1663,6 +1709,11 @@ async function main() {
 
     if (options.schemaPreflightOnly) {
       result = preflightResult;
+    } else if (cleanupStamp) {
+      console.log(`[two-step-smoke] Recovering exact interrupted fixture ${cleanupStamp}...`);
+      result = runRemote({ cleanupOnly: true });
+      result.evidence = result.evidence || {};
+      result.evidence.retainedDetailedArtifacts = retainedEvidenceArtifacts.map(item => ({ ...item }));
     } else {
       console.log('[two-step-smoke] Creating disposable TEST staff Cognito users...');
       for (const user of staffUsers) {
@@ -1785,10 +1836,12 @@ function remoteRunner() {
   };
 
   const schemaPreflightOnly = process.env.SCHEMA_PREFLIGHT_ONLY === '1';
+  const cleanupOnly = process.env.TWO_STEP_REVIEW_CLEANUP_ONLY === '1';
 
   const config = {
     stamp: requiredEnv('FIXTURE_STAMP'),
     schemaPreflightOnly,
+    cleanupOnly,
     keepFixture: process.env.KEEP_FIXTURE === '1',
     localBaseUrl: stripTrailingSlash(process.env.LOCAL_BASE_URL || 'http://127.0.0.1:5001'),
     portalLocalBaseUrl: stripTrailingSlash(process.env.PORTAL_LOCAL_BASE_URL || 'http://127.0.0.1:5000'),
@@ -2183,6 +2236,23 @@ function remoteRunner() {
       await connection.end();
       connection = null;
       progress('schema-only preflight complete');
+      return;
+    }
+    if (config.cleanupOnly) {
+      const suffix = config.stamp.split('-').at(-1);
+      config.staffUsers = [
+        { email: `codex.twostep.${suffix}.coord@example.com` },
+        { email: `codex.twostep.${suffix}.rm@example.com` },
+        { email: `codex.twostep.${suffix}.nwac@example.com` },
+      ];
+      config.applicantUser = { email: `codex.twostep.${suffix}.applicant@example.com` };
+      databaseWorkStarted = true;
+      await cleanupFixture();
+      finalCleanupComplete = true;
+      result.evidence.schemaSafety = schemaGuard.evidence();
+      await connection.end();
+      connection = null;
+      progress('cleanup recovery complete');
       return;
     }
     const fixtureCredentials = decryptFixtureCredentials();
@@ -3202,6 +3272,11 @@ function remoteRunner() {
         capturedRequestBody = postData;
         capturedRequestPayload = parsed;
         racePromise = (async () => {
+          const dispatchBaseline = await captureReturnedAssessmentResubmitState(
+            caseId,
+            applicationId,
+            baseline.application.workflow_id
+          );
           const adminStartedAt = new Date().toISOString();
           const adminOperations = ['browser-copy', 'concurrent-copy'].map(async caller => {
             try {
@@ -3315,6 +3390,7 @@ function remoteRunner() {
             baseline.application.workflow_id
           );
           return {
+            dispatchBaseline,
             adminStartedAt,
             adminOutcomes,
             signingOutcome,
@@ -3344,11 +3420,25 @@ function remoteRunner() {
       });
       await page.goto(`${config.localBaseUrl}${routePath}`, { waitUntil: 'domcontentloaded' });
       await dismissTutorialPromptIfPresent(page);
-      await waitForBodyText(page, 'Assess Eligibility');
-      for (let index = 0; index < 11; index += 1) {
-        await waitForVisibleEnabledButton(page, 'Next');
-        await clickVisibleButton(page, 'Next');
-        if (index === 9) {
+      const assessmentSteps = [
+        'eligibility',
+        'framing',
+        'rationale',
+        'barriers',
+        'priorities',
+        'otherFunding',
+        'type',
+        'childcare',
+        'previousIset',
+        'cost',
+        'docs',
+        'review',
+      ];
+      await waitForAssessmentWizardStep(page, assessmentSteps[0]);
+      for (let index = 0; index < assessmentSteps.length - 1; index += 1) {
+        await clickAssessmentWizardButton(page, 'Next');
+        await waitForAssessmentWizardStep(page, assessmentSteps[index + 1]);
+        if (assessmentSteps[index + 1] === 'docs') {
           await waitForBodyText(page, 'All required checklist items are complete.');
         }
       }
@@ -3403,7 +3493,9 @@ function remoteRunner() {
         Number(capturedRequestPayload?.applicationId) === Number(applicationId) &&
         capturedRequestPayload?.assessment_submit_action === true &&
         capturedRequestPayload?.applicationStatus === 'pending_approval' &&
-        Number(capturedRequestPayload?.expectedRowVersion) === Number(baseline.application.row_version) &&
+        Number(capturedRequestPayload?.expectedRowVersion) === Number(race?.dispatchBaseline?.application?.row_version) &&
+        Number(race?.dispatchBaseline?.application?.id) === Number(applicationId) &&
+        race?.dispatchBaseline?.application?.current_stage === 'returned_to_submitter' &&
         !Object.prototype.hasOwnProperty.call(capturedRequestPayload, 'assessment_preserve_existing_application_form') &&
         !Object.prototype.hasOwnProperty.call(capturedRequestPayload, 'assessment_preserve_existing_financial_overview') &&
         !resubmitHasDirectDecisionFields &&
@@ -3413,6 +3505,8 @@ function remoteRunner() {
         applicationId,
         requestApplicationId: capturedRequestPayload?.applicationId,
         expectedRowVersion: capturedRequestPayload?.expectedRowVersion,
+        preNavigationRowVersion: baseline.application.row_version,
+        dispatchRowVersion: race?.dispatchBaseline?.application?.row_version || null,
         resubmitHasDirectDecisionFields,
         decisionContextKeysPresent: resubmitDecisionContextKeys.filter(key => (
           Object.prototype.hasOwnProperty.call(resubmitAssessmentContext, key)
@@ -3458,6 +3552,7 @@ function remoteRunner() {
         caseId,
         applicationId,
         baseline,
+        dispatchBaseline: race.dispatchBaseline,
         after: race.afterReplay,
         pendingSigning,
       });
@@ -5242,15 +5337,20 @@ function remoteRunner() {
     caseId,
     applicationId,
     baseline,
+    dispatchBaseline,
     after,
     pendingSigning,
   }) {
     const applicationBefore = baseline.application || {};
+    const applicationAtDispatch = dispatchBaseline?.application || {};
     const applicationAfter = after.application || {};
     requireInvariant('application assessment: resubmit/signing race converges on one canonical RM-review application state', (
       Number(applicationAfter?.id) === Number(applicationId) &&
       Number(applicationAfter?.case_id) === Number(caseId) &&
       Number(applicationAfter?.workflow_id) === Number(applicationBefore?.workflow_id) &&
+      Number(applicationAtDispatch?.id) === Number(applicationId) &&
+      Number(applicationAtDispatch?.workflow_id) === Number(applicationBefore?.workflow_id) &&
+      applicationAtDispatch?.current_stage === 'returned_to_submitter' &&
       applicationAfter?.current_stage === 'rm_review' &&
       applicationAfter?.current_owner_role === 'Regional Manager' &&
       applicationAfter?.status === 'pending_approval' &&
@@ -5259,8 +5359,8 @@ function remoteRunner() {
       applicationAfter?.awaiting_reason === 'none' &&
       Number(applicationAfter?.docs_requested_active) === 0 &&
       applicationAfter?.docs_requested_source === 'secure_message' &&
-      Number(applicationAfter?.row_version) === Number(applicationBefore?.row_version) + 2
-    ), { applicationBefore, applicationAfter });
+      Number(applicationAfter?.row_version) === Number(applicationAtDispatch?.row_version) + 2
+    ), { applicationBefore, applicationAtDispatch, applicationAfter });
 
     const addedWorkflowEvents = rowsAddedById(baseline.workflowEvents, after.workflowEvents);
     requireInvariant('application assessment: resubmit race creates exactly one returned-to-submitter review transition', (
@@ -5424,7 +5524,8 @@ function remoteRunner() {
     });
 
     return {
-      applicationRowVersionBefore: Number(applicationBefore.row_version),
+      applicationRowVersionBeforeNavigation: Number(applicationBefore.row_version),
+      applicationRowVersionAtDispatch: Number(applicationAtDispatch.row_version),
       applicationRowVersionAfter: Number(applicationAfter.row_version),
       workflowEventIds: addedWorkflowEvents.map(row => row.id),
       caseEventIds: addedCaseEvents.map(row => row.id),
@@ -6443,12 +6544,16 @@ function remoteRunner() {
         });
       }
       const [applicationRows] = await query(
-        `SELECT id FROM iset_application WHERE CAST(payload_json AS CHAR) LIKE ?`,
+        `SELECT id, submission_id FROM iset_application WHERE CAST(payload_json AS CHAR) LIKE ?`,
         [stampLike]
       );
       const applicationIds = Array.from(new Set([
         ...Object.values(fixture.applications).filter(Boolean),
         ...applicationRows.map(row => Number(row.id)).filter(Boolean),
+      ]));
+      const submissionIds = Array.from(new Set([
+        ...Object.values(fixture.submissions).filter(Boolean),
+        ...applicationRows.map(row => Number(row.submission_id)).filter(Boolean),
       ]));
       const [actionPlanRows] = caseIds.length
         ? await query(
@@ -6485,8 +6590,13 @@ function remoteRunner() {
         ...staffRows.map(row => Number(row.id)).filter(Boolean),
       ]));
       const [userRows] = await query(
-        `SELECT id FROM user WHERE email LIKE ? OR cognito_sub LIKE ? ${staffEmails.length ? `OR email IN (${staffEmails.map(() => '?').join(',')})` : ''}`,
-        [`codex.twostep.${fixture.suffix}%`, `two-step-applicant-${fixture.suffix}%`, ...staffEmails]
+        `SELECT id, cognito_sub FROM user WHERE email LIKE ? OR cognito_sub LIKE ? OR email = ? ${staffEmails.length ? `OR email IN (${staffEmails.map(() => '?').join(',')})` : ''}`,
+        [
+          `codex.twostep.${fixture.suffix}%`,
+          `two-step-applicant-${fixture.suffix}%`,
+          config.applicantUser?.email || '',
+          ...staffEmails,
+        ]
       );
       const userIds = Array.from(new Set([
         fixture.applicantUser,
@@ -6496,6 +6606,7 @@ function remoteRunner() {
       const cognitoSubjects = Array.from(new Set([
         config.applicantUser?.sub,
         ...config.staffUsers.map(user => user.sub),
+        ...userRows.map(row => row.cognito_sub),
       ].filter(Boolean)));
       const eventIds = await idsForFixtureEvents(caseIds, staffProfileIds, fixture.applicantUser, stampLike);
       const reminderIds = await idsWhereIn('iset_case_reminder', 'case_id', caseIds);
@@ -6516,10 +6627,10 @@ function remoteRunner() {
       await deleteWhereIn('iset_event_delivery', 'event_id', eventIds);
       await deleteWhereIn('iset_event_receipt', 'event_id', eventIds);
       await deleteWhereIn('iset_event_receipt', 'viewer_staff_profile_id', staffProfileIds);
-      await deleteWhereIn('iset_event_receipt', 'viewer_applicant_user_id', [fixture.applicantUser].filter(Boolean));
+      await deleteWhereIn('iset_event_receipt', 'viewer_applicant_user_id', userIds);
       await deleteWhereIn('iset_reminder_lifecycle_event', 'reminder_id', reminderIds);
       if (staffProfileIds.length) await deleteWhereIn('iset_internal_notification', 'audience_staff_profile_id', staffProfileIds);
-      if (fixture.applicantUser) await deleteWhereIn('iset_internal_notification', 'audience_applicant_user_id', [fixture.applicantUser]);
+      await deleteWhereIn('iset_internal_notification', 'audience_applicant_user_id', userIds);
       if (caseIds.length) {
         const placeholders = caseIds.map(() => '?').join(',');
         await query(
@@ -6540,7 +6651,7 @@ function remoteRunner() {
         );
       }
       if (staffProfileIds.length) await deleteWhereIn('iset_event_entry', 'actor_staff_profile_id', staffProfileIds);
-      if (fixture.applicantUser) await deleteWhereIn('iset_event_entry', 'actor_applicant_user_id', [fixture.applicantUser]);
+      await deleteWhereIn('iset_event_entry', 'actor_applicant_user_id', userIds);
       if (caseIds.length) {
         const placeholders = caseIds.map(() => '?').join(',');
         await query(
@@ -6578,7 +6689,7 @@ function remoteRunner() {
       await deleteWhereIn('iset_case_action_plan', 'id', actionPlanIds);
       await deleteWhereIn('iset_application_assessment', 'application_id', applicationIds);
       await deleteWhereIn('iset_application', 'id', applicationIds);
-      await deleteWhereIn('iset_application_submission', 'id', Object.values(fixture.submissions).filter(Boolean));
+      await deleteWhereIn('iset_application_submission', 'id', submissionIds);
       await deleteWhereIn('iset_case', 'id', caseIds);
       if (fixture.client) await deleteWhereIn('client', 'id', [fixture.client]);
       await query('DELETE FROM client WHERE address_json IS NOT NULL AND CAST(address_json AS CHAR) LIKE ?', [stampLike]);
@@ -6593,6 +6704,7 @@ function remoteRunner() {
       const leftovers = await countFixtureLeftovers(stampLike, staffEmails, {
         caseIds,
         applicationIds,
+        submissionIds,
         actionPlanIds,
         interventionIds,
         proposalIds,
@@ -6977,13 +7089,13 @@ function remoteRunner() {
     const cfaSeriesIds = await idsWhereIn('cfa_series', 'case_id', caseIds);
     const cfaVersionIds = await idsWhereIn('cfa_version', 'series_id', cfaSeriesIds);
     await deleteWhereIn('cfa_version_documents', 'cfa_version_id', cfaVersionIds);
-    await deleteWhereIn('cfa_version', 'id', cfaVersionIds);
+    await deleteSelfReferencingVersions('cfa_version', cfaVersionIds);
     await deleteWhereIn('cfa_series', 'id', cfaSeriesIds);
 
     const fundingSeriesIds = await idsWhereIn('funding_overview_series', 'case_id', caseIds);
     const fundingVersionIds = await idsWhereIn('funding_overview_version', 'series_id', fundingSeriesIds);
     await deleteWhereIn('funding_overview_version_documents', 'funding_overview_version_id', fundingVersionIds);
-    await deleteWhereIn('funding_overview_version', 'id', fundingVersionIds);
+    await deleteSelfReferencingVersions('funding_overview_version', fundingVersionIds);
     await deleteWhereIn('funding_overview_series', 'id', fundingSeriesIds);
     return {
       cfaSeriesIds,
@@ -6991,6 +7103,34 @@ function remoteRunner() {
       fundingSeriesIds,
       fundingVersionIds,
     };
+  }
+
+  async function deleteSelfReferencingVersions(table, versionIds) {
+    if (!['cfa_version', 'funding_overview_version'].includes(table)) {
+      throw new Error(`fixture_version_table_not_allowed:${table}`);
+    }
+    const remaining = new Set(
+      (versionIds || [])
+        .map(value => Number(value))
+        .filter(value => Number.isSafeInteger(value) && value > 0)
+    );
+    if (!remaining.size) return;
+    const placeholders = Array.from(remaining).map(() => '?').join(',');
+    const [rows] = await query(
+      `SELECT ${table}.id, ${table}.supersedes_version_id
+         FROM ${table}
+        WHERE ${table}.id IN (${placeholders})`,
+      Array.from(remaining)
+    );
+    let batches;
+    try {
+      batches = orderSelfReferencingVersionDeleteBatches(Array.from(remaining), rows);
+    } catch (error) {
+      throw new Error(`${error.message}:${table}`);
+    }
+    for (const batch of batches) {
+      await deleteWhereIn(table, 'id', batch);
+    }
   }
 
   async function idsWhereIn(table, column, values) {
@@ -7145,7 +7285,9 @@ function remoteRunner() {
       );
       counts.reminderLifecycleEvents = Number(reminderLifecycleCount['COUNT(*)'] || 0);
     }
-    const submissionIds = Object.values(fixture.submissions).filter(Boolean);
+    const submissionIds = Array.from(new Set(
+      scope.submissionIds || Object.values(fixture.submissions).filter(Boolean)
+    ));
     if (submissionIds.length) {
       const placeholders = submissionIds.map(() => '?').join(',');
       const [[submissionCount]] = await query(
@@ -7309,4 +7451,5 @@ if (require.main === module) {
 module.exports = {
   createEncryptedFixtureEnvelope,
   createLiveSchemaGuard,
+  orderSelfReferencingVersionDeleteBatches,
 };

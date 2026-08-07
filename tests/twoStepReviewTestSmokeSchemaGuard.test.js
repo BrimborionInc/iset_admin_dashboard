@@ -5,6 +5,7 @@ const path = require('path');
 const {
   createEncryptedFixtureEnvelope,
   createLiveSchemaGuard,
+  orderSelfReferencingVersionDeleteBatches,
 } = require('../scripts/two-step-review-test-smoke');
 
 function column(Field, Type = 'varchar(255)', extra = {}) {
@@ -88,6 +89,27 @@ function makeGuard(connection, requiredTables = ['alpha', 'beta'], overrides = {
 }
 
 describe('two-step TEST smoke live-schema guard', () => {
+  test('orders self-referencing agreement versions from newest child to oldest parent', () => {
+    expect(orderSelfReferencingVersionDeleteBatches(
+      [11, 12, 13],
+      [
+        { id: 11, supersedes_version_id: null },
+        { id: 12, supersedes_version_id: 11 },
+        { id: 13, supersedes_version_id: 12 },
+      ]
+    )).toEqual([[13], [12], [11]]);
+  });
+
+  test('rejects a cyclic self-referencing agreement version chain', () => {
+    expect(() => orderSelfReferencingVersionDeleteBatches(
+      [21, 22],
+      [
+        { id: 21, supersedes_version_id: 22 },
+        { id: 22, supersedes_version_id: 21 },
+      ]
+    )).toThrow('fixture_version_dependency_cycle');
+  });
+
   test('credential envelope retains only authenticated ciphertext outside the remote ephemeral key', () => {
     const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
       modulusLength: 2048,
@@ -426,6 +448,10 @@ describe('two-step TEST smoke live-schema guard', () => {
     expect(source).toContain('application assessment: participant browser converges to the submitted state after a retryable signing conflict');
     expect(source).toContain('browser_signing_retry_payload_changed');
     expect(source).toContain('application assessment: deployed UI supplies the exact scoped optimistic resubmit payload');
+    expect(source).toContain('race?.dispatchBaseline?.application?.row_version');
+    expect(source).toContain("race?.dispatchBaseline?.application?.current_stage === 'returned_to_submitter'");
+    expect(source).toContain('Number(applicationAfter?.row_version) === Number(applicationAtDispatch?.row_version) + 2');
+    expect(source).toContain('dispatchBaseline: race.dispatchBaseline');
     expect(source).toContain('application assessment: exact concurrent resubmit copies serialize to one commit and one stale conflict');
     expect(source).toContain('application assessment: applicant signing overlaps resubmit and completes without deadlock or server failure');
     expect(source).toContain('application assessment: exact stale resubmit replay is a side-effect-free row-version conflict');

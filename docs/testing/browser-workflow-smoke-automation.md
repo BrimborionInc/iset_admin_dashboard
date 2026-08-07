@@ -4,7 +4,7 @@ Status: current guidance from the 2026-05-08/09 application-assessment containme
 
 Audience: Codex threads and developers building or rehearsing browser-level workflow smokes for PATH.
 
-Last Updated: 2026-07-05
+Last Updated: 2026-08-07
 
 ## Purpose
 
@@ -61,6 +61,8 @@ This smoke creates disposable TEST Cognito staff users for ISET Coordinator, Reg
 Coverage as of 2026-07-05 includes runtime flag/config checks, real role hydration, application assessment workflow, new intervention proposal workflow, intervention revision workflow, RM-as-submitter proposal start, NWAC start/final-decision guards, edit locks, browser route text, generated assessment PDFs, normalized intervention-document links, notification routing for RM review/final-decision/change-request handoffs, invalid-stage checks, and browser console/API error capture. The passing TEST run used SSM command `8428df04-2235-46e6-9533-7187a7260ac3` on replacement host `i-052566d75e0214d00`; cleanup reported zero synthetic cases, applications, interventions, documents, notifications, staff profiles, and users.
 
 Implementation notes: the TEST EC2 host returned `403 Forbidden` for Hosted UI login from instance-local browser automation, so the smoke uses Cognito password auth tokens directly. Final-decision `rm_review_submitted_to_nwac` bell alerts are role-audience notifications for `NWAC Administrator`, not staff-specific rows, so smoke assertions should verify role audience for that event.
+
+The 2026-08-07 Amanda correction release extended this smoke through the complete returned-assessment path: Financial Overview request/signing, authoritative review-stage recovery, same-person Regional Manager edit and Save Progress, every wizard transition, exact-application resubmit, RM sign-off, and Decision Maker queue/open. Browser navigation waits for the product-owned `data-path-assessment-step` signal after every click. Optimistic-concurrency checks capture the exact database state after the UI's intentional pre-submit refresh and immediately before the held request is dispatched; a pre-navigation row-version snapshot is not a valid expected token. Cleanup orders live-schema-proven `cfa_version` and `funding_overview_version` self-references child-first and `--cleanup-stamp <exact-stamp>` provides fail-closed recovery for an interrupted fixture. Passing evidence `tmp/two-step-review-test-smoke/two-step-1786128748799-61d4d58ce0-journey.json` records 96/96 checks, exact resubmit/signing cardinality, and zero residue; the wrapper independently verified all disposable Cognito users, temporary S3 objects, and the ephemeral credential absent.
 
 ## Option B Reference Implementation
 
