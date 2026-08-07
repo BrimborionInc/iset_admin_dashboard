@@ -2773,6 +2773,46 @@ function remoteRunner() {
     if (!clicked) throw new Error(`Visible enabled button not found: ${label}`);
   }
 
+  async function clickAssessmentWizardButton(page, label) {
+    const selector = '[data-path-assessment-wizard="true"]';
+    await page.waitForFunction((rootSelector, expected) => {
+      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      const root = document.querySelector(rootSelector);
+      return Array.from(root?.querySelectorAll('button, [role="button"]') || []).some(button => (
+        visible(button) &&
+        !button.disabled &&
+        button.getAttribute('aria-disabled') !== 'true' &&
+        normalize(button.innerText || button.textContent || button.getAttribute('aria-label')) === expected
+      ));
+    }, { timeout: 60_000 }, selector, label);
+    const clicked = await page.evaluate((rootSelector, expected) => {
+      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      const root = document.querySelector(rootSelector);
+      const button = Array.from(root?.querySelectorAll('button, [role="button"]') || []).find(candidate => (
+        visible(candidate) &&
+        !candidate.disabled &&
+        candidate.getAttribute('aria-disabled') !== 'true' &&
+        normalize(candidate.innerText || candidate.textContent || candidate.getAttribute('aria-label')) === expected
+      ));
+      if (!button) return false;
+      button.click();
+      return true;
+    }, selector, label);
+    if (!clicked) throw new Error(`Assessment wizard button not found: ${label}`);
+  }
+
   async function clickRadioByLabel(page, label) {
     const clicked = await page.evaluate(targetText => {
       const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
@@ -2959,9 +2999,9 @@ function remoteRunner() {
       await page.goto(`${config.localBaseUrl}${routePath}`, { waitUntil: 'domcontentloaded' });
       await dismissTutorialPromptIfPresent(page);
       await waitForBodyText(page, 'Assess Eligibility');
-      await clickVisibleButton(page, 'Next');
+      await clickAssessmentWizardButton(page, 'Next');
       await waitForBodyText(page, 'What is being proposed?');
-      await clickVisibleButton(page, 'Next');
+      await clickAssessmentWizardButton(page, 'Next');
       await waitForBodyText(page, 'Why is this intervention needed?');
 
       const fieldState = await page.evaluate(() => {
@@ -2971,7 +3011,8 @@ function remoteRunner() {
           const style = window.getComputedStyle(element);
           return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
         };
-        const textarea = Array.from(document.querySelectorAll('textarea')).find(visible);
+        const wizard = document.querySelector('[data-path-assessment-wizard="true"]');
+        const textarea = Array.from(wizard?.querySelectorAll('textarea') || []).find(visible);
         return textarea
           ? { disabled: textarea.disabled, readOnly: textarea.readOnly, value: textarea.value }
           : null;

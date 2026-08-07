@@ -146,4 +146,92 @@ describe('RM review requested notifications', () => {
       }),
     ]);
   });
+
+  test('routes forwarded changes to an explicit dual-role RM submitter without role broadcast', async () => {
+    const inserted = [];
+    let explicitRecipientParams = null;
+    const pool = {
+      query: jest.fn(async (sql, params = []) => {
+        if (sql.includes('FROM notification_setting')) {
+          return [[{
+            id: 601,
+            event: 'rm_review_changes_forwarded',
+            role: 'ISET Coordinator',
+            language: 'en',
+            enabled: 1,
+            email_alert: 0,
+            bell_alert: 1,
+            template_id: null,
+          }]];
+        }
+        if (sql.includes('FROM iset_case c')) {
+          return [[{
+            id: 76,
+            case_number: 'ISET-76',
+            case_status: 'submitted',
+            assigned_to: 67787,
+            assigned_staff_profile_id: 67787,
+            applicant_id: 2,
+            applicant_name: 'Joanna Nevers',
+            application_reference: 'ISET-76',
+          }]];
+        }
+        if (sql.includes('FROM staff_profiles sp') && sql.includes('WHERE sp.id IN')) {
+          explicitRecipientParams = params;
+          return [[{
+            id: 67787,
+            email: 'dual-role.manager@example.test',
+            primary_role: 'Regional Manager',
+            display_name: 'Dual Role Manager',
+            preferred_language: 'en',
+          }]];
+        }
+        if (sql.includes('FROM iset_case_watch')) return [[]];
+        if (sql.includes('SELECT id FROM iset_internal_notification')) return [[]];
+        if (sql.includes('INSERT INTO iset_internal_notification')) {
+          inserted.push(params);
+          return [{ insertId: 1 }];
+        }
+        throw new Error(`Unexpected query: ${sql}`);
+      }),
+    };
+
+    await dispatchInternalNotifications({
+      pool,
+      event: {
+        id: 'event-forwarded-dual-role',
+        event_type: 'rm_review_changes_forwarded',
+        severity: 'warning',
+        case_id: 76,
+        subject_type: 'case',
+        subject_id: '76',
+        event_data: {
+          application_id: 73,
+          workflow_type: 'application_assessment',
+          recipient_staff_profile_id: 67787,
+          note: 'Please add the requested financial claim.',
+        },
+        actor: {
+          type: 'staff',
+          staffProfileId: 67787,
+          displayName: 'Dual Role Manager',
+        },
+      },
+      logger: { warn: jest.fn(), error: jest.fn() },
+    });
+
+    expect(inserted).toHaveLength(1);
+    expect(explicitRecipientParams).toEqual(['en', 67787]);
+    expect(inserted[0][0]).toBe('rm_review_changes_forwarded');
+    expect(inserted[0][4]).toBe('user');
+    expect(inserted[0][7]).toBe(67787);
+    expect(JSON.parse(inserted[0][11])).toEqual(expect.objectContaining({
+      role: 'ISET Coordinator',
+      applicationId: 73,
+      workflowType: 'application_assessment',
+    }));
+    expect(pool.query.mock.calls.some(([sql]) => (
+      sql.includes('FROM staff_profiles sp') && sql.includes('WHERE LOWER(REPLACE(sp.primary_role')
+    ))).toBe(false);
+  });
 });

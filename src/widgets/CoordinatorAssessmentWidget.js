@@ -12081,7 +12081,11 @@ ${JSON.stringify(aiContext, null, 2)}`;
           accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
           onChange={handleChecklistFileSelected}
         />
-        <div style={{ visibility: wizardNavPriming ? 'hidden' : 'visible' }} aria-hidden={wizardNavPriming ? 'true' : undefined}>
+        <div
+          data-path-assessment-wizard="true"
+          style={{ visibility: wizardNavPriming ? 'hidden' : 'visible' }}
+          aria-hidden={wizardNavPriming ? 'true' : undefined}
+        >
           <Wizard
             activeStepIndex={activeStepIndex}
             i18nStrings={{ nextButton: wizardNextButtonLabel }}

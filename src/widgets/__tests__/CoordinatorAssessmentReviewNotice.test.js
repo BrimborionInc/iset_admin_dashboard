@@ -26,4 +26,13 @@ describe('application assessment reviewer-stage notice', () => {
     expect(noticeBlock).toContain("header: 'Ready for Decision Maker'");
     expect(noticeBlock).toContain('reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToRm');
   });
+
+  test('exposes a stable assessment-wizard boundary for deployed workflow acceptance', () => {
+    const source = readSource('src/widgets/CoordinatorAssessmentWidget.js');
+    expect(source).toContain('data-path-assessment-wizard="true"');
+
+    const smokeSource = readSource('scripts/two-step-review-test-smoke.js');
+    expect(smokeSource).toContain("const selector = '[data-path-assessment-wizard=\"true\"]';");
+    expect(smokeSource).toContain("await clickAssessmentWizardButton(page, 'Next');");
+  });
 });
