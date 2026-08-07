@@ -32,6 +32,7 @@ The core lesson from the repeat-application assessment release is that browser t
 
 4. Capture network and server failures.
    - Treat browser-console errors, failed API responses, and backend `500`s as first-class smoke failures.
+   - Scope repeated action labels to a stable product-owned surface, and after each asynchronous navigation wait for that surface's explicit active-state signal. Do not use page-global body text as a step-completion signal when the same text can exist in wizard navigation, hidden content, notifications, or another widget.
    - Include a small route/API smoke for adjacent surfaces touched by the change, such as application lists, work queues, decision queues, and document rows.
    - For dashboard/widget changes, keep network capture open after initial render and after sort/filter/page-size interactions. Fail the smoke if a non-polling endpoint keeps firing or canceling after the UI should be idle; this catches the recurring unstable-dependency loop class before it reaches TEST/PROD.
 

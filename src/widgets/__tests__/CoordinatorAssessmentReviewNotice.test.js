@@ -30,9 +30,13 @@ describe('application assessment reviewer-stage notice', () => {
   test('exposes a stable assessment-wizard boundary for deployed workflow acceptance', () => {
     const source = readSource('src/widgets/CoordinatorAssessmentWidget.js');
     expect(source).toContain('data-path-assessment-wizard="true"');
+    expect(source).toContain('data-path-assessment-step={currentStep}');
+    expect(source).toContain("data-path-assessment-editable={isAssessmentDisabled ? 'false' : 'true'}");
 
     const smokeSource = readSource('scripts/two-step-review-test-smoke.js');
     expect(smokeSource).toContain("const selector = '[data-path-assessment-wizard=\"true\"]';");
     expect(smokeSource).toContain("await clickAssessmentWizardButton(page, 'Next');");
+    expect(smokeSource).toContain("await waitForAssessmentWizardStep(page, 'framing');");
+    expect(smokeSource).toContain("await waitForAssessmentWizardStep(page, 'rationale');");
   });
 });

@@ -12083,6 +12083,8 @@ ${JSON.stringify(aiContext, null, 2)}`;
         />
         <div
           data-path-assessment-wizard="true"
+          data-path-assessment-step={currentStep}
+          data-path-assessment-editable={isAssessmentDisabled ? 'false' : 'true'}
           style={{ visibility: wizardNavPriming ? 'hidden' : 'visible' }}
           aria-hidden={wizardNavPriming ? 'true' : undefined}
         >

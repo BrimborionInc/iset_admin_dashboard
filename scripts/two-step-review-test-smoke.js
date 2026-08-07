@@ -2813,6 +2813,20 @@ function remoteRunner() {
     if (!clicked) throw new Error(`Assessment wizard button not found: ${label}`);
   }
 
+  async function waitForAssessmentWizardStep(page, expectedStep) {
+    const selector = '[data-path-assessment-wizard="true"]';
+    await page.waitForFunction((rootSelector, step) => {
+      const root = document.querySelector(rootSelector);
+      if (!root || root.getAttribute('aria-hidden') === 'true') return false;
+      const style = window.getComputedStyle(root);
+      return (
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        root.getAttribute('data-path-assessment-step') === step
+      );
+    }, { timeout: 60_000 }, selector, expectedStep);
+  }
+
   async function clickRadioByLabel(page, label) {
     const clicked = await page.evaluate(targetText => {
       const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
@@ -2998,11 +3012,11 @@ function remoteRunner() {
     try {
       await page.goto(`${config.localBaseUrl}${routePath}`, { waitUntil: 'domcontentloaded' });
       await dismissTutorialPromptIfPresent(page);
-      await waitForBodyText(page, 'Assess Eligibility');
+      await waitForAssessmentWizardStep(page, 'eligibility');
       await clickAssessmentWizardButton(page, 'Next');
-      await waitForBodyText(page, 'What is being proposed?');
+      await waitForAssessmentWizardStep(page, 'framing');
       await clickAssessmentWizardButton(page, 'Next');
-      await waitForBodyText(page, 'Why is this intervention needed?');
+      await waitForAssessmentWizardStep(page, 'rationale');
 
       const fieldState = await page.evaluate(() => {
         const visible = element => {
@@ -3014,10 +3028,20 @@ function remoteRunner() {
         const wizard = document.querySelector('[data-path-assessment-wizard="true"]');
         const textarea = Array.from(wizard?.querySelectorAll('textarea') || []).find(visible);
         return textarea
-          ? { disabled: textarea.disabled, readOnly: textarea.readOnly, value: textarea.value }
-          : null;
+          ? {
+              step: wizard.getAttribute('data-path-assessment-step'),
+              editable: wizard.getAttribute('data-path-assessment-editable'),
+              disabled: textarea.disabled,
+              readOnly: textarea.readOnly,
+              value: textarea.value,
+            }
+          : {
+              step: wizard?.getAttribute('data-path-assessment-step') || null,
+              editable: wizard?.getAttribute('data-path-assessment-editable') || null,
+              textareaCount: wizard?.querySelectorAll('textarea')?.length || 0,
+            };
       });
-      if (!fieldState || fieldState.disabled || fieldState.readOnly) {
+      if (!Object.prototype.hasOwnProperty.call(fieldState, 'value') || fieldState.disabled || fieldState.readOnly) {
         throw new Error(`Returned dual-role assessment was not editable: ${JSON.stringify(fieldState)}`);
       }
 
@@ -4239,59 +4263,60 @@ function remoteRunner() {
         String(signedRequestRow?.artifact_url || '').includes(signedDocumentRow.file_path)
       )
     );
-    expect('application assessment: signed Financial Overview is atomically linked to the exact repeat application and participant', (
-      signedRequestRows.length === 1 &&
-      signedRequestRow.status === 'signed' &&
-      signedRequestRow.signed_at != null &&
-      Number(signedRequestRow.case_id) === Number(caseId) &&
-      Number(signedRequestRow.participant_user_id) === Number(fixture.applicantUser) &&
-      typeof signedRequestRow.completion_token === 'string' && signedRequestRow.completion_token.length === 36 &&
-      typeof signedRequestRow.completion_payload_hash === 'string' && signedRequestRow.completion_payload_hash.length === 64 &&
-      typeof signedRequestRow.completion_event_id === 'string' && signedRequestRow.completion_event_id.length === 36 &&
-      signedRequestRow.completion_claim_token == null &&
-      signedRequestRow.completion_claim_expires_at == null &&
-      signedDocumentRows.length === 1 &&
-      Number(signedDocumentRow.case_id) === Number(caseId) &&
-      Number(signedDocumentRow.application_id) === Number(applicationId) &&
-      Number(signedDocumentRow.applicant_user_id) === Number(fixture.applicantUser) &&
-      Number(signedDocumentRow.origin_message_id) === Number(message.messageId) &&
-      Number(signedDocumentRow.signing_request_id) === Number(signingAttachment.id) &&
-      signedDocumentRow.source === 'system_generated' &&
-      signedDocumentRow.status === 'active' &&
-      signedDocumentRow.document_category === 'financial_overview' &&
-      signedDocumentRow.mime_type === 'application/pdf' &&
-      typeof signedDocumentRow.checksum_sha256 === 'string' && signedDocumentRow.checksum_sha256.length === 64 &&
-      artifactMatchesDocument &&
-      Number(documentMetadata.application_id) === Number(applicationId) &&
-      Number(documentMetadata.funding_overview_version_id) === Number(fundingOverviewVersionId) &&
-      Number(fundingOverviewVersionId) === Number(requestedFundingOverviewVersionId) &&
-      versionDocumentRows.length === 1 &&
-      versionDocumentRows[0].document_type === 'signed' &&
-      Number(versionDocumentRows[0].document_id) === Number(signedDocumentRow.id) &&
-      versionRows.length === 1 &&
-      versionRow.status === 'signed' &&
-      versionRow.signed_at != null &&
-      Number(versionRow.signed_by_participant_id) === Number(fixture.applicantUser) &&
-      typeof versionRow.snapshot_hash === 'string' && versionRow.snapshot_hash.length === 64 &&
-      seriesRows.length === 1 &&
-      Number(seriesRows[0].case_id) === Number(caseId) &&
-      Number(versionSnapshot?.case?.caseId) === Number(caseId) &&
-      Number(versionSnapshot?.case?.applicationId) === Number(applicationId) &&
-      Number(versionSnapshot?.case?.applicantUserId) === Number(fixture.applicantUser) &&
-      versionSnapshot?.sourceAnswers?.['income-employment'] === '1640.50' &&
-      versionSnapshot?.sourceAnswers?.['expenses-rent'] === '925.00' &&
-      targetContextAfter?.applicationAnswers?.['income-employment'] === '1640.50' &&
-      targetContextAfter?.applicationAnswers?.['expenses-rent'] === '925.00' &&
-      json(siblingContextAfter) === json(siblingContextBefore) &&
-      allCaseVersionRows.length === 1 &&
-      allCaseVersionRows.every(row => (
+    const financialOverviewLinkageChecks = {
+      oneSigningRequest: signedRequestRows.length === 1,
+      signingRequestSigned: signedRequestRow?.status === 'signed' && signedRequestRow?.signed_at != null,
+      signingRequestCase: Number(signedRequestRow?.case_id) === Number(caseId),
+      signingRequestParticipant: Number(signedRequestRow?.participant_user_id) === Number(fixture.applicantUser),
+      completionToken: typeof signedRequestRow?.completion_token === 'string' && signedRequestRow.completion_token.length === 36,
+      completionPayloadHash: typeof signedRequestRow?.completion_payload_hash === 'string' && signedRequestRow.completion_payload_hash.length === 64,
+      completionEvent: typeof signedRequestRow?.completion_event_id === 'string' && signedRequestRow.completion_event_id.length === 36,
+      completionClaimReleased: signedRequestRow?.completion_claim_token == null && signedRequestRow?.completion_claim_expires_at == null,
+      oneSignedDocument: signedDocumentRows.length === 1,
+      documentCase: Number(signedDocumentRow?.case_id) === Number(caseId),
+      documentApplication: Number(signedDocumentRow?.application_id) === Number(applicationId),
+      documentApplicant: Number(signedDocumentRow?.applicant_user_id) === Number(fixture.applicantUser),
+      documentOriginMessage: Number(signedDocumentRow?.origin_message_id) === Number(message.messageId),
+      documentSigningRequest: Number(signedDocumentRow?.signing_request_id) === Number(signingAttachment.id),
+      documentClassification: signedDocumentRow?.source === 'system_generated' && signedDocumentRow?.status === 'active' && signedDocumentRow?.document_category === 'financial_overview' && signedDocumentRow?.mime_type === 'application/pdf',
+      documentChecksum: typeof signedDocumentRow?.checksum_sha256 === 'string' && signedDocumentRow.checksum_sha256.length === 64,
+      documentArtifact: artifactMatchesDocument,
+      documentMetadataApplication: Number(documentMetadata.application_id) === Number(applicationId),
+      documentMetadataVersion: Number(documentMetadata.funding_overview_version_id) === Number(fundingOverviewVersionId),
+      exactRequestedVersion: Number(fundingOverviewVersionId) === Number(requestedFundingOverviewVersionId),
+      oneVersionDocument: versionDocumentRows.length === 1,
+      signedVersionDocument: versionDocumentRows[0]?.document_type === 'signed' && Number(versionDocumentRows[0]?.document_id) === Number(signedDocumentRow?.id),
+      oneFundingOverviewVersion: versionRows.length === 1,
+      signedFundingOverviewVersion: versionRow?.status === 'signed' && versionRow?.signed_at != null,
+      versionParticipant: Number(versionRow?.signed_by_participant_id) === Number(fixture.applicantUser),
+      versionSnapshotHash: typeof versionRow?.snapshot_hash === 'string' && versionRow.snapshot_hash.length === 64,
+      oneFundingOverviewSeries: seriesRows.length === 1,
+      seriesCase: Number(seriesRows[0]?.case_id) === Number(caseId),
+      snapshotCase: Number(versionSnapshot?.case?.caseId) === Number(caseId),
+      snapshotApplication: Number(versionSnapshot?.case?.applicationId) === Number(applicationId),
+      snapshotApplicant: Number(versionSnapshot?.case?.applicantUserId) === Number(fixture.applicantUser),
+      snapshotAnswers: versionSnapshot?.sourceAnswers?.['income-employment'] === '1640.50' && versionSnapshot?.sourceAnswers?.['expenses-rent'] === '925.00',
+      targetContextAnswers: targetContextAfter?.applicationAnswers?.['income-employment'] === '1640.50' && targetContextAfter?.applicationAnswers?.['expenses-rent'] === '925.00',
+      siblingContextUnchanged: json(siblingContextAfter) === json(siblingContextBefore),
+      oneCaseVersion: allCaseVersionRows.length === 1,
+      caseVersionsTargetApplication: allCaseVersionRows.every(row => (
         Number(parseJsonObject(row.metadata_json)?.case?.applicationId) === Number(applicationId)
-      ))
+      )),
+    };
+    expect('application assessment: signed Financial Overview is atomically linked to the exact repeat application and participant', (
+      Object.values(financialOverviewLinkageChecks).every(Boolean)
     ), {
       caseId,
       applicationId,
       siblingApplicationId,
       applicantUserId: fixture.applicantUser,
+      messageId: message.messageId,
+      signingRequestId: signingAttachment.id,
+      requestedFundingOverviewVersionId,
+      fundingOverviewVersionId,
+      failedChecks: Object.entries(financialOverviewLinkageChecks)
+        .filter(([, passed]) => !passed)
+        .map(([name]) => name),
       signedRequestRows,
       signedDocumentRows,
       versionDocumentRows,
