@@ -21,6 +21,13 @@ This is the first and non-negotiable instruction for every agent working in this
 - PROD requires an additional fail-closed sequence: verified schema evidence, read-only inventory/preview, explicit identifiers and guards, reviewed apply and recovery artifacts, appropriate lock/warning/snapshot controls, and independent post-apply verification. User urgency or authorization never waives schema proof.
 - If this rule is breached, stop immediately. Do not retry the mutation. Prove whether anything changed, roll back or recover if needed, clear temporary locks/warnings/procedures, tell Bill plainly, and restart from live schema discovery only after the failure has been reviewed.
 
+# STOP: NEVER USE AN IMPLICIT AWS PROFILE FOR TEST OR PROD
+
+- A reconnect, VS Code restart, shell restart, compaction, or resumed tool session invalidates earlier AWS-identity assurance. Re-run `aws sts get-caller-identity --profile <explicit-profile>` before the first resumed AWS operation, even when the preceding operation in the same task used the correct account.
+- Every raw AWS CLI command for TEST must include `--profile nwac-test` and prove account `124355655255`. Every raw AWS CLI command for PROD must include the runbook-approved PROD profile (normally `--profile nwac-prod`) and prove account `468278742295`. Never use the shell `default` profile as a shortcut for either environment.
+- Confirm the account and target resource belong together before sending the command. A remembered instance ID, bucket, pool, command ID, or prior-thread identity is not current target proof.
+- If an AWS command is attempted under the wrong account/profile, stop remote work, prove from the command result that nothing executed or changed, tell Bill plainly, and re-establish the explicit profile/account/resource boundary before continuing.
+
 # Admin Dashboard Assistant Context
 
 This file is the required project entry point for AI coding agents. Read it first, follow the linked reading order, and do not make code, database, deployment, or documentation changes until you have applied the relevant project guidance below.

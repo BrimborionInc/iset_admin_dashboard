@@ -39,4 +39,31 @@ describe('application assessment reviewer-stage notice', () => {
     expect(smokeSource).toContain("await waitForAssessmentWizardStep(page, 'framing');");
     expect(smokeSource).toContain("await waitForAssessmentWizardStep(page, 'rationale');");
   });
+
+  test('allows an authorised returned submitter to navigate legacy validation while retaining submit validation', () => {
+    const source = readSource('src/widgets/CoordinatorAssessmentWidget.js');
+    const navigationBlock = extractBetween(
+      source,
+      'const handleWizardNavigate = async ({ detail }) => {',
+      'const canRecallAssessmentSubmission ='
+    );
+    const submitBlock = extractBetween(
+      source,
+      'const handleSubmit = async () => {',
+      'const handleLetterBodyChange ='
+    );
+
+    expect(source).toContain(
+      'twoStepReviewEnabled && reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToSubmitter'
+    );
+    expect(navigationBlock).toContain(
+      'isReturnedToSubmitterStage && canEditAssessmentBody'
+    );
+    expect(navigationBlock).toContain(
+      'if (!valid && !canNavigateReturnedCorrection)'
+    );
+    expect(submitBlock).toContain('const errors = denyFundingFlowActive');
+    expect(submitBlock).toContain(': validateAssessment(assessment);');
+    expect(submitBlock).toContain('if (Object.keys(errors).length > 0)');
+  });
 });

@@ -5,7 +5,7 @@ No SQL—including `SELECT`—may reference an unverified live object. First pro
 # Agent Operational Access Notes
 
 Status: current operational access guidance for Codex/WSL threads. Verify live AWS/DB state before running mutating commands.
-Last reviewed: 2026-06-23 after AWS Environment Status IAM triage.
+Last reviewed: 2026-08-07 after a resumed TEST diagnostic inherited the PROD bootstrap default profile and was safely rejected before remote execution.
 
 Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AGENTS.md` while preserving the operational details future agents need.
 
@@ -120,6 +120,7 @@ Notes:
 - Before running AWS commands for TEST or PROD, use the explicit documented profile (`nwac-test`, `nwac-prod`, or the exact runbook profile) and confirm `aws sts get-caller-identity --profile <profile>` plus the target account/resource ARNs before any mutation.
 - If a Cognito, SES, S3, SSM, RDS, or IAM command fails under one identity, re-check the environment/profile mapping before asking for permissions. Permission requests must name the verified account, IAM principal, target environment, and exact resource ARNs.
 - Keep PROD and TEST identities as separate AWS CLI profiles; never rely on implicit defaults.
+- Treat every reconnect, editor restart, shell restart, or resumed tool session as a fresh identity boundary. Re-run the explicit profiled caller-identity check before the first resumed AWS operation; a successful check from before the restart is stale evidence.
 - Current known mappings in this Codex environment, re-verified 2026-04-20 after the PROD-role cutover:
   - `default` -> `arn:aws:iam::468278742295:user/nwac-prod-automation` (bootstrap identity only; direct PROD resource access is intentionally denied)
   - `nwac-prod` -> `arn:aws:sts::468278742295:assumed-role/nwac-prod-codex-operator/codex-prod-operator` when assumed from `default`

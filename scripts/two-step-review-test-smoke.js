@@ -2422,6 +2422,11 @@ function remoteRunner() {
     }
   }
 
+  function moneyValueMatches(value, expected) {
+    const normalized = String(value ?? '').replace(/,/g, '').trim();
+    return normalized !== '' && Number(normalized) === Number(expected);
+  }
+
   function markerJson(extra = {}) {
     return json({ ...fixture.marker, ...extra });
   }
@@ -2815,16 +2820,39 @@ function remoteRunner() {
 
   async function waitForAssessmentWizardStep(page, expectedStep) {
     const selector = '[data-path-assessment-wizard="true"]';
-    await page.waitForFunction((rootSelector, step) => {
-      const root = document.querySelector(rootSelector);
-      if (!root || root.getAttribute('aria-hidden') === 'true') return false;
-      const style = window.getComputedStyle(root);
-      return (
-        style.display !== 'none' &&
-        style.visibility !== 'hidden' &&
-        root.getAttribute('data-path-assessment-step') === step
-      );
-    }, { timeout: 60_000 }, selector, expectedStep);
+    try {
+      await page.waitForFunction((rootSelector, step) => {
+        const root = document.querySelector(rootSelector);
+        if (!root || root.getAttribute('aria-hidden') === 'true') return false;
+        const style = window.getComputedStyle(root);
+        return (
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          root.getAttribute('data-path-assessment-step') === step
+        );
+      }, { timeout: 60_000 }, selector, expectedStep);
+    } catch (error) {
+      const wizardState = await page.evaluate(rootSelector => {
+        const root = document.querySelector(rootSelector);
+        const bodyText = document.body?.innerText || '';
+        return {
+          wizardPresent: Boolean(root),
+          step: root?.getAttribute('data-path-assessment-step') || null,
+          editable: root?.getAttribute('data-path-assessment-editable') || null,
+          ariaHidden: root?.getAttribute('aria-hidden') || null,
+          display: root ? window.getComputedStyle(root).display : null,
+          visibility: root ? window.getComputedStyle(root).visibility : null,
+          conflictDeclarationVisible: bodyText.includes('Conflict of Interest Declaration'),
+          applicationAssessmentVisible: bodyText.includes('Application Assessment'),
+          applicationDecisionVisible: bodyText.includes('Application decision'),
+          loadErrorVisible: bodyText.includes('The application could not be loaded'),
+          storedLayout: window.localStorage.getItem('application-assessment-dashboard-layout.v2'),
+          bodyTail: bodyText.slice(-1200),
+        };
+      }, selector).catch(diagnosticError => ({ diagnosticError: diagnosticError.message || String(diagnosticError) }));
+      error.message = `${error.message}; expectedAssessmentStep=${expectedStep}; wizardState=${JSON.stringify(wizardState)}`;
+      throw error;
+    }
   }
 
   async function clickRadioByLabel(page, label) {
@@ -4295,8 +4323,8 @@ function remoteRunner() {
       snapshotCase: Number(versionSnapshot?.case?.caseId) === Number(caseId),
       snapshotApplication: Number(versionSnapshot?.case?.applicationId) === Number(applicationId),
       snapshotApplicant: Number(versionSnapshot?.case?.applicantUserId) === Number(fixture.applicantUser),
-      snapshotAnswers: versionSnapshot?.sourceAnswers?.['income-employment'] === '1640.50' && versionSnapshot?.sourceAnswers?.['expenses-rent'] === '925.00',
-      targetContextAnswers: targetContextAfter?.applicationAnswers?.['income-employment'] === '1640.50' && targetContextAfter?.applicationAnswers?.['expenses-rent'] === '925.00',
+      snapshotAnswers: moneyValueMatches(versionSnapshot?.sourceAnswers?.['income-employment'], '1640.50') && moneyValueMatches(versionSnapshot?.sourceAnswers?.['expenses-rent'], '925.00'),
+      targetContextAnswers: json(targetContextAfter?.applicationAnswers) === json(versionSnapshot?.sourceAnswers),
       siblingContextUnchanged: json(siblingContextAfter) === json(siblingContextBefore),
       oneCaseVersion: allCaseVersionRows.length === 1,
       caseVersionsTargetApplication: allCaseVersionRows.every(row => (

@@ -4562,11 +4562,14 @@ const CoordinatorAssessmentWidget = forwardRef(
   const isAssessmentSubmitted =
     isPendingApprovalStatus || isApplicationAssessmentReviewerStage;
   const isReviewComplete = APPLICATION_FINAL_STATUSES.has(normalizedApplicationStatus);
+  const isReturnedToSubmitterStage =
+    twoStepReviewEnabled && reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToSubmitter;
   const shouldUnlockWizardNavigation =
     !isEditingAssessment &&
     (
       isPendingApprovalStatus ||
       isApplicationAssessmentReviewerStage ||
+      isReturnedToSubmitterStage ||
       isPostDecisionStatus ||
       isReviewComplete
     );
@@ -8733,10 +8736,12 @@ ${JSON.stringify(aiContext, null, 2)}`;
         setAttemptedSteps(prev => ({ ...prev, [currentStep]: true }));
         setFieldErrors(validateAssessment(assessment));
         const valid = validateWizardStep(currentStep);
-        if (!valid) {
+        const canNavigateReturnedCorrection =
+          isReturnedToSubmitterStage && canEditAssessmentBody;
+        if (!valid && !canNavigateReturnedCorrection) {
           return;
         }
-        if (canManageEligibilityDuringAssessment && currentStep === 'eligibility') {
+        if (valid && canManageEligibilityDuringAssessment && currentStep === 'eligibility') {
           if (!autoSaveOk) {
             const eligibilitySaved = await persistEligibilitySelection();
             if (!eligibilitySaved.ok) {
