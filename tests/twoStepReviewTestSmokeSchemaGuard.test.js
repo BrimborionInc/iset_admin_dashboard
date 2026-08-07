@@ -431,6 +431,38 @@ describe('two-step TEST smoke live-schema guard', () => {
     expect(source).toContain('REMOTE_EVIDENCE_MARKER');
     expect(source).toContain('artifact?.sha256');
     expect(source).toContain('independentlyVerifiedRemoteIdentity');
+    expect(source).toContain('discoverRemoteAwsIdentity(instanceId, options)');
+    expect(source).toContain("require('dotenv').config({ path: '/opt/nwac/admin-dashboard/.env.test' })");
+    expect(source).toContain("expectedRemoteAwsArn: requiredEnv('TWO_STEP_REVIEW_EXPECTED_REMOTE_AWS_ARN')");
+    expect(source).toContain('identity?.Arn !== config.expectedRemoteAwsArn');
     expect(source).toContain('temporaryS3ObjectsAllVersionsVerifiedAbsent');
+  });
+
+  test('R1 intake acceptance preflights before fixtures and guards cleanup against live DDL', () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '..', 'scripts', 'r1-intake-completion-test-smoke.js'),
+      'utf8'
+    );
+
+    expect(source).toContain("const { createLiveSchemaGuard } = require('./two-step-review-test-smoke');");
+    expect(source.indexOf('const preflight = await runRemote({ preflightOnly: true });')).toBeLessThan(
+      source.indexOf('applicant.sub = createCognitoUser({ ...applicant, poolId }, options);')
+    );
+    expect(source.indexOf('result.schemaSafety = await schemaGuard.preflight();')).toBeLessThan(
+      source.indexOf('fixtureMutationStarted = true;')
+    );
+    expect(source).toContain('return schemaGuard.execute(sql, params);');
+    expect(source).not.toMatch(/connection\.(?:query|execute)\(/);
+    expect(source).toContain("throw new Error('--keep-fixture is disabled: release smoke must prove zero TEST residue.');");
+    expect(source).toContain("'iset_application_draft'");
+    expect(source).toContain("'iset_event_delivery'");
+    expect(source).toContain('DELETE FROM client_applicant_account_event WHERE client_id IN');
+    expect(source).not.toContain('DELETE FROM client_applicant_account_event WHERE id IN');
+    expect(source.indexOf('await connection.beginTransaction();')).toBeLessThan(
+      source.indexOf('fixture = await resolveFixtureRows();')
+    );
+    expect(source).toContain('suppressed_after_schema_safety_failure');
+    expect(source).not.toContain('DATE_ADD(UTC_TIMESTAMP()');
+    expect(source).toContain('AS \\`submission_id\\`');
   });
 });

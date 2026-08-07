@@ -795,6 +795,7 @@ function parseArgs(argv) {
     adminEnv: process.env.TWO_STEP_REVIEW_SMOKE_ADMIN_ENV || DEFAULT_ADMIN_ENV,
     portalEnv: process.env.TWO_STEP_REVIEW_SMOKE_PORTAL_ENV || DEFAULT_PORTAL_ENV,
     keepFixture: false,
+    schemaPreflightOnly: false,
     json: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -808,6 +809,7 @@ function parseArgs(argv) {
     else if (token === '--keep-fixture') {
       throw new Error('--keep-fixture is disabled: release smoke must prove zero TEST residue.');
     }
+    else if (token === '--schema-preflight-only') args.schemaPreflightOnly = true;
     else if (token === '--json') args.json = true;
     else if (token === '--help' || token === '-h') {
       usage();
@@ -828,6 +830,7 @@ function usage() {
     '',
     'Options:',
     '  --instance-id ID   Run on a specific online nwac-test-app instance.',
+    '  --schema-preflight-only  Prove live TEST identities/DDL without creating fixtures.',
     '  --profile NAME     AWS profile. Default: nwac-test.',
     '  --region REGION    AWS region. Default: ca-central-1.',
     '  --bucket NAME      Temporary S3 bucket. Default: nwac-test-artifacts.',
@@ -1009,6 +1012,49 @@ function discoverInstanceRoleExpectation(instanceId, options) {
     roleName: role.RoleName,
     roleId: role.RoleId,
   };
+}
+
+function discoverRemoteAwsIdentity(instanceId, options) {
+  const marker = '@@REMOTE_AWS_IDENTITY@@';
+  const discoverySource = [
+    "require('dotenv').config({ path: '/opt/nwac/admin-dashboard/.env.test' })",
+    "require('dotenv').config({ path: '/opt/nwac/admin-dashboard/.env' })",
+    "const { execFileSync } = require('child_process')",
+    `const output = execFileSync('aws', ['sts', 'get-caller-identity', '--region', ${JSON.stringify(options.region)}, '--output', 'json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })`,
+    `process.stdout.write(${JSON.stringify(marker)} + output)`,
+  ].join(';');
+  const commandId = sendRemoteCommand(instanceId, [
+    'set -euo pipefail',
+    'cd /opt/nwac/admin-dashboard',
+    `node -e ${shellQuote(discoverySource)}`,
+  ], 'Codex two-step review remote AWS identity discovery', options);
+  const invocation = waitForCommand(instanceId, commandId, options);
+  if (invocation?.Status !== 'Success') {
+    throw new Error(`Remote AWS identity discovery failed with status ${invocation?.Status || 'unknown'}.`);
+  }
+  const stdout = String(invocation?.Stdout || '');
+  const markerIndex = stdout.lastIndexOf(marker);
+  if (markerIndex < 0) throw new Error('Remote AWS identity discovery emitted no marker.');
+  let identity;
+  try {
+    identity = JSON.parse(stdout.slice(markerIndex + marker.length).trim());
+  } catch (_) {
+    throw new Error('Remote AWS identity discovery emitted invalid JSON.');
+  }
+  const account = String(identity?.Account || '');
+  const arn = String(identity?.Arn || '');
+  const userId = String(identity?.UserId || '');
+  if (
+    account !== EXPECTED_AWS_ACCOUNT ||
+    (
+      !arn.startsWith(`arn:aws:iam::${EXPECTED_AWS_ACCOUNT}:`) &&
+      !arn.startsWith(`arn:aws:sts::${EXPECTED_AWS_ACCOUNT}:`)
+    ) ||
+    !userId
+  ) {
+    throw new Error(`Remote AWS identity was incomplete or outside TEST: ${arn || 'missing'}.`);
+  }
+  return { account, arn, userId };
 }
 
 function createStaffUser({ email, password, givenName, familyName, poolId, groupName }, options) {
@@ -1498,6 +1544,7 @@ async function main() {
   let remoteConfigKey = null;
   let instanceId = null;
   let instanceRoleExpectation = null;
+  let remoteAwsIdentityExpectation = null;
   let result = null;
   const remoteEvidenceKeys = new Set();
   const retainedEvidenceArtifacts = [];
@@ -1506,6 +1553,7 @@ async function main() {
     console.log('[two-step-smoke] Discovering TEST app instance...');
     instanceId = discoverInstanceId(options);
     instanceRoleExpectation = discoverInstanceRoleExpectation(instanceId, options);
+    remoteAwsIdentityExpectation = discoverRemoteAwsIdentity(instanceId, options);
     console.log(`[two-step-smoke] Using ${instanceId}`);
 
     remoteKey = `ssm-scripts/two-step-review-smoke-${stamp}.js`;
@@ -1547,6 +1595,9 @@ async function main() {
           `TWO_STEP_REVIEW_EXPECTED_INSTANCE_ROLE_ARN=${shellQuote(instanceRoleExpectation.roleArn)}`,
           `TWO_STEP_REVIEW_EXPECTED_INSTANCE_ROLE_NAME=${shellQuote(instanceRoleExpectation.roleName)}`,
           `TWO_STEP_REVIEW_EXPECTED_INSTANCE_ROLE_ID=${shellQuote(instanceRoleExpectation.roleId)}`,
+          `TWO_STEP_REVIEW_EXPECTED_REMOTE_AWS_ACCOUNT=${shellQuote(remoteAwsIdentityExpectation.account)}`,
+          `TWO_STEP_REVIEW_EXPECTED_REMOTE_AWS_ARN=${shellQuote(remoteAwsIdentityExpectation.arn)}`,
+          `TWO_STEP_REVIEW_EXPECTED_REMOTE_AWS_USER_ID=${shellQuote(remoteAwsIdentityExpectation.userId)}`,
           `TWO_STEP_REVIEW_EVIDENCE_BUCKET=${shellQuote(expectedObjectBucket)}`,
           `TWO_STEP_REVIEW_EVIDENCE_KEY=${shellQuote(remoteEvidenceKey)}`,
           `TWO_STEP_REVIEW_CREDENTIAL_KEY_PATH=${shellQuote(credentialKeyPath)}`,
@@ -1605,37 +1656,41 @@ async function main() {
       throw new Error('Remote schema preflight did not establish the ephemeral credential transport key.');
     }
 
-    console.log('[two-step-smoke] Creating disposable TEST staff Cognito users...');
-    for (const user of staffUsers) {
-      createdUsers.push(user);
-      user.sub = createStaffUser({ ...user, poolId }, options);
-      user.session = authenticateStaffUser({ ...user, poolId, clientId }, options);
-    }
-    applicantUser.sub = createApplicantUser({ ...applicantUser, poolId: applicantPoolId }, options);
-    remoteConfigKey = `ssm-scripts/two-step-review-smoke-${stamp}.config.enc.json`;
-    uploadRemoteScript(createEncryptedFixtureEnvelope({
-      staffUsers: staffUsers.map(user => ({
-        key: user.key,
-        email: user.email,
-        password: user.password,
-        sub: user.sub,
-        role: user.role,
-        session: user.session,
-      })),
-      applicantUser,
-    }, credentialTransport.publicKeyPem), remoteConfigKey, options);
+    if (options.schemaPreflightOnly) {
+      result = preflightResult;
+    } else {
+      console.log('[two-step-smoke] Creating disposable TEST staff Cognito users...');
+      for (const user of staffUsers) {
+        createdUsers.push(user);
+        user.sub = createStaffUser({ ...user, poolId }, options);
+        user.session = authenticateStaffUser({ ...user, poolId, clientId }, options);
+      }
+      applicantUser.sub = createApplicantUser({ ...applicantUser, poolId: applicantPoolId }, options);
+      remoteConfigKey = `ssm-scripts/two-step-review-smoke-${stamp}.config.enc.json`;
+      uploadRemoteScript(createEncryptedFixtureEnvelope({
+        staffUsers: staffUsers.map(user => ({
+          key: user.key,
+          email: user.email,
+          password: user.password,
+          sub: user.sub,
+          role: user.role,
+          session: user.session,
+        })),
+        applicantUser,
+      }, credentialTransport.publicKeyPem), remoteConfigKey, options);
 
-    console.log('[two-step-smoke] Running deployed TEST two-step review smoke through SSM...');
-    result = runRemote({ preflightOnly: false });
-    result.evidence = result.evidence || {};
-    result.evidence.retainedDetailedArtifacts = retainedEvidenceArtifacts.map(item => ({ ...item }));
-    if (!options.json) {
-      console.log(summarizeResult(result));
-      console.log(`[two-step-smoke] Fixture IDs: ${JSON.stringify(result.fixtureIds)}`);
-    }
-    const failures = (result.checks || []).filter(check => check.status === 'FAIL');
-    if (failures.length) {
-      throw new Error(`${failures.length} two-step review smoke check(s) failed.`);
+      console.log('[two-step-smoke] Running deployed TEST two-step review smoke through SSM...');
+      result = runRemote({ preflightOnly: false });
+      result.evidence = result.evidence || {};
+      result.evidence.retainedDetailedArtifacts = retainedEvidenceArtifacts.map(item => ({ ...item }));
+      if (!options.json) {
+        console.log(summarizeResult(result));
+        console.log(`[two-step-smoke] Fixture IDs: ${JSON.stringify(result.fixtureIds)}`);
+      }
+      const failures = (result.checks || []).filter(check => check.status === 'FAIL');
+      if (failures.length) {
+        throw new Error(`${failures.length} two-step review smoke check(s) failed.`);
+      }
     }
   } finally {
     const cleanupErrors = [];
@@ -1749,6 +1804,9 @@ function remoteRunner() {
     expectedInstanceRoleArn: requiredEnv('TWO_STEP_REVIEW_EXPECTED_INSTANCE_ROLE_ARN'),
     expectedInstanceRoleName: requiredEnv('TWO_STEP_REVIEW_EXPECTED_INSTANCE_ROLE_NAME'),
     expectedInstanceRoleId: requiredEnv('TWO_STEP_REVIEW_EXPECTED_INSTANCE_ROLE_ID'),
+    expectedRemoteAwsAccount: requiredEnv('TWO_STEP_REVIEW_EXPECTED_REMOTE_AWS_ACCOUNT'),
+    expectedRemoteAwsArn: requiredEnv('TWO_STEP_REVIEW_EXPECTED_REMOTE_AWS_ARN'),
+    expectedRemoteAwsUserId: requiredEnv('TWO_STEP_REVIEW_EXPECTED_REMOTE_AWS_USER_ID'),
     evidenceBucket: requiredEnv('TWO_STEP_REVIEW_EVIDENCE_BUCKET'),
     evidenceKey: requiredEnv('TWO_STEP_REVIEW_EVIDENCE_KEY'),
     regionOverride: String(process.env.TWO_STEP_REVIEW_REGION_ID || '').trim(),
@@ -2246,11 +2304,11 @@ function remoteRunner() {
       return output ? JSON.parse(output) : {};
     };
     const identity = execAwsJson(['sts', 'get-caller-identity']);
-    const expectedAssumedRolePrefix = `arn:aws:sts::${config.awsAccount}:assumed-role/${config.expectedInstanceRoleName}/`;
     if (
-      identity?.Account !== config.awsAccount ||
-      !String(identity?.Arn || '').startsWith(expectedAssumedRolePrefix) ||
-      !String(identity?.UserId || '').startsWith(`${config.expectedInstanceRoleId}:`) ||
+      identity?.Account !== config.expectedRemoteAwsAccount ||
+      identity?.Arn !== config.expectedRemoteAwsArn ||
+      identity?.UserId !== config.expectedRemoteAwsUserId ||
+      config.expectedRemoteAwsAccount !== config.awsAccount ||
       config.expectedInstanceRoleArn !== `arn:aws:iam::${config.awsAccount}:role/${config.expectedInstanceRoleName}` ||
       !String(config.expectedInstanceProfileArn).startsWith(`arn:aws:iam::${config.awsAccount}:instance-profile/`)
     ) {
@@ -2267,6 +2325,11 @@ function remoteRunner() {
       account: identity.Account,
       arn: identity.Arn,
       userId: identity.UserId,
+      independentlyDiscoveredExpectedIdentity: {
+        account: config.expectedRemoteAwsAccount,
+        arn: config.expectedRemoteAwsArn,
+        userId: config.expectedRemoteAwsUserId,
+      },
       expectedInstanceProfileArn: config.expectedInstanceProfileArn,
       expectedRoleArn: config.expectedInstanceRoleArn,
       bucket: config.expectedObjectBucket,

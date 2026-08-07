@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { createLiveSchemaGuard } = require('./two-step-review-test-smoke');
 
 const TEST_ACCOUNT_ID = '124355655255';
 const DEFAULT_PROFILE = 'nwac-test';
@@ -12,6 +13,10 @@ const DEFAULT_REGION = 'ca-central-1';
 const DEFAULT_BUCKET = 'nwac-test-artifacts';
 const DEFAULT_PORTAL_ENV = path.resolve(__dirname, '..', '..', 'ISET-intake', '.env.test');
 const DEFAULT_LOCAL_BASE_URL = 'http://127.0.0.1:5000';
+const EXPECTED_TEST_DATABASE = 'iset_intake';
+const EXPECTED_TEST_DATABASE_HOSTNAME = 'ip-172-16-0-199';
+const EXPECTED_TEST_DATABASE_PORT = 3306;
+const EXPECTED_TEST_DATABASE_PRINCIPAL = 'app_admin@10.48.%';
 
 function parseArgs(argv) {
   const args = {
@@ -21,6 +26,7 @@ function parseArgs(argv) {
     instanceId: process.env.R1_INTAKE_SMOKE_INSTANCE_ID || '',
     portalEnv: process.env.R1_INTAKE_SMOKE_PORTAL_ENV || DEFAULT_PORTAL_ENV,
     keepFixture: false,
+    schemaPreflightOnly: false,
     json: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -30,7 +36,10 @@ function parseArgs(argv) {
     else if (token === '--bucket') args.bucket = argv[++index];
     else if (token === '--instance-id') args.instanceId = argv[++index];
     else if (token === '--portal-env') args.portalEnv = argv[++index];
-    else if (token === '--keep-fixture') args.keepFixture = true;
+    else if (token === '--keep-fixture') {
+      throw new Error('--keep-fixture is disabled: release smoke must prove zero TEST residue.');
+    }
+    else if (token === '--schema-preflight-only') args.schemaPreflightOnly = true;
     else if (token === '--json') args.json = true;
     else if (token === '--help' || token === '-h') {
       usage();
@@ -48,7 +57,7 @@ function usage() {
     '',
     'Creates one disposable TEST Cognito applicant and exercises the deployed',
     'portal intake completion boundary against the published TEST workflow and',
-    'real TEST database. Cleanup is automatic unless --keep-fixture is supplied.',
+    'real TEST database. Cleanup is automatic and mandatory.',
     '',
     'Options:',
     '  --instance-id ID   Use a specific online nwac-test-app instance.',
@@ -56,7 +65,7 @@ function usage() {
     '  --region REGION    AWS region. Default: ca-central-1.',
     '  --bucket NAME      Temporary script bucket. Default: nwac-test-artifacts.',
     '  --portal-env PATH  Portal .env.test used for Cognito pool discovery.',
-    '  --keep-fixture     Retain TEST DB/Cognito/object-store fixture.',
+    '  --schema-preflight-only  Prove live TEST identity/DDL without creating fixtures.',
     '  --json             Emit the structured result.',
   ].join('\n'));
 }
@@ -322,6 +331,18 @@ async function main() {
     portalEnv.COGNITO_PORTAL_USER_POOL_ID ||
     portalEnv.COGNITO_USER_POOL_ID;
   if (!poolId) throw new Error('Applicant Cognito user-pool ID is missing from portal .env.test.');
+  const expectedDbName = String(portalEnv.DB_NAME || '').trim();
+  const expectedDbHost = String(portalEnv.DB_HOST || '').trim();
+  const expectedDbUser = String(portalEnv.DB_USER || '').trim();
+  const expectedDbPort = Number(portalEnv.DB_PORT || 3306);
+  if (
+    expectedDbName !== EXPECTED_TEST_DATABASE ||
+    !expectedDbHost ||
+    !expectedDbUser ||
+    expectedDbPort !== EXPECTED_TEST_DATABASE_PORT
+  ) {
+    throw new Error('Portal TEST database target did not match the exact expected release-smoke target.');
+  }
 
   const suffix = crypto.randomBytes(5).toString('hex');
   const stamp = `r1-${Date.now()}-${suffix}`;
@@ -340,42 +361,70 @@ async function main() {
     const instanceId = discoverInstanceId(options);
     console.log(`[r1-intake-test] TEST identity ${identity.Arn}`);
     console.log(`[r1-intake-test] Using ${instanceId}`);
-    applicant.sub = createCognitoUser({ ...applicant, poolId }, options);
-    cognitoCreated = true;
-
     remoteKey = `ssm-scripts/r1-intake-completion-${stamp}.js`;
-    uploadRemoteScript(`(${remoteRunner.toString()})();\n`, remoteKey, options);
-    const remotePath = `/tmp/r1-intake-completion-${stamp}.js`;
-    const commands = [
-      'set -euo pipefail',
-      `aws s3 cp ${shellQuote(`s3://${options.bucket}/${remoteKey}`)} ${shellQuote(remotePath)} --region ${shellQuote(options.region)} --only-show-errors`,
-      `trap 'rm -f ${shellQuote(remotePath)}' EXIT`,
-      'cd /opt/nwac/portal',
-      [
-        `FIXTURE_STAMP=${shellQuote(stamp)}`,
-        `APPLICANT_EMAIL=${shellQuote(applicant.email)}`,
-        `APPLICANT_PASSWORD=${shellQuote(applicant.password)}`,
-        `APPLICANT_SUB=${shellQuote(applicant.sub)}`,
-        `KEEP_FIXTURE=${options.keepFixture ? '1' : '0'}`,
-        `PORTAL_LOCAL_BASE_URL=${shellQuote(DEFAULT_LOCAL_BASE_URL)}`,
-        `node ${shellQuote(remotePath)}`,
-      ].join(' '),
-    ];
-    const commandId = sendRemoteCommand(
-      instanceId,
-      commands,
-      'Codex R1 intake completion TEST rehearsal',
+    uploadRemoteScript(
+      `const createLiveSchemaGuard = ${createLiveSchemaGuard.toString()};\n(${remoteRunner.toString()})();\n`,
+      remoteKey,
       options
     );
-    console.log(`[r1-intake-test] SSM command ${commandId}`);
-    const invocation = await waitForCommand(instanceId, commandId, options);
-    result = parseRemoteResult(invocation?.Stdout);
-    if (invocation?.Status !== 'Success') {
-      throw new Error(`Remote rehearsal failed with status ${invocation?.Status || 'unknown'}: ${invocation?.Stderr || invocation?.Stdout || ''}`);
+
+    const runRemote = async ({ preflightOnly }) => {
+      const remotePath = `/tmp/r1-intake-completion-${stamp}${preflightOnly ? '-preflight' : ''}.js`;
+      const commands = [
+        'set -euo pipefail',
+        `aws s3 cp ${shellQuote(`s3://${options.bucket}/${remoteKey}`)} ${shellQuote(remotePath)} --region ${shellQuote(options.region)} --only-show-errors`,
+        `trap 'rm -f ${shellQuote(remotePath)}' EXIT`,
+        'cd /opt/nwac/portal',
+        [
+          `FIXTURE_STAMP=${shellQuote(preflightOnly ? `${stamp}-preflight` : stamp)}`,
+          `SCHEMA_PREFLIGHT_ONLY=${preflightOnly ? '1' : '0'}`,
+          `R1_EXPECTED_DB_NAME=${shellQuote(expectedDbName)}`,
+          `R1_EXPECTED_DB_HOST=${shellQuote(expectedDbHost)}`,
+          `R1_EXPECTED_DB_USER=${shellQuote(expectedDbUser)}`,
+          `R1_EXPECTED_DB_SERVER_HOSTNAME=${shellQuote(EXPECTED_TEST_DATABASE_HOSTNAME)}`,
+          `R1_EXPECTED_DB_PORT=${shellQuote(expectedDbPort)}`,
+          `R1_EXPECTED_DB_PRINCIPAL=${shellQuote(EXPECTED_TEST_DATABASE_PRINCIPAL)}`,
+          `KEEP_FIXTURE=${options.keepFixture ? '1' : '0'}`,
+          `PORTAL_LOCAL_BASE_URL=${shellQuote(DEFAULT_LOCAL_BASE_URL)}`,
+          ...(preflightOnly ? [] : [
+            `APPLICANT_EMAIL=${shellQuote(applicant.email)}`,
+            `APPLICANT_PASSWORD=${shellQuote(applicant.password)}`,
+            `APPLICANT_SUB=${shellQuote(applicant.sub)}`,
+          ]),
+          `node ${shellQuote(remotePath)}`,
+        ].join(' '),
+      ];
+      const commandId = sendRemoteCommand(
+        instanceId,
+        commands,
+        preflightOnly
+          ? 'Codex R1 intake completion TEST schema preflight'
+          : 'Codex R1 intake completion TEST rehearsal',
+        options
+      );
+      console.log(`[r1-intake-test] SSM command ${commandId}`);
+      const invocation = await waitForCommand(instanceId, commandId, options);
+      const remoteResult = parseRemoteResult(invocation?.Stdout);
+      if (invocation?.Status !== 'Success') {
+        throw new Error(`Remote rehearsal failed with status ${invocation?.Status || 'unknown'}: ${invocation?.Stderr || invocation?.Stdout || ''}`);
+      }
+      if (!remoteResult) throw new Error('Remote rehearsal emitted no parseable result.');
+      const failures = (remoteResult.checks || []).filter(check => check.status === 'FAIL');
+      if (failures.length) throw new Error(`${failures.length} TEST rehearsal check(s) failed.`);
+      return remoteResult;
+    };
+
+    const preflight = await runRemote({ preflightOnly: true });
+    if (!preflight?.schemaSafety?.preflightComplete) {
+      throw new Error('Remote TEST schema preflight did not return complete live-DDL evidence.');
     }
-    if (!result) throw new Error('Remote rehearsal emitted no parseable result.');
-    const failures = (result.checks || []).filter(check => check.status === 'FAIL');
-    if (failures.length) throw new Error(`${failures.length} TEST rehearsal check(s) failed.`);
+    if (options.schemaPreflightOnly) {
+      result = preflight;
+    } else {
+      applicant.sub = createCognitoUser({ ...applicant, poolId }, options);
+      cognitoCreated = true;
+      result = await runRemote({ preflightOnly: false });
+    }
   } catch (error) {
     runError = error;
   } finally {
@@ -420,14 +469,42 @@ function remoteRunner() {
     validateWorkflowCompletionPayload,
   } = portalRequire('./src/services/intakeWorkflowCompletionValidation');
 
+  const preflightOnly = process.env.SCHEMA_PREFLIGHT_ONLY === '1';
   const config = {
     stamp: requiredEnv('FIXTURE_STAMP'),
-    email: requiredEnv('APPLICANT_EMAIL'),
-    password: requiredEnv('APPLICANT_PASSWORD'),
-    sub: requiredEnv('APPLICANT_SUB'),
+    preflightOnly,
+    email: preflightOnly ? null : requiredEnv('APPLICANT_EMAIL'),
+    password: preflightOnly ? null : requiredEnv('APPLICANT_PASSWORD'),
+    sub: preflightOnly ? null : requiredEnv('APPLICANT_SUB'),
     keepFixture: process.env.KEEP_FIXTURE === '1',
     baseUrl: stripTrailingSlash(process.env.PORTAL_LOCAL_BASE_URL || 'http://127.0.0.1:5000'),
+    expectedDatabase: requiredEnv('R1_EXPECTED_DB_NAME'),
+    expectedDbHost: requiredEnv('R1_EXPECTED_DB_HOST'),
+    expectedDbUser: requiredEnv('R1_EXPECTED_DB_USER'),
+    expectedDbServerHostname: requiredEnv('R1_EXPECTED_DB_SERVER_HOSTNAME'),
+    expectedDbPort: Number(requiredEnv('R1_EXPECTED_DB_PORT')),
+    expectedDbPrincipal: requiredEnv('R1_EXPECTED_DB_PRINCIPAL'),
   };
+  const REQUIRED_TABLES = Object.freeze([
+    'client',
+    'client_applicant_account_event',
+    'input_json_state',
+    'iset_application',
+    'iset_application_draft',
+    'iset_application_draft_dynamic',
+    'iset_application_file',
+    'iset_application_submission',
+    'iset_case',
+    'iset_document',
+    'iset_event_delivery',
+    'iset_event_entry',
+    'iset_event_receipt',
+    'iset_internal_notification',
+    'iset_internal_notification_dismissal',
+    'pending_uploads',
+    'user',
+    'user_session_audit',
+  ]);
   const result = {
     status: 'running',
     startedAt: new Date().toISOString(),
@@ -437,10 +514,14 @@ function remoteRunner() {
     publishedWorkflow: null,
     sideEffects: null,
     cleanup: { database: 'not_run', objects: 'not_run' },
+    schemaSafety: null,
   };
   let connection = null;
+  let schemaGuard = null;
   let session = null;
   let expectedObjectKeys = [];
+  let fixtureMutationStarted = false;
+  let cleanupSuppressedForSchemaSafety = false;
 
   execute().catch(() => {
     // execute records and emits its own failure result.
@@ -450,6 +531,28 @@ function remoteRunner() {
     let primaryError = null;
     try {
       connection = await mysql.createConnection(dbConfig());
+      schemaGuard = createLiveSchemaGuard({
+        connection,
+        expectedDatabase: config.expectedDatabase,
+        expectedHost: config.expectedDbHost,
+        expectedUser: config.expectedDbUser,
+        expectedDatabaseHostname: config.expectedDbServerHostname,
+        expectedPort: config.expectedDbPort,
+        expectedPrincipal: config.expectedDbPrincipal,
+        configuredDatabase: requiredEnv('DB_NAME'),
+        configuredHost: requiredEnv('DB_HOST'),
+        configuredUser: requiredEnv('DB_USER'),
+        configuredPort: Number(process.env.DB_PORT || 3306),
+        requiredTables: REQUIRED_TABLES,
+        cryptoModule: crypto,
+      });
+      result.schemaSafety = await schemaGuard.preflight();
+      expect('TEST DB identity and live schema preflight proved', result.schemaSafety.preflightComplete, {
+        identity: result.schemaSafety.identity,
+        ddlHashes: result.schemaSafety.ddlHashes,
+      });
+      if (config.preflightOnly) return;
+      fixtureMutationStarted = true;
       await cleanupFixture({ quiet: true });
       const userId = await seedUser();
       result.fixtureIds.userId = userId;
@@ -563,11 +666,26 @@ function remoteRunner() {
       result.sideEffects = beforeRetry;
     } catch (error) {
       primaryError = error;
+      const schemaSafetyFailureCodes = new Set([
+        'ER_BAD_FIELD_ERROR',
+        'ER_COLLATION_CHARSET_MISMATCH',
+        'ER_ILLEGAL_COLLATION_MIX',
+        'ER_NO_SUCH_TABLE',
+        'ER_PARSE_ERROR',
+        'ER_SP_DOES_NOT_EXIST',
+        'ER_TRUNCATED_WRONG_VALUE_FOR_FIELD',
+        'WARN_DATA_TRUNCATED',
+      ]);
+      const errorCode = String(error?.code || '');
+      cleanupSuppressedForSchemaSafety =
+        errorCode.startsWith('schema_guard_') ||
+        schemaSafetyFailureCodes.has(errorCode) ||
+        String(error?.message || '').startsWith('schema_guard_');
       fail('remote R1 rehearsal completed without an unexpected error', {
         error: error?.stack || error?.message || String(error),
       });
     } finally {
-      if (connection && !config.keepFixture) {
+      if (connection && fixtureMutationStarted && !config.keepFixture && !cleanupSuppressedForSchemaSafety) {
         try {
           await cleanupFixture();
         } catch (cleanupError) {
@@ -576,9 +694,15 @@ function remoteRunner() {
           });
           primaryError = primaryError || cleanupError;
         }
-      } else if (config.keepFixture) {
+      } else if (fixtureMutationStarted && config.keepFixture) {
         result.cleanup = { database: 'kept', objects: 'kept' };
+      } else if (cleanupSuppressedForSchemaSafety) {
+        result.cleanup = {
+          database: 'suppressed_after_schema_safety_failure',
+          objects: 'suppressed_after_schema_safety_failure',
+        };
       }
+      if (schemaGuard) result.schemaSafety = schemaGuard.evidence();
       if (connection) await connection.end().catch(() => {});
       result.status = result.checks.some(check => check.status === 'FAIL') || primaryError ? 'failed' : 'passed';
       result.finishedAt = new Date().toISOString();
@@ -599,11 +723,12 @@ function remoteRunner() {
 
   function dbConfig() {
     return {
-      host: process.env.DB_HOST,
+      host: requiredEnv('DB_HOST'),
       port: Number(process.env.DB_PORT || 3306),
-      user: process.env.DB_USER,
+      user: requiredEnv('DB_USER'),
       password: process.env.DB_PASS || '',
-      database: process.env.DB_NAME || 'iset_intake',
+      database: requiredEnv('DB_NAME'),
+      multipleStatements: false,
       connectTimeout: 10000,
     };
   }
@@ -625,7 +750,8 @@ function remoteRunner() {
   }
 
   async function query(sql, params = []) {
-    return connection.query(sql, params);
+    if (!schemaGuard) throw new Error('schema_guard_not_initialized');
+    return schemaGuard.execute(sql, params);
   }
 
   async function insert(sql, params = []) {
@@ -816,10 +942,11 @@ function remoteRunner() {
   async function persistInputState(userId, workflowId, payload, history) {
     const checksum = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
     const finalStepId = Array.isArray(history) && history.length ? history[history.length - 1] : null;
+    const expiresAt = new Date(Date.now() + (2 * 60 * 60 * 1000));
     await query(
       `INSERT INTO input_json_state
         (user_id, session_token, workflow_id, step_cursor, input_payload, history, doc_refs, client_id, checksum_sha256, version, expires_at)
-       VALUES (?, '', ?, ?, CAST(? AS JSON), CAST(? AS JSON), CAST('[]' AS JSON), NULL, ?, 1, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 2 HOUR))
+       VALUES (?, '', ?, ?, CAST(? AS JSON), CAST(? AS JSON), CAST('[]' AS JSON), NULL, ?, 1, ?)
        ON DUPLICATE KEY UPDATE
          workflow_id = VALUES(workflow_id),
          step_cursor = VALUES(step_cursor),
@@ -830,22 +957,29 @@ function remoteRunner() {
          checksum_sha256 = VALUES(checksum_sha256),
          version = version + 1,
          expires_at = VALUES(expires_at)`,
-      [userId, workflowId || 'iset-v1', finalStepId, JSON.stringify(payload), JSON.stringify(history || []), checksum]
+      [userId, workflowId || 'iset-v1', finalStepId, JSON.stringify(payload), JSON.stringify(history || []), checksum, expiresAt]
     );
   }
 
   async function coreSnapshot(userId) {
-    const [[row]] = await query(
-      `SELECT
-         (SELECT COUNT(*) FROM client WHERE applicant_cognito_sub = ?) AS clients,
-         (SELECT COUNT(*) FROM iset_application_submission WHERE user_id = ?) AS submissions,
-         (SELECT COUNT(*) FROM iset_application a JOIN iset_application_submission s ON s.id = a.submission_id WHERE s.user_id = ?) AS applications,
-         (SELECT COUNT(*) FROM iset_case c JOIN client cl ON cl.id = c.client_id WHERE cl.applicant_cognito_sub = ?) AS cases,
-         (SELECT COUNT(*) FROM iset_document WHERE applicant_user_id = ?) AS documents,
-         (SELECT COUNT(*) FROM iset_event_entry WHERE actor_applicant_user_id = ?) AS events`,
-      [config.sub, userId, userId, config.sub, userId, userId]
-    );
-    return Object.fromEntries(Object.entries(row || {}).map(([key, value]) => [key, Number(value)]));
+    const count = async (sql, params) => {
+      const [[row]] = await query(sql, params);
+      return Number(row?.count || 0);
+    };
+    return {
+      clients: await count('SELECT COUNT(*) AS `count` FROM client WHERE applicant_cognito_sub = ?', [config.sub]),
+      submissions: await count('SELECT COUNT(*) AS `count` FROM iset_application_submission WHERE user_id = ?', [userId]),
+      applications: await count(
+        'SELECT COUNT(*) AS `count` FROM iset_application a JOIN iset_application_submission s ON s.id = a.submission_id WHERE s.user_id = ?',
+        [userId]
+      ),
+      cases: await count(
+        'SELECT COUNT(*) AS `count` FROM iset_case c JOIN client cl ON cl.id = c.client_id WHERE cl.applicant_cognito_sub = ?',
+        [config.sub]
+      ),
+      documents: await count('SELECT COUNT(*) AS `count` FROM iset_document WHERE applicant_user_id = ?', [userId]),
+      events: await count('SELECT COUNT(*) AS `count` FROM iset_event_entry WHERE actor_applicant_user_id = ?', [userId]),
+    };
   }
 
   function coreCountsAreZero(snapshot) {
@@ -855,9 +989,9 @@ function remoteRunner() {
 
   async function coherentResult(userId, ids) {
     const [rows] = await query(
-      `SELECT s.id AS submission_id, s.reference_number, s.user_id,
-              a.id AS application_id, a.client_id AS application_client_id, a.case_id,
-              c.client_id AS case_client_id, cl.applicant_cognito_sub
+      `SELECT s.id AS \`submission_id\`, s.reference_number, s.user_id,
+              a.id AS \`application_id\`, a.client_id AS \`application_client_id\`, a.case_id,
+              c.client_id AS \`case_client_id\`, cl.applicant_cognito_sub
          FROM iset_application_submission s
          JOIN iset_application a ON a.submission_id = s.id
          JOIN iset_case c ON c.id = a.case_id
@@ -996,12 +1130,52 @@ function remoteRunner() {
       [events] = await query(`SELECT id FROM iset_event_entry WHERE ${eventWhere.join(' OR ')}`, eventParams);
     }
     const eventIds = events.map(row => row.id);
+    let eventDeliveries = [];
+    if (eventIds.length) {
+      [eventDeliveries] = await query(
+        `SELECT id FROM iset_event_delivery WHERE event_id IN (${placeholders(eventIds)})`,
+        eventIds
+      );
+    }
     let notifications = [];
     if (eventIds.length) {
       [notifications] = await query(
         `SELECT id FROM iset_internal_notification
           WHERE JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.eventId')) IN (${placeholders(eventIds)})`,
         eventIds
+      );
+    }
+    let applicationDrafts = [];
+    let dynamicDrafts = [];
+    let inputStates = [];
+    let pendingUploads = [];
+    let applicationFiles = [];
+    let sessionAudits = [];
+    if (userIds.length) {
+      const userPlaceholders = placeholders(userIds);
+      [applicationDrafts] = await query(
+        `SELECT id FROM iset_application_draft WHERE user_id IN (${userPlaceholders})`,
+        userIds
+      );
+      [dynamicDrafts] = await query(
+        `SELECT id FROM iset_application_draft_dynamic WHERE user_id IN (${userPlaceholders})`,
+        userIds
+      );
+      [inputStates] = await query(
+        `SELECT user_id FROM input_json_state WHERE user_id IN (${userPlaceholders})`,
+        userIds
+      );
+      [pendingUploads] = await query(
+        `SELECT user_id FROM pending_uploads WHERE user_id IN (${userPlaceholders})`,
+        userIds
+      );
+      [applicationFiles] = await query(
+        `SELECT user_id FROM iset_application_file WHERE user_id IN (${userPlaceholders})`,
+        userIds
+      );
+      [sessionAudits] = await query(
+        `SELECT user_id FROM user_session_audit WHERE user_id IN (${userPlaceholders})`,
+        userIds
       );
     }
     return {
@@ -1013,24 +1187,25 @@ function remoteRunner() {
       caseIds,
       documents,
       eventIds,
+      eventDeliveryIds: eventDeliveries.map(row => Number(row.id)),
       notificationIds: notifications.map(row => Number(row.id)),
+      applicationDraftIds: applicationDrafts.map(row => Number(row.id)),
+      dynamicDraftIds: dynamicDrafts.map(row => Number(row.id)),
+      inputStateRows: inputStates.length,
+      pendingUploadRows: pendingUploads.length,
+      applicationFileRows: applicationFiles.length,
+      sessionAuditRows: sessionAudits.length,
     };
   }
 
   async function cleanupFixture({ quiet = false } = {}) {
-    const fixture = await resolveFixtureRows();
-    const objectKeys = [...new Set(fixture.documents.map(row => row.file_path).filter(Boolean))];
-    const objectFailures = [];
-    for (const key of objectKeys) {
-      try {
-        await deleteObject({ key });
-      } catch (error) {
-        objectFailures.push({ key, error: error?.message || String(error) });
-      }
-    }
-
     await connection.beginTransaction();
+    let fixture;
+    let objectKeys = [];
+    const objectFailures = [];
     try {
+      fixture = await resolveFixtureRows();
+      objectKeys = [...new Set(fixture.documents.map(row => row.file_path).filter(Boolean))];
       if (fixture.notificationIds.length) {
         await query(
           `DELETE FROM iset_internal_notification_dismissal WHERE notification_id IN (${placeholders(fixture.notificationIds)})`,
@@ -1042,6 +1217,7 @@ function remoteRunner() {
         );
       }
       if (fixture.eventIds.length) {
+        await query(`DELETE FROM iset_event_delivery WHERE event_id IN (${placeholders(fixture.eventIds)})`, fixture.eventIds);
         await query(`DELETE FROM iset_event_receipt WHERE event_id IN (${placeholders(fixture.eventIds)})`, fixture.eventIds);
         await query(`DELETE FROM iset_event_entry WHERE id IN (${placeholders(fixture.eventIds)})`, fixture.eventIds);
       }
@@ -1061,18 +1237,17 @@ function remoteRunner() {
       if (fixture.caseIds.length) {
         await query(`DELETE FROM iset_case WHERE id IN (${placeholders(fixture.caseIds)})`, fixture.caseIds);
       }
-      if (fixture.clientEventIds.length) {
-        await query(
-          `DELETE FROM client_applicant_account_event WHERE id IN (${placeholders(fixture.clientEventIds)})`,
-          fixture.clientEventIds
-        );
-      }
       if (fixture.clientIds.length) {
+        await query(
+          `DELETE FROM client_applicant_account_event WHERE client_id IN (${placeholders(fixture.clientIds)})`,
+          fixture.clientIds
+        );
         await query(`DELETE FROM client WHERE id IN (${placeholders(fixture.clientIds)})`, fixture.clientIds);
       }
       if (fixture.userIds.length) {
         const params = fixture.userIds;
         await query(`DELETE FROM input_json_state WHERE user_id IN (${placeholders(params)})`, params);
+        await query(`DELETE FROM iset_application_draft WHERE user_id IN (${placeholders(params)})`, params);
         await query(`DELETE FROM iset_application_draft_dynamic WHERE user_id IN (${placeholders(params)})`, params);
         await query(`DELETE FROM pending_uploads WHERE user_id IN (${placeholders(params)})`, params);
         await query(`DELETE FROM iset_application_file WHERE user_id IN (${placeholders(params)})`, params);
@@ -1083,6 +1258,14 @@ function remoteRunner() {
     } catch (error) {
       await connection.rollback();
       throw error;
+    }
+
+    for (const key of objectKeys) {
+      try {
+        await deleteObject({ key });
+      } catch (error) {
+        objectFailures.push({ key, error: error?.message || String(error) });
+      }
     }
 
     const residue = await resolveFixtureRows();
@@ -1100,8 +1283,15 @@ function remoteRunner() {
       residue.caseIds,
       residue.documents,
       residue.eventIds,
+      residue.eventDeliveryIds,
       residue.notificationIds,
-    ].every(values => values.length === 0);
+      residue.applicationDraftIds,
+      residue.dynamicDraftIds,
+    ].every(values => values.length === 0) &&
+      residue.inputStateRows === 0 &&
+      residue.pendingUploadRows === 0 &&
+      residue.applicationFileRows === 0 &&
+      residue.sessionAuditRows === 0;
     if (!quiet) {
       result.cleanup = {
         database: databaseEmpty ? 'verified_empty' : 'residue',

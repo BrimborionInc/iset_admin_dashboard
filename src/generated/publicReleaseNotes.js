@@ -1,7 +1,7 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-08-07T03:24:09.181Z",
-  "releaseId": "20260806-assessment-correction-hotfix-r3",
-  "releaseLabel": "Release 20260806-assessment-correction-hotfix-r3",
+  "generatedAt": "2026-08-07T04:48:29.863Z",
+  "releaseId": "20260807-assessment-correction-hotfix-r4",
+  "releaseLabel": "Release 20260807-assessment-correction-hotfix-r4",
   "releaseDateEn": "7th August 2026",
   "releaseDateFr": "7 aout 2026",
   "en": {
@@ -14,7 +14,7 @@ const publicReleaseNotes = {
     ],
     "featurePackages": [
       {
-        "title": "Release 20260806-assessment-correction-hotfix-r3",
+        "title": "Release 20260807-assessment-correction-hotfix-r4",
         "items": [
           "Financial Overview requests and signing no longer replace the active Application Assessment review stage or hide a returned assessment from the correct queue.",
           "A returned assessment can be edited and resubmitted only by the staff member recorded as its original submitter; a correction-required reopened assessment must be returned for correction before it can move forward again.",
@@ -50,7 +50,7 @@ const publicReleaseNotes = {
     ],
     "featurePackages": [
       {
-        "title": "Release 20260806-assessment-correction-hotfix-r3",
+        "title": "Release 20260807-assessment-correction-hotfix-r4",
         "items": [
           "Les demandes et signatures d'aperçu financier ne remplacent plus l'étape active de révision d'une évaluation de demande et ne masquent plus une évaluation retournée dans la mauvaise file.",
           "Une évaluation retournée peut être modifiée et soumise de nouveau uniquement par la personne enregistrée comme l'ayant soumise initialement. Une évaluation rouverte pour correction doit être retournée avant de pouvoir progresser de nouveau.",
