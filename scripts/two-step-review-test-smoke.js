@@ -1846,6 +1846,7 @@ function remoteRunner() {
     'iset_application_submission',
     'iset_case',
     'iset_case_action_plan',
+    'iset_case_conflict_declaration',
     'iset_case_intervention',
     'iset_case_note',
     'iset_case_reminder',
@@ -1893,6 +1894,7 @@ function remoteRunner() {
     'iset_application_submission.id',
     'iset_case.id',
     'iset_case_action_plan.id',
+    'iset_case_conflict_declaration.case_id',
     'iset_case_intervention.id',
     'iset_case_note.case_id',
     'iset_case_reminder.case_id',
@@ -2685,7 +2687,8 @@ function remoteRunner() {
   }
 
   async function dismissTutorialPromptIfPresent(page) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    let tutorialSeen = false;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
       const clicked = await page.evaluate(() => {
         const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
         const visible = element => {
@@ -2700,8 +2703,16 @@ function remoteRunner() {
         skip.click();
         return true;
       });
-      if (!clicked) return;
-      await delay(300);
+      if (clicked) {
+        tutorialSeen = true;
+        await delay(300);
+        continue;
+      }
+      const workspaceVisible = await page.evaluate(() => (
+        (document.body?.innerText || '').includes('ISET Application Assessment')
+      ));
+      if (tutorialSeen || (workspaceVisible && attempt >= 12)) return;
+      await delay(250);
     }
   }
 
@@ -2762,6 +2773,64 @@ function remoteRunner() {
     if (!clicked) throw new Error(`Visible enabled button not found: ${label}`);
   }
 
+  async function clickRadioByLabel(page, label) {
+    const clicked = await page.evaluate(targetText => {
+      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+      const visible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      const radios = Array.from(document.querySelectorAll('[role="radio"], input[type="radio"]')).filter(visible);
+      for (const radio of radios) {
+        let node = radio;
+        for (let depth = 0; depth < 8 && node; depth += 1) {
+          if (normalize(node.innerText || node.textContent || '').includes(targetText)) {
+            radio.scrollIntoView({ block: 'center', inline: 'center' });
+            radio.click();
+            return true;
+          }
+          node = node.parentElement;
+        }
+      }
+      return false;
+    }, label);
+    if (!clicked) throw new Error(`Visible radio option not found: ${label}`);
+  }
+
+  async function ensureNoConflictDeclarationThroughBrowser(page, caseId, applicationId) {
+    const gate = await page.waitForFunction(() => {
+      const body = document.body?.innerText || '';
+      if (body.includes('Decision Maker requested changes')) return 'decision';
+      if (body.includes('Conflict of Interest Declaration')) return 'conflict';
+      return false;
+    }, { timeout: 60_000 }).then(handle => handle.jsonValue());
+    if (gate === 'decision') return;
+
+    await clickRadioByLabel(page, 'I do not have any actual, potential, or perceived conflict of interest');
+    const responsePromise = page.waitForResponse(response => {
+      try {
+        return response.request().method() === 'PUT' && new URL(response.url()).pathname === `/api/cases/${caseId}`;
+      } catch (_) {
+        return false;
+      }
+    }, { timeout: 60_000 });
+    await clickVisibleButton(page, 'Sign and Continue');
+    const response = await responsePromise;
+    const requestBody = JSON.parse(response.request().postData() || '{}');
+    const responseText = await response.text().catch(() => '');
+    if (!response.ok()) {
+      throw new Error(`Conflict declaration returned ${response.status()}: ${responseText.slice(0, 500)}`);
+    }
+    expect('application assessment: synthetic RM satisfied the per-file conflict declaration prerequisite', (
+      Number(requestBody.applicationId) === Number(applicationId) &&
+      requestBody.assessment_conflict_declaration_signed === true &&
+      requestBody.assessment_conflict_declaration_choice === 'no_conflict'
+    ), { caseId, applicationId, requestBody, status: response.status() });
+    await waitForBodyText(page, 'Decision Maker requested changes');
+  }
+
   async function fillFirstVisibleTextarea(page, value) {
     const updated = await page.evaluate(nextValue => {
       const visible = element => {
@@ -2791,7 +2860,7 @@ function remoteRunner() {
     try {
       await page.goto(`${config.localBaseUrl}${routePath}`, { waitUntil: 'domcontentloaded' });
       await dismissTutorialPromptIfPresent(page);
-      await waitForBodyText(page, 'Decision Maker requested changes');
+      await ensureNoConflictDeclarationThroughBrowser(page, caseId, applicationId);
       const visibleReviewActions = await page.evaluate(() => {
         const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
         const visible = element => {
@@ -6313,6 +6382,7 @@ function remoteRunner() {
       }
       await deleteWhereLike('iset_event_entry', 'payload_json', stampLike);
       await deleteWhereIn('iset_case_note', 'case_id', caseIds);
+      await deleteWhereIn('iset_case_conflict_declaration', 'case_id', caseIds);
       await deleteWorkflowRows(caseIds, applicationIds, interventionIds, proposalIds);
       await deleteWhereIn('application_lock', 'application_id', applicationIds);
       const documentIds = await idsForDocuments(caseIds, stampLike);
@@ -6816,6 +6886,11 @@ function remoteRunner() {
         [...caseIds.map(String), ...caseIds, ...caseIds]
       );
       counts.caseEvents = Number(caseEventCount.count || 0);
+      const [conflictDeclarationRows] = await query(
+        `SELECT id FROM iset_case_conflict_declaration WHERE case_id IN (${placeholders})`,
+        caseIds
+      );
+      counts.conflictDeclarations = conflictDeclarationRows.length;
       const [[caseNotificationCount]] = await query(
         `SELECT COUNT(*) AS \`count\`
            FROM iset_internal_notification

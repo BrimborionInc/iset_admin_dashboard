@@ -105,6 +105,10 @@ describe('RM review requested notifications', () => {
         subject_type: 'case',
         subject_id: '1',
         event_data: {
+          application_id: 73,
+          intervention_id: 81,
+          action_plan_id: 91,
+          proposal_id: 101,
           workflow_type: 'application_assessment',
           review_stage: 'rm_review',
           tracking_id: 'ISET-20260620-C69321',
@@ -123,5 +127,23 @@ describe('RM review requested notifications', () => {
     expect(inserted.map(params => params[7])).toEqual([968, 4011]);
     expect(inserted.every(params => params[0] === 'rm_review_requested')).toBe(true);
     expect(inserted.every(params => params[2] === 'Pending Review')).toBe(true);
+    expect(inserted.map(params => JSON.parse(params[11]))).toEqual([
+      expect.objectContaining({
+        caseId: 1,
+        applicationId: 73,
+        interventionId: 81,
+        actionPlanId: 91,
+        proposalId: 101,
+        workflowType: 'application_assessment',
+      }),
+      expect.objectContaining({
+        caseId: 1,
+        applicationId: 73,
+        interventionId: 81,
+        actionPlanId: 91,
+        proposalId: 101,
+        workflowType: 'application_assessment',
+      }),
+    ]);
   });
 });

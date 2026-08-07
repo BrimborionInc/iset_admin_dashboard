@@ -42,6 +42,7 @@ import {
   isMaintenanceAnnouncementVisible,
 } from './utils/maintenanceAnnouncement.js';
 import { buildApplicationStatusInfo } from './utils/applicationStatus';
+import { buildNotificationTargetPath } from './utils/notificationTarget';
 import { buildApplicationWorkspaceTutorials, APPLICATION_WORKSPACE_TUTORIAL_ID } from './tutorials/applicationWorkspaceTutorials';
 	import { buildCaseWorkspaceTutorials, CASE_WORKSPACE_TUTORIAL_ID } from './tutorials/caseWorkspaceTutorials';
 	import {
@@ -1258,20 +1259,21 @@ const AppContent = () => {
         const trackingId = metadata.trackingId || null;
         const caseNumber = metadata.caseNumber || null;
         const appReference = metadata.applicationReference || null;
+        const applicationId = metadata.applicationId || metadata.application_id || null;
         const isCaseManaged = metadata.isCaseManaged === true;
-        const href =
-          isCaseManaged && caseId
-            ? `/cases/${caseId}`
-            : caseId
-              ? `/application-case/${caseId}`
-              : trackingId
-                ? `/application-case/${trackingId}`
-                : null;
+        const href = buildNotificationTargetPath({
+          caseId,
+          applicationId,
+          trackingId,
+          isCaseManaged,
+        });
         const linkColor = (flashType === 'info' || flashType === 'success') ? 'inverted' : 'normal';
         const openApplicationTarget = caseNumber || appReference || trackingId || null;
         const linkLabel = eventKey === 'document_signed'
           ? (openApplicationTarget ? `Open application ${openApplicationTarget}` : 'Open application')
-          : caseId
+          : applicationId
+            ? (appReference ? `View application ${appReference}` : 'View application')
+            : caseId
             ? (caseNumber ? `View case ${caseNumber}` : 'View case')
             : appReference
               ? `View application ${appReference}`

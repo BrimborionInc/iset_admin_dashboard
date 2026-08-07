@@ -22,6 +22,7 @@
 - The unfinished `iset_event_outbox` scaffold remains retired. Migration `20260711_0003_add_durable_event_delivery.sql` introduces the distinct, fully consumed `iset_event_delivery` queue for notification fan-out and recipient email outcomes.
 - Assessment recall now emits `assessment_recalled` from the application-assessment and intervention-proposal recall endpoints. The event records the case/application/proposal scope, recalled assessment version, archived document ids, and status transition so withdrawn submissions remain auditable without staying in the active approver document stream.
 - The delivery poller is a required long-lived service. Its schedule and owner remain strongly referenced and its timer remains event-loop referenced; deployed acceptance must create a queued event after startup and prove the worker claims and delivers it rather than treating the immediate startup pass as sufficient evidence.
+- Bell fan-out preserves exact entity scope from canonical event payloads in notification metadata: `applicationId`, `interventionId`, `actionPlanId`, and `proposalId` are normalized when supplied. Admin-shell application links use the exact application ID instead of relying on a case-primary fallback, which is required when one case has repeat applications.
 
 ## Progress Log
 
@@ -50,6 +51,10 @@
 ### 2026-08-07 - Delivery-worker liveness hardening
 - r6 deployed TEST acceptance created multiple valid queued admin events whose fan-out rows remained `pending` with `attempt_count=0`, proving the worker had completed no post-startup poll. Candidate r7 retains the worker owner and keeps its timer referenced instead of discarding an unreferenced background schedule.
 - Regression coverage drives the scheduled callback after startup and proves a newly enqueued fan-out reaches `delivered`. The deployed two-step journey remains the release gate because only it proves the long-lived TEST process continues polling real queued rows.
+
+### 2026-08-07 - Exact notification entity scope
+- r8 TEST acceptance proved review fan-out and recipient deliveries reached `delivered`, but the bell rows contained only case/tracking context. Exact application/intervention assertions therefore found no qualifying row even though a visible bell existed.
+- Shared fan-out now copies normalized application, intervention, action-plan, proposal, and workflow identifiers from the canonical event payload into bell metadata. The admin shell carries an exact application ID in the target link, and focused dispatch/link regressions distinguish repeat applications on the same case.
 
 ### 2025-09-30 - Admin endpoints & widgets upgraded
 - Hardened `/api/cases/:case_id/events`, `/api/events/feed`, and `/api/events` with filter parsing, validation (types, categories, date bounds), and consistent error codes.
@@ -326,7 +331,6 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 - Finalise scope for Step 2 (legacy code removal) and create tracking tasks.
 - Draft schema migration scripts and event service interface skeletons.
 - Define API contracts (OpenAPI/TypeScript types) for frontend and portal teams.
-
 
 
 
