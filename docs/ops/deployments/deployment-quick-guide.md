@@ -154,6 +154,8 @@ npm run path:maintenance -- clear --env prod --surfaces all --yes
 
 If the ASG refresh reports `Target.NotInUse` or insufficient ELB health data while fallback is active, first verify the replacement instance is actually serving local `/healthz` on the admin/portal ports through SSM. If the host is still bootstrapping (`npm ci`, pm2 not started, or local health failing), keep fallback active and recheck shortly. Once local health passes, clear the fallback in another shell so ELB can evaluate real target health, then let the refresh continue.
 
+On the single-instance PROD topology, local readiness does not prove that the target has already met the ALB healthy-threshold count. For an all-surface refresh, hand routing back one surface at a time: clear admin fallback, wait until the admin target group reports `healthy`, and smoke admin; then clear portal fallback, wait until the portal target group reports `healthy`, and smoke both portal hosts. If an immediate public smoke returns `503`, restore fallback at once and repeat the target-group-gated handoff. Keep the in-app warning active until both target groups and all public readiness checks are green.
+
 Use this when:
 - the change has already been validated in TEST
 - the maintenance warning/fallback sequence has been stated before the run
