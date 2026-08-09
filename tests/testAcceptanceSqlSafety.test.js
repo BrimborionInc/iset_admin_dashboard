@@ -116,11 +116,15 @@ describe('TEST acceptance SQL safety wiring', () => {
     const postflight = source('scripts/path-test-runtime-postflight.js');
     const metrics = source('scripts/path-test-runtime-metrics.js');
     const ledger = source('scripts/path-test-migration-ledger.js');
+    const deploy = source('scripts/path-deploy.js');
 
     expect(postflight).not.toContain('run-test-sql-via-ssm.sh');
     expect(postflight).not.toContain('SELECT COUNT(*) FROM iset_event_delivery');
     expect(postflight).toContain('node scripts/path-test-runtime-metrics.js');
     expect(postflight).toContain('node scripts/path-test-migration-ledger.js');
+    expect(deploy).toContain("'lib/live-mysql-schema-guard.js'");
+    expect(deploy).toContain("'path-test-migration-ledger.js'");
+    expect(deploy).toContain("'path-test-runtime-metrics.js'");
     expect(metrics).toContain("const { createLiveMysqlSchemaGuard } = require('./lib/live-mysql-schema-guard');");
     expect(ledger).toContain("const { createLiveMysqlSchemaGuard } = require('./lib/live-mysql-schema-guard');");
     expect(metrics.indexOf('await guard.preflight();')).toBeLessThan(
