@@ -1534,7 +1534,7 @@ function buildScenarios() {
       },
     },
     {
-      name: 'regional-manager-return-to-coordinator',
+      name: 'regional-manager-return-to-submitter',
       role: 'Regional Manager',
       path: approvalEntryPath('decision'),
       casePayload: buildCasePayload({
@@ -1551,9 +1551,9 @@ function buildScenarios() {
         if (commitButtons.length) {
           throw new Error(`RM review exposed final Commit control: ${JSON.stringify(commitButtons)}`);
         }
-        await waitForText(page, 'Return to Coordinator');
+        await waitForText(page, 'Return to submitter');
         await fillFirstVisibleTextarea(page, 'Please clarify the training rationale before approval.');
-        await clickButtonByText(page, 'Return to Coordinator');
+        await clickButtonByText(page, 'Return to submitter');
         const reviewAction = await waitUntil(
           () => state.mutations.reviewActions.find(entry => entry.body.action === REVIEW_ACTIONS.rmReturnToSubmitter),
           'RM return review action POST'
@@ -1567,7 +1567,7 @@ function buildScenarios() {
         if (!String(reviewAction.body.note || '').includes('training rationale')) {
           throw new Error('RM return did not send review notes.');
         }
-        await waitForText(page, 'Assessment returned to the Coordinator with notes.');
+        await waitForText(page, 'Assessment returned to the submitter with notes.');
       },
     },
     {
@@ -1595,10 +1595,10 @@ function buildScenarios() {
       }),
       run: async ({ page, state }) => {
         await waitForWorkspaceReady(page, 'Regional Manager review');
-        await waitForText(page, 'Coordinator correction required');
-        await waitForText(page, 'Return this reopened assessment to the Coordinator with correction notes.');
-        await waitForText(page, 'Return it to the Coordinator for correction before it can be submitted for another final decision.');
-        await waitForButtonEnabled(page, 'Return to Coordinator');
+        await waitForText(page, 'Submitter correction required');
+        await waitForText(page, 'Return this reopened assessment to the original submitter with correction notes.');
+        await waitForText(page, 'Return it to the original submitter for correction before it can be submitted for another final decision.');
+        await waitForButtonEnabled(page, 'Return to submitter');
 
         await page.screenshot({
           path: path.join(state.screenshotDir, `${state.name}-before-return.png`),
@@ -1615,7 +1615,7 @@ function buildScenarios() {
         }
 
         await fillFirstVisibleTextarea(page, 'Correct the approved funding amounts, then resubmit the assessment.');
-        await clickButtonByText(page, 'Return to Coordinator');
+        await clickButtonByText(page, 'Return to submitter');
         const reviewAction = await waitUntil(
           () => state.mutations.reviewActions.find(entry => entry.body.action === REVIEW_ACTIONS.rmReturnToSubmitter),
           'required correction return POST'
@@ -1624,9 +1624,9 @@ function buildScenarios() {
           throw new Error('Required correction return did not send the correction note.');
         }
         if (state.casePayload.reviewWorkflow?.currentStage !== REVIEW_STAGES.returnedToSubmitter) {
-          throw new Error(`Required correction return did not reach the Coordinator: ${state.casePayload.reviewWorkflow?.currentStage}`);
+          throw new Error(`Required correction return did not reach the submitter: ${state.casePayload.reviewWorkflow?.currentStage}`);
         }
-        await waitForText(page, 'Assessment returned to the Coordinator with notes.');
+        await waitForText(page, 'Assessment returned to the submitter with notes.');
       },
     },
     {
@@ -1754,8 +1754,8 @@ function buildScenarios() {
         if (submitToNwacVisible) {
           throw new Error('Returned-to-RM review should not offer Submit for final decision.');
         }
-        await fillFirstVisibleTextarea(page, 'Coordinator, please address the funding-source explanation.');
-        await clickButtonByText(page, 'Forward changes to Coordinator');
+        await fillFirstVisibleTextarea(page, 'Submitter, please address the funding-source explanation.');
+        await clickButtonByText(page, 'Forward changes to submitter');
         const reviewAction = await waitUntil(
           () => state.mutations.reviewActions.find(entry => entry.body.action === REVIEW_ACTIONS.rmForwardChangesToSubmitter),
           'RM forward-changes review action POST'
@@ -1769,9 +1769,9 @@ function buildScenarios() {
         if (!String(reviewAction.body.note || '').includes('funding-source')) {
           throw new Error('RM forward did not send review notes.');
         }
-        await waitForText(page, 'Requested changes forwarded to the Coordinator.');
+        await waitForText(page, 'Requested changes forwarded to the submitter.');
         if (state.casePayload.applicationStatus !== 'in_review') {
-          throw new Error(`RM forward should reopen coordinator editing, got ${state.casePayload.applicationStatus}`);
+          throw new Error(`RM forward should reopen submitter editing, got ${state.casePayload.applicationStatus}`);
         }
       },
     },

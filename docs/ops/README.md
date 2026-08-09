@@ -1,7 +1,7 @@
 # Operations Docs
 
 Status: operational guidance and runbooks. Verify before acting.
-Last reviewed: 2026-07-13 after release qualification became the enforced TEST/PROD admission boundary.
+Last reviewed: 2026-08-09 after the RM two-step review assurance handoff was added.
 
 This directory contains deployment guides, environment guides, migration-runner notes, incident notes, and infrastructure runbooks. Operational docs can become dangerous when stale, so treat code, package scripts, AWS/DB live checks, and current `docs/AGENTS.md` guardrails as higher authority.
 
@@ -14,6 +14,7 @@ This directory contains deployment guides, environment guides, migration-runner 
 - For PROD Aurora provisioned downsizing, use `runbooks/prod-aurora-provisioned-downsize.md`; do not modify the only writer in place. The 2026-06-14 prep summary is `runbooks/prod-aurora-downsize-prep-summary-20260614.md`.
 - For PROD NAT gateway consolidation, use `runbooks/prod-nat-gateway-consolidation.md`; current live state keeps only the `ca-central-1d` NAT and the temporary policy `NWACProdNatConsolidationTemporaryOperator` should be removed after the rollback watch window.
 - For TEST environment work, use `environments/test-env-config-map.md`, `environments/test-env-db-refresh.md`, and current rehearsal notes when relevant.
+- For feedback `#179`, use `feedback-179-amanda-response-draft-20260809.md` together with the testing assurance and future PROD rollout plan; the email remains a draft until the exact live Application 123 recheck is complete.
 - For privacy ERM migration work, use `environments/privacy-erm-grand-cleanup-rehearsal.md` with the controlling planning docs.
 - For Terraform, use `runbooks/` and verify against `infra/terraform/`.
 

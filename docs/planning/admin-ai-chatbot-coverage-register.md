@@ -1,7 +1,7 @@
 # Admin AI Chatbot Coverage Register
 
 Status: current working register
-Last updated: 2026-05-28
+Last updated: 2026-08-08
 
 ## Purpose
 
@@ -54,7 +54,7 @@ Priority is about execution order, not scope.
 | `src/documentation/documentationLinks.js` | `/documentation` library catalog. | source-only | Identifies current training documents shown in the admin Guidance Library. |
 | `src/documentation/runtime/trainingModules2025.json` | Runtime training module content for `/documentation`. | source-only | Policy/process source corpus; not UI behavior truth. |
 | `docs/training/TRAINING_MODULES_September_2025_extracted.md` | Extracted NWAC training/process source. | source-only | Baseline for staff expectations and job-aid language. |
-| `src/server/adminAiGuidanceService.js` | Current DB-backed guidance retrieval, seed data, no-match guardrail prompt, and guidance-card schema bootstrap. | partial | Current seed covers application Request Changes review, application missing-document follow-up, homepage Pending Completion, imported/application-less backload guidance, and approved intervention proposal/revision approval-letter follow-up; unmatched help-panel workflow questions now get a strict no-match guard instead of a free general answer. |
+| `src/server/adminAiGuidanceService.js` | Current DB-backed guidance retrieval, seed data, no-match guardrail prompt, and guidance-card schema bootstrap. | partial | Current seed covers the two-step up/down route, EI gates and funding-stream alignment, post-approval CFA production, application Request Changes review, application missing-document follow-up, homepage Pending Completion, imported/application-less backload guidance, and approved intervention proposal/revision approval-letter follow-up; unmatched help-panel workflow questions get a strict no-match guard instead of a free general answer. |
 | `sql/migrations/20260507_0001_harden_admin_ai_guidance_schema.sql` | Migration record for richer guidance-card and approved-example metadata. | partial | Adds source type/domain/status, workflow states, expected anchors, forbidden patterns, applicability/steps/side-effect/restriction text, review date, example context, source refs, eval fixture IDs, and indexes. |
 | `src/AppContent.js` | Help-chat shell, system prompt, page-context payload. | partial | Client prompt still discourages invention; server retrieval/no-match prompts now carry the stricter grounding policy. |
 | `isetadminserver.js` `/api/ai/chat` | OpenRouter proxy, privacy filter, guidance/no-match prompt injection, debug-gated guidance diagnostics. | partial | Preserve sensitive-content gates while expanding retrieval; `_guidance` metadata is System Administrator-only and requires `ADMIN_AI_GUIDANCE_DEBUG=true`. |
@@ -68,10 +68,10 @@ Initial route inventory from `src/routes/AppRoutes.js`.
 
 | Route | Surface | Domain | Priority | Current Help Source | KB Status | Next Coverage Work |
 | --- | --- | --- | --- | --- | --- | --- |
-| `/` | Home dashboard | Home / work queues | P0 | `homeDashboardHelp.js`; homepage widget help files | partial | Seeded card now covers Pending Completion purpose/routing. Map remaining role-specific queues, homepage widgets, work-item routing, and common "what do I do next" prompts. |
+| `/` | Home dashboard | Home / work queues | P0 | `homeDashboardHelp.js`; homepage widget help files | partial | Seeded cards cover Pending Completion plus the cross-route two-step up/down contract. Map remaining role-specific queues, homepage widgets, work-item routing, and common "what do I do next" prompts. |
 | `/case-assignment-dashboard` | Manage ISET Applications | Applications / intake triage | P0 | `caseAssignmentDashboardHelp.js`; `applicationsWidgetHelp.js` | inventory-only | Cover filters, assignment, auto-assignment, flagged items, search, status groups, and route to Application Workspace. |
-| `/application-case/:id` | Application Workspace | Application assessment | P0 | `applicationCaseDashboardHelp.js`; application widget help files | partial | Seeded cards now cover missing-document follow-up during assessment and Request Changes during application approval review. Convert broader application assessment, approval letters, funding forms/signatures, supporting documents, secure messaging, notes, and events into cards. |
-| `/cases/:caseId` | Case Workspace | Case management | P0 | `caseWorkspaceHelp.js`; case-workspace widget help files | partial | Seeded cards now cover backloads and approved intervention proposal/revision approval-letter follow-up; create coverage for case header, participant details, action plans, broader interventions, proposed interventions, documents, messages, notes, finance, compliance, and timeline. |
+| `/application-case/:id` | Application Workspace | Application assessment | P0 | `applicationCaseDashboardHelp.js`; application widget help files | partial | Seeded cards cover missing-document follow-up, Decision Maker Request Changes, the complete two-step route, EI gates, and post-approval CFA production. Convert remaining approval-letter, supporting-document, secure-message, note, and event questions into cards. |
+| `/cases/:caseId` | Case Workspace | Case management | P0 | `caseWorkspaceHelp.js`; case-workspace widget help files | partial | Seeded cards cover backloads, approved intervention proposal/revision letter follow-up, the complete two-step route, EI gates, and post-approval CFA production; create coverage for remaining case header, participant, action-plan, intervention, document, message, note, finance, compliance, and timeline questions. |
 | `/iset/cases` | Case Management portfolio | Case management | P0 | `portfolioDashboardHelp.js`; `portfolioCasesTableHelp.js` | inventory-only | Cover portfolio filters, assigned/region/global views, case open behavior, status meanings, and quick actions. |
 | `/iset/applications/intake` | Manual Application Intake | Intake / applications | P0 | `manualApplicationIntakeHelp.js` | inventory-only | Cover manual-intake limits, step handling, portal-only step omissions, drafts, submission effects, and privacy cautions. |
 | `/iset/imports/client-files` | Client Batch Import | Imports / backload | P0 | `clientFileImportDashboardHelp.js`; `clientFileImportWidgetHelp.js`; `docs/guides/client-file-imports.md` | inventory-only | Cover dry-run, commit, application-less cases, imported users, duplicate identity rules, and historical documents. |
@@ -186,6 +186,9 @@ The fixture source is `docs/testing/admin-ai-chatbot-eval-fixtures.json`; run `n
 | Imports / Backload | Can I backload an active intervention? | backlog |
 | Application Assessment | What do I do when required documents are missing? | verified guidance card seeded |
 | Application Assessment | How do I request changes instead of approving an application? | verified guidance card seeded |
+| Two-Step Review | How does two-step review move work up for approval and back down for changes? | verified guidance card seeded |
+| Two-Step Review | Where do EI status checks fit in two-step review? | verified guidance card seeded |
+| Two-Step Review | When is the Client Funding Agreement produced in the review workflow? | verified guidance card seeded |
 | Living Allowance | What documentation is needed before recommending a living allowance? | backlog |
 | Supporting Documents | Where should I upload a Band/Nation funding decision letter? | backlog |
 | Secure Messaging | Should I send a secure message or use Contact Communications? | backlog |
@@ -211,3 +214,4 @@ The fixture source is `docs/testing/admin-ai-chatbot-eval-fixtures.json`; run `n
 - 2026-05-07: Added a verified workflow card for missing required documents during application assessment, tying Supporting Documents checklist review to Secure Messaging requests and Notes/Case Notes follow-up documentation.
 - 2026-05-07: Added a verified workflow card for Application Approval `Request Changes`, including the required Request Changes note, Case Notes side effect, and non-denial/non-letter guardrails.
 - 2026-05-28: Added verified ESDC/ILMP guidance and eval fixtures for participant batch XML export/download/manual-upload workflow and Recent ILMP exports XML-snapshot/requeue behavior.
+- 2026-08-08: Aligned the live two-step review Info panels and page-local AI contexts, corrected the Decision Maker Request Changes card to preserve the Regional Manager hop, and added verified cards/eval fixtures for the full up/down route, EI approval gates and funding-stream alignment, and conditional post-approval CFA production.

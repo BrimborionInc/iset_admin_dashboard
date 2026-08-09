@@ -2,7 +2,7 @@
 
 Purpose: document the live pending-decision/review-mode behavior of the shared homepage `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-08-06
+Last Updated: 2026-08-09
 
 ## Scope
 
@@ -57,7 +57,9 @@ Last Updated: 2026-08-06
 - `Province`
   - uses the applicant submission address province/territory when available
 - `EI status`
-  - uses `assessment_esdc_eligibility` from the case assessment for both approval types
+  - application-assessment rows use the selected application's assessment EI value
+  - new-intervention rows use the proposal's explicit `metadata.review.eiStatus`; they do not borrow the case assessment value
+  - revision rows use that explicit proposal value when present and otherwise fall back only to the same parent Action Plan's `EIClaimant`
   - blank values are shown as `Not yet verified`
 - `Timeline target`
   - uses the same due/overdue badge style as the rest of the homepage work queue
@@ -87,3 +89,5 @@ Last Updated: 2026-08-06
 - Do not show unfunded proposed intervention rows in the `Item` breakdown.
 - Keep this table as a launch point into the real record. Detailed review and the final decision action belong in the workspace, not in the homepage table.
 - Preserve `application_id` on every application queue row and workspace link. A case can have multiple applications, so a queue route must never reopen whichever application happens to be primary for the case.
+- Preserve exact intervention application lineage as well. Proposal and Action Plan application ids must agree and belong to the case; do not use the case-primary application as a fallback for queue rows or links.
+- An applied revision evidence row is audit history, not a second operational intervention. Do not count it or emit a second approval/completion item; the source intervention's exact revision-follow-up marker owns any required completion work.

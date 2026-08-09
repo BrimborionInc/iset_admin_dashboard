@@ -235,6 +235,11 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     payload.nocVersionCode ||
     payload.noc_version_code ||
     null;
+  const isAppliedRevisionEvidence =
+    payload.isAppliedRevisionEvidence === true ||
+    payload.is_applied_revision_evidence === true ||
+    payload.recordKind === "applied_revision_evidence" ||
+    payload.record_kind === "applied_revision_evidence";
   return {
     id: payload.id,
     actionPlanId: payload.actionPlanId ?? planId ?? null,
@@ -304,6 +309,12 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     costLines: resolvedCostLinesSource.map(normalizeInterventionCostLine).filter(Boolean),
     fundingBreakdown: resolvedFundingBreakdown,
     metadata: resolvedMetadata,
+    operational: isAppliedRevisionEvidence ? false : payload.operational !== false,
+    recordKind:
+      payload.recordKind ||
+      payload.record_kind ||
+      (isAppliedRevisionEvidence ? "applied_revision_evidence" : "intervention"),
+    isAppliedRevisionEvidence,
     createdByStaffProfileId: payload.createdByStaffProfileId || null,
     createdAt: payload.createdAt || null,
     updatedAt: payload.updatedAt || null,
@@ -443,9 +454,15 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
           .map(item => buildInterventionFromApi(plan.id, item))
           .filter(Boolean)
       : [];
+    const appliedRevisionEvidence = Array.isArray(plan.appliedRevisionEvidence)
+      ? plan.appliedRevisionEvidence
+          .map(item => buildInterventionFromApi(plan.id, item))
+          .filter(Boolean)
+      : [];
     return {
       id: plan.id,
       caseId: plan.caseId || caseId,
+      applicationId: plan.applicationId || plan.application_id || null,
       title: plan.name || plan.title || "Untitled",
       status: plan.status || null,
       agreementNumber: plan.agreementNumber || plan.agreement_number || null,
@@ -488,8 +505,11 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
       updatedAt: plan.updatedAt || null,
       interventions,
       interventionCount: interventions.length,
+      appliedRevisionEvidence,
+      appliedRevisionEvidenceCount: appliedRevisionEvidence.length,
     };
   }));
+  const appliedRevisionEvidence = actionPlans.flatMap(plan => plan.appliedRevisionEvidence || []);
 
   const firstName = client.firstName || null;
   const lastName = client.lastName || null;
@@ -593,6 +613,8 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
     },
     caseContext: payload.caseContext ?? payload.case_context ?? null,
     actionPlans,
+    appliedRevisionEvidence,
+    appliedRevisionEvidenceCount: appliedRevisionEvidence.length,
     documents: Array.isArray(payload.documents) ? payload.documents : [],
     notes: Array.isArray(payload.notes) ? payload.notes : [],
     finance: payload.finance ?? null,
@@ -887,7 +909,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
   }, [lockApplicationId]);
 
   const loadInterventionCodes = useCallback(async () => {
-    if (interventionCodesLoaded && interventionCodes.length > 0) {
+    if (interventionCodesLoaded) {
       return interventionCodes;
     }
     setInterventionCodesLoading(true);
@@ -918,7 +940,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
   }, [interventionCodes, interventionCodesLoaded]);
 
   const loadInterventionOutcomes = useCallback(async () => {
-    if (interventionOutcomesLoaded && interventionOutcomes.length > 0) {
+    if (interventionOutcomesLoaded) {
       return interventionOutcomes;
     }
     setInterventionOutcomesLoading(true);
@@ -949,7 +971,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
   }, [interventionOutcomes, interventionOutcomesLoaded]);
 
   const loadFundingStreams = useCallback(async () => {
-    if (fundingStreamsLoaded && fundingStreams.length > 0) {
+    if (fundingStreamsLoaded) {
       return fundingStreams;
     }
     setFundingStreamsLoading(true);
@@ -981,7 +1003,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
   }, [fundingStreams, fundingStreamsLoaded]);
 
   const loadNocVersions = useCallback(async () => {
-    if (nocVersionsLoaded && nocVersions.length > 0) {
+    if (nocVersionsLoaded) {
       return nocVersions;
     }
     setNocVersionsLoading(true);
@@ -1800,7 +1822,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       }
       return response.json();
     },
-    [caseId]
+    [applicationId, caseId]
   );
 
   const activateActionPlan = useCallback(async actionPlanId => {

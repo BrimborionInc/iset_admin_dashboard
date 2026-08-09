@@ -43,6 +43,7 @@ import {
     buildApplicationQueueStatusFields,
     getApplicationQueueRawStatus,
 } from './homeApplicationQueueFields';
+import { resolveInterventionApprovalQueueEiStatus } from './interventionApprovalQueueEiStatus';
 
 const parseDashboardAmount = value => {
     if (value === null || typeof value === 'undefined' || value === '') {
@@ -1978,7 +1979,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         interventionGroups: row.interventionGroups || row.intervention_groups || [],
                         interventionSummaries: row.interventionSummaries || row.intervention_summaries || [],
                         intervention_start_date: row.intervention_start_date || null,
-                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
+                        assessment_esdc_eligibility: resolveInterventionApprovalQueueEiStatus(row),
                         budgetPotCode: row.budgetPotCode || row.budget_pot_code || null,
                         budget_pot_code: row.budgetPotCode || row.budget_pot_code || null,
                         approvalQueuedAt,
@@ -3211,7 +3212,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         interventionGroups: row.interventionGroups || row.intervention_groups || [],
                         interventionSummaries: row.interventionSummaries || row.intervention_summaries || [],
                         intervention_start_date: row.intervention_start_date || null,
-                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
+                        assessment_esdc_eligibility: resolveInterventionApprovalQueueEiStatus(row),
                         budgetPotCode: row.budgetPotCode || row.budget_pot_code || null,
                         budget_pot_code: row.budgetPotCode || row.budget_pot_code || null,
                         approvalQueuedAt,

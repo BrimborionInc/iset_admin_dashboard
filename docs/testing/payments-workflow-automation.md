@@ -1,6 +1,6 @@
 # Payments Workflow Automation
 
-Status: R7 local safety regression green on 2026-07-12; the 2026-05-11 TEST rehearsal remains historical evidence and fresh TEST/PROD preflight/config is still required.
+Status: R7 local safety regression green on 2026-07-12; SQL admission hardened locally on 2026-08-09; the 2026-05-11 TEST rehearsal remains historical evidence and fresh DEV/TEST/PROD evidence is still required.
 
 This note tracks the automated test strategy for PATH payments. The goal is to cover the workflow in layers so implementation changes are checked before PROD rollout and before real payment use is enabled.
 
@@ -31,6 +31,12 @@ This note tracks the automated test strategy for PATH payments. The goal is to c
   - Creates a synthetic client/case/application/intervention/budget pot/payment packet/payment line/evidence set inside a transaction.
   - Proves the target email-path data shape: submitted packet, submitted line without the legacy paid shortcut, line-scoped evidence, baseline evidence completeness, submitted operational finance transaction, packet-scoped communication log, and follow-up event history.
   - Rolls the transaction back and verifies no synthetic fixture rows remain.
+
+- `DB_HOST=172.26.176.1 npm run payments:workflow:smoke -- --schema-preflight-only`
+  - Proves the exact configured and live DEV database identity before inspecting any object.
+  - Retrieves `SHOW CREATE TABLE`, full columns, indexes, and constraints one object at a time for every table used by the fixture, assertions, or cleanup.
+  - Runs no ordinary read, transaction, mutation, residue query, or cleanup statement.
+  - Full DB/API/browser modes must complete this same in-process preflight before they can obtain the guarded SQL connection facade.
 
 - `DB_HOST=172.26.176.1 npm run payments:workflow:smoke:api`
   - Runs the authenticated DEV API layer when `PAYMENTS_SMOKE_ID_TOKEN` or `SMOKE_ID_TOKEN` is set.
@@ -102,6 +108,10 @@ Build the remaining automation in this order:
 
 - Do not send real Finance/applicant email in PROD without explicit approval for that exact action.
 - Use documented DEV/TEST/PROD DB access paths; do not experiment with ad hoc connection attempts.
+- The smoke has a closed target allowlist: exact WSL DEV (`172.26.176.1:3306` / `root` / `iset_intake`; live `DESKTOP-PDFA51K` / `root@172.26.%` / MySQL `8.0.40`) and exact TEST (`nwac-test-db.cluster-cn4yoy2s4w5t.ca-central-1.rds.amazonaws.com:3306` / `app_admin` / `iset_intake`; live `ip-172-16-0-199` / `app_admin@10.48.%` / MySQL `8.0.42`). There is no PROD entry. Target selection uses only the exact configured tuple; a mismatch is a preflight failure, not a prompt to retry ordinary SQL.
+- Every ordinary statement is validated immediately against that run's live metadata. Multi-table and residue queries must qualify every column, and every table/output alias must be both backtick-quoted and proven against the live MySQL keyword catalog.
+- Resolve the active `esdc_intervention_code` reference after schema preflight and before the first fixture write; never restore the old hard-coded numeric code.
+- A preflight or first-statement failure closes without rollback, residue query, or cleanup. After a fixture mutation begins, a failure rolls back and runs the guarded zero-residue assertion before rethrowing the original error; rollback/residue failures are aggregated with it. Persistent cleanup resolves packet/line relationships inside its cleanup transaction before deleting them.
 - Browser smokes should fail on console errors, failed API responses, backend `500`s, and visible workflow mismatches.
 - Every persistent fixture mode must include cleanup verification.
 - An attempt in `ambiguous` state must be reconciled by an authorized operator/provider check; automation must not resend it.

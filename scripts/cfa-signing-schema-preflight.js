@@ -35,6 +35,7 @@ function parseArgs(argv) {
     else if (token === '--expected-db-server-hostname') args.expectedDbServerHostname = argv[++index];
     else if (token === '--expected-db-port') args.expectedDbPort = Number(argv[++index]);
     else if (token === '--expected-db-principal') args.expectedDbPrincipal = argv[++index];
+    else if (token === '--expected-db-version') args.expectedDbVersion = argv[++index];
     else if (token === '--json') args.json = true;
     else throw new Error(`Unknown argument: ${token}`);
   }
@@ -45,6 +46,7 @@ function parseArgs(argv) {
     'expectedDbUser',
     'expectedDbServerHostname',
     'expectedDbPrincipal',
+    'expectedDbVersion',
   ]) {
     if (!String(args[key] || '').trim()) throw new Error(`Missing required ${key}`);
   }
@@ -89,11 +91,13 @@ async function main() {
       expectedDatabaseHostname: args.expectedDbServerHostname,
       expectedPort: args.expectedDbPort,
       expectedPrincipal: args.expectedDbPrincipal,
+      expectedVersion: args.expectedDbVersion,
       configuredDatabase: env.DB_NAME,
       configuredHost: env.DB_HOST,
       configuredUser: env.DB_USER,
       configuredPort,
       requiredTables: REQUIRED_TABLES,
+      absentColumns: ['signing_request.application_id'],
       cryptoModule: crypto,
     });
     const evidence = await guard.preflight();

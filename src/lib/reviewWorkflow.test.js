@@ -99,6 +99,35 @@ describe('reviewWorkflow', () => {
     });
   });
 
+  test('starts or restarts submission only from an initial, returned, or recalled stage', () => {
+    const allowedStages = [undefined, null, '', REVIEW_STAGES.ReturnedToSubmitter, REVIEW_STAGES.Withdrawn];
+    const lockedStages = [
+      REVIEW_STAGES.RmReview,
+      REVIEW_STAGES.ReturnedToRm,
+      REVIEW_STAGES.NwacReview,
+      REVIEW_STAGES.FinalDecisionRecorded,
+    ];
+
+    supportedWorkflowTypes.forEach(workflowType => {
+      allowedStages.forEach(currentStage => {
+        expect(getReviewTransition({
+          action: REVIEW_ACTIONS.SubmitForRmReview,
+          currentStage,
+          workflowType,
+          role: 'ISET Coordinator',
+        }).allowed).toBe(true);
+      });
+      lockedStages.forEach(currentStage => {
+        expect(getReviewTransition({
+          action: REVIEW_ACTIONS.SubmitForRmReview,
+          currentStage,
+          workflowType,
+          role: 'Regional Manager',
+        }).allowed).toBe(false);
+      });
+    });
+  });
+
   test('blocks every role from starting an unknown workflow type', () => {
     [undefined, null, '', 'unknown'].forEach(workflowType => {
       reviewRoles.forEach(role => {
@@ -158,6 +187,7 @@ describe('reviewWorkflow', () => {
         action: REVIEW_ACTIONS.NwacDeny,
         isAllowed: ({ stage, role }) => stage === REVIEW_STAGES.NwacReview && businessFinalDecisionRoles.has(role),
         nextStage: REVIEW_STAGES.FinalDecisionRecorded,
+        requiresNote: true,
         recordsFinalDecision: true,
       },
     ];
@@ -259,8 +289,42 @@ describe('reviewWorkflow', () => {
             role,
           }).allowed
         ).toBe(true);
+        const denial = getReviewTransition({
+          action: REVIEW_ACTIONS.NwacDeny,
+          currentStage: REVIEW_STAGES.NwacReview,
+          workflowType,
+          role,
+        });
+        expect(denial.allowed).toBe(true);
+        expect(denial.requiresNote).toBe(true);
       });
     });
+  });
+
+  test('limits recall/withdraw to submitter roles and System Administrator support', () => {
+    const permittedRoles = new Set([
+      'ISET Coordinator',
+      'Regional Manager',
+      'System Administrator',
+    ]);
+    supportedWorkflowTypes.forEach(workflowType => {
+      reviewRoles.forEach(role => {
+        const transition = getReviewTransition({
+          action: REVIEW_ACTIONS.Withdraw,
+          currentStage: REVIEW_STAGES.RmReview,
+          workflowType,
+          role,
+        });
+        expect(transition.allowed).toBe(permittedRoles.has(role));
+      });
+    });
+
+    expect(getReviewTransition({
+      action: REVIEW_ACTIONS.Withdraw,
+      currentStage: REVIEW_STAGES.FinalDecisionRecorded,
+      workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+      role: 'ISET Coordinator',
+    }).allowed).toBe(false);
   });
 
   test('routes NWAC request changes back to RM before submitter', () => {

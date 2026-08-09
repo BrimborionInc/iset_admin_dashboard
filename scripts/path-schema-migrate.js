@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const mysql = require('mysql2/promise');
+const { createLiveMysqlSchemaGuard } = require('./lib/live-mysql-schema-guard');
 const {
   DEFAULT_TRACKING_TABLE,
   getSharedSchemaInventory,
@@ -18,6 +19,17 @@ const {
 } = require('../src/lib/sharedSchemaMigrationRunner');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
+// Revalidated against local DEV metadata on 2026-08-09. Drift is a hard stop:
+// update this contract only from a fresh identity-only metadata probe.
+const VERIFIED_DEV_SCHEMA_IDENTITY = Object.freeze({
+  database: 'iset_intake',
+  configuredHost: '172.26.176.1',
+  configuredUser: 'root',
+  serverHostname: 'DESKTOP-PDFA51K',
+  port: 3306,
+  currentUser: 'root@172.26.%',
+  version: '8.0.40',
+});
 const REMOTE_TARGETS = {
   test: {
     targetEnv: 'test',
@@ -219,6 +231,24 @@ function getDbConfig() {
   return config;
 }
 
+function createDevSchemaPlanGuard(connection, dbConfig, {
+  trackingTable = DEFAULT_TRACKING_TABLE,
+} = {}) {
+  return createLiveMysqlSchemaGuard({
+    connection,
+    expectedIdentity: VERIFIED_DEV_SCHEMA_IDENTITY,
+    configuredIdentity: {
+      host: dbConfig.host,
+      user: dbConfig.user,
+      database: dbConfig.database,
+      port: dbConfig.port,
+    },
+    requiredObjects: [],
+    optionalObjects: [{ name: trackingTable, type: 'table' }],
+    allowedFunctions: [],
+  });
+}
+
 function buildEnsureTrackingTableSql(trackingTable) {
   return `CREATE TABLE IF NOT EXISTS ${trackingTable} (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -339,6 +369,7 @@ function summarizePlanForJson(plan) {
     pendingCount: plan.pendingCount,
     applied: plan.applied,
     pending: summarizePendingMigrations(plan.pending),
+    schemaEvidence: plan.schemaEvidence || null,
   };
 }
 
@@ -372,11 +403,11 @@ function printInventory(inventory) {
 
 function printPlan(plan) {
   console.log(`Tracking table: ${plan.trackingTable}`);
+  console.log(`Tracking table exists: ${plan.trackingTableExists ? 'yes' : 'no'}`);
   if (plan.targetEnv && plan.targetEnv !== 'dev') {
     console.log(`Target env: ${plan.targetEnv}`);
     console.log(`Profile: ${plan.profile}`);
     console.log(`Region: ${plan.region}`);
-    console.log(`Tracking table exists: ${plan.trackingTableExists ? 'yes' : 'no'}`);
   }
   console.log(`Canonical dir: ${plan.migrationsDir}`);
   console.log(`Pending migrations: ${plan.pendingCount}`);
@@ -398,8 +429,8 @@ function printApply(result) {
   });
 }
 
-async function openPool() {
-  return mysql.createPool(getDbConfig());
+async function openPool(dbConfig) {
+  return mysql.createPool(dbConfig);
 }
 
 function remoteQueryRows(remoteConfig, sqlText) {
@@ -645,12 +676,14 @@ async function main() {
     loadedEnvFile = loadDefaultEnvIfPresent();
   }
 
-  const pool = await openPool();
+  const dbConfig = getDbConfig();
+  const pool = await openPool(dbConfig);
   try {
     const inventory = getSharedSchemaInventory();
     const logger = args.json ? createQuietLogger() : console;
     if (args.command === 'plan') {
-      const plan = await planPendingSharedSchemaMigrations(pool);
+      const schemaGuard = createDevSchemaPlanGuard(pool, dbConfig);
+      const plan = await planPendingSharedSchemaMigrations(pool, { schemaGuard });
       const payload = {
         command: 'plan',
         loadedEnvFile,
@@ -688,7 +721,15 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  console.error(`[path-schema-migrate] ${error.message}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(error => {
+    console.error(`[path-schema-migrate] ${error.message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  VERIFIED_DEV_SCHEMA_IDENTITY,
+  createDevSchemaPlanGuard,
+  planPendingRemoteSharedSchemaMigrations,
+};

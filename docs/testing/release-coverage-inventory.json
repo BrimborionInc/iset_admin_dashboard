@@ -33,6 +33,7 @@
       "admin-lint",
       "portal-lint",
       "privacy-route-static",
+      "real-mysql-schema-preflight",
       "schema-plan-dev",
       "real-mysql-contract",
       "admin-build",
@@ -114,21 +115,29 @@
       "effects": "Read-only.",
       "cleanup": "None."
     },
+    "real-mysql-schema-preflight": {
+      "stage": "dev",
+      "cwd": "admin",
+      "command": ["node", "scripts/real-mysql-release-contract.js", "--target-env", "dev", "--schema-preflight-only", "--json"],
+      "description": "Metadata-only exact DEV identity plus one-object-at-a-time DDL, full-column, index, and constraint proof before any ordinary release-contract SQL.",
+      "effects": "Metadata queries only; zero runtime-readiness reads, transactions, fixtures, or cleanup SQL.",
+      "cleanup": "None; a failure blocks GO. Later SQL-bearing checks independently repeat fail-closed preflight and cannot execute ordinary SQL when it fails."
+    },
     "schema-plan-dev": {
       "stage": "dev",
       "cwd": "admin",
       "command": ["npm", "run", "db:migrate:plan", "--", "--target-env", "dev"],
-      "description": "Canonical migration ledger/checksum plan against real DEV MySQL.",
-      "effects": "Read-only database plan.",
+      "description": "Canonical migration ledger/checksum plan after exact DEV identity and full optional-ledger DDL proof.",
+      "effects": "Metadata-only preflight plus one live-schema-guarded, fully qualified ledger SELECT when the ledger exists; never creates the ledger.",
       "cleanup": "None."
     },
     "real-mysql-contract": {
       "stage": "dev",
       "cwd": "admin",
       "command": ["node", "scripts/real-mysql-release-contract.js", "--target-env", "dev", "--json"],
-      "description": "Real MySQL readiness, authenticated staff hydration, import claim, worker-delivery persistence, rollback, and residue proof.",
-      "effects": "Creates synthetic rows inside one DEV transaction and rolls it back.",
-      "cleanup": "Mandatory zero-row residue assertion after rollback."
+      "description": "Exact DEV identity/full-object schema guard, guarded runtime readiness/helpers, authenticated staff hydration, import claim, worker-delivery persistence, rollback, and residue proof.",
+      "effects": "Runs metadata-only identity/DDL/column/index/constraint preflight first, then creates synthetic rows through the per-statement guard inside one DEV transaction and rolls it back.",
+      "cleanup": "After mutation begins, rollback and every zero-row residue assertion are mandatory even when the fixture fails; before mutation, schema failure closes without cleanup SQL."
     },
     "admin-build": {
       "stage": "dev",
@@ -278,7 +287,7 @@
       "id": "operations-provenance",
       "description": "Build, package, migration, maintenance, rollback and deployment control plane.",
       "matches": {
-        "admin": ["^(scripts/(path-|write-build|local-dev|release|real-mysql|prod-repair-)|src/lib/releaseQualification|src/lib/__tests__/(?:feedback[1-9][0-9]*RepairContract|pathPatchBugGuards)\\.test\\.js$|tests/(releaseAdmission|releaseQualification|twoStepReviewTestSmokeSchemaGuard)|(?:scripts/)?bootstrap/|sql/ops/|infra/|package(-lock)?\\.json$|docs/ops/)"],
+        "admin": ["^(scripts/(path-|write-build|local-dev|release|real-mysql|prod-repair-)|scripts/lib/live-mysql-schema-guard\\.js$|src/lib/releaseQualification|src/lib/__tests__/(?:feedback[1-9][0-9]*RepairContract|pathPatchBugGuards)\\.test\\.js$|tests/(releaseAdmission|releaseQualification|twoStepReviewTestSmokeSchemaGuard|liveMysqlSchemaGuard|realMysqlReleaseContractSchemaGuard)|(?:scripts/)?bootstrap/|sql/ops/|infra/|package(-lock)?\\.json$|docs/ops/)"],
         "portal": ["^(scripts/(write-build|deploy)|package(-lock)?\\.json$)"],
         "shared": ["^(AGENTS\\.md|package(-lock)?\\.json$)"]
       },
@@ -290,7 +299,7 @@
       "id": "schema-readiness",
       "description": "Canonical migrations, runtime schema assertions and readiness/request parity.",
       "matches": {
-        "admin": ["^(sql/migrations/|src/lib/(schemaReadiness|adminRuntimeSchemaContract)|src/lib/sharedSchemaMigrationRunner|isetadminserver\\.js$|tests/schema)"],
+        "admin": ["^(sql/migrations/|scripts/lib/live-mysql-schema-guard\\.js$|src/lib/(schemaReadiness|adminRuntimeSchemaContract)|src/lib/sharedSchemaMigrationRunner|isetadminserver\\.js$|tests/(schema|liveMysqlSchemaGuard|realMysqlReleaseContractSchemaGuard))"],
         "portal": ["^(src/services/schemaReadiness|routes/__tests__/schemaReadiness|server\\.js$)"],
         "shared": ["\\.js$"]
       },
@@ -334,7 +343,7 @@
       "id": "application-review-workflows",
       "description": "Application assessment, action plan and intervention review state machines and artifacts.",
       "matches": {
-        "admin": ["(Assessment|assessment|applicationApproval|reviewWorkflow|Intervention|intervention|actionPlan|decisionLetterExternalAiBoundary|prod-repair-feedback|two-step-review|isetadminserver\\.js$)"],
+        "admin": ["(Assessment|assessment|applicationApproval|reviewWorkflow|reviewDecisionMakerCopy|identityLineageIntegrity|Intervention|intervention|actionPlan|decisionLetterExternalAiBoundary|fullExpressStack|prod-repair-feedback|twoStepReview|two-step-review|isetadminserver\\.js$)"],
         "shared": ["(review|event|notification)"]
       },
       "dependsOn": ["notifications-workers", "files-messages-signing"],

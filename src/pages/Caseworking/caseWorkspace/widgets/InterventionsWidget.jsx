@@ -20,6 +20,7 @@ import {
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "../../widgets/common";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
+import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 import InterventionModal from "../modals/InterventionModal.jsx";
 import { buildApprovalWorkspacePath } from "../../../../utils/approvalWorkspaceEntry.js";
 import {
@@ -28,12 +29,14 @@ import {
   isInterventionClosedStatus,
   isInterventionClosableStatus,
   isInterventionDeletableStatus,
+  isInterventionFinalDecisionRecorded,
   isInterventionProposalStatus,
   isInterventionApprovalLetterFollowUpPending,
   resolveInterventionApprovalLetterFollowUp,
   normalizeInterventionStatus,
   resolveInterventionStateFields,
 } from "../../../../utils/interventionStatus.js";
+import { canEditInterventionAssessmentBody } from "../../../../utils/interventionAssessmentEditAccess.js";
 
 const formatCurrency = value => {
   const numeric = Number(value);
@@ -381,6 +384,7 @@ const persistColumnWidths = widths => {
 
 const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const history = useHistory();
+  const currentUser = useCurrentUser();
   const {
     caseId,
     caseData,
@@ -893,6 +897,20 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       if (!intervention) return [];
       const status = intervention.status;
       if (isDraftStatus(status)) {
+        const canEditDraft = canEditInterventionAssessmentBody({
+          role: currentUser?.role,
+          reviewStatus: resolveInterventionStateFields(intervention).reviewStatus,
+          reviewWorkflow: intervention.reviewWorkflow,
+          createdByStaffProfileId:
+            intervention.createdByStaffProfileId ?? intervention.created_by_staff_profile_id,
+          currentStaffProfileId:
+            currentUser?.staffProfileId ?? currentUser?.staff_profile_id,
+          hasExistingIntervention: true,
+          hasBlockingProposal,
+        });
+        if (!canEditDraft || !canModify) {
+          return [{ id: "view", text: "View intervention" }];
+        }
         return [
           { id: "resume", text: "Resume draft" },
           { id: "delete", text: "Delete intervention" },
@@ -933,7 +951,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       }
       return items;
     },
-    [canModify, hasOpenProposal, openRevisionDraftsBySourceId]
+    [canModify, currentUser, hasBlockingProposal, hasOpenProposal, openRevisionDraftsBySourceId]
   );
 
   const openDraftWizard = () => {
@@ -973,7 +991,11 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         return;
       }
       setStartInCloseMode(false);
-      setForceReadOnly(!canModify);
+      // A two-step final decision freezes the reviewed proposal facts. Legacy
+      // operational/manual-backload rows have no such workflow and retain the
+      // established silent edit path; delivery lifecycle actions and revisions
+      // remain separate for finally decided records.
+      setForceReadOnly(!canModify || isInterventionFinalDecisionRecorded(target));
       if (!selectedIntervention || target.id !== selectedInterventionId) {
         setSelectedInterventionId(target.id);
       }

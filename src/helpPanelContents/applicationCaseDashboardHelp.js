@@ -68,17 +68,17 @@ const ApplicationCaseDashboardHelp = ({ onRestartTutorial, onEndTutorial }) => {
       <ol>
         <li>Start with <em>Application Overview</em> to confirm status, ownership, checklist summary, and urgency.</li>
         <li>Review the <em>ISET Application Form</em> and <em>Supporting Documents</em> together so you understand the applicant&apos;s request, background, and missing evidence.</li>
-        <li>Check whether EI consent and EI verification requirements are satisfied before moving the assessment forward.</li>
+        <li>Confirm signed EI consent is on file and that authorized staff recorded the verified CRF, EI Active Claim, or EI Reach Back status. Coordinators can view the Application Assessment EI fields but cannot set them.</li>
         <li>If documents or clarification are missing, contact the applicant through <em>Secure Messaging</em> and record the contact in <em>Notes and Tasks</em>.</li>
         <li>Complete the <em>Application Assessment</em> with a clear recommendation and justification, then submit it for review.</li>
-        <li>After the decision, use the communication and funding-agreement steps to finish the file properly instead of treating the decision alone as the end of the work.</li>
+        <li>After final approval, use Communication to send the letter. Funded cost lines add the exact application&apos;s Client Funding Agreement and EFT/Wire Transfer form; zero-funding approvals do not create a CFA package.</li>
       </ol>
 
       <h3>Training-aligned reminders</h3>
       <ul>
         <li>Contact new applicants promptly and document requests for missing information.</li>
         <li>All documents received and all meaningful staff interactions should be captured in the file.</li>
-        <li>A file is still pending until documents, coordinator assessment, final decision, and the signed Funding Agreement are complete.</li>
+        <li>A file remains pending until its required documents, assessment, two-step review, final decision, and post-decision checklist are complete. A signed CFA is required only when the funded approval produced a CFA package.</li>
         <li>If a living allowance is being considered, the financial overview and verification need to support the recommendation.</li>
       </ul>
 
@@ -111,10 +111,12 @@ Guide the user like a trained coordinator working a file, not like a product dem
 - Start from what they need to do next in the assessment process.
 - Use Application Overview to orient, Application Form plus Supporting Documents to review evidence, Secure Messaging plus Notes for follow-up, and Application Assessment for the recommendation.
 - If the file was opened from Pending Review or Pending Decision, explain that the workspace is intentionally focused on the active review step and the next action belongs in Application Assessment.
+- Explain the active two-step route accurately: submitter -> Regional Manager -> Decision Maker. A Decision Maker request returns to the Regional Manager first; the RM forwards it to the recorded submitter, and the corrected assessment passes RM review again.
+- Explain that the assessment body is read-only at reviewer stages and only the recorded submitter edits returned work.
 - Remind them that missing information requests and significant staff contact should be documented.
 
 When the coordinator needs to correct applicant data, direct them to the ISET Application Form widget: press Edit, confirm the modal, adjust the fields, then Save. Saving creates a new version visible under View versions. Editing is disabled once a final decision is recorded or another user holds the lock.
 
-Use program guidance: contact new applicants within five days; make up to three attempts for missing information before closure. Required evidence includes Status/Treaty card or two Nation letters plus self-declaration, two IDs, acceptance letter and fee statement, band funding denial where applicable, and income or expense proofs for living allowance. An application remains pending until documents are complete, the coordinator recommendation is recorded, the final decision is set, and the Funding Agreement is signed.`;
+  Use program guidance: contact new applicants within five days; make up to three attempts for missing information before closure. Required evidence includes Status/Treaty card or two Nation letters plus self-declaration, two IDs, acceptance letter and fee statement, band funding denial where applicable, and income or expense proofs for living allowance. Signed EI consent comes before verification; authorized staff select CRF, EI Active Claim, or EI Reach Back, and the EI status controls CRF/EI funding alignment rather than review ownership. After final approval, funded cost lines cause the approval-letter send to include the exact application-linked Client Funding Agreement and EFT/Wire Transfer form; zero-funding approvals do not. CFA signing is post-approval work, not another review decision. An application remains pending until its required checklist and follow-through are complete.`;
 
 export default ApplicationCaseDashboardHelp;

@@ -1,0 +1,299 @@
+const { Blob, File } = require('buffer');
+const { ReadableStream } = require('stream/web');
+const { MessageChannel, MessagePort } = require('worker_threads');
+const fs = require('fs');
+const path = require('path');
+
+global.Blob = global.Blob || Blob;
+global.File = global.File || File;
+global.ReadableStream = global.ReadableStream || ReadableStream;
+global.MessageChannel = global.MessageChannel || MessageChannel;
+global.MessagePort = global.MessagePort || MessagePort;
+global.DOMException = global.DOMException || class DOMException extends Error {
+  constructor(message = '', name = 'Error') {
+    super(message);
+    this.name = name;
+  }
+};
+
+jest.mock('axios', () => ({
+  get: jest.fn(),
+  post: jest.fn(),
+  put: jest.fn(),
+}));
+
+describe('intervention application lineage and assessment signatures', () => {
+  const previousRepairExports = process.env.PATH_REPAIR_EXPORTS;
+  let resolveInterventionApplicationScopeId;
+  let fetchAssessmentPdfSignatureContext;
+
+  beforeAll(() => {
+    process.env.NODE_ENV = 'test';
+    process.env.PATH_REPAIR_EXPORTS = '1';
+    ({
+      resolveInterventionApplicationScopeId,
+      fetchAssessmentPdfSignatureContext,
+    } = require('../isetadminserver'));
+  });
+
+  afterAll(() => {
+    if (previousRepairExports === undefined) delete process.env.PATH_REPAIR_EXPORTS;
+    else process.env.PATH_REPAIR_EXPORTS = previousRepairExports;
+  });
+
+  test('uses explicit proposal/action-plan lineage and never the case-primary fallback', () => {
+    expect(resolveInterventionApplicationScopeId({
+      case_id: 76,
+      proposal_application_id: 123,
+      action_plan_application_id: 123,
+      resolved_application_case_id: 76,
+      application_id: 999,
+      review_workflow_application_id: 123,
+    }, { required: true })).toBe(123);
+
+    expect(() => resolveInterventionApplicationScopeId({
+      case_id: 76,
+      proposal_application_id: null,
+      action_plan_application_id: null,
+      resolved_application_case_id: 76,
+      application_id: 999,
+    }, { required: true })).toThrow('intervention_application_scope_required');
+  });
+
+  test.each([
+    [{ proposal_application_id: 123, action_plan_application_id: 124 }, 'proposal and Action Plan'],
+    [{
+      proposal_application_id: 123,
+      action_plan_application_id: 123,
+      review_workflow_application_id: 124,
+    }, 'review workflow'],
+    [{
+      case_id: 76,
+      proposal_application_id: 123,
+      action_plan_application_id: 123,
+      resolved_application_case_id: 77,
+    }, 'does not belong'],
+  ])('fails closed when explicit application lineage conflicts (%s)', (row, message) => {
+    try {
+      resolveInterventionApplicationScopeId(row, { required: true });
+      throw new Error('expected_scope_conflict');
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: 'intervention_application_scope_conflict',
+        publicMessage: expect.stringContaining(message),
+      });
+    }
+  });
+
+  test('exact workflow stamps are authoritative before current-request fallbacks', async () => {
+    const connection = {
+      query: jest.fn(async sql => {
+        const text = String(sql);
+        if (text.includes('rw.submitted_at')) {
+          return [[{
+            review_workflow_id: 801,
+            submitted_at: '2026-08-09 12:00:01',
+            submitted_by_staff_profile_id: 51,
+            signer_name: 'Recorded Submitter',
+          }], []];
+        }
+        if (text.includes('rw.nwac_decided_at')) {
+          return [[{
+            review_workflow_id: 801,
+            nwac_decided_at: '2026-08-09 12:20:01',
+            nwac_decided_by_staff_profile_id: 53,
+            nwac_decision: 'denied',
+            nwac_decision_note: 'Recorded denial note.',
+            signer_name: 'Recorded Decision Maker',
+          }], []];
+        }
+        if (text.includes('rw.rm_reviewed_at')) {
+          return [[{
+            review_workflow_id: 801,
+            rm_reviewed_at: '2026-08-09 12:10:00',
+            rm_reviewed_by_staff_profile_id: 52,
+            rm_review_note: 'Recorded RM note.',
+            signer_name: 'RM Two',
+          }], []];
+        }
+        throw new Error(`unexpected_query:${String(sql)}`);
+      }),
+    };
+    const submittedFallback = {
+      signerName: 'Submitter Two',
+      signedAt: '2026-08-09T12:00:00.000Z',
+    };
+    const approvedFallback = {
+      signerName: 'Decision Maker Two',
+      signedAt: '2026-08-09T12:20:00.000Z',
+    };
+
+    await expect(fetchAssessmentPdfSignatureContext({
+      caseId: 76,
+      applicationId: 123,
+      connection,
+      submittedFallback,
+      approvedFallback,
+      finalDecisionOutcome: 'denied',
+    })).resolves.toEqual({
+      submittedSignature: expect.objectContaining({
+        workflowId: 801,
+        staffProfileId: 51,
+        signerName: 'Recorded Submitter',
+        roleLabel: 'Submitter',
+      }),
+      reviewSignature: expect.objectContaining({
+        workflowId: 801,
+        staffProfileId: 52,
+        signerName: 'RM Two',
+        roleLabel: 'Regional Manager',
+        reviewNote: 'Recorded RM note.',
+      }),
+      approvedSignature: expect.objectContaining({
+        workflowId: 801,
+        staffProfileId: 53,
+        signerName: 'Recorded Decision Maker',
+        roleLabel: 'Decision Maker',
+        decisionOutcome: 'denied',
+        decisionNote: 'Recorded denial note.',
+      }),
+      finalDecisionOutcome: 'denied',
+      rmReviewNote: 'Recorded RM note.',
+      decisionNote: 'Recorded denial note.',
+    });
+    expect(connection.query).toHaveBeenCalledTimes(3);
+    connection.query.mock.calls.forEach(([, params]) => {
+      expect(params).toEqual(['application_assessment:application:123']);
+    });
+  });
+
+  test('historical PDF regeneration resolves all three signatures from the exact workflow', async () => {
+    const connection = {
+      query: jest.fn(async sql => {
+        const text = String(sql);
+        if (text.includes('rw.submitted_at')) {
+          return [[{ submitted_at: '2026-08-09 12:00:00', signer_name: 'Submitter B' }], []];
+        }
+        if (text.includes('rw.nwac_decided_at')) {
+          return [[{
+            nwac_decided_at: '2026-08-09 12:20:00',
+            nwac_decision: 'approved',
+            nwac_decision_note: 'Approved after final review.',
+            signer_name: 'Decision Maker B',
+          }], []];
+        }
+        if (text.includes('rw.rm_reviewed_at')) {
+          return [[{
+            rm_reviewed_at: '2026-08-09 12:10:00',
+            rm_review_note: 'RM sign-off note.',
+            signer_name: 'RM B',
+          }], []];
+        }
+        throw new Error(`case-wide_event_lookup_forbidden:${text}`);
+      }),
+    };
+
+    const result = await fetchAssessmentPdfSignatureContext({
+      caseId: 76,
+      applicationId: 123,
+      connection,
+    });
+
+    expect(result.submittedSignature.signerName).toBe('Submitter B');
+    expect(result.reviewSignature.signerName).toBe('RM B');
+    expect(result.approvedSignature.signerName).toBe('Decision Maker B');
+    expect(result).toMatchObject({
+      finalDecisionOutcome: 'approved',
+      rmReviewNote: 'RM sign-off note.',
+      decisionNote: 'Approved after final review.',
+    });
+    expect(connection.query).toHaveBeenCalledTimes(3);
+    connection.query.mock.calls.forEach(([, params]) => {
+      expect(params).toEqual(['application_assessment:application:123']);
+    });
+  });
+
+  test('approval and completion queues never fall back to the case-primary application', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'isetadminserver.js'), 'utf8');
+    const start = source.indexOf("app.get('/api/dashboard/intervention-approval-items'");
+    const end = source.indexOf("app.get('/api/dashboard/intervention-milestone-items'", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const queues = source.slice(start, end);
+
+    expect(queues).toContain('q.application_id IS NOT NULL');
+    expect(queues).toContain('ON a.id = COALESCE(p.application_id, ap.application_id)');
+    expect(queues).toContain('p.application_id = ap.application_id');
+    expect(queues).toContain('rw.application_id = COALESCE(p.application_id, ap.application_id)');
+    expect(queues).not.toContain("buildCasePrimaryApplicationIdSql('c')");
+    expect(queues).not.toContain("buildCasePrimaryApplicationJoinSql('c', 'a')");
+  });
+
+  test('intervention PDFs resolve prior versions inside the exact intervention stream', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'isetadminserver.js'), 'utf8');
+    const start = source.indexOf('async function generateAndStoreInterventionAssessmentPdf');
+    const end = source.indexOf('async function generateAndStoreRevisionAssessmentPdf', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const generator = source.slice(start, end);
+
+    expect(generator).toContain('const assessmentDocumentInterventionId');
+    expect(generator).toContain('const exactReviewSubjectRow');
+    expect(generator).toContain('interventionId: assessmentDocumentInterventionId');
+    expect(generator).not.toContain('fallbackAssessmentDocumentInterventionId');
+    expect(generator).toContain('buildInterventionReviewWorkflowSubject(exactReviewSubjectRow)');
+    expect(generator).toContain('fetchReviewWorkflowSubmittedSignature(');
+    expect(generator).toContain('fetchReviewWorkflowRmSignature(connection, workflowSubject)');
+    expect(generator).toContain('fetchReviewWorkflowDecisionMakerSignature(connection, workflowSubject)');
+    expect(generator).toContain('assessment_subject_key: isFinalDecisionPacket ? workflowSubjectKey : null');
+    expect(generator).toContain('isFinalDecisionPacket && isRevisionSubject');
+    expect(generator).toContain("finalDecisionOutcome: resolvedFinalOutcome");
+  });
+
+  test('application packets exclude intervention document streams even though the compatibility category is shared', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'isetadminserver.js'), 'utf8');
+    const fetchStart = source.indexOf('async function fetchLatestAssessmentDocumentInfo');
+    const fetchEnd = source.indexOf('const ASSESSMENT_RECALL_VERSIONED_DOCUMENT_TYPES', fetchStart);
+    const fetcher = source.slice(fetchStart, fetchEnd);
+    expect(fetcher).toContain('excludeInterventionDocuments = false');
+    expect(fetcher).toContain("JSON_EXTRACT(metadata, '$.intervention_id') IS NULL");
+
+    const routeStart = source.indexOf("app.put('/api/cases/:id'");
+    const routeEnd = source.indexOf('// --- Event timeline endpoints', routeStart);
+    const assessmentRoute = source.slice(routeStart, routeEnd);
+    expect(assessmentRoute).toContain('excludeInterventionDocuments: true');
+    expect(assessmentRoute).toContain("assessment_source: 'application_assessment_final_decision'");
+    expect(assessmentRoute).toContain('assessment_subject_key: applicationAssessmentSubjectKey');
+    expect(assessmentRoute).toContain('workflowSubject: applicationWorkflowSubject');
+  });
+
+  test('application approve and deny create a neutral exact-subject final packet while request changes does not', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'isetadminserver.js'), 'utf8');
+    const routeStart = source.indexOf("app.put('/api/cases/:id'");
+    const routeEnd = source.indexOf('// --- Event timeline endpoints', routeStart);
+    const assessmentRoute = source.slice(routeStart, routeEnd);
+
+    expect(assessmentRoute).toContain("afterAssessmentReviewStatus === 'approve'");
+    expect(assessmentRoute).toContain("afterAssessmentReviewStatus === 'reject'");
+    expect(assessmentRoute).toContain("? 'approved'");
+    expect(assessmentRoute).toContain("? 'denied'");
+    expect(assessmentRoute).toContain('const shouldGenerateFinalAssessmentPdf =');
+    expect(assessmentRoute).toContain("documentType: isFinalDecisionPacket ? 'case_assessment_approved' : 'case_assessment'");
+    expect(assessmentRoute).toContain("fileNamePrefix: isFinalDecisionPacket ? 'final-assessment-packet'");
+    expect(assessmentRoute).toContain("const isFinalDecisionPacket = Boolean(normalizedFinalOutcome)");
+  });
+
+  test('intervention and Action Plan metric detail never inherit the newest case application', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'isetadminserver.js'), 'utf8');
+    const start = source.indexOf('async function fetchMetricActionPlanDetailRows');
+    const end = source.indexOf('async function fetchMetricActiveCaseDetailRows', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const metricDetails = source.slice(start, end);
+
+    expect(metricDetails).toContain('a.id = ap.application_id');
+    expect(metricDetails).toContain('p.application_id = ap.application_id');
+    expect(metricDetails).not.toContain("buildCasePrimaryApplicationIdSql('c')");
+    expect(metricDetails).not.toContain("buildCasePrimaryApplicationJoinSql('c', 'a')");
+  });
+});

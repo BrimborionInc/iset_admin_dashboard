@@ -1,4 +1,37 @@
-import { resolveInterventionApprovalLetterFollowUp } from "./interventionStatus";
+import {
+  isInterventionDeletableStatus,
+  isInterventionFinalDecisionRecorded,
+  resolveInterventionApprovalLetterFollowUp,
+} from "./interventionStatus";
+
+describe("isInterventionDeletableStatus", () => {
+  it("only allows an unsubmitted draft to enter the ordinary delete workflow", () => {
+    expect(isInterventionDeletableStatus({ reviewStatus: "draft" })).toBe(true);
+
+    ["submitted", "in_review", "changes_requested", "approved", "rejected"].forEach(
+      reviewStatus => {
+        expect(isInterventionDeletableStatus({ reviewStatus })).toBe(false);
+      }
+    );
+  });
+});
+
+describe("isInterventionFinalDecisionRecorded", () => {
+  it("requires an exact final review-workflow stage", () => {
+    expect(isInterventionFinalDecisionRecorded({
+      status: "in_progress",
+      metadata: { source: "manual_backload" },
+    })).toBe(false);
+    expect(isInterventionFinalDecisionRecorded({
+      status: "in_progress",
+      reviewWorkflow: { currentStage: "final_decision_recorded" },
+    })).toBe(true);
+    expect(isInterventionFinalDecisionRecorded({
+      status: "approved",
+      review_workflow: { current_stage: "returned_to_rm" },
+    })).toBe(false);
+  });
+});
 
 describe("resolveInterventionApprovalLetterFollowUp", () => {
   it("does not treat an original approval letter sent marker as a sent revision letter", () => {

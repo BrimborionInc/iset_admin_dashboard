@@ -23,12 +23,22 @@ jest.mock('axios', () => ({
 describe('case secure-message signing atomicity', () => {
   const previousRepairExports = process.env.PATH_REPAIR_EXPORTS;
   let validateCaseMessageSigningAttachmentRequest;
+  let resolveCaseMessageFundingSigningWorkflowKind;
+  let assertCaseMessageFundingFormsPostApproval;
+  let resolveCaseMessageApplicationDecisionAuthorization;
+  let assertCaseMessageApplicationDecisionLetters;
+  let resolveCaseMessageApplicationFundingApproval;
   let validateAutoFundingWorkflowAttachmentResolution;
   let assertUniqueVersionedSigningWorkflowAttachments;
   let resolveEligibleSigningWorkflowRows;
   let buildRequiredSigningWorkflowSchemas;
   let filterApplicationScopedVersionRows;
   let resolveApplicationScopedCfaDraft;
+  let isAppliedRevisionEvidenceIntervention;
+  let interventionHasCfaFunding;
+  let cfaSnapshotHasFunding;
+  let shouldIncludeFundedInterventionForCfa;
+  let createCfaVersionForPlan;
   let deleteUploadedObjectKeysBestEffort;
   let inspectCaseMessageCommitOutcome;
   let inspectGeneratedVersionCommitOutcome;
@@ -45,12 +55,22 @@ describe('case secure-message signing atomicity', () => {
     process.env.PATH_REPAIR_EXPORTS = '1';
     ({
       validateCaseMessageSigningAttachmentRequest,
+      resolveCaseMessageFundingSigningWorkflowKind,
+      assertCaseMessageFundingFormsPostApproval,
+      resolveCaseMessageApplicationDecisionAuthorization,
+      assertCaseMessageApplicationDecisionLetters,
+      resolveCaseMessageApplicationFundingApproval,
       validateAutoFundingWorkflowAttachmentResolution,
       assertUniqueVersionedSigningWorkflowAttachments,
       resolveEligibleSigningWorkflowRows,
       buildRequiredSigningWorkflowSchemas,
       filterApplicationScopedVersionRows,
       resolveApplicationScopedCfaDraft,
+      isAppliedRevisionEvidenceIntervention,
+      interventionHasCfaFunding,
+      cfaSnapshotHasFunding,
+      shouldIncludeFundedInterventionForCfa,
+      createCfaVersionForPlan,
       deleteUploadedObjectKeysBestEffort,
       inspectCaseMessageCommitOutcome,
       inspectGeneratedVersionCommitOutcome,
@@ -87,6 +107,432 @@ describe('case secure-message signing atomicity', () => {
       publicError: 'funding_forms_workflows_invalid',
       httpStatus: 409,
     }));
+  });
+
+  test('funding agreements and EFT forms are recognized from authoritative types or catalogue names', () => {
+    expect(resolveCaseMessageFundingSigningWorkflowKind({
+      document_type: 'funding_agreement',
+      name: 'Unrelated label',
+    })).toBe('funding_agreement');
+    expect(resolveCaseMessageFundingSigningWorkflowKind({
+      document_type: null,
+      name: 'Client Funding Agreement',
+    })).toBe('funding_agreement');
+    expect(resolveCaseMessageFundingSigningWorkflowKind({
+      document_type: 'eft_or_wire_transfer_direct_deposit_form',
+      name: 'Bank form',
+    })).toBe('eft_form');
+    expect(resolveCaseMessageFundingSigningWorkflowKind({
+      document_type: null,
+      name: 'EFT Form',
+    })).toBe('eft_form');
+    expect(resolveCaseMessageFundingSigningWorkflowKind({
+      document_type: 'assessment_approval_letter',
+      name: 'Approval letter',
+    })).toBeNull();
+  });
+
+  test('post-approval funding forms require a final decision on the exact application', () => {
+    const fundingRows = [
+      { document_type: 'funding_agreement', name: 'Funding agreement' },
+      { document_type: 'eft_form', name: 'EFT form' },
+    ];
+
+    expect(() => assertCaseMessageFundingFormsPostApproval({
+      attachmentRows: fundingRows,
+      selectedApplicationId: 123,
+      approvedApplicationId: 123,
+      finalApprovalRecorded: false,
+      hasFundedCostLines: true,
+      sourceType: 'application',
+    })).toThrow(expect.objectContaining({
+      publicError: 'funding_forms_final_approval_required',
+      httpStatus: 422,
+    }));
+
+    expect(() => assertCaseMessageFundingFormsPostApproval({
+      attachmentRows: fundingRows,
+      selectedApplicationId: 123,
+      approvedApplicationId: 999,
+      finalApprovalRecorded: true,
+      hasFundedCostLines: true,
+      sourceType: 'intervention',
+    })).toThrow(expect.objectContaining({
+      publicError: 'funding_forms_application_scope_conflict',
+      httpStatus: 409,
+      publicDetails: expect.objectContaining({
+        selectedApplicationId: 123,
+        approvedApplicationId: 999,
+        sourceType: 'intervention',
+      }),
+    }));
+  });
+
+  test('zero-funded approvals cannot attach funding forms while approval letters remain independent', () => {
+    expect(() => assertCaseMessageFundingFormsPostApproval({
+      attachmentRows: [{ document_type: 'funding_agreement' }],
+      selectedApplicationId: 123,
+      approvedApplicationId: 123,
+      finalApprovalRecorded: true,
+      hasFundedCostLines: false,
+      sourceType: 'application',
+    })).toThrow(expect.objectContaining({
+      publicError: 'funding_forms_not_applicable',
+      httpStatus: 422,
+    }));
+
+    expect(assertCaseMessageFundingFormsPostApproval({
+      attachmentRows: [{ document_type: 'assessment_approval_letter' }],
+      selectedApplicationId: 123,
+      approvedApplicationId: null,
+      finalApprovalRecorded: false,
+      hasFundedCostLines: false,
+    })).toEqual({ enforced: false, reason: 'no_funding_forms' });
+
+    expect(assertCaseMessageFundingFormsPostApproval({
+      attachmentRows: [
+        { document_type: 'assessment_approval_letter' },
+        { document_type: 'funding_agreement' },
+        { document_type: 'eft_form' },
+      ],
+      selectedApplicationId: 123,
+      approvedApplicationId: 123,
+      finalApprovalRecorded: true,
+      hasFundedCostLines: true,
+      sourceType: 'intervention',
+    })).toMatchObject({
+      enforced: true,
+      selectedApplicationId: 123,
+      approvedApplicationId: 123,
+      sourceType: 'intervention',
+      fundingFormKinds: ['funding_agreement', 'eft_form'],
+    });
+  });
+
+  test('name-only funding forms fail closed unless the server resolved an authoritative fallback type', () => {
+    expect(() => assertCaseMessageFundingFormsPostApproval({
+      attachmentRows: [{ id: 52, document_type: null, name: 'Client Funding Agreement' }],
+      selectedApplicationId: 123,
+      approvedApplicationId: 123,
+      finalApprovalRecorded: true,
+      hasFundedCostLines: true,
+    })).toThrow(expect.objectContaining({
+      publicError: 'funding_forms_workflows_invalid',
+      httpStatus: 409,
+      publicDetails: expect.objectContaining({ workflowId: 52 }),
+    }));
+
+    expect(assertCaseMessageFundingFormsPostApproval({
+      attachmentRows: [{ id: 53, document_type: null, name: 'EFT/Wire Transfer Form' }],
+      selectedApplicationId: 123,
+      approvedApplicationId: 123,
+      finalApprovalRecorded: true,
+      hasFundedCostLines: true,
+      documentTypeFallbackByWorkflowId: new Map([[53, 'EFT_form']]),
+    })).toMatchObject({
+      enforced: true,
+      fundingFormKinds: ['eft_form'],
+    });
+  });
+
+  test('an active two-step workflow is authoritative over stale application approval fields', () => {
+    const applicationRow = {
+      id: 123,
+      status: 'approved',
+      decision_outcome: 'approved',
+    };
+    expect(resolveCaseMessageApplicationFundingApproval({
+      selectedApplicationId: 123,
+      applicationRow,
+      caseStatus: 'active',
+      reviewWorkflow: {
+        application_id: 123,
+        current_stage: 'rm_review',
+        nwac_decision: null,
+      },
+    })).toMatchObject({
+      finalApprovalRecorded: false,
+      approvedApplicationId: 123,
+      reason: 'review_not_final',
+    });
+
+    expect(resolveCaseMessageApplicationFundingApproval({
+      selectedApplicationId: 123,
+      applicationRow,
+      caseStatus: 'active',
+      reviewWorkflow: {
+        application_id: 123,
+        current_stage: 'final_decision_recorded',
+        nwac_decision: 'approved',
+      },
+    })).toMatchObject({
+      finalApprovalRecorded: true,
+      approvedApplicationId: 123,
+      reason: 'workflow_final_approval',
+    });
+
+    expect(resolveCaseMessageApplicationFundingApproval({
+      selectedApplicationId: 123,
+      applicationRow,
+      caseStatus: 'active',
+      reviewWorkflow: {
+        application_id: 999,
+        current_stage: 'final_decision_recorded',
+        nwac_decision: 'approved',
+      },
+    })).toMatchObject({
+      finalApprovalRecorded: false,
+      approvedApplicationId: 999,
+      reason: 'workflow_application_scope_mismatch',
+    });
+
+    expect(resolveCaseMessageApplicationFundingApproval({
+      selectedApplicationId: 123,
+      applicationRow,
+      caseStatus: 'active',
+      reviewWorkflow: null,
+    })).toMatchObject({
+      finalApprovalRecorded: true,
+      approvedApplicationId: 123,
+      reason: 'legacy_final_approval',
+    });
+  });
+
+  test('two-step final decisions are authoritative for approval and denial letters', () => {
+    const staleApprovedApplication = {
+      id: 123,
+      status: 'approved',
+      decision_outcome: 'approved',
+    };
+    const approvalLetter = [{ document_type: 'assessment_approval_letter' }];
+    const denialLetter = [{ document_type: 'assessment_denial_letter' }];
+
+    expect(resolveCaseMessageApplicationDecisionAuthorization({
+      selectedApplicationId: 123,
+      applicationRow: staleApprovedApplication,
+      caseStatus: 'active',
+      reviewWorkflow: {
+        application_id: 123,
+        current_stage: 'rm_review',
+        nwac_decision: null,
+      },
+    })).toMatchObject({
+      outcome: null,
+      reason: 'review_not_final',
+      authoritativeSource: 'review_workflow',
+    });
+    expect(() => assertCaseMessageApplicationDecisionLetters({
+      attachmentRows: approvalLetter,
+      selectedApplicationId: 123,
+      applicationRow: staleApprovedApplication,
+      caseStatus: 'active',
+      reviewWorkflow: {
+        application_id: 123,
+        current_stage: 'rm_review',
+        nwac_decision: null,
+      },
+    })).toThrow(expect.objectContaining({
+      publicError: 'invalid_letter_attachment',
+      httpStatus: 422,
+      publicDetails: expect.objectContaining({ decisionReason: 'review_not_final' }),
+    }));
+
+    expect(assertCaseMessageApplicationDecisionLetters({
+      attachmentRows: approvalLetter,
+      selectedApplicationId: 123,
+      applicationRow: staleApprovedApplication,
+      caseStatus: 'active',
+      reviewWorkflow: {
+        application_id: 123,
+        current_stage: 'final_decision_recorded',
+        nwac_decision: 'approved',
+      },
+    })).toMatchObject({
+      enforced: true,
+      outcome: 'approved',
+      allowedDocumentType: 'assessment_approval_letter',
+      authoritativeSource: 'review_workflow',
+    });
+
+    const finalDenialWorkflow = {
+      application_id: 123,
+      current_stage: 'final_decision_recorded',
+      nwac_decision: 'denied',
+    };
+    expect(assertCaseMessageApplicationDecisionLetters({
+      attachmentRows: denialLetter,
+      selectedApplicationId: 123,
+      applicationRow: staleApprovedApplication,
+      caseStatus: 'active',
+      reviewWorkflow: finalDenialWorkflow,
+    })).toMatchObject({
+      enforced: true,
+      outcome: 'denied',
+      allowedDocumentType: 'assessment_denial_letter',
+      authoritativeSource: 'review_workflow',
+    });
+    expect(() => assertCaseMessageApplicationDecisionLetters({
+      attachmentRows: approvalLetter,
+      selectedApplicationId: 123,
+      applicationRow: staleApprovedApplication,
+      caseStatus: 'active',
+      reviewWorkflow: finalDenialWorkflow,
+    })).toThrow(expect.objectContaining({ publicError: 'invalid_letter_attachment' }));
+
+    expect(() => assertCaseMessageApplicationDecisionLetters({
+      attachmentRows: approvalLetter,
+      selectedApplicationId: 123,
+      applicationRow: staleApprovedApplication,
+      caseStatus: 'active',
+      reviewWorkflow: {
+        application_id: 999,
+        current_stage: 'final_decision_recorded',
+        nwac_decision: 'approved',
+      },
+    })).toThrow(expect.objectContaining({
+      publicDetails: expect.objectContaining({
+        decisionReason: 'workflow_application_scope_mismatch',
+      }),
+    }));
+
+    expect(assertCaseMessageApplicationDecisionLetters({
+      attachmentRows: approvalLetter,
+      selectedApplicationId: 123,
+      applicationRow: staleApprovedApplication,
+      caseStatus: 'active',
+      reviewWorkflow: null,
+    })).toMatchObject({
+      outcome: 'approved',
+      authoritativeSource: 'legacy_application',
+    });
+  });
+
+  test('CFA inclusion requires positive funding and excludes applied revision evidence rows', () => {
+    expect(interventionHasCfaFunding({
+      costLines: [{ amount: 0 }],
+      costTotal: 0,
+    })).toBe(false);
+    expect(cfaSnapshotHasFunding({
+      interventions: [{ costLines: [], costTotal: 0 }],
+    })).toBe(false);
+    expect(interventionHasCfaFunding({
+      costLines: [{
+        amount: null,
+        recurrence: { enabled: true, amountPerPeriod: 75, occurrences: 2 },
+      }],
+      costTotal: 0,
+    })).toBe(true);
+    expect(cfaSnapshotHasFunding({
+      interventions: [{ costLines: [], costTotal: 250 }],
+    })).toBe(true);
+
+    expect(isAppliedRevisionEvidenceIntervention({
+      metadata_json: JSON.stringify({
+        revisionApplication: {
+          status: 'applied',
+          appliedToInterventionId: '77',
+          appliedAt: '2026-08-09T12:00:00.000Z',
+        },
+      }),
+    })).toBe(true);
+    expect(isAppliedRevisionEvidenceIntervention({
+      metadata_json: JSON.stringify({ revisionApplication: { status: 'draft' } }),
+    })).toBe(false);
+
+    expect(shouldIncludeFundedInterventionForCfa('approved', {
+      metadata_json: JSON.stringify({
+        costLines: [{ type: 'TuitionFeesDirect', amount: 0 }],
+      }),
+    }, 'CRF')).toBe(false);
+    expect(shouldIncludeFundedInterventionForCfa('approved', {
+      metadata_json: JSON.stringify({
+        costLines: [{ type: 'TuitionFeesDirect', amount: 250 }],
+      }),
+    }, 'CRF')).toBe(true);
+    expect(shouldIncludeFundedInterventionForCfa('draft', {
+      metadata_json: JSON.stringify({
+        costLines: [{ type: 'TuitionFeesDirect', amount: 250 }],
+      }),
+    }, 'CRF')).toBe(false);
+    expect(shouldIncludeFundedInterventionForCfa('approved', {
+      metadata_json: JSON.stringify({
+        costLines: [{ type: 'TuitionFeesDirect', amount: 250 }],
+        revisionApplication: { status: 'applied' },
+      }),
+    }, 'CRF')).toBe(false);
+  });
+
+  test('zero-funded plan snapshots skip before CFA series lookup or draft supersession', async () => {
+    const calls = [];
+    const connection = {
+      query: jest.fn(async (sql, params = []) => {
+        const normalizedSql = String(sql).replace(/\s+/g, ' ').trim();
+        calls.push({ sql: normalizedSql, params });
+        if (normalizedSql === 'SELECT id FROM iset_case WHERE id = ? LIMIT 1 FOR UPDATE') {
+          return [[{ id: 76 }], []];
+        }
+        if (normalizedSql.includes('FROM iset_case_action_plan')) {
+          return [[{
+            id: 3,
+            application_id: 123,
+            name: 'Application 123 plan',
+            funding_stream: 'CRF',
+            agreement_number: null,
+            effective_date: null,
+          }], []];
+        }
+        if (normalizedSql.includes('FROM iset_case c')) {
+          return [[{
+            id: 76,
+            case_number: 'CASE-76',
+            application_id: 123,
+            client_id: 45,
+            case_context_json: '{}',
+            applicant_user_id: 67,
+            reference_number: 'APP-123',
+            intake_payload: '{}',
+          }], []];
+        }
+        if (normalizedSql.includes('FROM iset_case_intervention')) {
+          return [[{
+            id: 7,
+            status: 'approved',
+            intervention_code: '100',
+            start_date: '2026-08-10',
+            end_date: '2026-08-11',
+            intervention_cost: 0,
+            budget_amount: 0,
+            approved_amount: 0,
+            related_noc: null,
+            related_noc_version: null,
+            funding_stream: 'CRF',
+            metadata_json: JSON.stringify({
+              costLines: [{ type: 'TuitionFeesDirect', amount: 0 }],
+              snapshot: { costTotal: 0 },
+            }),
+            notes: null,
+          }], []];
+        }
+        throw new Error(`unexpected_query:${normalizedSql}`);
+      }),
+    };
+
+    await expect(createCfaVersionForPlan({
+      caseId: 76,
+      actionPlanId: 3,
+      applicationId: 123,
+      changeReason: 'NEW_INTERVENTION_APPROVED',
+      changeSummary: 'Zero funding',
+      actorUserId: 88,
+      staffProfileId: 54,
+      caseManagerName: 'Case Manager',
+      connection,
+    })).resolves.toEqual({ skipped: true, reason: 'no_interventions' });
+
+    expect(calls.some(call => call.sql.includes('FROM cfa_series'))).toBe(false);
+    expect(calls.some(call => call.sql.includes('FROM cfa_version'))).toBe(false);
+    expect(calls.some(call => call.sql.startsWith('UPDATE cfa_version'))).toBe(false);
+    expect(calls.some(call => call.sql.startsWith('UPDATE signing_request'))).toBe(false);
   });
 
   test('every requested workflow must resolve exactly once and be signing eligible', async () => {

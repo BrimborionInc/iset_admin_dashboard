@@ -48,7 +48,70 @@ describe('approved application isolation from historical case plans', () => {
     expect(snapshot).toContain('SELECT id, application_id, name, funding_stream');
     expect(snapshot).toContain('const planApplicationId = normalisePositiveInteger(planRow.application_id)');
     expect(snapshot).toContain("'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'");
+    expect(snapshot).toContain("'LEFT JOIN iset_application a ON 1 = 0'");
+    expect(snapshot).not.toContain("buildCasePrimaryApplicationJoinSql('c', 'a')");
     expect(snapshot).toContain('planApplicationId ? [planApplicationId, caseId] : [caseId]');
+  });
+
+  test('CFA snapshots include only funded interventions and exclude applied revision evidence', () => {
+    const snapshotSource = sourceSlice(
+      'function sanitizeInterventionForCfa',
+      'async function fetchAssignedCaseManagerForFundingAgreement'
+    );
+
+    expect(snapshotSource).toContain('function interventionHasCfaFunding');
+    expect(snapshotSource).toContain('.filter(interventionHasCfaFunding)');
+    expect(snapshotSource).toContain("revisionApplicationStatus === 'applied'");
+    expect(snapshotSource).toContain('if (!row || isAppliedRevisionEvidenceIntervention(row)) return null;');
+  });
+
+  test('zero-funded CFA creation exits before series lookup or draft supersession', () => {
+    const planVersion = sourceSlice(
+      'async function createCfaVersionForPlan',
+      'async function createCfaVersionFromAssessment'
+    );
+    const assessmentVersion = sourceSlice(
+      'async function createCfaVersionFromAssessment',
+      'const normalizeProposedIntervention'
+    );
+
+    for (const versionSource of [planVersion, assessmentVersion]) {
+      const noInterventionsGuard = versionSource.indexOf('if (!snapshot?.interventions?.length)');
+      const noFundingGuard = versionSource.indexOf('if (!cfaSnapshotHasFunding(snapshot))');
+      const ensureSeries = versionSource.indexOf('const seriesId = await ensureCfaSeries');
+      const supersessionWrite = versionSource.indexOf("SET status = 'withdrawn'");
+
+      expect(noInterventionsGuard).toBeGreaterThanOrEqual(0);
+      expect(noFundingGuard).toBeGreaterThan(noInterventionsGuard);
+      expect(ensureSeries).toBeGreaterThan(noFundingGuard);
+      expect(supersessionWrite).toBeGreaterThan(ensureSeries);
+    }
+  });
+
+  test('automatic CFA triggers require funded rows and suppress zero-funded final approvals', () => {
+    const createRoute = sourceSlice(
+      "app.post('/api/action-plans/:id/interventions'",
+      "app.patch('/api/interventions/:id'"
+    );
+    const patchRoute = sourceSlice(
+      "app.patch('/api/interventions/:id'",
+      "app.post('/api/interventions/:id/close'"
+    );
+
+    expect(createRoute).toContain('shouldIncludeFundedInterventionForCfa(\n        createInterventionState');
+    expect(createRoute).not.toContain('shouldIncludeInterventionForCfa(createInterventionState)');
+    expect(patchRoute).toContain('const wasIncludedInCfa = shouldIncludeFundedInterventionForCfa(');
+    expect(patchRoute).toContain('const isIncludedInCfa = shouldIncludeFundedInterventionForCfa(');
+
+    const zeroFundedGuard = patchRoute.indexOf('const isZeroFundedFinalApproval =');
+    const targetList = patchRoute.indexOf('const cfaTargets = [];', zeroFundedGuard);
+    const targetSuppression = patchRoute.indexOf('if (isZeroFundedFinalApproval)', targetList);
+    const cfaWrite = patchRoute.indexOf('await createCfaVersionForPlan({', targetSuppression);
+
+    expect(zeroFundedGuard).toBeGreaterThanOrEqual(0);
+    expect(targetList).toBeGreaterThan(zeroFundedGuard);
+    expect(targetSuppression).toBeGreaterThan(targetList);
+    expect(cfaWrite).toBeGreaterThan(targetSuppression);
   });
 
   test('every newly materialized application plan creates the next CFA version', () => {

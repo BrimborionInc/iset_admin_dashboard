@@ -119,9 +119,9 @@ describe('application assessment correction-return caller guard', () => {
     );
 
     expect(source).toContain('requiresSubmitterCorrectionReturn');
-    expect(source).toContain('Coordinator correction required');
+    expect(source).toContain('Submitter correction required');
     expect(source).toContain("!requiresSubmitterCorrectionReturn && (");
-    expect(source).toContain('Return this reopened assessment to the Coordinator for correction');
+    expect(source).toContain('Return this reopened assessment to the original submitter for correction');
   });
 
   const buildReturnedWorkflowRow = () => ({

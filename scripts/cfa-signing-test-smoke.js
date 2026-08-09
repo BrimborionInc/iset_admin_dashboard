@@ -13,6 +13,8 @@ const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 
 const EXPECTED_AWS_ACCOUNT = '124355655255';
+const EXPECTED_AWS_ARN = 'arn:aws:iam::124355655255:user/CODEX_CLI_Admin';
+const EXPECTED_REMOTE_AWS_ARN = 'arn:aws:iam::124355655255:user/SES_backend';
 const DEFAULT_PROFILE = 'nwac-test';
 const DEFAULT_REGION = 'ca-central-1';
 const DEFAULT_BUCKET = 'nwac-test-artifacts';
@@ -21,6 +23,7 @@ const EXPECTED_TEST_DB_USER = 'app_admin';
 const EXPECTED_TEST_DB_SERVER_HOSTNAME = 'ip-172-16-0-199';
 const EXPECTED_TEST_DB_PORT = 3306;
 const EXPECTED_TEST_DB_PRINCIPAL = 'app_admin@10.48.%';
+const EXPECTED_TEST_DB_VERSION = '8.0.42';
 
 function parseArgs(argv) {
   const args = {
@@ -172,8 +175,8 @@ function parseSmokeJson(stdout) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const identity = awsJson(['sts', 'get-caller-identity'], options);
-  if (identity?.Account !== EXPECTED_AWS_ACCOUNT) {
-    throw new Error(`AWS account ${identity?.Account || 'unknown'} did not match expected TEST account ${EXPECTED_AWS_ACCOUNT}`);
+  if (identity?.Account !== EXPECTED_AWS_ACCOUNT || identity?.Arn !== EXPECTED_AWS_ARN) {
+    throw new Error(`AWS identity did not match authorized TEST operator ${EXPECTED_AWS_ARN}`);
   }
   if (!fs.existsSync(options.portalEnv)) throw new Error(`Portal TEST env not found: ${options.portalEnv}`);
   const portalEnv = readEnvFile(options.portalEnv);
@@ -196,6 +199,7 @@ async function main() {
   try {
     const preflightCommandId = sendCommand(instanceId, [
       'set -euo pipefail',
+      `test "$(aws sts get-caller-identity --query Arn --output text --region ${shellQuote(options.region)})" = ${shellQuote(EXPECTED_REMOTE_AWS_ARN)}`,
       [
         'node', shellQuote('/opt/nwac/admin-dashboard/scripts/cfa-signing-schema-preflight.js'),
         '--env-file', shellQuote('/opt/nwac/portal/.env.test'),
@@ -205,6 +209,7 @@ async function main() {
         '--expected-db-server-hostname', shellQuote(EXPECTED_TEST_DB_SERVER_HOSTNAME),
         '--expected-db-port', shellQuote(EXPECTED_TEST_DB_PORT),
         '--expected-db-principal', shellQuote(EXPECTED_TEST_DB_PRINCIPAL),
+        '--expected-db-version', shellQuote(EXPECTED_TEST_DB_VERSION),
         '--json',
       ].join(' '),
     ], options);
@@ -236,7 +241,9 @@ async function main() {
         '--expected-db-server-hostname', shellQuote(EXPECTED_TEST_DB_SERVER_HOSTNAME),
         '--expected-db-port', shellQuote(EXPECTED_TEST_DB_PORT),
         '--expected-db-principal', shellQuote(EXPECTED_TEST_DB_PRINCIPAL),
+        '--expected-db-version', shellQuote(EXPECTED_TEST_DB_VERSION),
         '--expected-aws-account', shellQuote(EXPECTED_AWS_ACCOUNT),
+        '--expected-aws-arn', shellQuote(EXPECTED_REMOTE_AWS_ARN),
         '--applicant-email', shellQuote(applicant.email),
         '--applicant-password', shellQuote(applicant.password),
         '--applicant-sub', shellQuote(applicant.sub),

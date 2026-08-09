@@ -1,4 +1,5 @@
 import {
+  appendWorkQueueEiVerificationUploadFields,
   getWorkspacePath,
   updateApplicationEligibility,
 } from '../widgets/WorkQueueItemsTableWidget';
@@ -48,6 +49,28 @@ describe('work queue workspace links', () => {
 });
 
 describe('work queue EI eligibility writes', () => {
+  it('tags the uploaded verification document with the selected EI status and exact scope', () => {
+    const formData = { append: jest.fn() };
+    const file = { name: 'ei-verification.pdf' };
+
+    expect(appendWorkQueueEiVerificationUploadFields({
+      formData,
+      file,
+      eligibilityStatus: 'EI Reach Back',
+      caseId: 76,
+      applicationId: 124,
+    })).toBe(formData);
+
+    expect(formData.append.mock.calls).toEqual([
+      ['file', file],
+      ['label', 'EI Verification'],
+      ['documentType', 'ei_verification'],
+      ['eligibilityStatus', 'EI Reach Back'],
+      ['caseId', 76],
+      ['applicationId', 124],
+    ]);
+  });
+
   it('sends the exact selected application id with the case-scoped update', async () => {
     const fetcher = jest.fn().mockResolvedValue({ ok: true });
 

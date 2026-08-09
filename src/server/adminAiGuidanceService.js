@@ -1588,6 +1588,8 @@ const SEEDED_GUIDANCE_EXAMPLES = [
       "Approval letters",
       "Generate drafts",
       "Send client approval letter",
+      "Client Funding Agreement",
+      "funded cost lines",
     ],
     mustNotMention: [
       "Approvals area",
@@ -1602,7 +1604,7 @@ const SEEDED_GUIDANCE_EXAMPLES = [
     ],
     questionText: "How do I prepare approval letters for approved new interventions?",
     answerText:
-      "Open the client in Case Workspace and use the Interventions widget. For the approved new intervention proposal with letter follow-up pending, choose `Actions > Prepare approval letters`; PATH opens the approval follow-up on `Approval letters`. Click `Generate drafts`, review or edit the `Client letter` and any supporting institution, loan-provider, or other-funder letter tabs, then use `Send client approval letter` for the client-facing send. Supporting funder letters are reviewed or downloaded for manual handling; PATH does not send them automatically.",
+      "Open the client in Case Workspace and use the Interventions widget. For the approved new intervention proposal with letter follow-up pending, choose `Actions > Prepare approval letters`; PATH opens the approval follow-up on `Approval letters`. Click `Generate drafts`, review or edit the `Client letter` and supporting tabs, then use `Send client approval letter`. When the approval has funded cost lines, PATH includes the exact Action Plan's Client Funding Agreement and EFT/Wire Transfer form; a zero-funding approval has no CFA package. Supporting institution, loan-provider, or other-funder letters are reviewed or downloaded for manual handling and are not sent automatically.",
   },
   {
     guidanceSlug: "home-pending-completion-purpose",
@@ -1617,6 +1619,7 @@ const SEEDED_GUIDANCE_EXAMPLES = [
       "funding forms and signatures",
       "approved intervention proposal",
       "completed or closed",
+      "Client Funding Agreement",
     ],
     mustNotMention: [
       "completed applications only",
@@ -1631,7 +1634,7 @@ const SEEDED_GUIDANCE_EXAMPLES = [
     ],
     questionText: "What is Pending Completion for?",
     answerText:
-      "`Pending Completion` is for post-decision follow-through, not for already archived work. It includes application files after an approval or denial decision while approval letters, funding forms and signatures, checklist work, or final closeout still need to be finished. It also includes approved new intervention proposals and approved intervention revisions until the intervention-scoped client approval or funding revision letter is sent. Open the item name to continue the work in the correct Application Workspace or Case Workspace; the row remains until the application is completed/closed or the intervention letter follow-up is sent.",
+      "`Pending Completion` is for post-decision follow-through, not for already archived work. It includes application files after an approval or denial decision while approval letters, funding forms and signatures, checklist work, or final closeout remain. For funded approvals, those forms can include the exact application or Action Plan-linked Client Funding Agreement; zero-funding approvals have no CFA package. The queue also includes approved new intervention proposals and revisions until their client approval or funding revision letter is sent. Open the item name in the correct workspace; the row remains until the application is completed/closed or intervention letter follow-up is sent.",
   },
   {
     guidanceSlug: "application-missing-documents-followup",
@@ -1676,7 +1679,8 @@ const SEEDED_GUIDANCE_EXAMPLES = [
       "Request Changes note",
       "Commit",
       "Case Notes",
-      "case manager",
+      "Regional Manager",
+      "recorded submitter",
     ],
     mustNotMention: [
       "deny the application",
@@ -1691,7 +1695,98 @@ const SEEDED_GUIDANCE_EXAMPLES = [
     ],
     questionText: "How do I request changes instead of approving an application?",
     answerText:
-      "Open the application in Application Workspace and go to the Application Approval review, then use `Approval and decision`. Select `Request Changes` under `Funding Decision`, enter the required `Request Changes note` with what the coordinator or case manager needs to fix or clarify, and click `Commit`. PATH sends the assessment back for updates and records the note in Case Notes/Notes and Reminders; it is not a denial and it does not start approval or denial letter communication.",
+      "Open the application in Application Workspace and use `Approval and decision`. Select `Request Changes`, enter the required note, and click `Commit`. PATH returns the read-only assessment to the Regional Manager first and records the note in Case Notes/Notes and Tasks. The Regional Manager reviews it, adds a forwarding note, and sends it to the recorded submitter. After correction, the assessment must pass Regional Manager review again before returning for final decision. This is not a denial and does not start decision-letter or CFA communication.",
+  },
+  {
+    guidanceSlug: "two-step-review-up-down",
+    sortOrder: 12,
+    coverageStatus: "verified",
+    evalFixtureId: "two-step-review-up-down",
+    routeContext: ["/", "/application-case/:id", "/cases/:caseId"],
+    roleContext: ["ISET Coordinator", "Regional Manager", "NWAC Administrator", "System Administrator"],
+    mustMention: [
+      "Submit for review",
+      "Pending Review",
+      "Submit for final decision",
+      "Pending Decision",
+      "Regional Manager first",
+      "recorded submitter",
+    ],
+    mustNotMention: [
+      "Regional Manager records the final decision",
+      "Decision Maker sends changes directly to the coordinator",
+      "any Regional Manager can edit",
+    ],
+    sourceRefs: [
+      "docs/guides/rm-two-step-review-user-guide.md",
+      "src/widgets/CoordinatorAssessmentWidget.js",
+      "src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx",
+      "src/helpPanelContents/homeApprovalsItemsHelp.js",
+    ],
+    questionText: "How does two-step review move work up for approval and back down for changes?",
+    answerText:
+      "The recorded submitter uses `Submit for review`, which sends a read-only packet to the Regional Manager's `Pending Review` queue. The RM either returns it to that submitter with a note or uses `Submit for final decision`, moving it to the Decision Maker's `Pending Decision` queue. If the Decision Maker requests changes, the packet returns to the Regional Manager first; the RM forwards the request with a note to the recorded submitter. After correction, it goes through RM review again before returning for final decision. Work moves up and down one level at a time, and Regional Managers do not record final decisions.",
+  },
+  {
+    guidanceSlug: "two-step-review-ei-gates",
+    sortOrder: 13,
+    coverageStatus: "verified",
+    evalFixtureId: "two-step-review-ei-gates",
+    routeContext: ["/application-case/:id", "/cases/:caseId"],
+    roleContext: ["ISET Coordinator", "Regional Manager", "NWAC Administrator", "System Administrator"],
+    mustMention: [
+      "signed consent",
+      "CRF",
+      "EI Active Claim",
+      "EI Reach Back",
+      "funding stream",
+      "final approval",
+    ],
+    mustNotMention: [
+      "EI status controls the review queue",
+      "change EI to match the budget pot",
+      "every proposal needs EI before RM review",
+    ],
+    sourceRefs: [
+      "docs/guides/rm-two-step-review-user-guide.md",
+      "src/widgets/CoordinatorAssessmentWidget.js",
+      "src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx",
+      "src/helpPanelContents/applicationAssessmentHelp.js",
+      "src/helpPanelContents/caseWorkspaceProposedInterventionsHelp.js",
+    ],
+    questionText: "Where do EI status checks fit in two-step review?",
+    answerText:
+      "Keep EI verification separate from review ownership. Signed consent comes before the verification request. Application assessments need an authorized staff member to record `CRF`, `EI Active Claim`, or `EI Reach Back` before submission; the Regional Manager can complete that reviewer-only check while the submitted assessment body remains read-only. A new intervention proposal may enter RM review before EI is final, but the Decision Maker cannot record final approval until the status is confirmed. CRF maps to a CRF funding stream; both EI statuses map to EI. Resolve any Action Plan mismatch from verified facts—never change EI merely to fit a budget pot.",
+  },
+  {
+    guidanceSlug: "two-step-review-cfa-production",
+    sortOrder: 14,
+    coverageStatus: "verified",
+    evalFixtureId: "two-step-review-cfa-production",
+    routeContext: ["/application-case/:id", "/cases/:caseId"],
+    roleContext: ["ISET Coordinator", "Regional Manager", "NWAC Administrator", "System Administrator"],
+    mustMention: [
+      "final approval",
+      "funded cost lines",
+      "Client Funding Agreement",
+      "EFT/Wire Transfer",
+      "exact application",
+      "post-approval",
+    ],
+    mustNotMention: [
+      "CFA is the final decision",
+      "CFA controls Pending Review",
+      "reuse an older application agreement",
+    ],
+    sourceRefs: [
+      "docs/guides/rm-two-step-review-user-guide.md",
+      "isetadminserver.js",
+      "src/widgets/CoordinatorAssessmentWidget.js",
+      "src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx",
+    ],
+    questionText: "When is the Client Funding Agreement produced in the review workflow?",
+    answerText:
+      "The Client Funding Agreement is post-approval document work, not a Regional Manager sign-off or Decision Maker decision. After final approval, sending the client approval letter includes the exact application/Action Plan-linked CFA and EFT/Wire Transfer form when funded cost lines exist. Zero-funding approvals have no CFA package, and denials or requested changes do not start signing. Intervention revisions use the applicable revised or red-line CFA. Do not reuse an older application's signed agreement, and do not treat CFA signing as a review-queue transition.",
   },
   {
     guidanceSlug: "case-backload-overview",

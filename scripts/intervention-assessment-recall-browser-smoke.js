@@ -140,10 +140,33 @@ function buildProposedIntervention() {
 }
 
 function buildIntervention(status = 'submitted') {
+  const reviewWorkflow = status === 'submitted'
+    ? {
+        id: 90,
+        workflowType: 'intervention_proposal',
+        workflow_type: 'intervention_proposal',
+        applicationId: APPLICATION_ID,
+        application_id: APPLICATION_ID,
+        interventionId: INTERVENTION_ID,
+        intervention_id: INTERVENTION_ID,
+        currentStage: 'rm_review',
+        current_stage: 'rm_review',
+        currentOwnerRole: 'Regional Manager',
+        current_owner_role: 'Regional Manager',
+        submittedByStaffProfileId: 1,
+        submitted_by_staff_profile_id: 1,
+      }
+    : null;
   return {
     id: INTERVENTION_ID,
     actionPlanId: ACTION_PLAN_ID,
     action_plan_id: ACTION_PLAN_ID,
+    applicationId: APPLICATION_ID,
+    application_id: APPLICATION_ID,
+    proposalId: 201,
+    proposal_id: 201,
+    createdByStaffProfileId: 1,
+    created_by_staff_profile_id: 1,
     title: 'Administrative Assistant Certificate',
     code: '4',
     status,
@@ -151,6 +174,8 @@ function buildIntervention(status = 'submitted') {
     review_status: status,
     deliveryStatus: null,
     delivery_status: null,
+    reviewWorkflow,
+    review_workflow: reviewWorkflow,
     startDate: '2026-09-01',
     endDate: '2027-04-30',
     institution: 'Example College',
@@ -229,6 +254,8 @@ function buildCasePayload(interventionStatus = 'submitted') {
       {
         id: ACTION_PLAN_ID,
         case_id: CASE_ID,
+        applicationId: APPLICATION_ID,
+        application_id: APPLICATION_ID,
         title: '2026 employment plan',
         name: '2026 employment plan',
         status: 'active',

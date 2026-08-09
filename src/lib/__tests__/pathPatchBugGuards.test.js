@@ -21,6 +21,11 @@ const secureMessagingWidgetSource = fs.readFileSync(
   'utf8'
 );
 
+const coordinatorAssessmentWidgetSource = fs.readFileSync(
+  path.join(process.cwd(), 'src', 'widgets', 'CoordinatorAssessmentWidget.js'),
+  'utf8'
+);
+
 function extractAdminFunction(name) {
   const marker = `function ${name}`;
   const asyncMarker = `async function ${name}`;
@@ -210,6 +215,14 @@ describe('PATH patch bug guards', () => {
       expect(routeSource).toContain('JOIN iset_application a ON a.case_id = c.id AND a.id = ?');
       expect(routeSource).not.toContain("buildCasePrimaryApplicationJoinSql('c', 'a')");
     }
+
+    const recallActorGuard = extractAdminFunction('assertAssessmentRecallActorAllowed');
+    expect(recallActorGuard).toContain('fetchApplicationAssessmentReviewWorkflow');
+    expect(recallActorGuard).toContain('exactWorkflow?.submitted_by_staff_profile_id');
+    expect(recallActorGuard).toContain('normalizedApplicationId\n    ? null\n    : await fetchLatestAssessmentSubmitterActor');
+    expect(extractAdminFunction('isAssessmentRecallAdmin')).toContain("=== 'systemadministrator'");
+    expect(coordinatorAssessmentWidgetSource).toContain("roleKey === 'systemadministrator'");
+    expect(coordinatorAssessmentWidgetSource).toContain('isCurrentReviewWorkflowSubmitter ||');
   });
 
   test('secure-message display does not write application lifecycle from aggregate case attachments', () => {

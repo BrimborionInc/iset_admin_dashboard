@@ -2,9 +2,22 @@
 
 Purpose: running execution log for the privacy ERM cleanup plan so work survives thread transitions.
 
-Last Updated: 2026-04-27
+Last Updated: 2026-08-09
 
 Canonical plan: `docs/planning/privacy-erm-cleanup-grand-release-plan.md`
+
+## 2026-08-09 Smoke SQL Admission Hardening
+
+`scripts/privacy-erm-smoke.js` now has an explicit fail-closed database admission boundary:
+
+- `--schema-preflight-only` proves the exact configured/live WSL DEV identity and retrieves each required table independently with its full create definition, columns, indexes, and constraints. It executes no integrity read after metadata discovery.
+- Retired-object and retired-column absence, and required FK/CHECK ownership/reference, are derived and reported from the proven object DDL/column/constraint evidence. The smoke no longer runs ordinary joined `information_schema` count queries to infer those facts.
+- The three privacy audit objects are required and proved from live metadata as base tables; the guard rejects a type mismatch rather than assuming that an object name implies a view.
+- Full read-only integrity checks receive only the guarded connection created after preflight. Every statement is validated immediately, every multi-table column is qualified, and every table alias is both backtick-quoted and live keyword-proven.
+- The old informational join that tried to interpret runtime string `workflow_id` values as either numeric workflow IDs or names was removed. Those fields remain deliberately classified as string keys and are not asserted as a relational FK by this smoke.
+- Wrong identity, missing/wrong object metadata, a retired column/object reappearing, or a missing/misdirected constraint aborts before any ordinary integrity query. Focused fake-connection tests prove this boundary without contacting a database.
+
+This change is source/test hardening only. It does not itself constitute a new DEV, TEST, or PROD smoke result, and it made no environment or schema change.
 
 ## Current Stage
 

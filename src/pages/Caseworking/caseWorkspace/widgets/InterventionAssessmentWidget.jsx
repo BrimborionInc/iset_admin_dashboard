@@ -43,6 +43,11 @@ import {
   requiresNocForInterventionCode as requiresNocForCode,
 } from "../../../../utils/interventionCodeRules.js";
 import { resolveInterventionReviewEiEligibility } from "../../../../utils/interventionEiEligibility.js";
+import {
+  canEditInterventionAssessmentBody,
+  canRecallInterventionAssessmentSubmission,
+} from "../../../../utils/interventionAssessmentEditAccess.js";
+import { isActionPlanSelectableForApplication } from "../../../../utils/interventionApplicationPlanScope.js";
 import styles from "./InterventionAssessmentWidget.module.css";
 
 const BARRIER_OPTIONS = [
@@ -1582,12 +1587,18 @@ const normalizeCostLine = raw => {
 
 const hasApprovedFundingAmount = line => {
   if (!line || typeof line !== "object") return false;
-  const totalAmount = parseCurrencyInput(line.amount);
-  if (totalAmount !== null && totalAmount > 0) return true;
+  const totalAmount = parseCurrencyToNumber(line.amount);
+  if (totalAmount > 0) return true;
   const recurrence = line.recurrence && typeof line.recurrence === "object" ? line.recurrence : {};
-  const amountPerPeriod = parseCurrencyInput(recurrence.amountPerPeriod);
-  return amountPerPeriod !== null && amountPerPeriod > 0;
+  const amountPerPeriod = parseCurrencyToNumber(recurrence.amountPerPeriod);
+  return amountPerPeriod > 0;
 };
+
+export const interventionApprovalIncludesFundingPackage = interventions =>
+  (Array.isArray(interventions) ? interventions : []).some(intervention => {
+    const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+    return costLines.some(hasApprovedFundingAmount);
+  });
 
 const normalizeProposedIntervention = raw => {
   if (!raw || typeof raw !== "object") return null;
@@ -1664,7 +1675,6 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     refresh,
     updateActionPlan,
     createIntervention,
-    deleteIntervention: deleteInterventionRecord,
     updateIntervention: updateInterventionRecord,
     interventionCodes,
     interventionCodesLoading,
@@ -2104,10 +2114,21 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const rmReviewNote = String(reviewWorkflow?.rmReviewNote || reviewWorkflow?.rm_review_note || "").trim();
   const nwacDecisionNote = String(reviewWorkflow?.nwacDecisionNote || reviewWorkflow?.nwac_decision_note || "").trim();
 
-  const isProposalBodyEditable =
-    isDraftStatus ||
-    isChangesRequestedStatus ||
-    (!statusValue && !hasBlockingProposal);
+  const isProposalBodyEditable = canEditInterventionAssessmentBody({
+    role,
+    reviewStatus: statusValue,
+    reviewWorkflow,
+    createdByStaffProfileId:
+      activeInterventionRecord?.createdByStaffProfileId ||
+      activeInterventionRecord?.created_by_staff_profile_id ||
+      null,
+    currentStaffProfileId:
+      currentUser?.staffProfileId ||
+      currentUser?.staff_profile_id ||
+      null,
+    hasExistingIntervention: Boolean(activeInterventionRecord?.id),
+    hasBlockingProposal,
+  });
   const isDecisionEditable =
     isReviewStageStatus &&
     canDecideSubmittedProposal &&
@@ -2118,9 +2139,18 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const canRecallSubmittedProposal =
     isReviewStageStatus &&
     !completionNote &&
-    !canDecideSubmittedProposal &&
-    isAssessor &&
-    (!twoStepReviewEnabled || reviewStage === INTERVENTION_REVIEW_STAGES.rmReview || reviewStage === INTERVENTION_REVIEW_STAGES.returnedToSubmitter) &&
+    canRecallInterventionAssessmentSubmission({
+      role,
+      reviewWorkflow: hasReviewWorkflow ? reviewWorkflow : null,
+      createdByStaffProfileId:
+        activeInterventionRecord?.createdByStaffProfileId ||
+        activeInterventionRecord?.created_by_staff_profile_id ||
+        null,
+      currentStaffProfileId:
+        currentUser?.staffProfileId ||
+        currentUser?.staff_profile_id ||
+        null,
+    }) &&
     Boolean(activeInterventionIdValue);
   const statusLabel = completionNote
     ? (isApprovedDecisionOutcome ? "Approved" : (isRejectedDecisionOutcome ? "Denied" : "Completed"))
@@ -2177,12 +2207,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const selectablePlans = useMemo(() => {
     const plans = caseData?.actionPlans || [];
     return plans.filter(plan => {
+      if (!isActionPlanSelectableForApplication(plan, applicationId)) return false;
       const status = String(plan.status || "").toLowerCase();
       if (status === "closed" || status === "archived") return false;
       if (plan.archivedAt) return false;
       return true;
     });
-  }, [caseData]);
+  }, [applicationId, caseData]);
 
   const planOptions = useMemo(
     () =>
@@ -3241,6 +3272,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     });
     return total;
   }, [interventionTotals]);
+  const approvalHasFundingPackage = useMemo(
+    () => interventionApprovalIncludesFundingPackage(proposedInterventions),
+    [proposedInterventions]
+  );
   const canApproveHighValueFunding =
     String(currentUserEmail || "").trim().toLowerCase() === HIGH_VALUE_FUNDING_APPROVER_EMAIL;
   const isHighValueFundingApprovalBlocked =
@@ -4184,6 +4219,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       if (revision && nextProposed.length > 1) {
         nextProposed = nextProposed.slice(0, 1);
       }
+      const draftHasFundingPackage = interventionApprovalIncludesFundingPackage(nextProposed);
       const mappedBarriers = Array.isArray(metadata.barriers)
         ? metadata.barriers
             .map(val => BARRIER_OPTIONS.find(opt => opt.value === (val.value || val)))
@@ -4279,11 +4315,17 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                   : "Intervention proposal approved",
               body: approvalLetterFollowUp.letterSent
                 ? approvalLetterFollowUp.isRevision
-                  ? `The approved revision was applied to ${approvalLetterFollowUp.sourceTitle || "this intervention"}, and the client funding revision letter was sent.`
+                  ? draftHasFundingPackage
+                    ? `The approved revision was applied to ${approvalLetterFollowUp.sourceTitle || "this intervention"}, and the client funding revision letter was sent.`
+                    : `The approved change was applied to ${approvalLetterFollowUp.sourceTitle || "this intervention"}, and the client intervention change approval letter was sent.`
                   : "This intervention proposal has been approved, and the client approval letter was sent."
                 : approvalLetterFollowUp.isRevision
-                  ? `The approved revision was applied to ${approvalLetterFollowUp.sourceTitle || "this intervention"}. Prepare or send the funding revision letter from here.`
-                  : "This intervention proposal has been approved. Prepare or send the client approval letter and related funding documents from here.",
+                  ? draftHasFundingPackage
+                    ? `The approved revision was applied to ${approvalLetterFollowUp.sourceTitle || "this intervention"}. Prepare or send the funding revision letter from here.`
+                    : `The approved change was applied to ${approvalLetterFollowUp.sourceTitle || "this intervention"}. Prepare or send the client intervention change approval letter from here.`
+                  : draftHasFundingPackage
+                    ? "This intervention proposal has been approved. Prepare or send the client approval letter and related funding documents from here."
+                    : "This intervention proposal has been approved. Prepare or send the client approval letter from here.",
               decisionLetterSent: approvalLetterFollowUp.letterSent,
               showDecisionLetters: !approvalLetterFollowUp.letterSent,
               persistedApprovalLetterFollowUp: true,
@@ -4332,10 +4374,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     setSelectedInterventionId,
   ]);
 
-  const isDirty = useMemo(
-    () => JSON.stringify(form) !== JSON.stringify(initialFormRef.current),
-    [form]
-  );
+  // `handleSave` advances the mutable baseline without changing `form`.
+  // Recompute on each render so the loading-state render after a successful
+  // save observes the new baseline instead of retaining a stale memoized true.
+  const isDirty = JSON.stringify(form) !== JSON.stringify(initialFormRef.current);
 
   const requiresPrimaryNoc = useMemo(
     () => Boolean(primaryIntervention?.code && requiresNocForCode(primaryIntervention.code)),
@@ -4596,6 +4638,24 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       interventionTotals,
       resolveInterventionLabel,
     ]
+  );
+
+  const buildDecisionPayload = useCallback(
+    (decision, { potId = null, postingContext = null, eiDocumentId = null } = {}) => ({
+      status: decision,
+      ...(potId ? { potId } : {}),
+      ...(postingContext ? { postingContext } : {}),
+      metadata: {
+        review: {
+          eiStatus: form.eiVerificationStatus || "",
+          eiNotes: form.eiVerificationNotes || "",
+          decision,
+          decisionNotes: form.decisionNotes || "",
+          eiDocumentId: eiDocumentId || form.eiVerificationDocumentId || null,
+        },
+      },
+    }),
+    [form.decisionNotes, form.eiVerificationDocumentId, form.eiVerificationNotes, form.eiVerificationStatus]
   );
 
   const findEditableDraft = useCallback(() => {
@@ -5322,35 +5382,27 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                 updated?.id || Number(revisionSourceInterventionId),
               ]);
             }
-            let cleanupError = null;
-            if (
-              typeof deleteInterventionRecord === "function" &&
-              activeInterventionIdValue &&
-              String(activeInterventionIdValue) !== String(revisionSourceInterventionId)
-            ) {
-              try {
-                await deleteInterventionRecord(Number(activeInterventionIdValue));
-              } catch (err) {
-                cleanupError = err;
-              }
-            }
             setCurrentInterventionStatus(revisionSourceStatus || "approved");
             setApprovalLetterPackGenerated(false);
             setApprovalLetterPackTabId("client");
             setClientLetterBody("");
             setSendingLetterError(null);
             setCompletionNote({
-              type: cleanupError ? "info" : "success",
-              header: cleanupError ? "Revision applied with follow-up needed" : "Revision workflow complete",
-              body: cleanupError
-                ? `The approved revision was applied to ${revisionSourceTitle}, but the temporary revision draft could not be cleaned up automatically. ${cleanupError.message || "Delete it from the interventions table if needed."} Prepare or send the funding revision letter from here.`
-                : `The approved revision was applied to ${revisionSourceTitle}. Prepare or send the funding revision letter from here.`,
-              followUpIssue: cleanupError ? "draft_cleanup_failed" : null,
+              type: "success",
+              header: "Revision workflow complete",
+              body: approvalHasFundingPackage
+                ? `The approved revision was applied to ${revisionSourceTitle}. The final revision record was retained, and the funding revision letter can now be prepared or sent from here.`
+                : `The approved change was applied to ${revisionSourceTitle}. The final revision record was retained, and the client intervention change approval letter can now be prepared or sent from here.`,
               showDecisionLetters: true,
             });
+            // The decided revision draft is retained by the server as audit evidence,
+            // but it is intentionally partitioned out of operational intervention rows.
+            // Refresh immediately so the client does not keep showing the pre-decision
+            // draft as a second operational intervention until the next page load.
+            await refresh().catch(() => {});
           } else {
-            const [primary, ...rest] = interventionsToCreate;
-            const primaryPayload = buildApprovedInterventionPayload(primary, {
+            const [, ...rest] = interventionsToCreate;
+            const primaryPayload = buildDecisionPayload("approved", {
               potId: approvalPotId,
               postingContext: approvalPostingContext,
               eiDocumentId: approvalEiDocumentId,
@@ -5363,7 +5415,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                 postingContext: approvalPostingContext,
                 eiDocumentId: approvalEiDocumentId,
               });
-              const row = await createIntervention(actionPlanId, payload);
+              const row = await createIntervention(actionPlanId, {
+                ...payload,
+                approvalSourceInterventionId: Number(activeInterventionIdValue),
+                approvalSourceItemId: intervention.id,
+              });
               if (row?.id) created.push(row.id);
             }
             const allIds = [updated?.id || Number(activeInterventionIdValue), ...created].filter(Boolean);
@@ -5379,12 +5435,14 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             setCompletionNote({
               type: "success",
               header: "Intervention proposal approved",
-              body: "Approved interventions were created. Prepare or send the client approval letter and related funding documents from here before starting another proposal or revision.",
+              body: approvalHasFundingPackage
+                ? "Approved interventions were created. Prepare or send the client approval letter and related funding documents from here before starting another proposal or revision."
+                : "Approved interventions were created. Prepare or send the client approval letter from here before starting another proposal or revision.",
               showDecisionLetters: true,
             });
           }
         } else {
-          const payload = buildProposalPayload(outcome);
+          const payload = buildDecisionPayload(outcome);
           const updated = await updateInterventionRecord(actionPlanId, Number(activeInterventionIdValue), payload);
           const updatedReviewWorkflow = updated?.reviewWorkflow || updated?.review_workflow || null;
           const updatedReviewStage = updatedReviewWorkflow?.currentStage || updatedReviewWorkflow?.current_stage || null;
@@ -5423,11 +5481,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     },
     [
       activeInterventionIdValue,
+      approvalHasFundingPackage,
       buildApprovedInterventionPayload,
-      buildProposalPayload,
+      buildDecisionPayload,
       canDecideSubmittedProposal,
       createIntervention,
-      deleteInterventionRecord,
       dispatchCaseNotesRefresh,
       ensureActionPlanFundingReadyForApproval,
       form,
@@ -5436,6 +5494,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       isReviewStageStatus,
       linkEiDocumentToInterventions,
       proposedInterventions,
+      refresh,
       resolvedApprovalPotId,
       resolvedApprovalPostingContext,
       revisionSourceActionPlanId,
@@ -5614,47 +5673,73 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         return `- ${label}: $${Number(amount).toFixed(2)} payable to ${payeePhrase}${dateClause}.`;
       })
       .filter(Boolean);
-    const fundingParagraph = fundingLines.length
-      ? [
-          isRevisionMode ? "The revised approved funding is:" : "The approved funding is:",
-          ...fundingLines,
-        ].join("\n")
-      : isRevisionMode
-        ? "The approved funding for your eligible supports under this intervention has been updated."
-        : "Funding has been approved for your eligible supports under this intervention.";
+    const fundingParagraph = approvalHasFundingPackage
+      ? fundingLines.length
+        ? [
+            isRevisionMode ? "The revised approved funding is:" : "The approved funding is:",
+            ...fundingLines,
+          ].join("\n")
+        : isRevisionMode
+          ? "The approved funding for your eligible supports under this intervention has been updated."
+          : "Funding has been approved for your eligible supports under this intervention."
+      : "This approval does not include funded cost lines.";
+    const fundingFormsParagraph = approvalHasFundingPackage
+      ? isRevisionMode
+        ? "I have attached a red-line revised Client Funding Agreement for your review, along with a Banking Details form. When you have a moment, please review and complete any required attachments so we can keep your funding moving without delay."
+        : "I have attached the Client Funding Agreement for your review, along with a Banking Details form. When you have a moment, please review and complete the attachments so we can move ahead with your funding deposit."
+      : "Because this approval does not include funded cost lines, no Client Funding Agreement or banking/funding forms are attached.";
     return [
-      isRevisionMode ? "Funding Revision Letter" : "Letter of Approval",
+      isRevisionMode
+        ? approvalHasFundingPackage
+          ? "Funding Revision Letter"
+          : "Intervention Change Approval Letter"
+        : "Letter of Approval",
       `Date: ${formatDate(new Date())}`,
       "",
       `Dear ${recipient},`,
       "",
       isRevisionMode
-        ? `I’m writing with an update about your ISET support. After reviewing the requested changes to your approved intervention, I’m pleased to confirm that the funding for your intervention has been changed as follows. This revised approval will continue to support you ${requestPhrase}.`
-        : `I’m pleased to let you know that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, has approved funding to support you ${requestPhrase}.`,
+        ? approvalHasFundingPackage
+          ? `I’m writing with an update about your ISET support. After reviewing the requested changes to your approved intervention, I’m pleased to confirm that the funding for your intervention has been changed as follows. This revised approval will continue to support you ${requestPhrase}.`
+          : `I’m writing with an update about your ISET support. After reviewing the requested changes to your approved intervention, I’m pleased to confirm that the intervention change has been approved. This approval will continue to support you ${requestPhrase}.`
+        : approvalHasFundingPackage
+          ? `I’m pleased to let you know that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, has approved funding to support you ${requestPhrase}.`
+          : `I’m pleased to let you know that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, has approved your intervention ${requestPhrase}.`,
       "",
       fundingParagraph,
       "",
-      isRevisionMode
-        ? "I have attached a red-line revised Client Funding Agreement for your review, along with a Banking Details form. When you have a moment, please review and complete any required attachments so we can keep your funding moving without delay."
-        : "I have attached the Client Funding Agreement for your review, along with a Banking Details form. When you have a moment, please review and complete the attachments so we can move ahead with your funding deposit.",
+      fundingFormsParagraph,
       "",
       "If you have any questions, please reach out to me directly. I look forward to continuing to support you through your ISET intervention.",
       "",
       "Sincerely,",
       DEFAULT_ORG_NAME,
     ].join("\n");
-  }, [applicantSalutationName, isRevisionMode, participantLegalName, proposedInterventions]);
+  }, [
+    applicantSalutationName,
+    approvalHasFundingPackage,
+    isRevisionMode,
+    participantLegalName,
+    proposedInterventions,
+  ]);
   const canGenerateLetterDrafts = isApprovedDecisionOutcome && !sendingLetter;
   const generateLetterPackDrafts = useCallback(() => {
     if (isApprovedDecisionOutcome) {
       setClientLetterBody(buildApprovedClientLetterBody());
-      setEditableInstitutionApprovalLetters(institutionApprovalLetters);
-      setEditableCoFunderApprovalLetters(coFunderApprovalLetters);
-      setEditableLoanProviderApprovalLetters(loanProviderApprovalLetters);
+      setEditableInstitutionApprovalLetters(
+        approvalHasFundingPackage ? institutionApprovalLetters : []
+      );
+      setEditableCoFunderApprovalLetters(
+        approvalHasFundingPackage ? coFunderApprovalLetters : []
+      );
+      setEditableLoanProviderApprovalLetters(
+        approvalHasFundingPackage ? loanProviderApprovalLetters : []
+      );
       setApprovalLetterPackGenerated(true);
       return;
     }
   }, [
+    approvalHasFundingPackage,
     buildApprovedClientLetterBody,
     coFunderApprovalLetters,
     institutionApprovalLetters,
@@ -5685,12 +5770,16 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       setSendingLetterError(null);
       try {
       const subject = isApprovedDecisionOutcome
-        ? (isRevisionMode ? "Funding Revision Approval" : "Letter of Approval")
+        ? (isRevisionMode
+          ? (approvalHasFundingPackage ? "Funding Revision Approval" : "Intervention Change Approval")
+          : "Letter of Approval")
         : "";
       const body = String(clientLetterBody || "").trim()
         || (isApprovedDecisionOutcome
           ? (isRevisionMode
-            ? "Please review your funding revision letter in the portal."
+            ? (approvalHasFundingPackage
+              ? "Please review your funding revision letter in the portal."
+              : "Please review your intervention change approval letter in the portal.")
             : "Please review your approval letter in the portal.")
           : "");
       const payload = {
@@ -5739,6 +5828,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   }, [
     activeLetterWorkflowId,
     applicantSalutationName,
+    approvalHasFundingPackage,
     applicationId,
     caseId,
     clientLetterBody,
@@ -5754,7 +5844,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           return {
             type: "info",
             header: "Client letter sent with follow-up still needed",
-            body: `The approved revision was applied to ${revisionSourceTitle}, and the client funding revision letter was sent to the client's secure messages. Remove the leftover temporary revision draft from the interventions table if needed.`,
+            body: approvalHasFundingPackage
+              ? `The approved revision was applied to ${revisionSourceTitle}, and the client funding revision letter was sent to the client's secure messages. Remove the leftover temporary revision draft from the interventions table if needed.`
+              : `The approved change was applied to ${revisionSourceTitle}, and the client intervention change approval letter was sent to the client's secure messages. Remove the leftover temporary revision draft from the interventions table if needed.`,
             followUpIssue: completionNote.followUpIssue,
             decisionLetterSent: true,
             showDecisionLetters: false,
@@ -5763,7 +5855,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         return {
           type: "success",
           header: "Revision complete",
-          body: `The approved revision was applied to ${revisionSourceTitle}, and the client funding revision letter was sent to the client's secure messages.`,
+          body: approvalHasFundingPackage
+            ? `The approved revision was applied to ${revisionSourceTitle}, and the client funding revision letter was sent to the client's secure messages.`
+            : `The approved change was applied to ${revisionSourceTitle}, and the client intervention change approval letter was sent to the client's secure messages.`,
           decisionLetterSent: true,
           showDecisionLetters: false,
         };
@@ -5771,9 +5865,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       return {
         type: "success",
         header: "Intervention workflow complete",
-        body: "Approved interventions were created, and the client approval letter was sent to the client's secure messages. Supporting letters remain available below if you need them.",
+        body: approvalHasFundingPackage
+          ? "Approved interventions were created, and the client approval letter was sent to the client's secure messages. Supporting letters remain available below if you need them."
+          : "Approved interventions were created, and the client approval letter was sent to the client's secure messages.",
         decisionLetterSent: true,
-        showDecisionLetters: true,
+        showDecisionLetters: approvalHasFundingPackage,
       };
     }
     return completionNote || {
@@ -5785,6 +5881,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       showDecisionLetters: false,
     };
   }, [
+    approvalHasFundingPackage,
     completionNote,
     isApprovedDecisionOutcome,
     isRevisionMode,
@@ -5883,7 +5980,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const headerDescription = completionNote
     ? showDecisionLettersPanel
       ? isApprovedDecisionOutcome
-        ? "The decision is recorded. Prepare or send the approval letters and related funding documents from here if needed."
+        ? approvalHasFundingPackage
+          ? "The decision is recorded. Prepare or send the approval letters and related funding documents from here if needed."
+          : isRevisionMode
+            ? "The decision is recorded. Prepare or send the client intervention change approval letter from here if needed."
+            : "The decision is recorded. Prepare or send the client approval letter from here if needed."
         : "The decision is recorded."
       : null
     : canRegionalManagerReview
@@ -6992,15 +7093,25 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                 }
                 loading={sendingLetter}
               >
-                {isRevisionMode ? "Send client funding revision letter" : "Send client approval letter"}
+                {isRevisionMode
+                  ? approvalHasFundingPackage
+                    ? "Send client funding revision letter"
+                    : "Send client intervention change approval letter"
+                  : "Send client approval letter"}
               </Button>
             </SpaceBetween>
           }
         >
-          {isRevisionMode ? "Funding revision letters" : "Approval letters"}
+          {isRevisionMode
+            ? approvalHasFundingPackage
+              ? "Funding revision letters"
+              : "Intervention change approval letter"
+            : "Approval letters"}
         </Header>
         <Box margin={{ top: "xs" }}>
-          The decision has already been recorded. Use this section only if you need to prepare or send the client letter and related follow-up documents.
+          {approvalHasFundingPackage
+            ? "The decision has already been recorded. Use this section only if you need to prepare or send the client letter and related follow-up documents."
+            : "The decision has already been recorded. Use this section only if you need to prepare or send the client approval letter."}
         </Box>
         {letterWorkflowsError && (
           <Alert type="error" statusIconAriaLabel="Error" dismissible onDismiss={() => setLetterWorkflowsError(null)}>
@@ -7015,57 +7126,67 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         {isApprovedDecisionOutcome ? (
           <SpaceBetween size="m">
             <Box>
-              {isRevisionMode
-                ? "Edit the client funding revision letter, then edit or review the red-line revised Client Funding Agreement and the institution, loan-provider, and other-funder letters before downloading them."
-                : "Edit the client approval letter, then edit or review the institution, loan-provider, and other-funder letters in the tabs before downloading them."}
+              {approvalHasFundingPackage
+                ? isRevisionMode
+                  ? "Edit the client funding revision letter, then edit or review the red-line revised Client Funding Agreement and the institution, loan-provider, and other-funder letters before downloading them."
+                  : "Edit the client approval letter, then edit or review the institution, loan-provider, and other-funder letters in the tabs before downloading them."
+                : "Edit the client approval letter before sending it. This approval has no funded cost lines, so there is no Client Funding Agreement or funding-form package to prepare."}
             </Box>
-            <Tabs
-              activeTabId={approvalLetterPackTabId}
-              onChange={({ detail }) => setApprovalLetterPackTabId(detail.activeTabId)}
-              tabs={[
-                {
-                  id: "client",
-                  label: "Client letter",
-                  content: (
-                    <Textarea
-                      value={clientLetterBody}
-                      onChange={({ detail }) => setClientLetterBody(detail.value || "")}
-                      rows={18}
-                    />
-                  ),
-                },
-                {
-                  id: "institution",
-                  label: "Institution letter",
-                  content: renderEditableLetters(
-                    institutionApprovalLettersForDisplay,
-                    "No institution-directed funding was identified from intervention delivery details and cost lines.",
-                    (letter, value, index) => updateEditableLetterBody(setEditableInstitutionApprovalLetters, letter, value, index),
-                    { requireDraftGeneration: true }
-                  ),
-                },
-                {
-                  id: "loan-provider",
-                  label: "Loan provider letters",
-                  content: renderEditableLetters(
-                    loanProviderApprovalLettersForDisplay,
-                    "No student loan repayment lines were identified in the approved cost items.",
-                    (letter, value, index) => updateEditableLetterBody(setEditableLoanProviderApprovalLetters, letter, value, index),
-                    { requireDraftGeneration: true }
-                  ),
-                },
-                {
-                  id: "other-funding",
-                  label: "Letters to other funders",
-                  content: renderEditableLetters(
-                    coFunderApprovalLettersForDisplay,
-                    "No other funding sources were provided in the Other funding sources step.",
-                    (letter, value, index) => updateEditableLetterBody(setEditableCoFunderApprovalLetters, letter, value, index),
-                    { requireDraftGeneration: true }
-                  ),
-                },
-              ]}
-            />
+            {approvalHasFundingPackage ? (
+              <Tabs
+                activeTabId={approvalLetterPackTabId}
+                onChange={({ detail }) => setApprovalLetterPackTabId(detail.activeTabId)}
+                tabs={[
+                  {
+                    id: "client",
+                    label: "Client letter",
+                    content: (
+                      <Textarea
+                        value={clientLetterBody}
+                        onChange={({ detail }) => setClientLetterBody(detail.value || "")}
+                        rows={18}
+                      />
+                    ),
+                  },
+                  {
+                    id: "institution",
+                    label: "Institution letter",
+                    content: renderEditableLetters(
+                      institutionApprovalLettersForDisplay,
+                      "No institution-directed funding was identified from intervention delivery details and cost lines.",
+                      (letter, value, index) => updateEditableLetterBody(setEditableInstitutionApprovalLetters, letter, value, index),
+                      { requireDraftGeneration: true }
+                    ),
+                  },
+                  {
+                    id: "loan-provider",
+                    label: "Loan provider letters",
+                    content: renderEditableLetters(
+                      loanProviderApprovalLettersForDisplay,
+                      "No student loan repayment lines were identified in the approved cost items.",
+                      (letter, value, index) => updateEditableLetterBody(setEditableLoanProviderApprovalLetters, letter, value, index),
+                      { requireDraftGeneration: true }
+                    ),
+                  },
+                  {
+                    id: "other-funding",
+                    label: "Letters to other funders",
+                    content: renderEditableLetters(
+                      coFunderApprovalLettersForDisplay,
+                      "No other funding sources were provided in the Other funding sources step.",
+                      (letter, value, index) => updateEditableLetterBody(setEditableCoFunderApprovalLetters, letter, value, index),
+                      { requireDraftGeneration: true }
+                    ),
+                  },
+                ]}
+              />
+            ) : (
+              <Textarea
+                value={clientLetterBody}
+                onChange={({ detail }) => setClientLetterBody(detail.value || "")}
+                rows={18}
+              />
+            )}
           </SpaceBetween>
         ) : (
           <Textarea
@@ -7085,7 +7206,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         if (sendingLetter) return;
         setShowSendApprovalLetterConfirmModal(false);
       }}
-      header={isRevisionMode ? "Send client funding revision letter?" : "Send client approval letter?"}
+      header={isRevisionMode
+        ? approvalHasFundingPackage
+          ? "Send client funding revision letter?"
+          : "Send client intervention change approval letter?"
+        : "Send client approval letter?"}
       footer={
         <SpaceBetween direction="horizontal" size="xs">
           <Button
@@ -7094,7 +7219,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             loading={sendingLetter}
             disabled={sendingLetter}
           >
-            {isRevisionMode ? "Send client funding revision letter" : "Send client approval letter"}
+            {isRevisionMode
+              ? approvalHasFundingPackage
+                ? "Send client funding revision letter"
+                : "Send client intervention change approval letter"
+              : "Send client approval letter"}
           </Button>
           <Button
             variant="normal"
@@ -7108,14 +7237,20 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     >
       <SpaceBetween size="s">
         <Box>
-          {isRevisionMode
-            ? "This will send the client funding revision letter with the red-line revised Client Funding Agreement and EFT & Wire Transfer Direct Debit form attached."
-            : "This will send the client approval letter with the Client Funding Agreement and EFT & Wire Transfer Direct Debit form attached."}
+          {approvalHasFundingPackage
+            ? isRevisionMode
+              ? "This will send the client funding revision letter with the red-line revised Client Funding Agreement and EFT & Wire Transfer Direct Debit form attached."
+              : "This will send the client approval letter with the Client Funding Agreement and EFT & Wire Transfer Direct Debit form attached."
+            : isRevisionMode
+              ? "This will send the client intervention change approval letter. No Client Funding Agreement or funding forms will be attached because the approved change does not include funded cost lines."
+              : "This will send the client approval letter. No Client Funding Agreement or funding forms will be attached because the approved intervention does not include funded cost lines."}
         </Box>
-        <Box>
-          Institution letters and letters to other funders are not sent automatically by the
-          system and should be sent manually.
-        </Box>
+        {approvalHasFundingPackage ? (
+          <Box>
+            Institution letters and letters to other funders are not sent automatically by the
+            system and should be sent manually.
+          </Box>
+        ) : null}
       </SpaceBetween>
     </Modal>
   );

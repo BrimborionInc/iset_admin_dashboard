@@ -1,70 +1,216 @@
-# Regional Manager Review Job Aid
+# Two-Step Review: Upward Approval and Downward Changes
 
-Status: Draft for DEV/UAT. Application assessments, new intervention proposals, and intervention amendments now use the same two-step operating model in local DEV. Application assessments passed a live DEV UI walkthrough on 2026-06-19; intervention proposal and amendment walkthroughs are the next validation step.
-Last Updated: 2026-06-26
+Status: Live staff guide for application assessments, new intervention proposals, and intervention changes.
+Last Updated: 2026-08-08
 
-## What Is Changing
+## Purpose
 
-PATH is adding a Regional Manager review/sign-off step before the Decision Maker records the final program decision.
+PATH uses two separate review levels before a final program decision is recorded:
 
-The basic flow is:
+1. a **Regional Manager review**; then
+2. a **Decision Maker final decision**.
 
-1. ISET Coordinator submits the assessment or proposal, or a Regional Manager submits their own draft item.
-2. Regional Manager reviews the submitted packet.
-3. Regional Manager either returns it to the submitter with notes or submits it to the Decision Maker for final approval.
-4. The Decision Maker approves, denies, or requests changes.
-5. If the Decision Maker requests changes, the request returns to the Regional Manager first.
-6. The Regional Manager reviews the request and forwards changes to the submitter.
+This guide explains who owns the work at each stage, how an item moves upward for approval or downward for changes, where Employment Insurance (EI) checks fit, and when a Client Funding Agreement (CFA) is created and signed.
 
-Regional Managers may edit application-assessment drafts while the application is still `In Review` and has not been submitted into the review workflow.
+## Roles
 
-Regional Managers do not edit submitted assessment/proposal details directly and do not record the final approval or denial.
+| Role | Main responsibility |
+| --- | --- |
+| **Submitter** | Completes the assessment or proposal and submits it for review. Usually this is an ISET Coordinator. A Regional Manager may also be the submitter for their own draft work. |
+| **Regional Manager** | Performs the first review, returns incomplete work, or signs it off and submits it for final decision. A Regional Manager does not record the final approval or denial. |
+| **Decision Maker** | Records the final approval, denial, or request for changes. In PATH this is the NWAC Administrator system role. |
+| **System Administrator** | Provides technical support. This is not a normal business-review role and should not be used to bypass the workflow. |
 
-For application assessments, Regional Managers may still complete the EI verification step by setting the EI status and uploading the EI verification report. That does not unlock the submitted assessment details for editing.
+## The Complete Flow
 
-## ISET Coordinator
+```text
+Submitter prepares item
+        |
+        | Submit for review
+        v
+Regional Manager — Pending Review
+        |                         |
+        | Return to submitter     | Submit for final decision
+        v                         v
+Submitter corrects          Decision Maker — Pending Decision
+and resubmits                     |          |              |
+        |                          | Approve  | Deny         | Request changes
+        +--------------------------+          |              v
+                                               Final      Regional Manager
+                                               outcome    reviews request
+                                                             |
+                                                             | Forward changes
+                                                             v
+                                                        Original submitter
+                                                        corrects and resubmits
+```
 
-After submitting, the assessment/proposal becomes read-only while it is with the Regional Manager or the Decision Maker.
+The central rule is simple: **work goes up one level at a time and comes down one level at a time**. The submitter cannot send directly to the Decision Maker, and a Decision Maker's requested changes do not go directly to the submitter.
 
-If the Regional Manager returns it, PATH returns the item to the submitter with review notes. The submitter updates the assessment/proposal and submits again.
+## Moving Up for Approval
 
-If the Decision Maker requests changes and the Regional Manager forwards them, the submitter sees a `Changes requested` panel at the top of the assessment/proposal widget. It shows both the Decision Maker note and the Regional Manager note.
+### 1. Submitter to Regional Manager
 
-Recall is only available before Regional Manager sign-off. After the Regional Manager submits the item to the Decision Maker, corrections must move through the review workflow.
+The submitter selects **Submit for review**. PATH then:
 
-## Regional Manager
+- makes the submitted assessment or proposal read-only;
+- places it in the Regional Manager's **Pending Review** queue; and
+- preserves who submitted it, because only that submitter can edit it if it is returned.
 
-On the homepage, use `Pending Review` for submitted application assessments, new intervention proposals, and intervention amendments waiting for Regional Manager action.
+Where PATH shows a **Recall** action, it is available only while the item is still with the Regional Manager and before Regional Manager sign-off. Recall availability varies by request type and submitter role. Once an item has been submitted for final decision, any correction must come back through the review workflow.
 
-At Regional Manager review, read the submitted packet and choose one action:
+### 2. Regional Manager to Decision Maker
 
-- `Return to Coordinator`: use when changes are needed before the Decision Maker sees the item. Notes are required.
-- `Submit for final decision`: use when the packet is ready for the Decision Maker's final decision.
+The Regional Manager opens the item from **Pending Review**, reviews the complete packet, and chooses:
 
-If the Decision Maker requests changes, PATH sends the item back to Regional Manager review first. Review the note, then forward the requested changes to the submitter with notes.
+- **Return to Coordinator** or **Return to submitter** when changes are required. A clear return note is required.
+- **Submit for final decision** when the packet is ready. The Regional Manager may add a review note, and PATH records the sign-off.
 
-## Decision Maker
+The Regional Manager reviews the submitted facts but does not directly rewrite the submitted assessment or proposal. Reviewer-only controls, such as the application assessment's EI status and verification upload, remain separate from editing the submitted packet.
 
-The Decision Maker sees final decision controls only after Regional Manager sign-off.
+### 3. Decision Maker records the final decision
 
-Available decisions remain:
+The Decision Maker opens the item from **Pending Decision**. The decision screen shows the submitter's recommendation and rationale together with the Regional Manager sign-off and note.
 
-- approve;
-- deny;
-- request changes.
+The Decision Maker chooses:
 
-The decision step shows the submitter's recommendation/rationale and the Regional Manager review note so the Decision Maker can see the full review context before committing the final decision.
+- **Approve**;
+- **Deny**; or
+- **Request changes**.
 
-Funding approvals of `$20,000` or above must be approved by Shelley Stacey. If another final-decision user opens a high-value request, PATH shows a Shelley approval warning and disables the approve option. Deny and request-changes remain available.
+A denial or request for changes requires a note. Funding approvals of **$20,000 or more** can be approved only by Shelley Stacey. Other Decision Makers may still deny the request or request changes.
 
-Request changes sends the item back to the Regional Manager first, not directly to the submitter.
+## Moving Down for Changes
+
+There are two different downward paths. They should not be confused.
+
+### Regional Manager requests changes
+
+The Regional Manager selects **Return to Coordinator** or **Return to submitter** and explains what must change. PATH returns the item directly to the original submitter.
+
+The original submitter:
+
+1. reads the return note;
+2. edits the returned item;
+3. saves any required evidence or corrections; and
+4. selects **Resubmit for review**.
+
+The item returns to the Regional Manager's **Pending Review** queue. It does not skip directly to the Decision Maker.
+
+### Decision Maker requests changes
+
+The Decision Maker's **Request changes** action sends the item back to the Regional Manager first. At this stage the packet remains read-only.
+
+The Regional Manager:
+
+1. reviews the Decision Maker's note;
+2. adds any useful Regional Manager context; and
+3. selects **Forward changes to Coordinator** or **Forward changes to submitter**.
+
+The original submitter then sees both notes, makes the correction, and resubmits. The corrected item must pass Regional Manager review again before returning to the Decision Maker.
+
+If the Regional Manager was also the original submitter, the item returns to that person in their **submitter** capacity. They edit and resubmit it, then complete the Regional Manager sign-off as a separate workflow action.
+
+### Reopened items that already had a final decision
+
+An exceptionally reopened, finally decided application assessment must first be returned to its original submitter for a real correction. PATH blocks the Regional Manager from simply sending the unchanged assessment upward for another final decision. After the submitter corrects and resubmits it, the normal Regional Manager and Decision Maker stages apply again.
+
+## Editing and Notes Rules
+
+- A draft is editable by its submitter.
+- A submitted packet is read-only while it is with the Regional Manager or Decision Maker.
+- An item returned by the Regional Manager or forwarded down after a Decision Maker request is editable only by the recorded original submitter.
+- A different Regional Manager cannot take over the returned submitter's editing rights merely because they can see the case.
+- A return note is required when the Regional Manager sends work back.
+- A Decision Maker note is required for denial or requested changes.
+- A Regional Manager forwarding note is required when passing Decision Maker changes to the submitter.
+- Review and decision notes are retained in the workflow record and are also made available in the case audit context, including Notes and Tasks where applicable.
+
+## EI Status and Verification Rules
+
+EI eligibility and review ownership are separate. An EI status does not decide whether an item belongs in **Pending Review** or **Pending Decision**; the current review stage does that.
+
+PATH uses three EI status choices:
+
+| EI status | Funding stream used by PATH |
+| --- | --- |
+| **CRF** | CRF |
+| **EI Active Claim** | EI |
+| **EI Reach Back** | EI |
+
+Select the status from the verified result. Do not infer it from the participant's circumstances or choose a status merely to match an available budget pot.
+
+### Before verification
+
+Program guidance requires a signed **Client Consent for EI Verification** before an EI verification request is made. The consent and verification evidence should remain on the client file so the funding-stream decision is auditable.
+
+### Application assessments
+
+- An EI status is required before the assessment can move forward for review.
+- ISET Coordinators can see the status but cannot set it in the Application Assessment. Authorized staff—Regional Managers, Decision Makers, or System Administrators—set the status and upload the verification report.
+- During Regional Manager review, the assessment body remains read-only, but the Regional Manager may still complete or correct the EI status and upload verification evidence.
+- When a returned assessment keeps the already accepted EI status unchanged, PATH preserves that status and does not demand a newly retrofitted verification document solely because another part of the assessment was returned.
+- If the EI status is changed during a returned correction, supporting EI verification evidence must be present before the changed status can be saved.
+
+### New intervention proposals and intervention changes
+
+- The submitter may submit a new intervention proposal or change for Regional Manager review before the final EI result is recorded.
+- The Decision Maker cannot **approve** it until the EI status is selected or confirmed.
+- For a revision, PATH may prefill a blank EI value from the same parent Action Plan. The Decision Maker must still check that the value is current and correct.
+- The EI result determines the required Action Plan funding stream: CRF maps to CRF; both EI statuses map to EI.
+- PATH blocks approval when the selected EI status and the Action Plan funding stream do not match. Correct the EI result or the Action Plan funding setup based on the verified facts; do not force one to match the other without evidence.
+- The intervention decision screen treats the EI verification-document upload separately from the required status. Even where the upload control is shown as optional, staff must still follow the consent, verification, and document-retention requirements for the file.
+
+## Client Funding Agreement Rules
+
+The **Client Funding Agreement (CFA) is post-approval work**. It is not the Regional Manager sign-off, it is not the Decision Maker's approval, and it does not control which review queue owns the item.
+
+### When PATH creates or sends a CFA
+
+- The Decision Maker must first record an approval.
+- If the approved application or intervention contains funded cost lines, the client approval-letter send includes the applicable CFA and EFT/Wire Transfer form for the participant to complete.
+- If the approval contains no funded cost lines, PATH sends the approval letter without a CFA or funding forms.
+- A denied item or an item returned for changes does not start CFA signing.
+
+### Which CFA is used
+
+- The CFA must belong to the exact approved application, Action Plan, interventions, and version being sent.
+- A repeat application must use its own application-linked Action Plan and CFA. An older application or historical plan must not supply the new application's agreement.
+- An approved intervention change creates the appropriate new or revised CFA version. The participant receives the revised agreement, including the red-line version where the workflow requires it.
+- Never reuse an older signed CFA to complete a newer application or intervention change.
+
+### After the CFA is sent
+
+- The participant reviews and signs the CFA through the public portal.
+- PATH keeps the signing request, secure message, application, agreement version, and signed document linked together.
+- Where the application approval checklist requires funding forms, the application is not complete until the required CFA and related forms are submitted and the checklist is complete.
+- CFA signing is its own document process. It must not move an assessment between Regional Manager and Decision Maker queues or overwrite a returned-for-changes stage.
+
+## Queue and Action Quick Reference
+
+| What the user sees | Who acts next | Main action |
+| --- | --- | --- |
+| Draft or returned work in the workspace | Original submitter | Edit, save, then **Submit/Resubmit for review** |
+| **Pending Review** | Regional Manager | **Return to submitter** or **Submit for final decision** |
+| **Pending Decision** | Decision Maker | **Approve**, **Deny**, or **Request changes** |
+| Decision Maker changes returned to **Pending Review** | Regional Manager | **Forward changes to submitter** |
+| Final approval recorded | Post-decision follow-up owner | Prepare/send approval letter and, when funded, the CFA and funding forms |
+
+## Common Mistakes to Avoid
+
+- Do not treat **Pending Review** as final approval authority for the Regional Manager.
+- Do not send Decision Maker changes directly to the submitter; they return through the Regional Manager.
+- Do not edit the packet while it is under review. Return it to the recorded submitter.
+- Do not confuse EI status with review status. EI controls funding-stream eligibility; the review stage controls ownership and queues.
+- Do not select an EI status simply to fit the Action Plan's existing budget stream.
+- Do not prepare or send a CFA before final approval.
+- Do not attach an older application's CFA to a repeat application.
+- Do not mark funded approval follow-up complete until the required forms and signatures are complete.
 
 ## If Someone Is Away
 
-The first rollout does not include automatic vacation/delegation routing. Use normal operational coverage: another Regional Manager with the right regional access can complete the review, or a System Administrator can help resolve an urgent routing issue.
+PATH does not currently provide automatic vacation or delegate routing. Another Regional Manager with the correct regional access may complete Regional Manager review. If the returned item belongs to an unavailable original submitter, ask a System Administrator for assistance rather than informally editing under another person's workflow ownership.
 
-Add a dedicated out-of-office/delegate feature later only if the manual coverage process creates real delays.
+## Final Records
 
-## Final PDFs
-
-Final assessment PDFs show submitter evidence, Regional Manager sign-off, and Decision Maker final decision evidence.
+Final assessment and proposal records preserve the submitter evidence, Regional Manager review/sign-off, and Decision Maker decision/sign-off. The CFA and signed funding forms are separate post-approval documents linked to the exact approved application or intervention version.

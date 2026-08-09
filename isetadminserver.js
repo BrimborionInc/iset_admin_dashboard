@@ -182,6 +182,7 @@ const {
   buildReviewSubjectKey,
   getReviewTransition,
   isTwoStepReviewEnabled,
+  normalizeRoleKey,
 } = require('./src/lib/reviewWorkflow');
 const {
   buildReviewWorkflowCaseNoteBody,
@@ -2558,10 +2559,20 @@ const buildAssessmentPdfHtml = ({ templateHtml, fields }) => {
 function buildAssessmentVersionLabel({
   versionNumber = null,
   variant = 'submitted',
-  previousVersionNumber = null
+  previousVersionNumber = null,
+  finalDecisionOutcome = null,
 } = {}) {
   const normalizedVersion = normalisePositiveInteger(versionNumber);
   if (!normalizedVersion) return '';
+  if (variant === 'final') {
+    const normalizedOutcome = normalizeAssessmentFinalDecisionOutcome(finalDecisionOutcome);
+    const outcomeLabel = normalizedOutcome === 'approved'
+      ? 'Approved'
+      : normalizedOutcome === 'denied'
+        ? 'Denied'
+        : 'Final';
+    return `v${normalizedVersion} final - ${outcomeLabel}`;
+  }
   if (variant === 'approved') {
     return `v${normalizedVersion} approved`;
   }
@@ -2578,9 +2589,11 @@ function buildAssessmentDocumentMetadata({
   versionNumber = null,
   variant = 'submitted',
   previousVersionNumber = null,
+  finalDecisionOutcome = null,
   snapshot = null,
   extraMetadata = null
 } = {}) {
+  const normalizedFinalOutcome = normalizeAssessmentFinalDecisionOutcome(finalDecisionOutcome);
   const metadata = {
     label,
     document_type: documentType,
@@ -2589,6 +2602,9 @@ function buildAssessmentDocumentMetadata({
     assessment_previous_version_number: normalisePositiveInteger(previousVersionNumber) || null,
     assessment_snapshot: snapshot && typeof snapshot === 'object' ? snapshot : null
   };
+  if (normalizedFinalOutcome) {
+    metadata.assessment_final_outcome = normalizedFinalOutcome;
+  }
   if (extraMetadata && typeof extraMetadata === 'object' && !Array.isArray(extraMetadata)) {
     Object.entries(extraMetadata).forEach(([key, value]) => {
       if (!key || typeof value === 'undefined') return;
@@ -2607,6 +2623,9 @@ function parseAssessmentDocumentInfo(row) {
   const versionNumber = normalisePositiveInteger(metadata.assessment_version_number) || 1;
   const previousVersionNumber = normalisePositiveInteger(metadata.assessment_previous_version_number) || null;
   const variant = normaliseString(metadata.assessment_variant || null) || null;
+  const finalDecisionOutcome = normalizeAssessmentFinalDecisionOutcome(
+    metadata.assessment_final_outcome || null
+  );
   const snapshot = metadata.assessment_snapshot && typeof metadata.assessment_snapshot === 'object'
     ? metadata.assessment_snapshot
     : null;
@@ -2616,6 +2635,7 @@ function parseAssessmentDocumentInfo(row) {
     versionNumber,
     previousVersionNumber,
     variant,
+    finalDecisionOutcome,
     snapshot,
     createdAt: toIsoDateTime(row.created_at) || null,
     label: normaliseString(row.label || metadata.label || null) || null,
@@ -2628,6 +2648,7 @@ async function fetchLatestAssessmentDocumentInfo({
   caseId = null,
   documentTypes = ['case_assessment'],
   interventionId = null,
+  excludeInterventionDocuments = false,
   connection = pool
 } = {}) {
   const categories = Array.isArray(documentTypes)
@@ -2652,6 +2673,8 @@ async function fetchLatestAssessmentDocumentInfo({
   if (normalizedInterventionId) {
     whereClauses.push(`CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.intervention_id')) AS UNSIGNED) = ?`);
     params.push(normalizedInterventionId);
+  } else if (excludeInterventionDocuments) {
+    whereClauses.push(`JSON_EXTRACT(metadata, '$.intervention_id') IS NULL`);
   }
   const [rows] = await connection.query(
     `SELECT id, document_category, label, metadata, status, created_at
@@ -2678,7 +2701,7 @@ const APPLICATION_ASSESSMENT_RECALL_COMPANION_DOCUMENT_TYPES = Object.freeze([
 ]);
 
 function isAssessmentRecallAdmin(req) {
-  return hasSystemOrNwacAdminAccess(req);
+  return normalizeRoleKey(inferUserRole(req) || resolveStaffRole(req)) === 'systemadministrator';
 }
 
 async function fetchLatestAssessmentSubmitterActor(connection, { caseId, eventType = 'assessment_submitted' } = {}) {
@@ -2751,6 +2774,7 @@ async function fetchLatestAssessmentDocumentActorUserId(connection, { applicatio
        FROM iset_document
       WHERE ${scopeClause}
         AND document_category = 'case_assessment'
+        AND JSON_EXTRACT(metadata, '$.intervention_id') IS NULL
         AND status = 'active'
         AND source = 'system_generated'
       ORDER BY created_at DESC, id DESC
@@ -2769,12 +2793,25 @@ async function assertAssessmentRecallActorAllowed(connection, req, {
   if (isAssessmentRecallAdmin(req)) return { ok: true, reason: 'admin' };
   const requesterStaffProfileId = resolveActiveStaffProfileId(req);
   const requesterUserId = await resolveExistingUserIdFromAuth(req, connection);
-  const latestSubmitter = await fetchLatestAssessmentSubmitterActor(connection, { caseId });
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const exactWorkflow = normalizedApplicationId
+    ? await fetchApplicationAssessmentReviewWorkflow(
+        connection,
+        { applicationId: normalizedApplicationId }
+      )
+    : null;
+  // Case-wide historical events cannot identify the submitter for one member
+  // of a repeat-application case. Use them only for legacy, applicationless
+  // recall paths; an exact workflow row is authoritative when one exists.
+  const latestSubmitter = normalizedApplicationId
+    ? null
+    : await fetchLatestAssessmentSubmitterActor(connection, { caseId });
   const latestDocumentActorUserId = await fetchLatestAssessmentDocumentActorUserId(connection, {
     applicationId,
     caseId,
   });
   const allowedStaffProfileId =
+    normalisePositiveInteger(exactWorkflow?.submitted_by_staff_profile_id) ||
     normalisePositiveInteger(latestSubmitter?.staffProfileId) ||
     normalisePositiveInteger(fallbackStaffProfileId);
   const allowedUserId =
@@ -2820,6 +2857,8 @@ async function archiveRecalledAssessmentDocuments(connection, {
     if (normalizedInterventionId) {
       metadataClauses.push(`CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.intervention_id')) AS UNSIGNED) = ?`);
       metadataParams.push(normalizedInterventionId);
+    } else {
+      metadataClauses.push(`JSON_EXTRACT(metadata, '$.intervention_id') IS NULL`);
     }
     const [rows] = await connection.query(
       `SELECT id
@@ -2901,6 +2940,7 @@ async function storeAssessmentPdfDocument({
   versionNumber = null,
   variant = 'submitted',
   previousVersionNumber = null,
+  finalDecisionOutcome = null,
   snapshot = null,
   extraMetadata = null,
   archivePreviousActive = true,
@@ -2962,9 +3002,49 @@ async function storeAssessmentPdfDocument({
           AND status = 'active'`,
       [scopeValue, documentType]
     );
+    const replacementSubjectKey = normaliseString(extraMetadata?.assessment_subject_key) || null;
+    let interventionScopedDocumentIds = null;
+    if (!replacementSubjectKey && normalizedInterventionIds.length && Array.isArray(existingRows) && existingRows.length) {
+      const candidateDocumentIds = existingRows
+        .map(row => normalisePositiveInteger(row?.id))
+        .filter(Boolean);
+      if (candidateDocumentIds.length) {
+        const documentPlaceholders = candidateDocumentIds.map(() => '?').join(',');
+        const interventionPlaceholders = normalizedInterventionIds.map(() => '?').join(',');
+        const [linkRows] = await runner.query(
+          `SELECT document_id, intervention_id
+             FROM iset_document_intervention
+            WHERE document_id IN (${documentPlaceholders})
+              AND intervention_id IN (${interventionPlaceholders})`,
+          [...candidateDocumentIds, ...normalizedInterventionIds]
+        );
+        interventionScopedDocumentIds = new Set(
+          (Array.isArray(linkRows) ? linkRows : [])
+            .map(row => normalisePositiveInteger(row?.document_id))
+            .filter(Boolean)
+        );
+      } else {
+        interventionScopedDocumentIds = new Set();
+      }
+    }
     const idsToArchive = (Array.isArray(existingRows) ? existingRows : [])
-      .map(row => ({ id: normalisePositiveInteger(row?.id), info: parseAssessmentDocumentInfo(row) }))
-      .filter(item => item.id && item.info?.versionNumber === normalizedVersionNumber)
+      .map(row => ({
+        id: normalisePositiveInteger(row?.id),
+        info: parseAssessmentDocumentInfo(row),
+        metadata: parseMetadata(row?.metadata) || {},
+      }))
+      .filter(item => (
+        item.id &&
+        item.info?.versionNumber === normalizedVersionNumber &&
+        (
+          !replacementSubjectKey ||
+          normaliseString(item.metadata?.assessment_subject_key) === replacementSubjectKey
+        ) &&
+        (
+          !interventionScopedDocumentIds ||
+          interventionScopedDocumentIds.has(item.id)
+        )
+      ))
       .map(item => item.id);
     if (idsToArchive.length) {
       const idPlaceholders = idsToArchive.map(() => '?').join(',');
@@ -2983,6 +3063,7 @@ async function storeAssessmentPdfDocument({
     versionNumber: normalizedVersionNumber,
     variant,
     previousVersionNumber,
+    finalDecisionOutcome,
     snapshot,
     extraMetadata
   });
@@ -4876,50 +4957,167 @@ function formatMultilineHtml(value) {
 function buildPdfSignaturePanelHtml({
   signerName,
   signedAt,
+  roleLabel = null,
   emptyMessage = 'Not signed'
 } = {}) {
   const normalizedSignerName = normaliseString(signerName);
   const signatureBoxClass = normalizedSignerName ? 'signature-box' : 'signature-box empty';
   const signatureValue = normalizedSignerName || emptyMessage;
   const signedAtText = signedAt ? `Signed on ${escapeHtml(formatSignatureDate(signedAt))}` : 'No signature timestamp recorded';
+  const normalizedRoleLabel = normaliseString(roleLabel);
   return `
     <div class="signature-panel">
       <div class="${signatureBoxClass}">${escapeHtml(signatureValue)}</div>
+      ${normalizedRoleLabel ? `<div class="signature-meta">Capacity: ${escapeHtml(normalizedRoleLabel)}</div>` : ''}
       <div class="signature-meta">${signedAtText}</div>
     </div>
   `;
 }
 
+const ASSESSMENT_PDF_ROLE_LABELS = Object.freeze({
+  submitter: 'Submitter',
+  regionalManager: 'Regional Manager',
+  decisionMaker: 'Decision Maker',
+});
+
+function normalizeAssessmentFinalDecisionOutcome(value) {
+  const normalized = (normaliseString(value) || '')
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  if (['approve', 'approved'].includes(normalized)) return 'approved';
+  if (['deny', 'denied', 'reject', 'rejected'].includes(normalized)) return 'denied';
+  return null;
+}
+
+function mergeAssessmentSignatureEvidence({
+  authoritative = null,
+  fallback = null,
+  roleLabel = null,
+} = {}) {
+  const primary = authoritative && typeof authoritative === 'object' ? authoritative : {};
+  const secondary = fallback && typeof fallback === 'object' ? fallback : {};
+  const signerName = normaliseString(primary.signerName) || normaliseString(secondary.signerName) || null;
+  const signedAt = primary.signedAt || secondary.signedAt || null;
+  if (!signerName && !signedAt) return null;
+  return {
+    ...secondary,
+    ...primary,
+    signerName,
+    signedAt,
+    roleLabel: normaliseString(roleLabel) || normaliseString(primary.roleLabel) || null,
+  };
+}
+
+function buildAssessmentFinalEvidenceMetadata({
+  finalDecisionOutcome,
+  assessmentSubjectKey = null,
+  workflowType = null,
+  workflowSubject = null,
+  submittedSignature = null,
+  reviewSignature = null,
+  decisionSignature = null,
+  rmReviewNote = null,
+  decisionNote = null,
+} = {}) {
+  const outcome = normalizeAssessmentFinalDecisionOutcome(finalDecisionOutcome);
+  if (!outcome) return null;
+  const subject = workflowSubject && typeof workflowSubject === 'object'
+    ? workflowSubject
+    : {};
+  return {
+    outcome,
+    subjectKey: normaliseString(assessmentSubjectKey) || null,
+    workflowType: normaliseString(workflowType) || null,
+    workflowId:
+      normalisePositiveInteger(decisionSignature?.workflowId) ||
+      normalisePositiveInteger(reviewSignature?.workflowId) ||
+      normalisePositiveInteger(submittedSignature?.workflowId) ||
+      null,
+    subject: pruneNullish({
+      key: normaliseString(assessmentSubjectKey) || null,
+      caseId: normalisePositiveInteger(subject.caseId) || null,
+      applicationId: normalisePositiveInteger(subject.applicationId) || null,
+      actionPlanId: normalisePositiveInteger(subject.actionPlanId) || null,
+      interventionId: normalisePositiveInteger(subject.interventionId) || null,
+      proposalId: normalisePositiveInteger(subject.proposalId) || null,
+    }),
+    submitter: pruneNullish({
+      staffProfileId: normalisePositiveInteger(submittedSignature?.staffProfileId) || null,
+      name: normaliseString(submittedSignature?.signerName) || null,
+      signedAt: submittedSignature?.signedAt || null,
+      capacity: ASSESSMENT_PDF_ROLE_LABELS.submitter,
+    }),
+    regionalManager: pruneNullish({
+      staffProfileId: normalisePositiveInteger(reviewSignature?.staffProfileId) || null,
+      name: normaliseString(reviewSignature?.signerName) || null,
+      signedAt: reviewSignature?.signedAt || null,
+      capacity: ASSESSMENT_PDF_ROLE_LABELS.regionalManager,
+      note: normaliseString(rmReviewNote || reviewSignature?.reviewNote) || null,
+    }),
+    decisionMaker: pruneNullish({
+      staffProfileId: normalisePositiveInteger(decisionSignature?.staffProfileId) || null,
+      name: normaliseString(decisionSignature?.signerName) || null,
+      signedAt: decisionSignature?.signedAt || null,
+      capacity: ASSESSMENT_PDF_ROLE_LABELS.decisionMaker,
+      note: normaliseString(decisionNote || decisionSignature?.decisionNote) || null,
+    }),
+  };
+}
+
 function buildAssessmentAgreementSectionHtml({
   agreeWithCoordinator,
   denialReason,
+  finalDecisionOutcome,
+  submittedSignatureHtml,
   reviewSignatureHtml,
-  approvalSignatureHtml
+  approvalSignatureHtml,
+  rmReviewNote = null,
+  decisionNote = null,
 } = {}) {
   const normalizedDecision = normaliseString(agreeWithCoordinator);
   const agreeChecked = normalizedDecision === 'agree' ? ' checked="checked"' : '';
   const disagreeChecked = normalizedDecision === 'disagree' ? ' checked="checked"' : '';
+  const normalizedOutcome = normalizeAssessmentFinalDecisionOutcome(finalDecisionOutcome);
+  const outcomeLabel = normalizedOutcome === 'approved'
+    ? 'Approved'
+    : normalizedOutcome === 'denied'
+      ? 'Denied'
+      : 'Not recorded';
+  const resolvedDecisionNote = normaliseString(decisionNote) || normaliseString(denialReason) || '';
+  const resolvedRmReviewNote = normaliseString(rmReviewNote) || '';
   return `
-    <div class="section-title">AGREEMENT WITH COORDINATOR RECOMMENDATION</div>
+    <div class="section-title">FINAL REVIEW AND DECISION</div>
     <table class="form-table">
       <tr>
-        <td class="label">Coordinator recommendation</td>
+        <td class="label">Agreement with submitter recommendation</td>
         <td>
           <div class="check-grid">
-            <label class="check"><input type="radio" name="agreeCoordinatorApproved"${agreeChecked} />Agree</label>
-            <label class="check"><input type="radio" name="agreeCoordinatorApproved"${disagreeChecked} />Disagree</label>
+            <label class="check"><input type="radio" name="agreeSubmitterFinal"${agreeChecked} />Agree</label>
+            <label class="check"><input type="radio" name="agreeSubmitterFinal"${disagreeChecked} />Disagree</label>
           </div>
         </td>
-        <td class="label">Reason for denial by NWAC (if applicable)</td>
-        <td><div class="text-field large">${escapeHtml(denialReason || '')}</div></td>
+        <td class="label">Final decision outcome</td>
+        <td><div class="text-field compact">${escapeHtml(outcomeLabel)}</div></td>
+      </tr>
+      <tr>
+        <td class="label">Submitter evidence</td>
+        <td colspan="3">${submittedSignatureHtml || buildPdfSignaturePanelHtml({ roleLabel: ASSESSMENT_PDF_ROLE_LABELS.submitter })}</td>
       </tr>
       <tr>
         <td class="label">Regional Manager review/sign-off</td>
-        <td colspan="3">${reviewSignatureHtml || buildPdfSignaturePanelHtml({})}</td>
+        <td colspan="3">${reviewSignatureHtml || buildPdfSignaturePanelHtml({ roleLabel: ASSESSMENT_PDF_ROLE_LABELS.regionalManager })}</td>
       </tr>
       <tr>
-        <td class="label">Approver eSignature</td>
-        <td colspan="3">${approvalSignatureHtml || buildPdfSignaturePanelHtml({})}</td>
+        <td class="label">Regional Manager review note</td>
+        <td colspan="3"><div class="text-field large">${formatMultilineHtml(resolvedRmReviewNote)}</div></td>
+      </tr>
+      <tr>
+        <td class="label">Decision Maker final decision/sign-off</td>
+        <td colspan="3">${approvalSignatureHtml || buildPdfSignaturePanelHtml({ roleLabel: ASSESSMENT_PDF_ROLE_LABELS.decisionMaker })}</td>
+      </tr>
+      <tr>
+        <td class="label">Decision Maker decision note${normalizedOutcome === 'denied' ? ' (required for denial)' : ''}</td>
+        <td colspan="3"><div class="text-field large">${formatMultilineHtml(resolvedDecisionNote)}</div></td>
       </tr>
     </table>
   `;
@@ -6224,6 +6422,9 @@ async function buildAssessmentPdfFields({
   reviewSignature = null,
   approvalSignature = null,
   includeAgreementSection = false,
+  finalDecisionOutcome = null,
+  rmReviewNote = null,
+  decisionNote = null,
   versionNumber = null,
   variant = 'submitted',
   previousVersionNumber = null,
@@ -6267,22 +6468,29 @@ async function buildAssessmentPdfFields({
   });
   const recommendationSignatureHtml = buildPdfSignaturePanelHtml({
     signerName: recommendationSignature?.signerName,
-    signedAt: recommendationSignature?.signedAt
+    signedAt: recommendationSignature?.signedAt,
+    roleLabel: ASSESSMENT_PDF_ROLE_LABELS.submitter,
   });
   const reviewSignatureHtml = buildPdfSignaturePanelHtml({
     signerName: reviewSignature?.signerName,
-    signedAt: reviewSignature?.signedAt
+    signedAt: reviewSignature?.signedAt,
+    roleLabel: ASSESSMENT_PDF_ROLE_LABELS.regionalManager,
   });
   const approvalSignatureHtml = buildPdfSignaturePanelHtml({
     signerName: approvalSignature?.signerName,
-    signedAt: approvalSignature?.signedAt
+    signedAt: approvalSignature?.signedAt,
+    roleLabel: ASSESSMENT_PDF_ROLE_LABELS.decisionMaker,
   });
   const agreementSectionHtml = includeAgreementSection
     ? buildAssessmentAgreementSectionHtml({
         agreeWithCoordinator: snapshot?.agree_with_coordinator || '',
         denialReason: snapshot?.denial_reason || '',
+        finalDecisionOutcome,
+        submittedSignatureHtml: recommendationSignatureHtml,
         reviewSignatureHtml,
-        approvalSignatureHtml
+        approvalSignatureHtml,
+        rmReviewNote,
+        decisionNote,
       })
     : '';
   const inlineField = (fieldName, { emptyValue = '&mdash;' } = {}) => {
@@ -6320,7 +6528,8 @@ async function buildAssessmentPdfFields({
     assessment_version_label: buildAssessmentVersionLabel({
       versionNumber,
       variant,
-      previousVersionNumber
+      previousVersionNumber,
+      finalDecisionOutcome,
     }),
     reference_number: inlineField('reference_number', { emptyValue: '' }),
     date_of_assessment: inlineField('date_of_assessment', { emptyValue: '' }),
@@ -6910,6 +7119,9 @@ async function generateAssessmentPdfBuffer({
   reviewSignature = null,
   approvalSignature = null,
   includeAgreementSection = false,
+  finalDecisionOutcome = null,
+  rmReviewNote = null,
+  decisionNote = null,
   versionNumber = null,
   variant = 'submitted',
   previousVersionNumber = null,
@@ -6929,6 +7141,9 @@ async function generateAssessmentPdfBuffer({
     reviewSignature,
     approvalSignature,
     includeAgreementSection,
+    finalDecisionOutcome,
+    rmReviewNote,
+    decisionNote,
     versionNumber,
     variant,
     previousVersionNumber,
@@ -13449,7 +13664,7 @@ function buildInterventionReviewWorkflowSubject(row = {}) {
   return {
     workflowType,
     caseId: normalisePositiveInteger(row.case_id ?? row.caseId) || null,
-    applicationId: normalisePositiveInteger(row.application_id ?? row.applicationId) || null,
+    applicationId: resolveInterventionApplicationScopeId(row, { required: false }),
     actionPlanId: normalisePositiveInteger(row.action_plan_id ?? row.actionPlanId) || null,
     interventionId,
     proposalId,
@@ -13603,6 +13818,451 @@ function assertApplicationAssessmentReturnedToSubmitterActor({
   throw error;
 }
 
+function assertInterventionReturnedToSubmitterActor({
+  reviewWorkflow,
+  actorStaffProfileId,
+  actorRole,
+  proposalMutationRequested = false,
+} = {}) {
+  if (!proposalMutationRequested) {
+    return { enforced: false, reason: 'no_proposal_mutation' };
+  }
+  if (reviewWorkflow?.current_stage !== REVIEW_STAGES.ReturnedToSubmitter) {
+    return { enforced: false, reason: 'not_returned_to_submitter' };
+  }
+  if (canonicaliseAccessRole(actorRole) === 'System Administrator') {
+    return { enforced: true, reason: 'system_administrator_support' };
+  }
+  const canonicalActorRole = canonicaliseAccessRole(actorRole);
+  if (!new Set(['ISET Coordinator', 'Regional Manager']).has(canonicalActorRole)) {
+    const roleError = new Error('intervention_submitter_actor_forbidden');
+    roleError.code = 'intervention_submitter_actor_forbidden';
+    roleError.status = 403;
+    roleError.publicMessage =
+      'Only the staff member who originally submitted this intervention request can edit or resubmit it after it is returned for correction.';
+    throw roleError;
+  }
+  const originalSubmitterStaffProfileId = normalisePositiveInteger(
+    reviewWorkflow?.submitted_by_staff_profile_id
+  );
+  const numericActorStaffProfileId = normalisePositiveInteger(actorStaffProfileId);
+  if (
+    originalSubmitterStaffProfileId &&
+    numericActorStaffProfileId === originalSubmitterStaffProfileId
+  ) {
+    return { enforced: true, reason: 'original_submitter' };
+  }
+  const error = new Error('intervention_submitter_actor_forbidden');
+  error.code = 'intervention_submitter_actor_forbidden';
+  error.status = 403;
+  error.publicMessage =
+    'Only the staff member who originally submitted this intervention request can edit or resubmit it after it is returned for correction.';
+  throw error;
+}
+
+function assertInterventionSubmitterOwnedMutationAllowed({
+  interventionRow,
+  reviewWorkflow = null,
+  actorStaffProfileId,
+  actorRole,
+  proposalMutationRequested = false,
+} = {}) {
+  if (!proposalMutationRequested) {
+    return { enforced: false, reason: 'no_proposal_mutation' };
+  }
+  const interventionState = resolveInterventionStateFields({
+    status: interventionRow?.status,
+    delivery_status: interventionRow?.delivery_status || null,
+  });
+  const reviewStatus = interventionState.reviewStatus || null;
+  if (reviewStatus !== 'draft' && reviewStatus !== 'changes_requested') {
+    return { enforced: false, reason: 'proposal_status_not_submitter_editable' };
+  }
+  if (reviewStatus === 'changes_requested') {
+    if (!reviewWorkflow || reviewWorkflow.current_stage !== REVIEW_STAGES.ReturnedToSubmitter) {
+      const stageError = new Error('intervention_submission_locked');
+      stageError.code = 'intervention_submission_locked';
+      stageError.status = 409;
+      stageError.publicMessage =
+        'This intervention request cannot be edited because its returned-work ownership could not be verified.';
+      throw stageError;
+    }
+    return assertInterventionReturnedToSubmitterActor({
+      reviewWorkflow,
+      actorStaffProfileId,
+      actorRole,
+      proposalMutationRequested,
+    });
+  }
+
+  if (canonicaliseAccessRole(actorRole) === 'System Administrator') {
+    return { enforced: true, reason: 'system_administrator_support' };
+  }
+
+  const canonicalActorRole = canonicaliseAccessRole(actorRole);
+  const ownerStaffProfileId = normalisePositiveInteger(
+    interventionRow?.created_by_staff_profile_id
+  );
+  const numericActorStaffProfileId = normalisePositiveInteger(actorStaffProfileId);
+  if (
+    new Set(['ISET Coordinator', 'Regional Manager']).has(canonicalActorRole) &&
+    ownerStaffProfileId &&
+    ownerStaffProfileId === numericActorStaffProfileId
+  ) {
+    return {
+      enforced: true,
+      reason: 'draft_creator',
+    };
+  }
+  const error = new Error('intervention_submitter_actor_forbidden');
+  error.code = 'intervention_submitter_actor_forbidden';
+  error.status = 403;
+  error.publicMessage =
+    'Only the staff member who created this intervention draft can edit or submit it.';
+  throw error;
+}
+
+function assertInterventionFinalDecisionMutationAllowed({
+  reviewWorkflow,
+  interventionRow,
+  body = null,
+  nextStatusPersistence = null,
+  isApplyingApprovedRevision = false,
+} = {}) {
+  if (reviewWorkflow?.current_stage !== REVIEW_STAGES.FinalDecisionRecorded) {
+    return { enforced: false, reason: 'workflow_not_final' };
+  }
+  if (isApplyingApprovedRevision) {
+    return { enforced: true, reason: 'approved_revision_application' };
+  }
+
+  const requestBody = body && typeof body === 'object' ? body : {};
+  const operationalKeys = new Set(['deliveryStatus', 'delivery_status', 'status']);
+  const unexpectedKeys = Object.keys(requestBody).filter(key => !operationalKeys.has(key));
+  const currentState = resolveInterventionStateFields({
+    status: interventionRow?.status,
+    delivery_status: interventionRow?.delivery_status || null,
+  });
+  const nextReviewStatus =
+    nextStatusPersistence?.reviewStatus ||
+    currentState.reviewStatus ||
+    null;
+  if (
+    unexpectedKeys.length === 0 &&
+    currentState.reviewStatus === 'approved' &&
+    nextReviewStatus === 'approved'
+  ) {
+    return { enforced: true, reason: 'approved_delivery_operation' };
+  }
+
+  const error = new Error('intervention_final_decision_locked');
+  error.code = 'intervention_final_decision_locked';
+  error.status = 409;
+  error.publicMessage =
+    'This intervention decision is final. Use the intervention revision workflow for proposal changes.';
+  throw error;
+}
+
+function assertInterventionDecisionPayloadOwnership({
+  body = null,
+  isRecordingProposalDecision = false,
+} = {}) {
+  if (!isRecordingProposalDecision) {
+    return { enforced: false, reason: 'not_recording_decision' };
+  }
+  const requestBody = body && typeof body === 'object' ? body : {};
+  const decisionOwnedTopLevelKeys = new Set([
+    'status',
+    'metadata',
+    'potId',
+    'budgetPotId',
+    'budget_pot_id',
+    'postingContext',
+    'posting_context',
+  ]);
+  const unexpectedTopLevelKeys = Object.keys(requestBody).filter(
+    key => !decisionOwnedTopLevelKeys.has(key)
+  );
+  const metadata = requestBody.metadata;
+  const unexpectedMetadataKeys =
+    metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? Object.keys(metadata).filter(key => key !== 'review')
+      : metadata == null
+        ? []
+        : ['metadata'];
+  const review = metadata?.review;
+  const decisionOwnedReviewKeys = new Set([
+    'eiStatus',
+    'ei_status',
+    'eiNotes',
+    'ei_notes',
+    'decision',
+    'decisionNotes',
+    'decision_notes',
+    'eiDocumentId',
+    'ei_document_id',
+  ]);
+  const unexpectedReviewKeys =
+    review && typeof review === 'object' && !Array.isArray(review)
+      ? Object.keys(review).filter(key => !decisionOwnedReviewKeys.has(key))
+      : review == null
+        ? []
+        : ['review'];
+  if (
+    unexpectedTopLevelKeys.length === 0 &&
+    unexpectedMetadataKeys.length === 0 &&
+    unexpectedReviewKeys.length === 0
+  ) {
+    return { enforced: true, reason: 'decision_owned_fields_only' };
+  }
+
+  const error = new Error('intervention_submitted_packet_immutable');
+  error.code = 'intervention_submitted_packet_immutable';
+  error.status = 409;
+  error.publicMessage =
+    'The submitted intervention packet is read-only during final decision. Return it through the review workflow if proposal facts must change.';
+  error.details = {
+    unexpectedTopLevelKeys,
+    unexpectedMetadataKeys,
+    unexpectedReviewKeys,
+  };
+  throw error;
+}
+
+const EI_VERIFICATION_DOCUMENT_CATEGORY = 'ei_verification';
+const INTERVENTION_EI_FUNDING_STREAM_BY_STATUS = Object.freeze({
+  crf: 'CRF',
+  ei_active_claim: 'EI',
+  ei_reach_back: 'EI',
+});
+
+function createReviewEiValidationError(code, publicMessage, status = 422) {
+  const error = new Error(code);
+  error.code = code;
+  error.status = status;
+  error.publicMessage = publicMessage;
+  return error;
+}
+
+async function hasActiveApplicationAssessmentEiEvidence(connection, {
+  caseId,
+  applicationId,
+} = {}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!normalizedCaseId || !normalizedApplicationId) return false;
+  const runner = connection || pool;
+  const [[row]] = await runner.query(
+    `SELECT d.id
+       FROM iset_document d
+      WHERE d.case_id = ?
+        AND d.application_id = ?
+        AND d.document_category = ?
+        AND d.status = ?
+      LIMIT 1`,
+    [
+      normalizedCaseId,
+      normalizedApplicationId,
+      EI_VERIFICATION_DOCUMENT_CATEGORY,
+      'active',
+    ]
+  );
+  return Boolean(normalisePositiveInteger(row?.id));
+}
+
+function assertApplicationAssessmentEiEligibilityChangeEvidence({
+  previousEligibility,
+  nextEligibility,
+  hasVerificationEvidence = false,
+} = {}) {
+  const normalizedPreviousEligibility = normalizeEsdcEligibilityValue(previousEligibility);
+  const normalizedNextEligibility = normalizeEsdcEligibilityValue(nextEligibility);
+  const nextEligibilityText = normaliseString(nextEligibility);
+  if (nextEligibilityText && !normalizedNextEligibility) {
+    throw createReviewEiValidationError(
+      'assessment_ei_status_invalid',
+      'Select CRF, EI Active Claim, or EI Reach Back.'
+    );
+  }
+  if (normalizedPreviousEligibility === normalizedNextEligibility) {
+    return { enforced: false, reason: 'eligibility_unchanged' };
+  }
+  if (!hasVerificationEvidence) {
+    throw createReviewEiValidationError(
+      'assessment_ei_verification_required',
+      'Upload an EI verification document for this application before saving the changed EI status.'
+    );
+  }
+  return {
+    enforced: true,
+    reason: 'eligibility_change_has_application_evidence',
+    eligibility: normalizedNextEligibility,
+  };
+}
+
+function assertApplicationAssessmentEiSubmissionReady({
+  reviewWorkflow = null,
+  previousEligibility,
+  nextEligibility,
+  hasVerificationEvidence = false,
+} = {}) {
+  const normalizedPreviousEligibility = normalizeEsdcEligibilityValue(previousEligibility);
+  const normalizedNextEligibility = normalizeEsdcEligibilityValue(nextEligibility);
+  if (!normalizedNextEligibility) {
+    throw createReviewEiValidationError(
+      'assessment_ei_status_required',
+      'Select CRF, EI Active Claim, or EI Reach Back before submitting this assessment for Regional Manager review.'
+    );
+  }
+  const preservesAcceptedReturnedEligibility = Boolean(
+    reviewWorkflow?.current_stage === REVIEW_STAGES.ReturnedToSubmitter &&
+    normalizedPreviousEligibility &&
+    normalizedPreviousEligibility === normalizedNextEligibility
+  );
+  if (!hasVerificationEvidence && !preservesAcceptedReturnedEligibility) {
+    throw createReviewEiValidationError(
+      'assessment_ei_verification_required',
+      'Upload an EI verification document for this application before submitting the assessment for Regional Manager review.'
+    );
+  }
+  return {
+    enforced: true,
+    reason: preservesAcceptedReturnedEligibility && !hasVerificationEvidence
+      ? 'returned_eligibility_unchanged'
+      : 'status_and_application_evidence_present',
+    eligibility: normalizedNextEligibility,
+  };
+}
+
+function resolveInterventionReviewEiDetails(metadata = null) {
+  const source = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? metadata
+    : {};
+  const review = source.review && typeof source.review === 'object' && !Array.isArray(source.review)
+    ? source.review
+    : {};
+  const rawStatus = review.eiStatus ?? review.ei_status ?? null;
+  const rawDocumentId = review.eiDocumentId ?? review.ei_document_id ?? null;
+  return {
+    status: normalizeEsdcEligibilityValue(rawStatus),
+    rawStatus: normaliseString(rawStatus) || null,
+    documentId: normalisePositiveInteger(rawDocumentId),
+    documentIdProvided: rawDocumentId !== null && typeof rawDocumentId !== 'undefined' && String(rawDocumentId).trim() !== '',
+  };
+}
+
+function normalizeActionPlanEiFundingStream(value) {
+  const normalized = normaliseString(value);
+  if (!normalized) return null;
+  const uppercase = normalized.toUpperCase();
+  return uppercase === 'CRF' || uppercase === 'EI' ? uppercase : null;
+}
+
+function assertInterventionApprovalEiFundingAlignment({
+  metadata = null,
+  planFundingStream = null,
+} = {}) {
+  const ei = resolveInterventionReviewEiDetails(metadata);
+  if (ei.rawStatus && !ei.status) {
+    throw createReviewEiValidationError(
+      'intervention_ei_status_invalid',
+      'Select CRF, EI Active Claim, or EI Reach Back before approving this intervention request.'
+    );
+  }
+  if (!ei.status) {
+    throw createReviewEiValidationError(
+      'intervention_ei_status_required',
+      'Select CRF, EI Active Claim, or EI Reach Back before approving this intervention request.'
+    );
+  }
+  const requiredFundingStream = INTERVENTION_EI_FUNDING_STREAM_BY_STATUS[ei.status] || null;
+  const actualFundingStream = normalizeActionPlanEiFundingStream(planFundingStream);
+  if (!requiredFundingStream || actualFundingStream !== requiredFundingStream) {
+    throw createReviewEiValidationError(
+      'intervention_ei_funding_stream_mismatch',
+      `The Action Plan funding stream must be ${requiredFundingStream || 'set from the verified EI status'} before this intervention request can be approved.`,
+      409
+    );
+  }
+  if (ei.documentIdProvided && !ei.documentId) {
+    throw createReviewEiValidationError(
+      'intervention_ei_document_invalid',
+      'The selected EI verification document is invalid.'
+    );
+  }
+  return {
+    ...ei,
+    requiredFundingStream,
+    actualFundingStream,
+  };
+}
+
+async function assertInterventionEiEvidenceLink(connection, {
+  documentId = null,
+  caseId,
+  actionPlanId,
+  applicationId = null,
+  interventionId,
+} = {}) {
+  if (!documentId) {
+    return { enforced: false, reason: 'optional_evidence_not_supplied' };
+  }
+  const normalizedDocumentId = normalisePositiveInteger(documentId);
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedInterventionId = normalisePositiveInteger(interventionId);
+  if (
+    !normalizedDocumentId ||
+    !normalizedCaseId ||
+    !normalizedActionPlanId ||
+    !normalizedInterventionId
+  ) {
+    throw createReviewEiValidationError(
+      'intervention_ei_document_scope_mismatch',
+      'The EI verification document is not linked to this intervention and Action Plan.'
+    );
+  }
+  const applicationFilter = normalizedApplicationId ? 'AND d.application_id = ?' : '';
+  const params = [
+    normalizedDocumentId,
+    normalizedCaseId,
+    normalizedActionPlanId,
+  ];
+  if (normalizedApplicationId) params.push(normalizedApplicationId);
+  params.push(
+    EI_VERIFICATION_DOCUMENT_CATEGORY,
+    'active',
+    normalizedInterventionId
+  );
+  const runner = connection || pool;
+  const [[row]] = await runner.query(
+    `SELECT d.id
+       FROM iset_document d
+       JOIN iset_document_intervention di ON di.document_id = d.id
+      WHERE d.id = ?
+        AND d.case_id = ?
+        AND d.action_plan_id = ?
+        ${applicationFilter}
+        AND d.document_category = ?
+        AND d.status = ?
+        AND di.intervention_id = ?
+      LIMIT 1`,
+    params
+  );
+  if (!normalisePositiveInteger(row?.id)) {
+    throw createReviewEiValidationError(
+      'intervention_ei_document_scope_mismatch',
+      'The EI verification document is not linked to this intervention and Action Plan.'
+    );
+  }
+  return {
+    enforced: true,
+    reason: 'evidence_link_verified',
+    documentId: normalizedDocumentId,
+  };
+}
+
 function assertApplicationAssessmentMutationStageAllowed({
   reviewWorkflow,
   assessmentMutationRequested = false,
@@ -13739,6 +14399,7 @@ async function startReviewWorkflow(connection, {
   actorRole = null,
   metadata = null,
   enforceApplicationAssessmentOriginalSubmitter = false,
+  enforceInterventionOriginalSubmitter = false,
 } = {}) {
   const subjectKey = buildReviewSubjectKey({
     workflowType,
@@ -13761,6 +14422,14 @@ async function startReviewWorkflow(connection, {
       assessmentMutationRequested: true,
     });
   }
+  if (enforceInterventionOriginalSubmitter) {
+    assertInterventionReturnedToSubmitterActor({
+      reviewWorkflow: existing,
+      actorStaffProfileId,
+      actorRole,
+      proposalMutationRequested: true,
+    });
+  }
   let transition = getReviewTransition({
     action: REVIEW_ACTIONS.SubmitForRmReview,
     currentStage: fromStage,
@@ -13771,7 +14440,14 @@ async function startReviewWorkflow(connection, {
     enforceApplicationAssessmentOriginalSubmitter &&
     existing?.current_stage === REVIEW_STAGES.ReturnedToSubmitter &&
     canonicaliseAccessRole(actorRole) === 'System Administrator';
-  if (!transition.allowed && isSystemAdministratorReturnedAssessmentSupport) {
+  const isSystemAdministratorReturnedInterventionSupport =
+    enforceInterventionOriginalSubmitter &&
+    existing?.current_stage === REVIEW_STAGES.ReturnedToSubmitter &&
+    canonicaliseAccessRole(actorRole) === 'System Administrator';
+  const isSystemAdministratorReturnedSubmitterSupport =
+    isSystemAdministratorReturnedAssessmentSupport ||
+    isSystemAdministratorReturnedInterventionSupport;
+  if (!transition.allowed && isSystemAdministratorReturnedSubmitterSupport) {
     transition = {
       allowed: true,
       nextStage: REVIEW_STAGES.RmReview,
@@ -13786,7 +14462,13 @@ async function startReviewWorkflow(connection, {
   }
 
   const metadataJson = metadata && typeof metadata === 'object' ? JSON.stringify(metadata) : null;
-  const workflowSubmitterStaffProfileId = isSystemAdministratorReturnedAssessmentSupport
+  const preserveReturnedSubmitterLineage =
+    existing?.current_stage === REVIEW_STAGES.ReturnedToSubmitter &&
+    (
+      enforceApplicationAssessmentOriginalSubmitter ||
+      enforceInterventionOriginalSubmitter
+    );
+  const workflowSubmitterStaffProfileId = preserveReturnedSubmitterLineage
     ? normalisePositiveInteger(existing?.submitted_by_staff_profile_id)
     : normalisePositiveInteger(actorStaffProfileId);
   let workflowId = existing?.id || null;
@@ -13872,7 +14554,18 @@ async function startApplicationAssessmentReviewWorkflow(connection, options = {}
 }
 
 async function startInterventionReviewWorkflow(connection, options = {}) {
-  return startReviewWorkflow(connection, options);
+  if (!normalisePositiveInteger(options?.applicationId)) {
+    const error = new Error('intervention_application_scope_required');
+    error.code = 'intervention_application_scope_required';
+    error.status = 409;
+    error.publicMessage =
+      'Link the intervention Action Plan to the exact application before starting review.';
+    throw error;
+  }
+  return startReviewWorkflow(connection, {
+    ...options,
+    enforceInterventionOriginalSubmitter: true,
+  });
 }
 
 async function applyReviewWorkflowAction(connection, {
@@ -14867,6 +15560,17 @@ function shouldIncludeInterventionForCfa(status) {
   );
 }
 
+function shouldIncludeFundedInterventionForCfa(
+  status,
+  interventionRow,
+  planFundingStream = null
+) {
+  return (
+    shouldIncludeInterventionForCfa(status) &&
+    interventionHasFundedCostLines(interventionRow, planFundingStream)
+  );
+}
+
 function sanitizeInterventionForCfa(intervention) {
   if (!intervention || typeof intervention !== 'object') return intervention;
   const costLines = (Array.isArray(intervention.costLines) ? intervention.costLines : [])
@@ -14880,8 +15584,94 @@ function sanitizeInterventionForCfa(intervention) {
   };
 }
 
+function interventionHasCfaFunding(intervention) {
+  if (!intervention || typeof intervention !== 'object') return false;
+  const costLines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
+  if (costLines.some(line => shouldIncludeFundingAgreementCostLine(line, intervention))) {
+    return true;
+  }
+  const costTotal = parseCurrencyValue(intervention.costTotal);
+  return Number.isFinite(costTotal) && costTotal > 0;
+}
+
+function cfaSnapshotHasFunding(snapshot) {
+  return (Array.isArray(snapshot?.interventions) ? snapshot.interventions : [])
+    .some(interventionHasCfaFunding);
+}
+
+function isAppliedRevisionEvidenceIntervention(row) {
+  if (!row || typeof row !== 'object') return false;
+  const metadata = safeJsonParse(
+    row.metadata_json ?? row.metadataJson ?? row.metadata ?? null,
+    null
+  ) || {};
+  const revisionApplicationStatus = (
+    normaliseString(
+      metadata?.revisionApplication?.status ??
+      metadata?.revision_application?.status ??
+      null
+    ) || ''
+  ).toLowerCase();
+  return revisionApplicationStatus === 'applied';
+}
+
+function buildAppliedRevisionEvidenceSql(alias = 'ci') {
+  const qualifiedAlias = String(alias || 'ci').trim() || 'ci';
+  return `LOWER(COALESCE(
+    JSON_UNQUOTE(JSON_EXTRACT(${qualifiedAlias}.metadata_json, '$.revisionApplication.status')),
+    JSON_UNQUOTE(JSON_EXTRACT(${qualifiedAlias}.metadata_json, '$.revision_application.status')),
+    ''
+  )) = 'applied'`;
+}
+
+function buildOperationalInterventionSql(alias = 'ci') {
+  return `NOT (${buildAppliedRevisionEvidenceSql(alias)})`;
+}
+
+function partitionAppliedRevisionEvidenceRows(rows) {
+  const operationalRows = [];
+  const appliedRevisionEvidenceRows = [];
+  (Array.isArray(rows) ? rows : []).forEach(row => {
+    if (isAppliedRevisionEvidenceIntervention(row)) {
+      appliedRevisionEvidenceRows.push(row);
+    } else {
+      operationalRows.push(row);
+    }
+  });
+  return { operationalRows, appliedRevisionEvidenceRows };
+}
+
+function filterOperationalInterventionRows(rows) {
+  return partitionAppliedRevisionEvidenceRows(rows).operationalRows;
+}
+
+function mapAppliedRevisionEvidenceRow(row) {
+  const mapped = mapInterventionRow(row);
+  if (!mapped) return null;
+  return {
+    ...mapped,
+    operational: false,
+    recordKind: 'applied_revision_evidence',
+    record_kind: 'applied_revision_evidence',
+    isAppliedRevisionEvidence: true,
+    is_applied_revision_evidence: true,
+  };
+}
+
+function assertOperationalInterventionRow(interventionRow, { operation = 'update' } = {}) {
+  if (!isAppliedRevisionEvidenceIntervention(interventionRow)) {
+    return { enforced: false, reason: 'operational_intervention' };
+  }
+  const error = new Error('applied_revision_evidence_read_only');
+  error.code = 'applied_revision_evidence_read_only';
+  error.status = 409;
+  error.publicMessage =
+    `This retained revision decision is audit evidence and cannot be used to ${operation} an intervention.`;
+  throw error;
+}
+
 function buildCfaInterventionSnapshot(row, planFundingStream = null) {
-  if (!row) return null;
+  if (!row || isAppliedRevisionEvidenceIntervention(row)) return null;
   const metadata = safeJsonParse(row.metadata_json, null) || {};
   const snapshotSource = metadata.snapshot && typeof metadata.snapshot === 'object' ? metadata.snapshot : {};
   const costLinesRaw = Array.isArray(metadata.costLines)
@@ -15131,7 +15921,10 @@ async function buildCfaSnapshot({ connection, caseId, actionPlanId }) {
   const planApplicationId = normalisePositiveInteger(planRow.application_id);
   const applicationJoinSql = planApplicationId
     ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
-    : buildCasePrimaryApplicationJoinSql('c', 'a');
+    // An applicationless historical Action Plan must stay applicationless.
+    // Falling back to the newest/primary case application would silently
+    // attach an older plan and CFA to the wrong repeat application.
+    : 'LEFT JOIN iset_application a ON 1 = 0';
   const [[caseRow]] = await connection.query(
     `SELECT c.id,
             c.case_number,
@@ -15178,7 +15971,7 @@ async function buildCfaSnapshot({ connection, caseId, actionPlanId }) {
     ? interventionRows
         .filter(row => shouldIncludeInterventionForCfa(row.status))
         .map(row => buildCfaInterventionSnapshot(row, planRow?.funding_stream || null))
-        .filter(Boolean)
+        .filter(interventionHasCfaFunding)
     : [];
 
   const totalsByFundingStream = interventions.reduce((acc, item) => {
@@ -15320,7 +16113,8 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId, applicationI
   const proposedRaw = assessmentRow.proposed_interventions;
   let proposedInterventions = normalizeAssessmentProposedInterventions(proposedRaw)
     .filter(entry => entry.code)
-    .map(sanitizeInterventionForCfa);
+    .map(sanitizeInterventionForCfa)
+    .filter(interventionHasCfaFunding);
   if (!proposedInterventions.length) {
     const rawType = Array.isArray(proposedRaw) ? 'array' : typeof proposedRaw;
     const rawLen = typeof proposedRaw === 'string' ? proposedRaw.length : Array.isArray(proposedRaw) ? proposedRaw.length : null;
@@ -15338,7 +16132,10 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId, applicationI
         fallbackIntervention.code,
         Array.isArray(fallbackIntervention.costLines) ? fallbackIntervention.costLines.length : 0
       );
-      proposedInterventions = [sanitizeInterventionForCfa(fallbackIntervention)];
+      const sanitizedFallback = sanitizeInterventionForCfa(fallbackIntervention);
+      proposedInterventions = interventionHasCfaFunding(sanitizedFallback)
+        ? [sanitizedFallback]
+        : [];
     } else {
       console.warn(
         '[cfa] fallback intervention missing code for case %s (assessment_intervention_code=%s).',
@@ -15351,7 +16148,7 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId, applicationI
     ? interventionRows
         .filter(row => shouldIncludeInterventionForCfa(row.status))
         .map(row => buildCfaInterventionSnapshot(row, null))
-        .filter(Boolean)
+        .filter(interventionHasCfaFunding)
     : [];
   const proposedCostLineCount = proposedInterventions.reduce(
     (sum, entry) => sum + (Array.isArray(entry?.costLines) ? entry.costLines.length : 0),
@@ -17313,6 +18110,18 @@ async function createCfaVersionForPlan({
       }
       return { skipped: true, reason: 'no_interventions' };
     }
+    if (!cfaSnapshotHasFunding(snapshot)) {
+      if (release) {
+        commitAttempted = true;
+        try {
+          await runner.commit();
+        } catch (commitError) {
+          console.warn('[cfa] zero-funding plan-version COMMIT acknowledgement lost', commitError?.message || commitError);
+        }
+        commitOutcome = 'committed';
+      }
+      return { skipped: true, reason: 'no_funded_cost_lines' };
+    }
 
     const seriesId = await ensureCfaSeries(runner, {
       caseId: normalizedCaseId,
@@ -17583,6 +18392,18 @@ async function createCfaVersionFromAssessment({
         commitOutcome = 'committed';
       }
       return { skipped: true, reason: 'no_interventions' };
+    }
+    if (!cfaSnapshotHasFunding(snapshot)) {
+      if (release) {
+        commitAttempted = true;
+        try {
+          await runner.commit();
+        } catch (commitError) {
+          console.warn('[cfa] zero-funding assessment-version COMMIT acknowledgement lost', commitError?.message || commitError);
+        }
+        commitOutcome = 'committed';
+      }
+      return { skipped: true, reason: 'no_funded_cost_lines' };
     }
 
     const seriesId = await ensureCfaSeries(runner, {
@@ -18180,6 +19001,10 @@ async function buildRevisionAssessmentSnapshot({
 async function fetchInterventionAssessmentContext({ caseId, interventionRow, connection = pool } = {}) {
   const normalizedCaseId = normalisePositiveInteger(caseId || interventionRow?.case_id || null);
   if (!normalizedCaseId) return null;
+  const exactApplicationId = resolveInterventionApplicationScopeId(
+    interventionRow,
+    { required: true }
+  );
   const [[row]] = await connection.query(
     `SELECT c.id AS case_id,
             c.case_number,
@@ -18196,8 +19021,12 @@ async function fetchInterventionAssessmentContext({ caseId, interventionRow, con
             cl.first_name AS client_first_name,
             cl.last_name AS client_last_name
        FROM iset_case c
-       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
-       LEFT JOIN iset_case_action_plan ap ON ap.id = ?
+       JOIN iset_application a
+         ON a.id = ?
+        AND a.case_id = c.id
+       LEFT JOIN iset_case_action_plan ap
+         ON ap.id = ?
+        AND ap.case_id = c.id
        LEFT JOIN budget_pot bp
          ON (
            (? IS NOT NULL AND bp.id = ?)
@@ -18213,6 +19042,7 @@ async function fetchInterventionAssessmentContext({ caseId, interventionRow, con
       WHERE c.id = ?
       LIMIT 1`,
     [
+      exactApplicationId,
       normalisePositiveInteger(interventionRow?.action_plan_id) || null,
       normalisePositiveInteger(interventionRow?.pot_id) || normalisePositiveInteger(interventionRow?.budget_pot) || null,
       normalisePositiveInteger(interventionRow?.pot_id) || normalisePositiveInteger(interventionRow?.budget_pot) || null,
@@ -18283,7 +19113,10 @@ async function fetchReviewWorkflowRmSignature(connection = pool, subject = {}) {
   if (!subjectKey) return null;
   try {
     const [[row]] = await connection.query(
-      `SELECT rw.rm_reviewed_at,
+      `SELECT rw.id AS review_workflow_id,
+              rw.rm_reviewed_at,
+              rw.rm_reviewed_by_staff_profile_id,
+              rw.rm_review_note,
               COALESCE(
                 NULLIF(TRIM(sp.display_name), ''),
                 NULLIF(TRIM(sp.name), ''),
@@ -18299,10 +19132,97 @@ async function fetchReviewWorkflowRmSignature(connection = pool, subject = {}) {
     const signerName = normaliseString(row?.signer_name) || null;
     const signedAt = toIsoDateTime(row?.rm_reviewed_at);
     if (!signerName && !signedAt) return null;
-    return { signerName, signedAt };
+    return {
+      signerName,
+      signedAt,
+      workflowId: normalisePositiveInteger(row?.review_workflow_id) || null,
+      staffProfileId: normalisePositiveInteger(row?.rm_reviewed_by_staff_profile_id) || null,
+      roleLabel: ASSESSMENT_PDF_ROLE_LABELS.regionalManager,
+      reviewNote: normaliseString(row?.rm_review_note) || null,
+    };
   } catch (err) {
     if (!isMissingTableErrorLocal(err)) {
       console.warn('[assessment-pdf] RM review signature lookup failed', err?.message || err);
+    }
+    return null;
+  }
+}
+
+async function fetchReviewWorkflowSubmittedSignature(connection = pool, subject = {}) {
+  const subjectKey = buildReviewSubjectKey(subject);
+  if (!subjectKey) return null;
+  try {
+    const [[row]] = await connection.query(
+      `SELECT rw.id AS review_workflow_id,
+              rw.submitted_at,
+              rw.submitted_by_staff_profile_id,
+              COALESCE(
+                NULLIF(TRIM(sp.display_name), ''),
+                NULLIF(TRIM(sp.name), ''),
+                NULLIF(TRIM(sp.email), '')
+              ) AS signer_name
+         FROM iset_review_workflow rw
+         LEFT JOIN staff_profiles sp ON sp.id = rw.submitted_by_staff_profile_id
+        WHERE rw.subject_key = ?
+          AND rw.archived_at IS NULL
+        LIMIT 1`,
+      [subjectKey]
+    );
+    const signerName = normaliseString(row?.signer_name) || null;
+    const signedAt = toIsoDateTime(row?.submitted_at);
+    if (!signerName && !signedAt) return null;
+    return {
+      signerName,
+      signedAt,
+      workflowId: normalisePositiveInteger(row?.review_workflow_id) || null,
+      staffProfileId: normalisePositiveInteger(row?.submitted_by_staff_profile_id) || null,
+      roleLabel: ASSESSMENT_PDF_ROLE_LABELS.submitter,
+    };
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.warn('[assessment-pdf] submitter workflow signature lookup failed', err?.message || err);
+    }
+    return null;
+  }
+}
+
+async function fetchReviewWorkflowDecisionMakerSignature(connection = pool, subject = {}) {
+  const subjectKey = buildReviewSubjectKey(subject);
+  if (!subjectKey) return null;
+  try {
+    const [[row]] = await connection.query(
+      `SELECT rw.id AS review_workflow_id,
+              rw.nwac_decided_at,
+              rw.nwac_decided_by_staff_profile_id,
+              rw.nwac_decision,
+              rw.nwac_decision_note,
+              COALESCE(
+                NULLIF(TRIM(sp.display_name), ''),
+                NULLIF(TRIM(sp.name), ''),
+                NULLIF(TRIM(sp.email), '')
+              ) AS signer_name
+         FROM iset_review_workflow rw
+         LEFT JOIN staff_profiles sp ON sp.id = rw.nwac_decided_by_staff_profile_id
+        WHERE rw.subject_key = ?
+          AND rw.archived_at IS NULL
+        LIMIT 1`,
+      [subjectKey]
+    );
+    const signerName = normaliseString(row?.signer_name) || null;
+    const signedAt = toIsoDateTime(row?.nwac_decided_at);
+    if (!signerName && !signedAt) return null;
+    return {
+      signerName,
+      signedAt,
+      workflowId: normalisePositiveInteger(row?.review_workflow_id) || null,
+      staffProfileId: normalisePositiveInteger(row?.nwac_decided_by_staff_profile_id) || null,
+      roleLabel: ASSESSMENT_PDF_ROLE_LABELS.decisionMaker,
+      decisionOutcome: normalizeAssessmentFinalDecisionOutcome(row?.nwac_decision),
+      decisionNote: normaliseString(row?.nwac_decision_note) || null,
+    };
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.warn('[assessment-pdf] Decision Maker workflow signature lookup failed', err?.message || err);
     }
     return null;
   }
@@ -18449,14 +19369,23 @@ async function generateAndStoreInterventionAssessmentPdf({
   caseId,
   interventionRow,
   sourceInterventionRow = null,
+  reviewSubjectInterventionRow = null,
   actorUserId = null,
   submittedSignature = null,
   approvedSignature = null,
   approved = false,
+  finalDecisionOutcome = null,
   connection = pool
 } = {}) {
   const normalizedCaseId = normalisePositiveInteger(caseId || interventionRow?.case_id || sourceInterventionRow?.case_id || null);
   if (!normalizedCaseId || !interventionRow) return null;
+  const normalizedRequestedFinalOutcome =
+    normalizeAssessmentFinalDecisionOutcome(finalDecisionOutcome) ||
+    (approved ? 'approved' : null);
+  const isFinalDecisionPacket = Boolean(normalizedRequestedFinalOutcome);
+  const exactReviewSubjectRow = reviewSubjectInterventionRow || interventionRow;
+  const assessmentDocumentInterventionId = normalisePositiveInteger(exactReviewSubjectRow?.id);
+  if (!assessmentDocumentInterventionId) return null;
   const context = await fetchInterventionAssessmentContext({
     caseId: normalizedCaseId,
     interventionRow,
@@ -18464,16 +19393,20 @@ async function generateAndStoreInterventionAssessmentPdf({
   });
   if (!context) return null;
 
+  // Submitted, redline, and final packets stay in the exact proposal/revision
+  // subject stream. Never borrow another intervention's version as a fallback.
   const latestSubmittedDoc = await fetchLatestAssessmentDocumentInfo({
     applicationId: context.applicationId,
     caseId: normalizedCaseId,
     documentTypes: ['case_assessment'],
+    interventionId: assessmentDocumentInterventionId,
     connection
   });
   const latestVersionedDoc = await fetchLatestAssessmentDocumentInfo({
     applicationId: context.applicationId,
     caseId: normalizedCaseId,
     documentTypes: ['case_assessment', 'case_assessment_approved'],
+    interventionId: assessmentDocumentInterventionId,
     connection
   });
   const baselineSnapshot = latestSubmittedDoc?.snapshot || latestVersionedDoc?.snapshot || null;
@@ -18482,52 +19415,127 @@ async function generateAndStoreInterventionAssessmentPdf({
     sourceInterventionRow,
     baselineSnapshot,
     context,
-    approved,
+    approved: normalizedRequestedFinalOutcome === 'approved',
     connection
   });
   if (!hasAssessmentSnapshotContent(currentSnapshot)) return null;
-  if (approved) {
+  if (normalizedRequestedFinalOutcome === 'approved') {
     currentSnapshot.agree_with_coordinator =
       currentSnapshot.agree_with_coordinator ||
       resolveInterventionAssessmentCoordinatorAgreement({ interventionRow, approved: true });
   }
 
-  const submittedFallback =
-    submittedSignature ||
-    await fetchInterventionSubmittedSignatureFallback({ interventionRow, connection }) ||
+  const workflowSubject = buildInterventionReviewWorkflowSubject(exactReviewSubjectRow);
+  const workflowSubjectKey = buildReviewSubjectKey(workflowSubject);
+  const workflowSubmittedSignature = await fetchReviewWorkflowSubmittedSignature(
+    connection,
+    workflowSubject
+  );
+  const submittedSignatureResolved = mergeAssessmentSignatureEvidence({
+    authoritative: workflowSubmittedSignature,
+    fallback:
+      submittedSignature ||
+      await fetchInterventionSubmittedSignatureFallback({
+        interventionRow: exactReviewSubjectRow,
+        connection,
+      }),
+    roleLabel: ASSESSMENT_PDF_ROLE_LABELS.submitter,
+  });
+  const workflowReviewSignature = isFinalDecisionPacket
+    ? await fetchReviewWorkflowRmSignature(connection, workflowSubject)
+    : null;
+  const workflowDecisionSignature = isFinalDecisionPacket
+    ? await fetchReviewWorkflowDecisionMakerSignature(connection, workflowSubject)
+    : null;
+  const authoritativeFinalOutcome = normalizeAssessmentFinalDecisionOutcome(
+    workflowDecisionSignature?.decisionOutcome
+  );
+  if (
+    authoritativeFinalOutcome &&
+    normalizedRequestedFinalOutcome &&
+    authoritativeFinalOutcome !== normalizedRequestedFinalOutcome
+  ) {
+    const outcomeError = new Error('assessment_pdf_final_outcome_mismatch');
+    outcomeError.code = 'assessment_pdf_final_outcome_mismatch';
+    throw outcomeError;
+  }
+  const resolvedFinalOutcome = authoritativeFinalOutcome || normalizedRequestedFinalOutcome;
+  const decisionSignatureResolved = isFinalDecisionPacket
+    ? mergeAssessmentSignatureEvidence({
+        authoritative: workflowDecisionSignature,
+        fallback: approvedSignature,
+        roleLabel: ASSESSMENT_PDF_ROLE_LABELS.decisionMaker,
+      })
+    : null;
+  const decisionNote =
+    normaliseString(workflowDecisionSignature?.decisionNote) ||
+    normaliseString(interventionRow?.review_notes) ||
     null;
-  const submittedSignatureResolved =
-    submittedFallback ||
-    await fetchLatestCaseEventSignature(connection, { caseId: normalizedCaseId, eventType: 'assessment_submitted' }) ||
-    null;
+  if (resolvedFinalOutcome === 'denied') {
+    currentSnapshot.denial_reason = decisionNote || currentSnapshot.denial_reason || '';
+  }
   const signatureContext = {
     submittedSignature: submittedSignatureResolved,
-    reviewSignature: approved
-      ? (
-          await fetchReviewWorkflowRmSignature(connection, buildInterventionReviewWorkflowSubject(interventionRow)) ||
-          (sourceInterventionRow
-            ? await fetchReviewWorkflowRmSignature(connection, buildInterventionReviewWorkflowSubject(sourceInterventionRow))
-            : null) ||
-          null
-        )
-      : null,
-    approvedSignature: approved ? (approvedSignature || null) : null
+    reviewSignature: workflowReviewSignature,
+    approvedSignature: decisionSignatureResolved,
   };
-  const assessmentVersionNumber = approved
+  const assessmentVersionNumber = isFinalDecisionPacket
     ? (latestSubmittedDoc?.versionNumber || latestVersionedDoc?.versionNumber || 1)
     : ((latestVersionedDoc?.versionNumber || 0) + 1);
-  const documentType = approved ? 'case_assessment_approved' : 'case_assessment';
-  const label = approved
-    ? `Approved case manager assessment v${assessmentVersionNumber}`
+  const documentType = isFinalDecisionPacket ? 'case_assessment_approved' : 'case_assessment';
+  const finalOutcomeLabel = resolvedFinalOutcome === 'approved' ? 'Approved' : 'Denied';
+  const label = isFinalDecisionPacket
+    ? `Final assessment packet v${assessmentVersionNumber} - ${finalOutcomeLabel}`
     : `Case manager assessment v${assessmentVersionNumber}`;
-  const fileNamePrefix = approved ? 'approved-case-manager-assessment' : 'case-manager-assessment';
-  const variant = approved ? 'approved' : 'submitted';
+  const fileNamePrefix = isFinalDecisionPacket ? 'final-assessment-packet' : 'case-manager-assessment';
+  const variant = isFinalDecisionPacket ? 'final' : 'submitted';
+  const workflowType = workflowSubject?.workflowType || null;
+  const isRevisionSubject = workflowType === REVIEW_WORKFLOW_TYPES.InterventionRevision;
+  const renderedInterventionId = normalisePositiveInteger(interventionRow?.id);
+  const operationalSourceInterventionId = isRevisionSubject
+    ? (
+        renderedInterventionId !== assessmentDocumentInterventionId
+          ? renderedInterventionId
+          : normalisePositiveInteger(sourceInterventionRow?.id)
+      )
+    : null;
+  const linkedInterventionIds = [assessmentDocumentInterventionId];
+  if (
+    isFinalDecisionPacket &&
+    resolvedFinalOutcome === 'approved' &&
+    isRevisionSubject &&
+    renderedInterventionId !== assessmentDocumentInterventionId
+  ) {
+    linkedInterventionIds.push(renderedInterventionId);
+  }
   const interventionDocumentMetadata = pruneNullish({
-    assessment_source: approved
-      ? 'intervention_approval'
+    assessment_source: isFinalDecisionPacket
+      ? 'intervention_final_decision'
       : (sourceInterventionRow ? 'intervention_revision_submission' : 'intervention_proposal_submission'),
-    intervention_id: normalisePositiveInteger(interventionRow?.id) || null,
-    source_intervention_id: normalisePositiveInteger(sourceInterventionRow?.id) || null,
+    assessment_subject_key: isFinalDecisionPacket ? workflowSubjectKey : null,
+    assessment_workflow_type: isFinalDecisionPacket ? workflowType : null,
+    assessment_final_outcome: isFinalDecisionPacket ? resolvedFinalOutcome : null,
+    assessment_final_evidence: isFinalDecisionPacket ? buildAssessmentFinalEvidenceMetadata({
+      finalDecisionOutcome: resolvedFinalOutcome,
+      assessmentSubjectKey: workflowSubjectKey,
+      workflowType,
+      workflowSubject,
+      submittedSignature: signatureContext.submittedSignature,
+      reviewSignature: signatureContext.reviewSignature,
+      decisionSignature: signatureContext.approvedSignature,
+      rmReviewNote: workflowReviewSignature?.reviewNote || null,
+      decisionNote,
+    }) : null,
+    intervention_id: assessmentDocumentInterventionId,
+    revision_intervention_id:
+      isFinalDecisionPacket && isRevisionSubject
+        ? assessmentDocumentInterventionId
+        : null,
+    materialized_intervention_id:
+      renderedInterventionId !== assessmentDocumentInterventionId
+        ? renderedInterventionId
+        : null,
+    source_intervention_id: operationalSourceInterventionId,
   });
 
   const pdfBuffer = await generateAssessmentPdfBuffer({
@@ -18538,7 +19546,10 @@ async function generateAndStoreInterventionAssessmentPdf({
     recommendationSignature: signatureContext.submittedSignature,
     reviewSignature: signatureContext.reviewSignature,
     approvalSignature: signatureContext.approvedSignature,
-    includeAgreementSection: approved,
+    includeAgreementSection: isFinalDecisionPacket,
+    finalDecisionOutcome: resolvedFinalOutcome,
+    rmReviewNote: workflowReviewSignature?.reviewNote || null,
+    decisionNote,
     versionNumber: assessmentVersionNumber,
     variant
   });
@@ -18548,7 +19559,7 @@ async function generateAndStoreInterventionAssessmentPdf({
     clientId: context.clientId,
     applicantUserId: context.applicantUserId,
     actorUserId,
-    interventionIds: [interventionRow.id],
+    interventionIds: linkedInterventionIds,
     trackingId: context.referenceNumber,
     pdfBuffer,
     documentType,
@@ -18556,6 +19567,7 @@ async function generateAndStoreInterventionAssessmentPdf({
     fileNamePrefix,
     versionNumber: assessmentVersionNumber,
     variant,
+    finalDecisionOutcome: resolvedFinalOutcome,
     snapshot: currentSnapshot,
     extraMetadata: interventionDocumentMetadata,
     archivePreviousActive: false,
@@ -18563,7 +19575,7 @@ async function generateAndStoreInterventionAssessmentPdf({
     connection
   });
 
-  if (!approved && latestSubmittedDoc?.versionNumber && hasAssessmentSnapshotContent(latestSubmittedDoc?.snapshot)) {
+  if (!isFinalDecisionPacket && latestSubmittedDoc?.versionNumber && hasAssessmentSnapshotContent(latestSubmittedDoc?.snapshot)) {
     const redlineBuffer = await generateAssessmentPdfBuffer({
       caseRow: interventionRow,
       applicantName: context.applicantName,
@@ -18584,7 +19596,7 @@ async function generateAndStoreInterventionAssessmentPdf({
       clientId: context.clientId,
       applicantUserId: context.applicantUserId,
       actorUserId,
-      interventionIds: [interventionRow.id],
+      interventionIds: [assessmentDocumentInterventionId],
       trackingId: context.referenceNumber,
       pdfBuffer: redlineBuffer,
       documentType: 'case_assessment_redline',
@@ -18675,7 +19687,7 @@ const assessmentHasFundedCostLines = (assessmentRow) => {
   const hasPositiveCostLine = proposedInterventions.some(intervention => {
     const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
     return costLines.some(line => {
-      const amount = parseCurrencyValue(line?.amount);
+      const amount = resolveFundingAgreementCostLineAmount(line, intervention);
       return Number.isFinite(amount) && amount > 0;
     });
   });
@@ -18699,6 +19711,7 @@ const interventionHasFundedCostLines = (interventionRow, planFundingStream = nul
   const interventionSnapshot = sanitizeInterventionForCfa(
     buildCfaInterventionSnapshot(interventionRow, planFundingStream)
   );
+  if (!interventionSnapshot) return false;
   const costLines = Array.isArray(interventionSnapshot?.costLines) ? interventionSnapshot.costLines : [];
   if (costLines.length > 0) {
     return true;
@@ -18811,7 +19824,10 @@ async function fetchInterventionCodeLabels(connection, codes = []) {
   return labels;
 }
 
-async function fetchLatestEventEntrySignature(connection, { caseId, eventType, outcome = null } = {}) {
+async function fetchLatestEventEntrySignature(
+  connection,
+  { caseId, applicationId = null, eventType, outcome = null } = {}
+) {
   if (!connection || !caseId || !eventType) return null;
   const whereClauses = [
     "e.subject_type = 'case'",
@@ -18819,6 +19835,11 @@ async function fetchLatestEventEntrySignature(connection, { caseId, eventType, o
     'e.event_type = ?'
   ];
   const params = [String(caseId), eventType];
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (normalizedApplicationId) {
+    whereClauses.push(`JSON_UNQUOTE(JSON_EXTRACT(e.payload_json, '$.application_id')) = ?`);
+    params.push(String(normalizedApplicationId));
+  }
   if (outcome) {
     whereClauses.push(`JSON_UNQUOTE(JSON_EXTRACT(e.payload_json, '$.outcome')) = ?`);
     params.push(outcome);
@@ -18863,10 +19884,18 @@ async function fetchLatestEventEntrySignature(connection, { caseId, eventType, o
   }
 }
 
-async function fetchLatestLegacyCaseEventSignature(connection, { caseId, eventType, outcome = null } = {}) {
+async function fetchLatestLegacyCaseEventSignature(
+  connection,
+  { caseId, applicationId = null, eventType, outcome = null } = {}
+) {
   if (!connection || !caseId || !eventType) return null;
   const whereClauses = ['e.case_id = ?', 'e.event_type = ?'];
   const params = [caseId, eventType];
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (normalizedApplicationId) {
+    whereClauses.push(`JSON_UNQUOTE(JSON_EXTRACT(e.payload_json, '$.application_id')) = ?`);
+    params.push(String(normalizedApplicationId));
+  }
   if (outcome) {
     whereClauses.push(`JSON_UNQUOTE(JSON_EXTRACT(e.payload_json, '$.outcome')) = ?`);
     params.push(outcome);
@@ -18914,27 +19943,70 @@ async function fetchAssessmentPdfSignatureContext({
   applicationId = null,
   connection = pool,
   submittedFallback = null,
-  approvedFallback = null
+  approvedFallback = null,
+  finalDecisionOutcome = null,
 } = {}) {
-  const submittedSignature =
-    await fetchLatestCaseEventSignature(connection, { caseId, eventType: 'assessment_submitted' }) ||
-    submittedFallback ||
-    null;
-  const approvedSignature =
-    await fetchLatestCaseEventSignature(connection, { caseId, eventType: 'nwac_review_approved' }) ||
-    await fetchLatestCaseEventSignature(connection, { caseId, eventType: 'nwac_review_submitted', outcome: 'approve' }) ||
-    approvedFallback ||
-    null;
-  const reviewSignature = applicationId
-    ? await fetchReviewWorkflowRmSignature(connection, {
+  const workflowSubject = applicationId
+    ? {
         workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
         applicationId,
-      })
+      }
+    : null;
+  const workflowSubmittedSignature = workflowSubject
+    ? await fetchReviewWorkflowSubmittedSignature(connection, workflowSubject)
+    : null;
+  const eventSubmittedSignature = !workflowSubmittedSignature && !submittedFallback
+    ? await fetchLatestCaseEventSignature(connection, {
+      caseId,
+      applicationId,
+      eventType: 'assessment_submitted',
+    })
+    : null;
+  const submittedSignature = mergeAssessmentSignatureEvidence({
+    authoritative: workflowSubmittedSignature,
+    fallback: submittedFallback || eventSubmittedSignature,
+    roleLabel: ASSESSMENT_PDF_ROLE_LABELS.submitter,
+  });
+  const workflowDecisionSignature = workflowSubject
+    ? await fetchReviewWorkflowDecisionMakerSignature(connection, workflowSubject)
+    : null;
+  const resolvedFinalDecisionOutcome =
+    normalizeAssessmentFinalDecisionOutcome(workflowDecisionSignature?.decisionOutcome) ||
+    normalizeAssessmentFinalDecisionOutcome(finalDecisionOutcome);
+  let eventDecisionSignature = null;
+  if (!workflowDecisionSignature && !approvedFallback) {
+    const finalEventType = resolvedFinalDecisionOutcome === 'denied'
+      ? 'nwac_review_denied'
+      : 'nwac_review_approved';
+    eventDecisionSignature = await fetchLatestCaseEventSignature(connection, {
+      caseId,
+      applicationId,
+      eventType: finalEventType,
+    });
+    if (!eventDecisionSignature && resolvedFinalDecisionOutcome === 'approved') {
+      eventDecisionSignature = await fetchLatestCaseEventSignature(connection, {
+        caseId,
+        applicationId,
+        eventType: 'nwac_review_submitted',
+        outcome: 'approve',
+      });
+    }
+  }
+  const approvedSignature = mergeAssessmentSignatureEvidence({
+    authoritative: workflowDecisionSignature,
+    fallback: approvedFallback || eventDecisionSignature,
+    roleLabel: ASSESSMENT_PDF_ROLE_LABELS.decisionMaker,
+  });
+  const reviewSignature = applicationId
+    ? await fetchReviewWorkflowRmSignature(connection, workflowSubject)
     : null;
   return {
     submittedSignature,
     reviewSignature,
-    approvedSignature
+    approvedSignature,
+    finalDecisionOutcome: resolvedFinalDecisionOutcome,
+    rmReviewNote: normaliseString(reviewSignature?.reviewNote) || null,
+    decisionNote: normaliseString(approvedSignature?.decisionNote) || null,
   };
 }
 
@@ -20834,10 +21906,11 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
           const placeholders = planIds.map(() => '?').join(', ');
           const [interventionRows] = await conn.query(
             `SELECT ci.*, ap.funding_stream AS plan_funding_stream
-               FROM iset_case_intervention ci
-               LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
-               WHERE ci.action_plan_id IN (${placeholders})
-               ORDER BY ci.start_date IS NULL, ci.start_date ASC, ci.id ASC`,
+	               FROM iset_case_intervention ci
+	               LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+	               WHERE ci.action_plan_id IN (${placeholders})
+	                 AND ${buildOperationalInterventionSql('ci')}
+	               ORDER BY ci.start_date IS NULL, ci.start_date ASC, ci.id ASC`,
             planIds
           );
           interventionRows.forEach(row => {
@@ -21838,14 +22911,19 @@ async function fetchActionPlanWithCase(planId) {
        c.assigned_staff_profile_id AS assigned_staff_profile_id,
        c.assigned_staff_profile_id AS assigned_to_user_id,
        c.portfolio_region_id,
+       a.case_id AS application_case_id,
        sp.region_id AS owner_region_id,
        (
          SELECT COUNT(*)
          FROM iset_case_intervention ci
          WHERE ci.action_plan_id = ap.id
+           AND ${buildOperationalInterventionSql('ci')}
      ) AS intervention_count
    FROM iset_case_action_plan ap
    JOIN iset_case c ON c.id = ap.case_id
+   LEFT JOIN iset_application a
+     ON a.id = ap.application_id
+    AND a.case_id = c.id
    LEFT JOIN budget_pot bp
      ON (
        (ap.budget_pot REGEXP '^[0-9]+$' AND bp.id = CAST(ap.budget_pot AS UNSIGNED))
@@ -21874,7 +22952,10 @@ async function fetchInterventionWithCase(interventionId, connection = pool, { fo
        p.review_status AS proposal_review_status,
        p.reviewed_at AS proposal_reviewed_at,
        p.source_intervention_id AS proposal_source_intervention_id,
-       COALESCE(p.application_id, ap.application_id, a.id) AS application_id,
+       p.application_id AS proposal_application_id,
+       ap.application_id AS action_plan_application_id,
+       a.case_id AS resolved_application_case_id,
+       COALESCE(p.application_id, ap.application_id) AS application_id,
        ${buildReviewWorkflowSelectColumns('rw')},
        c.assigned_staff_profile_id AS assigned_staff_profile_id,
        c.assigned_staff_profile_id AS assigned_to_user_id,
@@ -21884,7 +22965,9 @@ async function fetchInterventionWithCase(interventionId, connection = pool, { fo
      LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
      LEFT JOIN iset_case c ON c.id = ci.case_id
      LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = ci.id
-     LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
+     LEFT JOIN iset_application a
+       ON a.id = COALESCE(p.application_id, ap.application_id)
+      AND a.case_id = ci.case_id
      LEFT JOIN iset_review_workflow rw
        ON rw.archived_at IS NULL
       AND rw.workflow_type = CASE
@@ -21905,6 +22988,88 @@ async function fetchInterventionWithCase(interventionId, connection = pool, { fo
     [interventionId]
   );
   return row || null;
+}
+
+function resolveInterventionApplicationScopeId(row = {}, { required = false } = {}) {
+  const hasExplicitLineage =
+    Object.prototype.hasOwnProperty.call(row || {}, 'proposal_application_id') ||
+    Object.prototype.hasOwnProperty.call(row || {}, 'action_plan_application_id');
+  const proposalApplicationId = normalisePositiveInteger(row?.proposal_application_id);
+  const actionPlanApplicationId = normalisePositiveInteger(row?.action_plan_application_id);
+  if (
+    proposalApplicationId &&
+    actionPlanApplicationId &&
+    proposalApplicationId !== actionPlanApplicationId
+  ) {
+    const error = new Error('intervention_application_scope_conflict');
+    error.code = 'intervention_application_scope_conflict';
+    error.status = 409;
+    error.publicMessage =
+      'The intervention proposal and Action Plan point to different applications.';
+    throw error;
+  }
+  // The generic `application_id` property historically contained a
+  // case-primary fallback. It is never authoritative intervention lineage.
+  // Callers that need an application must expose the raw proposal/plan
+  // fields, even in non-required/read-only paths.
+  const resolvedApplicationId = hasExplicitLineage
+    ? (proposalApplicationId || actionPlanApplicationId || null)
+    : null;
+  if (required && !hasExplicitLineage) {
+    const error = new Error('intervention_application_scope_required');
+    error.code = 'intervention_application_scope_required';
+    error.status = 409;
+    error.publicMessage =
+      'The intervention application lineage could not be verified.';
+    throw error;
+  }
+  const workflowApplicationId = normalisePositiveInteger(
+    row?.review_workflow_application_id ?? row?.workflow_application_id
+  );
+  if (
+    resolvedApplicationId &&
+    workflowApplicationId &&
+    resolvedApplicationId !== workflowApplicationId
+  ) {
+    const error = new Error('intervention_application_scope_conflict');
+    error.code = 'intervention_application_scope_conflict';
+    error.status = 409;
+    error.publicMessage =
+      'The intervention review workflow points to a different application.';
+    throw error;
+  }
+  const exposesResolvedApplicationCase = Object.prototype.hasOwnProperty.call(
+    row || {},
+    'resolved_application_case_id'
+  );
+  const resolvedApplicationCaseId = normalisePositiveInteger(
+    row?.resolved_application_case_id
+  );
+  const interventionCaseId = normalisePositiveInteger(row?.case_id ?? row?.caseId);
+  if (
+    resolvedApplicationId &&
+    exposesResolvedApplicationCase &&
+    (
+      !resolvedApplicationCaseId ||
+      (interventionCaseId && resolvedApplicationCaseId !== interventionCaseId)
+    )
+  ) {
+    const error = new Error('intervention_application_scope_conflict');
+    error.code = 'intervention_application_scope_conflict';
+    error.status = 409;
+    error.publicMessage =
+      'The intervention application does not belong to this case.';
+    throw error;
+  }
+  if (required && !resolvedApplicationId) {
+    const error = new Error('intervention_application_scope_required');
+    error.code = 'intervention_application_scope_required';
+    error.status = 409;
+    error.publicMessage =
+      'Link the intervention Action Plan to the exact application before continuing this review action.';
+    throw error;
+  }
+  return resolvedApplicationId;
 }
 
 const REVISION_ELIGIBLE_INTERVENTION_STATUSES = new Set(['approved', 'in_progress', 'suspended']);
@@ -22917,6 +24082,722 @@ function resolveInterventionFundingApprovalAmount(interventionRow, metadataOverr
     if (Number.isFinite(parsed)) return parsed;
   }
   return null;
+}
+
+function validateApprovedInterventionMaterializationRequest({
+  sourceInterventionRow,
+  sourceReviewWorkflow,
+  sourceItemId,
+  targetPlanId,
+  targetCaseId,
+  requestedCode,
+  requestedTitle,
+  expectedTitle,
+  requestedStartDate,
+  requestedEndDate,
+  requestedDurationDays,
+  expectedDurationDays,
+  requestedCost,
+  requestedNotes,
+  expectedNotes,
+  requestedNoc,
+  requestedNocVersion,
+  requestedApprovedAmount,
+  requestedActualAmount,
+  requestedFundingStream,
+  requestedDeliveryStatus,
+} = {}) {
+  const fail = (code, message, status = 409, details = null) => {
+    const error = new Error(code);
+    error.code = code;
+    error.status = status;
+    error.publicMessage = message;
+    error.details = details;
+    throw error;
+  };
+  if (!sourceInterventionRow) {
+    fail('approved_intervention_source_not_found', 'The approved proposal source could not be found.', 404);
+  }
+  const sourceState = resolveInterventionStateFields({
+    status: sourceInterventionRow.status,
+    delivery_status: sourceInterventionRow.delivery_status || null,
+  });
+  if (
+    sourceState.reviewStatus !== 'approved' ||
+    sourceReviewWorkflow?.current_stage !== REVIEW_STAGES.FinalDecisionRecorded ||
+    sourceReviewWorkflow?.nwac_decision !== 'approved'
+  ) {
+    fail(
+      'approved_intervention_source_not_final',
+      'Additional interventions can be created only from a proposal with a recorded final approval.'
+    );
+  }
+  if (
+    Number(sourceInterventionRow.action_plan_id) !== Number(targetPlanId) ||
+    Number(sourceInterventionRow.case_id) !== Number(targetCaseId)
+  ) {
+    fail(
+      'approved_intervention_source_scope_mismatch',
+      'The approved proposal source does not belong to this case and Action Plan.'
+    );
+  }
+
+  const sourceMetadata = safeJsonParse(sourceInterventionRow.metadata_json, {}) || {};
+  const rawItems = Array.isArray(sourceMetadata.proposedInterventions)
+    ? sourceMetadata.proposedInterventions
+    : Array.isArray(sourceMetadata.proposed_interventions)
+      ? sourceMetadata.proposed_interventions
+      : [];
+  const normalizedItems = normalizeAssessmentProposedInterventions(rawItems);
+  const normalizedSourceItemId = normaliseString(sourceItemId);
+  const itemIndex = normalizedItems.findIndex(
+    item => item.id && item.id === normalizedSourceItemId
+  );
+  if (itemIndex <= 0) {
+    fail(
+      'approved_intervention_source_item_invalid',
+      'The additional intervention is not part of the approved proposal.'
+    );
+  }
+  const expected = normalizedItems[itemIndex];
+  const expectedCost = Number.isFinite(Number(expected.costTotal)) ? Number(expected.costTotal) : 0;
+  const actualCost = Number.isFinite(Number(requestedCost)) ? Number(requestedCost) : 0;
+  const facts = [
+    ['code', expected.code || '', normalizeInterventionCodeValue(requestedCode) || ''],
+    ['startDate', expected.startDate || '', toDateOnlyString(requestedStartDate) || ''],
+    ['endDate', expected.endDate || '', toDateOnlyString(requestedEndDate) || ''],
+    ['cost', Number(expectedCost.toFixed(2)), Number(actualCost.toFixed(2))],
+    ['noc', expected.noc || '', normaliseString(requestedNoc) || ''],
+    ['nocVersion', expected.nocVersion || '', normaliseString(requestedNocVersion) || ''],
+  ];
+  if (typeof requestedTitle !== 'undefined') {
+    facts.push([
+      'title',
+      normaliseString(expectedTitle) || '',
+      normaliseString(requestedTitle) || '',
+    ]);
+  }
+  if (typeof requestedDurationDays !== 'undefined' && requestedDurationDays !== null) {
+    const normalizedExpectedDuration = Number.isFinite(Number(expectedDurationDays))
+      ? Math.round(Number(expectedDurationDays))
+      : null;
+    const normalizedRequestedDuration = Number.isFinite(Number(requestedDurationDays))
+      ? Math.round(Number(requestedDurationDays))
+      : null;
+    facts.push(['durationDays', normalizedExpectedDuration, normalizedRequestedDuration]);
+  }
+  if (typeof requestedNotes !== 'undefined') {
+    facts.push([
+      'notes',
+      normaliseString(expectedNotes) || '',
+      normaliseString(requestedNotes) || '',
+    ]);
+  }
+  [
+    ['approvedAmount', requestedApprovedAmount],
+    ['actualAmount', requestedActualAmount],
+    ['fundingStream', requestedFundingStream],
+    ['deliveryStatus', requestedDeliveryStatus],
+  ].forEach(([field, requestedValue]) => {
+    if (
+      requestedValue !== null &&
+      typeof requestedValue !== 'undefined' &&
+      String(requestedValue).trim() !== ''
+    ) {
+      facts.push([field, null, requestedValue]);
+    }
+  });
+  const mismatches = facts
+    .filter(([, expectedValue, actualValue]) => expectedValue !== actualValue)
+    .map(([field, expectedValue, actualValue]) => ({ field, expectedValue, actualValue }));
+  if (mismatches.length) {
+    fail(
+      'approved_intervention_source_item_mismatch',
+      'The additional intervention does not match the approved proposal.',
+      409,
+      mismatches
+    );
+  }
+
+  return {
+    sourceMetadata,
+    sourceItem: rawItems[itemIndex],
+    normalizedSourceItem: expected,
+    sourceItemIndex: itemIndex,
+    trustedTitle: normaliseString(expectedTitle) || '',
+    trustedDurationDays: Number.isFinite(Number(expectedDurationDays))
+      ? Math.round(Number(expectedDurationDays))
+      : null,
+    trustedNotes: normaliseString(expectedNotes) || '',
+  };
+}
+
+function resolveApprovedInterventionMaterializationKey(metadata) {
+  const parsed = safeJsonParse(metadata, {}) || {};
+  const materialization =
+    parsed.approvalMaterialization && typeof parsed.approvalMaterialization === 'object'
+      ? parsed.approvalMaterialization
+      : parsed.approval_materialization && typeof parsed.approval_materialization === 'object'
+        ? parsed.approval_materialization
+        : null;
+  if (!materialization) return null;
+  const sourceInterventionId = normalisePositiveInteger(
+    materialization.sourceInterventionId ?? materialization.source_intervention_id
+  );
+  const sourceItemId = normaliseString(
+    materialization.sourceItemId ?? materialization.source_item_id
+  );
+  if (!sourceInterventionId || !sourceItemId) return null;
+  return { sourceInterventionId, sourceItemId };
+}
+
+function buildApprovedInterventionMaterializationItemSignature(rawItem) {
+  const item = normalizeProposedIntervention(rawItem);
+  if (!item) return null;
+  const costTotal = Number.isFinite(Number(item.costTotal))
+    ? Number(Number(item.costTotal).toFixed(2))
+    : null;
+  return JSON.stringify({
+    id: normaliseString(item.id) || null,
+    code: normaliseString(item.code) || null,
+    startDate: item.startDate || null,
+    endDate: item.endDate || null,
+    deliveryMode: normaliseString(item.deliveryMode) || null,
+    institution: normaliseString(item.institution) || null,
+    programName: normaliseString(item.programName) || null,
+    itpDetails: normaliseString(item.itpDetails) || null,
+    wageSubsidyDetails: normaliseString(item.wageSubsidyDetails) || null,
+    noc: normaliseString(item.noc) || null,
+    nocVersion: normaliseString(item.nocVersion) || null,
+    costTotal,
+    costLines: Array.isArray(item.costLines) ? item.costLines : [],
+  });
+}
+
+function assertApprovedInterventionMaterializationReplayMatches(
+  replayRow,
+  { sourceItem, sourceWorkflowId } = {}
+) {
+  const metadata = safeJsonParse(replayRow?.metadata_json, {}) || {};
+  const materialization =
+    metadata.approvalMaterialization && typeof metadata.approvalMaterialization === 'object'
+      ? metadata.approvalMaterialization
+      : {};
+  const recordedWorkflowId = normalisePositiveInteger(
+    materialization.sourceWorkflowId ?? materialization.source_workflow_id
+  );
+  const expectedWorkflowId = normalisePositiveInteger(sourceWorkflowId);
+  const targetItems = Array.isArray(metadata.proposedInterventions)
+    ? metadata.proposedInterventions
+    : Array.isArray(metadata.proposed_interventions)
+      ? metadata.proposed_interventions
+      : [];
+  const expectedSignature = buildApprovedInterventionMaterializationItemSignature(sourceItem);
+  const actualSignature = targetItems.length === 1
+    ? buildApprovedInterventionMaterializationItemSignature(targetItems[0])
+    : null;
+  if (
+    !expectedWorkflowId ||
+    recordedWorkflowId !== expectedWorkflowId ||
+    !expectedSignature ||
+    actualSignature !== expectedSignature
+  ) {
+    const conflictError = new Error('approved_intervention_materialization_conflict');
+    conflictError.code = 'approved_intervention_materialization_conflict';
+    conflictError.status = 409;
+    conflictError.publicMessage =
+      'The existing approved-item materialization does not match the final approved proposal packet.';
+    conflictError.details = {
+      interventionId: normalisePositiveInteger(replayRow?.id),
+      expectedWorkflowId,
+      recordedWorkflowId,
+      packetMatches: Boolean(expectedSignature && actualSignature === expectedSignature),
+    };
+    throw conflictError;
+  }
+  return { enforced: true, reason: 'exact_materialization_replay' };
+}
+
+async function findApprovedInterventionMaterializationReplay(connection, {
+  caseId,
+  actionPlanId,
+  sourceInterventionId,
+  sourceItemId,
+  forUpdate = false,
+} = {}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  const normalizedSourceInterventionId = normalisePositiveInteger(sourceInterventionId);
+  const normalizedSourceItemId = normaliseString(sourceItemId);
+  if (
+    !normalizedCaseId ||
+    !normalizedActionPlanId ||
+    !normalizedSourceInterventionId ||
+    !normalizedSourceItemId
+  ) {
+    const invalidError = new Error('approved_intervention_materialization_key_invalid');
+    invalidError.code = 'approved_intervention_materialization_key_invalid';
+    invalidError.status = 409;
+    invalidError.publicMessage = 'The approved intervention materialization key is incomplete.';
+    throw invalidError;
+  }
+  const [rows] = await connection.query(
+    `SELECT ci.id,
+            ci.case_id,
+            ci.action_plan_id,
+            ci.status,
+            ci.delivery_status,
+            ci.metadata_json
+       FROM iset_case_intervention ci
+      WHERE ci.case_id = ?
+        AND ci.action_plan_id = ?
+        AND JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.approvalMaterialization.sourceInterventionId')) = ?
+        AND JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.approvalMaterialization.sourceItemId')) = ?
+      ORDER BY ci.id ASC${forUpdate ? ' FOR UPDATE' : ''}`,
+    [
+      normalizedCaseId,
+      normalizedActionPlanId,
+      String(normalizedSourceInterventionId),
+      normalizedSourceItemId,
+    ]
+  );
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  if (rows.length > 1) {
+    const duplicateError = new Error('approved_intervention_materialization_duplicate');
+    duplicateError.code = 'approved_intervention_materialization_duplicate';
+    duplicateError.status = 409;
+    duplicateError.publicMessage =
+      'More than one intervention already uses this approved proposal item. Resolve the duplicate before retrying.';
+    duplicateError.details = { interventionIds: rows.map(row => normalisePositiveInteger(row.id)).filter(Boolean) };
+    throw duplicateError;
+  }
+  const [row] = rows;
+  const key = resolveApprovedInterventionMaterializationKey(row.metadata_json);
+  const state = resolveInterventionStateFields(row);
+  if (
+    !key ||
+    key.sourceInterventionId !== normalizedSourceInterventionId ||
+    key.sourceItemId !== normalizedSourceItemId ||
+    normalisePositiveInteger(row.case_id) !== normalizedCaseId ||
+    normalisePositiveInteger(row.action_plan_id) !== normalizedActionPlanId ||
+    state.reviewStatus !== 'approved'
+  ) {
+    const conflictError = new Error('approved_intervention_materialization_conflict');
+    conflictError.code = 'approved_intervention_materialization_conflict';
+    conflictError.status = 409;
+    conflictError.publicMessage =
+      'The existing approved-item materialization does not match this retry.';
+    throw conflictError;
+  }
+  return row;
+}
+
+async function materializeApprovedInterventionProposalAdditionalItems(connection, {
+  sourceInterventionRow,
+  sourceReviewWorkflow,
+  actionPlanId,
+  caseId,
+  potId,
+  postingContext = 'external',
+  reviewedByStaffProfileId = null,
+  eiDocumentId = null,
+} = {}) {
+  const normalizedSourceInterventionId = normalisePositiveInteger(sourceInterventionRow?.id);
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!normalizedSourceInterventionId || !normalizedActionPlanId || !normalizedCaseId) {
+    const scopeError = new Error('approved_intervention_materialization_scope_invalid');
+    scopeError.code = 'approved_intervention_materialization_scope_invalid';
+    scopeError.status = 409;
+    scopeError.publicMessage = 'The approved intervention proposal scope is incomplete.';
+    throw scopeError;
+  }
+  const sourceWorkflowApproval = assertApprovedInterventionMaterializationWorkflow(
+    sourceInterventionRow,
+    sourceReviewWorkflow
+  );
+
+  const sourceMetadata = safeJsonParse(sourceInterventionRow.metadata_json, {}) || {};
+  const rawItems = Array.isArray(sourceMetadata.proposedInterventions)
+    ? sourceMetadata.proposedInterventions
+    : Array.isArray(sourceMetadata.proposed_interventions)
+      ? sourceMetadata.proposed_interventions
+      : [];
+  const normalizedItems = normalizeAssessmentProposedInterventions(rawItems);
+  if (!normalizedItems.length || normalizedItems.length !== rawItems.length) {
+    const packetError = new Error('approved_intervention_source_item_invalid');
+    packetError.code = 'approved_intervention_source_item_invalid';
+    packetError.status = 409;
+    packetError.publicMessage =
+      'Every intervention in the approved proposal must be a valid materialization item.';
+    throw packetError;
+  }
+  const itemIds = normalizedItems.map(item => normaliseString(item.id));
+  if (
+    itemIds.some(itemId => !itemId) ||
+    new Set(itemIds).size !== itemIds.length
+  ) {
+    const keyError = new Error('approved_intervention_source_item_key_invalid');
+    keyError.code = 'approved_intervention_source_item_key_invalid';
+    keyError.status = 409;
+    keyError.publicMessage =
+      'Every intervention in the approved proposal must have a unique item id.';
+    throw keyError;
+  }
+
+  const results = [];
+  const sourceDecisionNotes = normaliseString(
+    sourceMetadata?.review?.decisionNotes ?? sourceMetadata?.review?.decision_notes ?? null
+  ) || null;
+  const trustedNotes = normaliseString(sourceMetadata.rationale ?? sourceMetadata.notes ?? null) || '';
+  const normalizedPotId = normalisePositiveInteger(potId);
+  for (let index = 1; index < normalizedItems.length; index += 1) {
+    const item = normalizedItems[index];
+    const sourceItemId = itemIds[index];
+    const rawItem = rawItems.find(raw => normaliseString(raw?.id) === sourceItemId) || rawItems[index];
+    const trustedTitle = await fetchInterventionCodeLabel(connection, item.code) || 'Intervention';
+    const duration = resolveInterventionDurationDaysForStorage({
+      durationDays: null,
+      startDate: item.startDate,
+      endDate: item.endDate,
+      deriveFromDates: true,
+    });
+    if (duration.error || !item.code || !item.startDate) {
+      const itemError = new Error('approved_intervention_source_item_invalid');
+      itemError.code = 'approved_intervention_source_item_invalid';
+      itemError.status = 409;
+      itemError.publicMessage =
+        'An additional intervention in the approved proposal has incomplete trusted facts.';
+      itemError.details = { sourceItemId, reason: duration.error || 'code_or_start_date_missing' };
+      throw itemError;
+    }
+    const requiresNoc = Number(item.code) >= 6 && Number(item.code) <= 13;
+    if (requiresNoc) {
+      const expectedLength = item.nocVersion === '2021' ? 5 : 4;
+      const validNocShape =
+        item.nocVersion && item.noc && /^\d+$/.test(item.noc) && item.noc.length === expectedLength;
+      const validNoc = validNocShape
+        ? await isValidNocCodeForVersion(connection, item.noc, item.nocVersion)
+        : false;
+      if (!validNoc) {
+        const nocError = new Error('approved_intervention_source_item_noc_invalid');
+        nocError.code = 'approved_intervention_source_item_noc_invalid';
+        nocError.status = 409;
+        nocError.publicMessage =
+          'An additional intervention in the approved proposal has an invalid NOC selection.';
+        nocError.details = { sourceItemId };
+        throw nocError;
+      }
+    }
+    validateApprovedInterventionMaterializationRequest({
+      sourceInterventionRow,
+      sourceReviewWorkflow,
+      sourceItemId,
+      targetPlanId: normalizedActionPlanId,
+      targetCaseId: normalizedCaseId,
+      requestedCode: item.code,
+      requestedTitle: trustedTitle,
+      expectedTitle: trustedTitle,
+      requestedStartDate: item.startDate,
+      requestedEndDate: item.endDate,
+      requestedDurationDays: duration.value,
+      expectedDurationDays: duration.value,
+      requestedCost: item.costTotal,
+      requestedNotes: trustedNotes,
+      expectedNotes: trustedNotes,
+      requestedNoc: item.noc,
+      requestedNocVersion: item.nocVersion,
+    });
+
+    const replayRow = await findApprovedInterventionMaterializationReplay(connection, {
+      caseId: normalizedCaseId,
+      actionPlanId: normalizedActionPlanId,
+      sourceInterventionId: normalizedSourceInterventionId,
+      sourceItemId,
+      forUpdate: true,
+    });
+    if (replayRow) {
+      assertApprovedInterventionMaterializationReplayMatches(replayRow, {
+        sourceItem: rawItem,
+        sourceWorkflowId: sourceWorkflowApproval.workflowId,
+      });
+      if (normalisePositiveInteger(eiDocumentId)) {
+        await connection.query(
+          `INSERT IGNORE INTO iset_document_intervention
+             (document_id, intervention_id, created_at)
+           VALUES (?, ?, NOW())`,
+          [normalisePositiveInteger(eiDocumentId), replayRow.id]
+        );
+      }
+      results.push({
+        interventionId: normalisePositiveInteger(replayRow.id),
+        sourceItemId,
+        replayed: true,
+      });
+      continue;
+    }
+
+    const trustedCostLines = Array.isArray(rawItem?.costLines)
+      ? rawItem.costLines
+      : Array.isArray(rawItem?.cost_lines)
+        ? rawItem.cost_lines
+        : [];
+    const review = {
+      ...(
+        sourceMetadata.review && typeof sourceMetadata.review === 'object'
+          ? sourceMetadata.review
+          : {}
+      ),
+      decision: 'approved',
+    };
+    const materializedMetadata = stripInterventionRecurringMetadata({
+      snapshot: {
+        code: item.code,
+        title: trustedTitle,
+        startDate: item.startDate,
+        endDate: item.endDate || null,
+        deliveryMode: item.deliveryMode || null,
+        institution: item.institution || '',
+        programName: item.programName || '',
+        itpDetails: item.itpDetails || '',
+        wageSubsidyDetails: item.wageSubsidyDetails || '',
+        nocVersion: item.nocVersion || '',
+        nocCode: item.noc || '',
+        costTotal: Number.isFinite(Number(item.costTotal)) ? Number(item.costTotal) : 0,
+        costLines: trustedCostLines,
+      },
+      code: item.code,
+      title: trustedTitle,
+      cost: Number.isFinite(Number(item.costTotal)) ? Number(item.costTotal) : 0,
+      costLines: trustedCostLines,
+      proposedInterventions: [rawItem],
+      rationale: sourceMetadata.rationale || sourceMetadata.notes || '',
+      barriers: Array.isArray(sourceMetadata.barriers) ? sourceMetadata.barriers : [],
+      otherFundingDetails:
+        sourceMetadata.otherFundingDetails || sourceMetadata.other_funding_details || null,
+      childcareNeed: sourceMetadata.childcareNeed || sourceMetadata.childcare_need || '',
+      childcareFunding: sourceMetadata.childcareFunding || sourceMetadata.childcare_funding || '',
+      review,
+      ...(normalizedPotId ? { potId: String(normalizedPotId), budgetPotId: String(normalizedPotId) } : {}),
+      postingContext,
+      ...(trustedNotes ? { notes: trustedNotes } : {}),
+      ...(item.noc ? { noc: item.noc } : {}),
+      ...(item.nocVersion ? { nocVersion: item.nocVersion } : {}),
+      compliance: { ilmp: 'pending', finance: 'pending' },
+      approvalMaterialization: {
+        sourceInterventionId: normalizedSourceInterventionId,
+        sourceItemId,
+        sourceWorkflowId: sourceWorkflowApproval.workflowId,
+      },
+    });
+    const materializedCost = Number.isFinite(Number(item.costTotal))
+      ? Number(item.costTotal)
+      : null;
+    const esdcPayload = pruneNullish({
+      interventionCode: item.code,
+      interventionStartDate: item.startDate,
+      interventionEndDate: item.endDate || null,
+      interventionOutcome: null,
+      interventionDuration: duration.value,
+      interventionCost: materializedCost,
+      interventionRelatedNOC: item.noc || null,
+      interventionRelatedNOCVersion: item.nocVersion || null,
+      postingContext,
+    });
+    const [insertResult] = await connection.query(
+      `INSERT INTO iset_case_intervention
+         (case_id, action_plan_id, intervention_code, status, delivery_status,
+          start_date, end_date, duration_days, budget_amount, approved_amount,
+          actual_amount, intervention_cost, related_noc, related_noc_version,
+          outcome_code, notes, metadata_json, esdc_intervention_json, closed_at,
+          created_by_staff_profile_id, reviewed_by_staff_profile_id, reviewed_at, review_notes)
+       VALUES (?, ?, ?, 'approved', 'planned', ?, ?, ?, ?, NULL, NULL, ?, ?, ?,
+               NULL, ?, ?, ?, NULL, ?, ?, NOW(), ?)`,
+      [
+        normalizedCaseId,
+        normalizedActionPlanId,
+        item.code,
+        item.startDate,
+        item.endDate || null,
+        duration.value,
+        materializedCost,
+        materializedCost,
+        item.noc || null,
+        item.nocVersion || null,
+        trustedNotes || null,
+        JSON.stringify(materializedMetadata),
+        JSON.stringify(esdcPayload),
+        normalisePositiveInteger(sourceInterventionRow.created_by_staff_profile_id) || null,
+        normalisePositiveInteger(reviewedByStaffProfileId) || null,
+        sourceDecisionNotes,
+      ]
+    );
+    const insertedInterventionId = normalisePositiveInteger(insertResult?.insertId);
+    if (!insertedInterventionId) {
+      const insertError = new Error('approved_intervention_materialization_failed');
+      insertError.code = 'approved_intervention_materialization_failed';
+      insertError.status = 409;
+      insertError.publicMessage = 'An approved additional intervention could not be created.';
+      throw insertError;
+    }
+    let insertedRow = await fetchInterventionWithCase(insertedInterventionId, connection);
+    await syncInterventionProposalCompatibility(insertedRow, connection);
+    insertedRow = await fetchInterventionWithCase(insertedInterventionId, connection);
+    if (normalisePositiveInteger(eiDocumentId)) {
+      await connection.query(
+        `INSERT IGNORE INTO iset_document_intervention
+           (document_id, intervention_id, created_at)
+         VALUES (?, ?, NOW())`,
+        [normalisePositiveInteger(eiDocumentId), insertedInterventionId]
+      );
+    }
+    results.push({
+      interventionId: insertedInterventionId,
+      sourceItemId,
+      replayed: false,
+      row: insertedRow,
+    });
+  }
+  return results;
+}
+
+function validateApprovedInterventionRevisionApplicationRequest({
+  revisionDraftRow,
+  requestedCode,
+  requestedTitle,
+  requestedStartDate,
+  requestedEndDate,
+  requestedDurationDays,
+  requestedCost,
+  requestedNotes,
+  requestedNoc,
+  requestedNocVersion,
+} = {}) {
+  const revisionMetadata = safeJsonParse(revisionDraftRow?.metadata_json, {}) || {};
+  const proposed = normalizeAssessmentProposedInterventions(
+    revisionMetadata.proposedInterventions ??
+    revisionMetadata.proposed_interventions ??
+    null
+  );
+  const expected = proposed[0] || normalizeProposedIntervention({
+    code: revisionDraftRow?.intervention_code,
+    startDate: revisionDraftRow?.start_date,
+    endDate: revisionDraftRow?.end_date,
+    interventionNoc: revisionDraftRow?.related_noc,
+    interventionNocVersion: revisionDraftRow?.related_noc_version,
+    cost: revisionDraftRow?.intervention_cost ?? revisionDraftRow?.budget_amount ?? null,
+    costLines:
+      revisionMetadata.costLines ??
+      revisionMetadata.cost_lines ??
+      revisionMetadata.snapshot?.costLines ??
+      [],
+  });
+  const expectedCost = Number.isFinite(Number(expected?.costTotal))
+    ? Number(expected.costTotal)
+    : 0;
+  const actualCost = Number.isFinite(Number(requestedCost)) ? Number(requestedCost) : 0;
+  const expectedTitle = normaliseString(
+    revisionMetadata.title ?? revisionMetadata.snapshot?.title ?? null
+  ) || '';
+  const actualTitle = normaliseString(requestedTitle) || '';
+  const expectedNotes = normaliseString(
+    revisionMetadata.rationale ??
+    revisionMetadata.notes ??
+    revisionDraftRow?.notes ??
+    null
+  ) || '';
+  const actualNotes = normaliseString(requestedNotes) || '';
+  const storedDurationDays =
+    revisionDraftRow?.duration_days === null ||
+    typeof revisionDraftRow?.duration_days === 'undefined' ||
+    revisionDraftRow?.duration_days === ''
+      ? NaN
+      : Number(revisionDraftRow.duration_days);
+  const derivedDuration = resolveInterventionDurationDaysForStorage({
+    durationDays: null,
+    startDate: expected?.startDate || null,
+    endDate: expected?.endDate || null,
+    deriveFromDates: true,
+  });
+  const expectedDurationDays = Number.isFinite(storedDurationDays)
+    ? Math.round(storedDurationDays)
+    : (Number.isFinite(Number(derivedDuration?.value)) ? Number(derivedDuration.value) : null);
+  const actualDurationNumber = Number(requestedDurationDays);
+  const actualDurationDays = Number.isFinite(actualDurationNumber)
+    ? Math.round(actualDurationNumber)
+    : null;
+  const facts = [
+    ['code', expected?.code || '', normalizeInterventionCodeValue(requestedCode) || ''],
+    ['startDate', expected?.startDate || '', toDateOnlyString(requestedStartDate) || ''],
+    ['endDate', expected?.endDate || '', toDateOnlyString(requestedEndDate) || ''],
+    ['cost', Number(expectedCost.toFixed(2)), Number(actualCost.toFixed(2))],
+    ['noc', expected?.noc || '', normaliseString(requestedNoc) || ''],
+    ['nocVersion', expected?.nocVersion || '', normaliseString(requestedNocVersion) || ''],
+  ];
+  if (typeof requestedTitle !== 'undefined') {
+    facts.push(['title', expectedTitle, actualTitle]);
+  }
+  if (typeof requestedDurationDays !== 'undefined') {
+    facts.push(['durationDays', expectedDurationDays, actualDurationDays]);
+  }
+  if (typeof requestedNotes !== 'undefined') {
+    facts.push(['notes', expectedNotes, actualNotes]);
+  }
+  const mismatches = facts
+    .filter(([, expectedValue, actualValue]) => expectedValue !== actualValue)
+    .map(([field, expectedValue, actualValue]) => ({ field, expectedValue, actualValue }));
+  if (!expected || mismatches.length) {
+    const error = new Error('approved_revision_packet_mismatch');
+    error.code = 'approved_revision_packet_mismatch';
+    error.status = 409;
+    error.publicMessage =
+      'The intervention update does not match the exact revision packet that completed review.';
+    error.details = mismatches;
+    throw error;
+  }
+  return {
+    revisionMetadata,
+    normalizedRevision: expected,
+    trustedTitle: expectedTitle,
+    trustedDurationDays: expectedDurationDays,
+    trustedNotes: expectedNotes,
+  };
+}
+
+function assertInterventionRevisionApplyPayloadOwnership({ body = null } = {}) {
+  const requestBody = body && typeof body === 'object' ? body : {};
+  const allowedTopLevelKeys = new Set([
+    'status',
+    'code',
+    'title',
+    'startDate',
+    'endDate',
+    'durationDays',
+    'cost',
+    'notes',
+    'noc',
+    'nocVersion',
+    'potId',
+    'budgetPotId',
+    'budget_pot_id',
+    'postingContext',
+    'posting_context',
+    'metadata',
+    'revisionAppliedFromInterventionId',
+  ]);
+  const unexpectedTopLevelKeys = Object.keys(requestBody).filter(
+    key => !allowedTopLevelKeys.has(key)
+  );
+  if (!unexpectedTopLevelKeys.length) {
+    return { enforced: true, reason: 'approved_revision_fields_only' };
+  }
+  const error = new Error('approved_revision_packet_mismatch');
+  error.code = 'approved_revision_packet_mismatch';
+  error.status = 409;
+  error.publicMessage =
+    'The intervention update contains fields outside the exact revision packet that completed review.';
+  error.details = { unexpectedTopLevelKeys };
+  throw error;
 }
 function normaliseApplicationStatusValue(status) {
   if (status === undefined || status === null) return null;
@@ -24281,6 +26162,358 @@ function hasAppliedInterventionRevisionMetadata(metadata) {
   return Array.isArray(metadata.revisionHistory) && metadata.revisionHistory.length > 0;
 }
 
+function normalizeInterventionDecisionValue(value) {
+  const normalized = (normaliseString(value || '') || '')
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  if (normalized === 'approve' || normalized === 'approved') return 'approved';
+  if (['deny', 'denied', 'reject', 'rejected'].includes(normalized)) return 'rejected';
+  if (['request_changes', 'requested_changes', 'changes_requested', 'push_back'].includes(normalized)) {
+    return 'changes_requested';
+  }
+  return normalized || null;
+}
+
+function isInterventionDecisionMakerRole(role) {
+  return canonicaliseAccessRole(role) === 'NWAC Administrator';
+}
+
+function canApplyApprovedInterventionRevision(req) {
+  return isInterventionDecisionMakerRole(inferUserRole(req) || resolveStaffRole(req) || null);
+}
+
+function assertInterventionDecisionOutcomeConsistency({
+  requestedReviewStatus = null,
+  review = null,
+} = {}) {
+  const expectedDecision = normalizeInterventionDecisionValue(requestedReviewStatus);
+  if (!INTERVENTION_DECISION_REVIEW_STATUSES.has(expectedDecision)) {
+    return { enforced: false, reason: 'not_final_decision' };
+  }
+  const requestedReview = review && typeof review === 'object' && !Array.isArray(review)
+    ? review
+    : null;
+  const actualDecision = normalizeInterventionDecisionValue(
+    requestedReview?.decision ??
+    requestedReview?.decisionStatus ??
+    requestedReview?.decision_status ??
+    null
+  );
+  if (actualDecision === expectedDecision) {
+    return { enforced: true, reason: 'decision_matches_status', decision: expectedDecision };
+  }
+  const error = new Error('intervention_decision_outcome_mismatch');
+  error.code = 'intervention_decision_outcome_mismatch';
+  error.status = 422;
+  error.publicMessage =
+    'The intervention decision selection must match the requested decision status.';
+  error.details = {
+    expectedDecision,
+    actualDecision,
+  };
+  throw error;
+}
+
+function assertInterventionDecisionNoteReady({ action = null, review = null } = {}) {
+  if (!new Set([REVIEW_ACTIONS.NwacDeny, REVIEW_ACTIONS.NwacRequestChanges]).has(action)) {
+    return { enforced: false, reason: 'decision_note_optional' };
+  }
+  const requestedReview = review && typeof review === 'object' && !Array.isArray(review)
+    ? review
+    : {};
+  const note = normaliseString(
+    requestedReview.decisionNotes ?? requestedReview.decision_notes ?? null
+  );
+  if (note) {
+    return { enforced: true, reason: 'decision_note_present', note };
+  }
+  const error = new Error('review_workflow_note_required');
+  error.code = 'review_workflow_note_required';
+  error.status = 422;
+  error.publicMessage =
+    action === REVIEW_ACTIONS.NwacDeny
+      ? 'Enter a reason before denying this intervention request.'
+      : 'Enter a note explaining the changes required.';
+  throw error;
+}
+
+function resolveExactFinalApprovedInterventionWorkflow(row, {
+  workflowType = null,
+  interventionId = null,
+  proposalId = null,
+  applicationId = null,
+} = {}) {
+  if (!row) return { eligible: false, reason: 'missing_intervention' };
+  const expectedWorkflowType = workflowType || resolveInterventionReviewWorkflowType(row);
+  const expectedInterventionId = normalisePositiveInteger(interventionId ?? row.id ?? row.intervention_id);
+  const expectedProposalId = normalisePositiveInteger(proposalId ?? row.proposal_id);
+  const expectedApplicationId = normalisePositiveInteger(
+    applicationId ?? resolveInterventionApplicationScopeId(row, { required: true })
+  );
+  const workflowId = normalisePositiveInteger(row.review_workflow_id);
+  const workflowInterventionId = normalisePositiveInteger(row.review_workflow_intervention_id);
+  const workflowProposalId = normalisePositiveInteger(row.review_workflow_proposal_id);
+  const workflowApplicationId = normalisePositiveInteger(row.review_workflow_application_id);
+  const workflowTypeMatches = row.review_workflow_type === expectedWorkflowType;
+  const subjectMatches = expectedProposalId
+    ? (
+        workflowProposalId === expectedProposalId &&
+        workflowInterventionId === expectedInterventionId
+      )
+    : workflowInterventionId === expectedInterventionId;
+  if (
+    !workflowId ||
+    !workflowTypeMatches ||
+    !subjectMatches ||
+    !expectedApplicationId ||
+    workflowApplicationId !== expectedApplicationId
+  ) {
+    return { eligible: false, reason: 'workflow_scope_mismatch' };
+  }
+  if (
+    row.review_workflow_current_stage !== REVIEW_STAGES.FinalDecisionRecorded ||
+    normalizeInterventionDecisionValue(row.review_workflow_nwac_decision) !== 'approved'
+  ) {
+    return { eligible: false, reason: 'workflow_not_final_approved' };
+  }
+  return {
+    eligible: true,
+    reason: 'workflow_final_approved',
+    workflowId,
+    workflowType: expectedWorkflowType,
+    interventionId: expectedInterventionId,
+    proposalId: expectedProposalId,
+    applicationId: expectedApplicationId,
+  };
+}
+
+function resolveExactFinalApprovedInterventionWorkflowWithRow(
+  interventionRow,
+  reviewWorkflow
+) {
+  return resolveExactFinalApprovedInterventionWorkflow({
+    ...interventionRow,
+    review_workflow_id: reviewWorkflow?.id,
+    review_workflow_type: reviewWorkflow?.workflow_type,
+    review_workflow_intervention_id: reviewWorkflow?.intervention_id,
+    review_workflow_proposal_id: reviewWorkflow?.proposal_id,
+    review_workflow_application_id: reviewWorkflow?.application_id,
+    review_workflow_current_stage: reviewWorkflow?.current_stage,
+    review_workflow_nwac_decision: reviewWorkflow?.nwac_decision,
+  });
+}
+
+function assertApprovedInterventionMaterializationWorkflow(interventionRow, reviewWorkflow) {
+  const approval = resolveExactFinalApprovedInterventionWorkflowWithRow(
+    interventionRow,
+    reviewWorkflow
+  );
+  if (approval.eligible) return approval;
+  const error = new Error('approved_intervention_source_not_final');
+  error.code = 'approved_intervention_source_not_final';
+  error.status = 409;
+  error.publicMessage =
+    'Additional interventions require the exact proposal workflow final approval.';
+  error.details = approval;
+  throw error;
+}
+
+async function resolveInterventionFinalApprovalWorkflow(
+  connection,
+  interventionRow,
+  { forUpdate = false } = {}
+) {
+  const ownWorkflow = resolveExactFinalApprovedInterventionWorkflow(interventionRow);
+  if (ownWorkflow.eligible) return ownWorkflow;
+
+  const materializationKey = resolveApprovedInterventionMaterializationKey(
+    interventionRow?.metadata_json
+  );
+  if (!materializationKey) return ownWorkflow;
+  const sourceRow = await fetchInterventionWithCase(
+    materializationKey.sourceInterventionId,
+    connection,
+    { forUpdate }
+  );
+  if (!sourceRow) {
+    return { eligible: false, reason: 'materialization_source_missing' };
+  }
+  const targetApplicationId = resolveInterventionApplicationScopeId(
+    interventionRow,
+    { required: true }
+  );
+  const sourceApplicationId = resolveInterventionApplicationScopeId(
+    sourceRow,
+    { required: true }
+  );
+  if (
+    normalisePositiveInteger(sourceRow.case_id) !== normalisePositiveInteger(interventionRow.case_id) ||
+    normalisePositiveInteger(sourceRow.action_plan_id) !== normalisePositiveInteger(interventionRow.action_plan_id) ||
+    sourceApplicationId !== targetApplicationId
+  ) {
+    return { eligible: false, reason: 'materialization_source_scope_mismatch' };
+  }
+  const sourceMetadata = safeJsonParse(sourceRow.metadata_json, {}) || {};
+  const sourceItems = Array.isArray(sourceMetadata.proposedInterventions)
+    ? sourceMetadata.proposedInterventions
+    : Array.isArray(sourceMetadata.proposed_interventions)
+      ? sourceMetadata.proposed_interventions
+      : [];
+  const sourceItemExists = sourceItems.some(item => (
+    normaliseString(item?.id) === materializationKey.sourceItemId
+  ));
+  if (!sourceItemExists) {
+    return { eligible: false, reason: 'materialization_source_item_missing' };
+  }
+  const sourceWorkflow = resolveExactFinalApprovedInterventionWorkflow(sourceRow);
+  if (!sourceWorkflow.eligible) return sourceWorkflow;
+  const targetMetadata = safeJsonParse(interventionRow?.metadata_json, {}) || {};
+  const recordedSourceWorkflowId = normalisePositiveInteger(
+    targetMetadata?.approvalMaterialization?.sourceWorkflowId ??
+    targetMetadata?.approval_materialization?.source_workflow_id
+  );
+  if (recordedSourceWorkflowId && recordedSourceWorkflowId !== sourceWorkflow.workflowId) {
+    return { eligible: false, reason: 'materialization_workflow_mismatch' };
+  }
+  return {
+    ...sourceWorkflow,
+    reason: 'materialization_source_workflow_final_approved',
+    materializedInterventionId: normalisePositiveInteger(interventionRow.id),
+    sourceInterventionId: materializationKey.sourceInterventionId,
+    sourceItemId: materializationKey.sourceItemId,
+  };
+}
+
+function assertInterventionCloseAllowed(interventionRow, { finalApproval = null } = {}) {
+  const metadata = safeJsonParse(interventionRow?.metadata_json, {}) || {};
+  if (isManualBackloadInterventionMetadata(metadata)) {
+    return { enforced: false, reason: 'manual_backload' };
+  }
+  const state = resolveInterventionStateFields({
+    status: interventionRow?.status,
+    delivery_status: interventionRow?.delivery_status || null,
+    proposal_review_status: interventionRow?.proposal_review_status || null,
+  });
+  if (state.reviewStatus !== 'approved') {
+    const stateError = new Error('intervention_close_requires_final_approval');
+    stateError.code = 'intervention_close_requires_final_approval';
+    stateError.status = 409;
+    stateError.publicMessage =
+      'Only a finally approved intervention can be completed or cancelled.';
+    throw stateError;
+  }
+  const workflow = finalApproval || resolveExactFinalApprovedInterventionWorkflow(interventionRow);
+  if (!workflow.eligible) {
+    const workflowError = new Error('intervention_close_requires_final_approval');
+    workflowError.code = 'intervention_close_requires_final_approval';
+    workflowError.status = 409;
+    workflowError.publicMessage =
+      'The matching intervention review workflow must contain a final approval before this intervention can be closed.';
+    workflowError.details = workflow;
+    throw workflowError;
+  }
+  return { enforced: true, reason: 'workflow_final_approved', workflowId: workflow.workflowId };
+}
+
+function assertInterventionDeleteAllowed({
+  interventionRow,
+  actorStaffProfileId = null,
+  actorRole = null,
+} = {}) {
+  const state = resolveInterventionStateFields({
+    status: interventionRow?.status,
+    delivery_status: interventionRow?.delivery_status || null,
+  });
+  const rawStatus = (normaliseString(interventionRow?.status || '') || '')
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  const workflowStage = normaliseString(interventionRow?.review_workflow_current_stage);
+  const isDraft = state.reviewStatus === 'draft';
+  const isWithdrawn = rawStatus === 'withdrawn' || workflowStage === REVIEW_STAGES.Withdrawn;
+  if (!isDraft || (normalisePositiveInteger(interventionRow?.review_workflow_id) && !isWithdrawn)) {
+    const stateError = new Error('intervention_delete_forbidden');
+    stateError.code = 'intervention_delete_forbidden';
+    stateError.status = 409;
+    stateError.publicMessage =
+      'Only an unsubmitted draft or a recalled draft can be deleted.';
+    throw stateError;
+  }
+  if (canonicaliseAccessRole(actorRole) === 'System Administrator') {
+    return { enforced: true, reason: 'system_administrator_support' };
+  }
+  const creatorStaffProfileId = normalisePositiveInteger(
+    interventionRow?.created_by_staff_profile_id
+  );
+  const numericActorStaffProfileId = normalisePositiveInteger(actorStaffProfileId);
+  if (creatorStaffProfileId && creatorStaffProfileId === numericActorStaffProfileId) {
+    return { enforced: true, reason: isWithdrawn ? 'withdrawn_creator' : 'draft_creator' };
+  }
+  const actorError = new Error('intervention_delete_actor_forbidden');
+  actorError.code = 'intervention_delete_actor_forbidden';
+  actorError.status = 403;
+  actorError.publicMessage =
+    'Only the staff member who created this intervention draft can delete it.';
+  throw actorError;
+}
+
+function buildInterventionDecisionCoreVersion(row = {}) {
+  return JSON.stringify({
+    id: normalisePositiveInteger(row.id),
+    actionPlanId: normalisePositiveInteger(row.action_plan_id),
+    status: normaliseString(row.status),
+    deliveryStatus: normaliseString(row.delivery_status),
+    updatedAt: toIsoDateTime(row.updated_at),
+    metadataJson: normaliseString(row.metadata_json),
+    proposalId: normalisePositiveInteger(row.proposal_id),
+    proposalReviewStatus: normaliseString(row.proposal_review_status),
+    proposalReviewedAt: toIsoDateTime(row.proposal_reviewed_at),
+    workflowId: normalisePositiveInteger(row.review_workflow_id),
+    workflowStage: normaliseString(row.review_workflow_current_stage),
+    workflowDecision: normaliseString(row.review_workflow_nwac_decision),
+    workflowUpdatedAt: toIsoDateTime(row.review_workflow_updated_at),
+  });
+}
+
+function assertInterventionDecisionCoreVersionCurrent(expectedRow, lockedRow) {
+  if (
+    expectedRow &&
+    lockedRow &&
+    buildInterventionDecisionCoreVersion(expectedRow) === buildInterventionDecisionCoreVersion(lockedRow)
+  ) {
+    return { enforced: true, reason: 'version_current' };
+  }
+  const error = new Error('intervention_decision_stale');
+  error.code = 'intervention_decision_stale';
+  error.status = 409;
+  error.publicMessage =
+    'This intervention changed while the decision was being prepared. Reload it before trying again.';
+  throw error;
+}
+
+async function runInterventionDecisionCoreTransaction(connectionPool, worker) {
+  const connection = await connectionPool.getConnection();
+  let transactionStarted = false;
+  try {
+    await connection.beginTransaction();
+    transactionStarted = true;
+    const result = await worker(connection);
+    await connection.commit();
+    transactionStarted = false;
+    return result;
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        error.rollbackError = rollbackError;
+      }
+    }
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 function isManualBackloadInterventionMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object') return false;
   const source = (normaliseString(metadata.source || '') || '').toLowerCase();
@@ -24332,7 +26565,27 @@ function resolveApprovedInterventionProposalLetterEligibilityFromRow(row) {
 
   const metadata = safeJsonParse(row.metadata_json, {}) || {};
   if (hasAppliedInterventionRevisionMetadata(metadata)) {
-    return { eligible: true, proposalKind: 'revision', reason: 'applied_revision' };
+    const appliedRevision =
+      metadata.lastAppliedRevision && typeof metadata.lastAppliedRevision === 'object'
+        ? metadata.lastAppliedRevision
+        : Array.isArray(metadata.revisionHistory)
+          ? metadata.revisionHistory[metadata.revisionHistory.length - 1]
+          : null;
+    return {
+      eligible: false,
+      proposalKind: 'revision',
+      reason: 'applied_revision_workflow_required',
+      revisionDraftInterventionId: normalisePositiveInteger(
+        appliedRevision?.draftInterventionId ?? appliedRevision?.draft_intervention_id
+      ),
+    };
+  }
+  if (resolveApprovedInterventionMaterializationKey(metadata)) {
+    return {
+      eligible: false,
+      proposalKind: 'new',
+      reason: 'materialization_workflow_required',
+    };
   }
 
   const proposalId = normalisePositiveInteger(row.proposal_id);
@@ -24342,10 +26595,19 @@ function resolveApprovedInterventionProposalLetterEligibilityFromRow(row) {
     proposalReviewStatus === 'approved' &&
     !isManualBackloadInterventionMetadata(metadata)
   ) {
+    const exactWorkflow = resolveExactFinalApprovedInterventionWorkflow(row);
+    if (!exactWorkflow.eligible) {
+      return {
+        eligible: false,
+        proposalKind: normaliseInterventionProposalKind(row.proposal_kind, 'new'),
+        reason: exactWorkflow.reason,
+      };
+    }
     return {
       eligible: true,
       proposalKind: normaliseInterventionProposalKind(row.proposal_kind, 'new'),
-      reason: 'approved_proposal',
+      reason: 'approved_proposal_final_workflow',
+      workflowId: exactWorkflow.workflowId,
     };
   }
 
@@ -24356,6 +26618,7 @@ async function resolveApprovedInterventionProposalLetterEligibility({
   connection = pool,
   caseId,
   interventionId,
+  forUpdate = false,
 } = {}) {
   const normalizedCaseId = normalisePositiveInteger(caseId);
   const normalizedInterventionId = normalisePositiveInteger(interventionId);
@@ -24363,23 +26626,107 @@ async function resolveApprovedInterventionProposalLetterEligibility({
     return { eligible: false, proposalKind: null, reason: 'invalid_scope' };
   }
   try {
-    const [[row]] = await connection.query(
-      `SELECT ci.id,
-              ci.case_id,
-              ci.status,
-              ci.delivery_status,
-              ci.metadata_json,
-              p.id AS proposal_id,
-              p.proposal_kind,
-              p.review_status AS proposal_review_status
-         FROM iset_case_intervention ci
-         LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = ci.id
-        WHERE ci.id = ?
-          AND ci.case_id = ?
-        LIMIT 1`,
-      [normalizedInterventionId, normalizedCaseId]
+    const row = await fetchInterventionWithCase(
+      normalizedInterventionId,
+      connection,
+      { forUpdate }
     );
-    return resolveApprovedInterventionProposalLetterEligibilityFromRow(row);
+    if (!row || normalisePositiveInteger(row.case_id) !== normalizedCaseId) {
+      return { eligible: false, proposalKind: null, reason: 'missing_intervention' };
+    }
+    const eligibility = resolveApprovedInterventionProposalLetterEligibilityFromRow(row);
+    if (eligibility.reason === 'materialization_workflow_required') {
+      const sourceWorkflow = await resolveInterventionFinalApprovalWorkflow(
+        connection,
+        row,
+        { forUpdate }
+      );
+      if (!sourceWorkflow.eligible) {
+        return {
+          eligible: false,
+          proposalKind: 'new',
+          reason: sourceWorkflow.reason,
+        };
+      }
+      return {
+        eligible: true,
+        proposalKind: 'new',
+        reason: 'approved_materialization_final_workflow',
+        workflowId: sourceWorkflow.workflowId,
+        applicationId: resolveInterventionApplicationScopeId(row, { required: true }),
+        actionPlanId: normalisePositiveInteger(row.action_plan_id),
+        interventionId: normalisePositiveInteger(row.id),
+        proposalId: normalisePositiveInteger(sourceWorkflow.proposalId),
+        sourceInterventionId: sourceWorkflow.sourceInterventionId,
+        sourceItemId: sourceWorkflow.sourceItemId,
+      };
+    }
+    if (eligibility.reason === 'applied_revision_workflow_required') {
+      const revisionDraftInterventionId = normalisePositiveInteger(
+        eligibility.revisionDraftInterventionId
+      );
+      if (!revisionDraftInterventionId) {
+        return { eligible: false, proposalKind: 'revision', reason: 'revision_evidence_missing' };
+      }
+      const revisionRow = await fetchInterventionWithCase(
+        revisionDraftInterventionId,
+        connection,
+        { forUpdate }
+      );
+      if (!revisionRow) {
+        return { eligible: false, proposalKind: 'revision', reason: 'revision_evidence_missing' };
+      }
+      const revisionMetadata = safeJsonParse(revisionRow.metadata_json, {}) || {};
+      const revisionInfo =
+        revisionMetadata.revision && typeof revisionMetadata.revision === 'object'
+          ? revisionMetadata.revision
+          : {};
+      const sourceInterventionId = normalisePositiveInteger(
+        revisionInfo.sourceInterventionId ?? revisionInfo.source_intervention_id
+      );
+      const mainApplicationId = resolveInterventionApplicationScopeId(row, { required: true });
+      const revisionApplicationId = resolveInterventionApplicationScopeId(revisionRow, { required: true });
+      if (
+        sourceInterventionId !== normalizedInterventionId ||
+        normalisePositiveInteger(revisionRow.case_id) !== normalizedCaseId ||
+        normalisePositiveInteger(revisionRow.action_plan_id) !== normalisePositiveInteger(row.action_plan_id) ||
+        revisionApplicationId !== mainApplicationId
+      ) {
+        return { eligible: false, proposalKind: 'revision', reason: 'revision_scope_mismatch' };
+      }
+      const exactRevisionWorkflow = resolveExactFinalApprovedInterventionWorkflow(revisionRow, {
+        workflowType: REVIEW_WORKFLOW_TYPES.InterventionRevision,
+        interventionId: revisionDraftInterventionId,
+        proposalId: revisionRow.proposal_id,
+        applicationId: revisionApplicationId,
+      });
+      if (!exactRevisionWorkflow.eligible) {
+        return {
+          eligible: false,
+          proposalKind: 'revision',
+          reason: exactRevisionWorkflow.reason,
+        };
+      }
+      return {
+        eligible: true,
+        proposalKind: 'revision',
+        reason: 'applied_revision_final_workflow',
+        workflowId: exactRevisionWorkflow.workflowId,
+        applicationId: mainApplicationId,
+        actionPlanId: normalisePositiveInteger(row.action_plan_id),
+        interventionId: normalisePositiveInteger(row.id),
+        proposalId: normalisePositiveInteger(revisionRow.proposal_id),
+        revisionDraftInterventionId,
+      };
+    }
+    if (!eligibility.eligible) return eligibility;
+    return {
+      ...eligibility,
+      applicationId: resolveInterventionApplicationScopeId(row, { required: true }),
+      actionPlanId: normalisePositiveInteger(row?.action_plan_id),
+      interventionId: normalisePositiveInteger(row?.id),
+      proposalId: normalisePositiveInteger(row?.proposal_id),
+    };
   } catch (error) {
     if (error?.code === 'ER_NO_SUCH_TABLE' || error?.code === 'ER_BAD_FIELD_ERROR') {
       return { eligible: false, proposalKind: null, reason: 'proposal_table_unavailable' };
@@ -24824,7 +27171,8 @@ async function setInterventionComplianceForCase(caseId, status) {
       `UPDATE iset_case_intervention
           SET metadata_json = JSON_SET(COALESCE(metadata_json, JSON_OBJECT()), '$.compliance.ilmp', ?),
               updated_at = NOW()
-        WHERE case_id = ?`,
+        WHERE case_id = ?
+          AND ${buildOperationalInterventionSql('iset_case_intervention')}`,
       [status, caseId]
     );
   } catch (err) {
@@ -28685,9 +31033,10 @@ async function countInactiveCasesWithScope(pool, { regionId = null, regionIds = 
             GROUP BY case_id
           ) task_summary ON task_summary.case_id = c.id
           LEFT JOIN (
-            SELECT case_id, MAX(updated_at) AS last_intervention_at
-            FROM iset_case_intervention
-            GROUP BY case_id
+            SELECT ci.case_id, MAX(ci.updated_at) AS last_intervention_at
+            FROM iset_case_intervention ci
+            WHERE ${buildOperationalInterventionSql('ci')}
+            GROUP BY ci.case_id
           ) intervention_summary ON intervention_summary.case_id = c.id
           WHERE 1=1
             ${whereSql}
@@ -29397,7 +31746,8 @@ async function countMetricsInterventionDecisions(pool, { start, end, scope }) {
     const filters = [
       'COALESCE(ci.updated_at, ci.created_at) >= ?',
       'COALESCE(ci.updated_at, ci.created_at) < ?',
-      `${statusExpr} IN (${placeholders})`
+      `${statusExpr} IN (${placeholders})`,
+      buildOperationalInterventionSql('ci')
     ];
     const params = [start, end, ...statuses];
     applyMetricsScopeFilters(filters, params, scope, { caseAlias: 'c', staffAlias: 'sp' });
@@ -29491,6 +31841,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         WHERE ${metricDateExpr} >= ?
           AND ${metricDateExpr} < ?
           AND ${proposalReviewStatusExpr} <> ?
+          AND COALESCE(LOWER(TRIM(p.proposal_kind)), 'new') <> 'revision'
+          AND p.source_intervention_id IS NULL
+          AND ${buildOperationalInterventionSql('ci')}
 
         UNION ALL
 
@@ -29503,6 +31856,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         JOIN iset_case c ON c.id = ci.case_id
         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         WHERE p_existing.id IS NULL
+          AND ${buildOperationalInterventionSql('ci')}
           AND ${legacyMetricDateExpr} >= ?
           AND ${legacyMetricDateExpr} < ?
           AND ${interventionReviewStatusExpr} <> ?
@@ -29512,7 +31866,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     const legacyFilters = [
       `${legacyMetricDateExpr} >= ?`,
       `${legacyMetricDateExpr} < ?`,
-      `${interventionReviewStatusExpr} <> ?`
+      `${interventionReviewStatusExpr} <> ?`,
+      buildOperationalInterventionSql('ci')
     ];
     const legacyParams = [start, end, 'draft'];
     applyMetricsScopeFilters(legacyFilters, legacyParams, scope, { caseAlias: 'c', staffAlias: 'sp' });
@@ -29548,7 +31903,8 @@ async function countMetricsCompletedInterventions(pool, { start, end, scope }) {
     const filters = [
       `${statusExpr} = ?`,
       'COALESCE(ci.end_date, DATE(ci.closed_at), DATE(ci.updated_at), DATE(ci.created_at)) >= ?',
-      'COALESCE(ci.end_date, DATE(ci.closed_at), DATE(ci.updated_at), DATE(ci.created_at)) < ?'
+      'COALESCE(ci.end_date, DATE(ci.closed_at), DATE(ci.updated_at), DATE(ci.created_at)) < ?',
+      buildOperationalInterventionSql('ci')
     ];
     const params = ['completed', start, end];
     applyMetricsScopeFilters(filters, params, scope, { caseAlias: 'c', staffAlias: 'sp' });
@@ -29578,7 +31934,8 @@ async function sumMetricsApprovedInterventionAmounts(pool, { start, end, scope }
     const filters = [
       `${approvalDateExpr} >= ?`,
       `${approvalDateExpr} < ?`,
-      `${statusExpr} IN (${placeholders})`
+      `${statusExpr} IN (${placeholders})`,
+      buildOperationalInterventionSql('ci')
     ];
     const params = [start, end, ...statuses];
     applyMetricsScopeFilters(filters, params, scope, { caseAlias: 'c', staffAlias: 'sp' });
@@ -30056,7 +32413,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         sp.region_id AS assigned_user_region_id
       FROM iset_case_action_plan ap
       JOIN iset_case c ON c.id = ap.case_id
-      ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+      LEFT JOIN iset_application a
+        ON a.id = ap.application_id
+       AND a.case_id = c.id
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN client cl ON cl.id = c.client_id
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
@@ -30083,7 +32442,8 @@ async function fetchMetricInterventionDetailRows(pool, { start, end, scope, mode
       const metricDateExpr = 'COALESCE(ci.end_date, DATE(ci.closed_at), DATE(ci.updated_at), DATE(ci.created_at))';
       const filters = [
         `${metricDateExpr} >= ?`,
-        `${metricDateExpr} < ?`
+        `${metricDateExpr} < ?`,
+        buildOperationalInterventionSql('ci')
       ];
       const params = [start, end];
       filters.unshift(`${interventionDeliveryStatusExpr} = ?`);
@@ -30105,7 +32465,7 @@ async function fetchMetricInterventionDetailRows(pool, { start, end, scope, mode
           ic.label AS intervention_label,
           c.case_number,
 c.assigned_staff_profile_id AS assigned_to_user_id,
-          COALESCE(ap.application_id, a.id) AS application_id,
+          ap.application_id AS application_id,
           cl.first_name AS client_first_name,
           cl.last_name AS client_last_name,
           COALESCE(
@@ -30124,7 +32484,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         FROM iset_case_intervention ci
         JOIN iset_case c ON c.id = ci.case_id
         LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
-        LEFT JOIN iset_application a ON a.id = COALESCE(ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
+        LEFT JOIN iset_application a
+          ON a.id = ap.application_id
+         AND a.case_id = c.id
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN client cl ON cl.id = c.client_id
         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
@@ -30172,7 +32534,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           c.case_number,
 c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.region_id AS region_id,
-          COALESCE(p.application_id, ap.application_id, a.id) AS application_id,
+          COALESCE(p.application_id, ap.application_id) AS application_id,
           cl.first_name AS client_first_name,
           cl.last_name AS client_last_name,
           COALESCE(
@@ -30192,7 +32554,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         JOIN iset_case c ON c.id = p.case_id
         LEFT JOIN iset_case_intervention ci ON ci.id = p.legacy_intervention_id
         LEFT JOIN iset_case_action_plan ap ON ap.id = COALESCE(p.action_plan_id, ci.action_plan_id)
-        LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
+        LEFT JOIN iset_application a
+          ON a.id = COALESCE(p.application_id, ap.application_id)
+         AND a.case_id = c.id
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN client cl ON cl.id = c.client_id
         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
@@ -30200,6 +32564,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         WHERE ${metricDateExpr} >= ?
           AND ${metricDateExpr} < ?
           AND ${proposalReviewStatusExpr} <> ?
+          AND COALESCE(LOWER(TRIM(p.proposal_kind)), 'new') <> 'revision'
+          AND p.source_intervention_id IS NULL
+          AND ${buildOperationalInterventionSql('ci')}
+          AND (p.application_id IS NULL OR ap.application_id IS NULL OR p.application_id = ap.application_id)
 
         UNION ALL
 
@@ -30219,7 +32587,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           c.case_number,
 c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.region_id AS region_id,
-          COALESCE(ap.application_id, a.id) AS application_id,
+          ap.application_id AS application_id,
           cl.first_name AS client_first_name,
           cl.last_name AS client_last_name,
           COALESCE(
@@ -30239,12 +32607,15 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         LEFT JOIN iset_intervention_proposal p_existing ON p_existing.legacy_intervention_id = ci.id
         JOIN iset_case c ON c.id = ci.case_id
         LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
-        LEFT JOIN iset_application a ON a.id = COALESCE(ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
+        LEFT JOIN iset_application a
+          ON a.id = ap.application_id
+         AND a.case_id = c.id
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN client cl ON cl.id = c.client_id
         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
         WHERE p_existing.id IS NULL
+          AND ${buildOperationalInterventionSql('ci')}
           AND ${legacyMetricDateExpr} >= ?
           AND ${legacyMetricDateExpr} < ?
           AND ${interventionReviewStatusExpr} <> ?
@@ -30256,7 +32627,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     const legacyFilters = [
       `${legacyMetricDateExpr} >= ?`,
       `${legacyMetricDateExpr} < ?`,
-      `${interventionReviewStatusExpr} <> ?`
+      `${interventionReviewStatusExpr} <> ?`,
+      buildOperationalInterventionSql('ci')
     ];
     const legacyParams = [start, end, 'draft'];
     applyMetricsScopeFilters(legacyFilters, legacyParams, scope, { caseAlias: 'c', staffAlias: 'sp' });
@@ -30294,7 +32666,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         sp.region_id AS assigned_user_region_id
       FROM iset_case_intervention ci
       JOIN iset_case c ON c.id = ci.case_id
-      ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+      LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+      LEFT JOIN iset_application a
+        ON a.id = ap.application_id
+       AND a.case_id = c.id
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN client cl ON cl.id = c.client_id
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
@@ -30576,11 +32951,11 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
 
     // Block if any non-completed/non-cancelled interventions remain
     const [interventionRows] = await conn.query(
-      'SELECT status FROM iset_case_intervention WHERE case_id = ?',
+      'SELECT status, metadata_json FROM iset_case_intervention WHERE case_id = ?',
       [numericCaseId]
     );
     const blockingInterventions = (interventionRows || []).filter(
-      row => !isInterventionClosedStatus(row?.status)
+      row => !isAppliedRevisionEvidenceIntervention(row) && !isInterventionClosedStatus(row?.status)
     );
 
     // Block if any future reminders are open
@@ -31989,6 +34364,7 @@ esdcRouter.get('/participants', async (req, res, next) => {
           FROM iset_case_intervention ci
           WHERE ci.case_id = eps.case_id
             AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+            AND ${buildOperationalInterventionSql('ci')}
             AND ci.start_date IS NOT NULL
             AND ci.start_date <= CURDATE()
             AND ${esdcInterventionDeliveryStatusExpr} IN (${startedInterventionStatuses.map(() => '?').join(',')})
@@ -32003,12 +34379,14 @@ esdcRouter.get('/participants', async (req, res, next) => {
           FROM iset_case_intervention ci
           WHERE ci.case_id = eps.case_id
             AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+            AND ${buildOperationalInterventionSql('ci')}
         )
         AND NOT EXISTS (
           SELECT 1
           FROM iset_case_intervention ci
           WHERE ci.case_id = eps.case_id
             AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+            AND ${buildOperationalInterventionSql('ci')}
             AND (
               ci.start_date IS NULL
               OR ${esdcInterventionDeliveryStatusExpr} IS NULL
@@ -32360,6 +34738,7 @@ esdcRouter.post('/participants/validate-all', async (req, res, next) => {
               FROM iset_case_intervention ci
               WHERE ci.case_id = eps.case_id
                 AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+                AND ${buildOperationalInterventionSql('ci')}
                 AND ci.start_date IS NOT NULL
                 AND ci.start_date <= CURDATE()
                 AND ${esdcInterventionDeliveryStatusExpr} IN (${startedInterventionStatuses.map(() => '?').join(',')})
@@ -32374,12 +34753,14 @@ esdcRouter.post('/participants/validate-all', async (req, res, next) => {
               FROM iset_case_intervention ci
               WHERE ci.case_id = eps.case_id
                 AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+                AND ${buildOperationalInterventionSql('ci')}
             )
             AND NOT EXISTS (
               SELECT 1
               FROM iset_case_intervention ci
               WHERE ci.case_id = eps.case_id
                 AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+                AND ${buildOperationalInterventionSql('ci')}
                 AND (
                   ci.start_date IS NULL
                   OR ${esdcInterventionDeliveryStatusExpr} IS NULL
@@ -32537,6 +34918,7 @@ async function collectReadyEsdcBatchParticipants() {
             FROM iset_case_intervention ci
             WHERE ci.case_id = eps.case_id
               AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+              AND ${buildOperationalInterventionSql('ci')}
               AND ci.start_date IS NOT NULL
               AND ci.start_date <= CURDATE()
               AND ${esdcInterventionDeliveryStatusExpr} IN (${startedInterventionStatuses.map(() => '?').join(',')})
@@ -32551,12 +34933,14 @@ async function collectReadyEsdcBatchParticipants() {
             FROM iset_case_intervention ci
             WHERE ci.case_id = eps.case_id
               AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+              AND ${buildOperationalInterventionSql('ci')}
           )
           AND NOT EXISTS (
             SELECT 1
             FROM iset_case_intervention ci
             WHERE ci.case_id = eps.case_id
               AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+              AND ${buildOperationalInterventionSql('ci')}
               AND (
                 ci.start_date IS NULL
                 OR ${esdcInterventionDeliveryStatusExpr} IS NULL
@@ -34565,6 +36949,7 @@ async function readRegionalSnapshotCalculatedMetrics(
             OR bp.code = ap.budget_pot
           )
         LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = ci.id
+        WHERE ${buildOperationalInterventionSql('ci')}
         `
       ),
       runner.query(
@@ -35502,6 +37887,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
       WHERE ci.intervention_code IS NOT NULL
+        AND ${buildOperationalInterventionSql('ci')}
         AND (
           (ci.start_date IS NOT NULL AND ci.start_date <= ?)
           OR (
@@ -35963,6 +38349,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
         WHERE ci.intervention_code IS NOT NULL
+          AND ${buildOperationalInterventionSql('ci')}
           AND (
             (ci.start_date IS NOT NULL AND ci.start_date <= ?)
             OR (
@@ -44673,6 +47060,44 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
   }
 });
 
+const INTERVENTION_QUEUE_EI_BY_ACTION_PLAN_CLAIMANT = Object.freeze({
+  '1': 'EI Active Claim',
+  '2': 'EI Reach Back',
+  '3': 'CRF',
+});
+
+const resolveInterventionApprovalQueueEiStatus = ({
+  metadata,
+  proposalKind,
+  revisionSourceInterventionId,
+  actionPlanEiClaimant,
+} = {}) => {
+  const review = metadata?.review && typeof metadata.review === 'object'
+    ? metadata.review
+    : {};
+  const explicitReviewStatus = normaliseString(review.eiStatus ?? review.ei_status ?? null);
+  if (explicitReviewStatus) {
+    return explicitReviewStatus;
+  }
+
+  const isRevision =
+    normaliseString(proposalKind)?.toLowerCase() === 'revision' ||
+    Boolean(normalisePositiveInteger(revisionSourceInterventionId)) ||
+    Boolean(
+      normalisePositiveInteger(
+        metadata?.revision?.sourceInterventionId ??
+        metadata?.revision?.source_intervention_id ??
+        null
+      )
+    );
+  if (!isRevision) {
+    return null;
+  }
+
+  const claimantCode = normaliseString(actionPlanEiClaimant);
+  return claimantCode ? INTERVENTION_QUEUE_EI_BY_ACTION_PLAN_CLAIMANT[claimantCode] || null : null;
+};
+
 // Intervention proposals awaiting approval
 app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
@@ -44685,9 +47110,14 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
   const interventionReviewStatusExpr = buildInterventionReviewStatusSql('ci');
   const interventionDeliveryStatusExpr = buildInterventionDeliveryStatusSql('ci');
   const interventionEffectiveStatusExpr = buildInterventionEffectiveStatusSql('ci');
-  const legacyFilters = [`${interventionReviewStatusExpr} IN (?, ?)`];
+  const legacyFilters = [
+    `${interventionReviewStatusExpr} IN (?, ?)`,
+    buildOperationalInterventionSql('ci'),
+    'ap.application_id IS NOT NULL',
+    'a.id IS NOT NULL',
+  ];
   const legacyParams = ['submitted', 'in_review'];
-  const proposalOuterFilters = [];
+  const proposalOuterFilters = ['q.application_id IS NOT NULL'];
   const proposalParams = ['submitted', 'in_review', 'submitted', 'in_review'];
   if (role === 'NWAC Administrator') {
     proposalOuterFilters.push('(q.review_workflow_id IS NULL OR q.review_workflow_stage = ?)');
@@ -44750,6 +47180,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       sp.primary_role AS assigned_user_role,
       sp.region_id AS assigned_user_region_id,
       ca.esdc_eligibility AS assessment_esdc_eligibility,
+      ap.EIClaimant AS action_plan_ei_claimant,
       bp.code AS budget_pot_code,
       a.id AS application_id,
       c.case_context_json,
@@ -44769,7 +47200,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
     LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
     LEFT JOIN client cl ON cl.id = c.client_id
-    ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+    LEFT JOIN iset_application a
+      ON a.id = ap.application_id
+     AND a.case_id = c.id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
@@ -44830,8 +47263,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.primary_role AS assigned_user_role,
           sp.region_id AS assigned_user_region_id,
           ca.esdc_eligibility AS assessment_esdc_eligibility,
+          ap.EIClaimant AS action_plan_ei_claimant,
           bp.code AS budget_pot_code,
-          COALESCE(p.application_id, ap.application_id, a.id) AS application_id,
+          a.id AS application_id,
           c.case_context_json,
           cl.first_name AS client_first_name,
           cl.last_name AS client_last_name,
@@ -44855,7 +47289,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         LEFT JOIN iset_case_action_plan ap ON ap.id = COALESCE(p.action_plan_id, ci.action_plan_id)
         LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
         LEFT JOIN client cl ON cl.id = c.client_id
-        LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
+        LEFT JOIN iset_application a
+          ON a.id = COALESCE(p.application_id, ap.application_id)
+         AND a.case_id = c.id
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         LEFT JOIN esdc_intervention_code ic ON ic.code = COALESCE(p.intervention_code, ci.intervention_code)
@@ -44876,6 +47312,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
            OR (p.id IS NULL AND rw.intervention_id = COALESCE(p.legacy_intervention_id, p.source_intervention_id))
          )
         WHERE ${proposalReviewStatusExpr} IN (?, ?)
+          AND (p.application_id IS NULL OR ap.application_id IS NULL OR p.application_id = ap.application_id)
+          AND (rw.application_id IS NULL OR rw.application_id = COALESCE(p.application_id, ap.application_id))
 
         UNION ALL
 
@@ -44905,8 +47343,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.primary_role AS assigned_user_role,
           sp.region_id AS assigned_user_region_id,
           ca.esdc_eligibility AS assessment_esdc_eligibility,
+          ap.EIClaimant AS action_plan_ei_claimant,
           bp.code AS budget_pot_code,
-          COALESCE(ap.application_id, a.id) AS application_id,
+          a.id AS application_id,
           c.case_context_json,
           cl.first_name AS client_first_name,
           cl.last_name AS client_last_name,
@@ -44929,7 +47368,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
         LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
         LEFT JOIN client cl ON cl.id = c.client_id
-        LEFT JOIN iset_application a ON a.id = COALESCE(ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
+        LEFT JOIN iset_application a
+          ON a.id = ap.application_id
+         AND a.case_id = c.id
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
@@ -44949,6 +47390,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
          AND rw.intervention_id = ci.id
         WHERE p_existing.id IS NULL
           AND ${interventionReviewStatusExpr} IN (?, ?)
+          AND ${buildOperationalInterventionSql('ci')}
+          AND (rw.application_id IS NULL OR rw.application_id = ap.application_id)
       ) q
     ${proposalOuterWhere}
     ORDER BY q.submitted_at DESC, q.intervention_id DESC
@@ -44965,9 +47408,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         throw proposalError;
       }
     }
+    const queueRows = filterOperationalInterventionRows(rows);
     const proposalInterventionsByRow = new Map();
     const interventionCodes = new Set();
-    (Array.isArray(rows) ? rows : []).forEach((row, index) => {
+    queueRows.forEach((row, index) => {
       const metadata = safeJsonParse(row?.metadata_json, {}) || {};
       const proposedInterventions = normalizeAssessmentProposedInterventions(
         metadata?.proposedInterventions ?? metadata?.proposed_interventions ?? null
@@ -44983,7 +47427,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       }
     });
     const interventionLabelMap = await fetchInterventionCodeLabels(pool, Array.from(interventionCodes));
-    const items = Array.isArray(rows) ? rows.map((r, rowIndex) => {
+    const items = queueRows.map((r, rowIndex) => {
       const caseContext = safeJsonParse(r.case_context_json, null) || {};
       const metadata = safeJsonParse(r?.metadata_json, {}) || {};
       const contextPersonal = caseContext?.applicationPersonal || {};
@@ -45072,6 +47516,12 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
               )
             )
           : null;
+      const interventionEiStatus = resolveInterventionApprovalQueueEiStatus({
+        metadata,
+        proposalKind,
+        revisionSourceInterventionId,
+        actionPlanEiClaimant: r.action_plan_ei_claimant,
+      });
       return {
         proposalId: r.proposal_id || null,
         interventionId: r.intervention_id || null,
@@ -45112,6 +47562,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         interventionSummaries,
         intervention_summaries: interventionSummaries,
         intervention_start_date: r.intervention_start_date || null,
+        interventionEiStatus,
+        intervention_ei_status: interventionEiStatus,
         assessment_esdc_eligibility: r.assessment_esdc_eligibility || null,
         budgetPotCode: normaliseString(r.budget_pot_code) || null,
         budget_pot_code: normaliseString(r.budget_pot_code) || null,
@@ -45124,7 +47576,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         approval_request_type: approvalRequestType,
         approval_request_type_label: approvalRequestTypeLabel,
       };
-    }) : [];
+    });
     return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items });
   } catch (err) {
     if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
@@ -45223,6 +47675,10 @@ app.get('/api/dashboard/intervention-completion-items', async (req, res) => {
 
   const completionFilters = [
     `${interventionReviewStatusExpr} = 'approved'`,
+    buildOperationalInterventionSql('ci'),
+    'COALESCE(p.application_id, ap.application_id) IS NOT NULL',
+    'a.id IS NOT NULL',
+    '(p.application_id IS NULL OR ap.application_id IS NULL OR p.application_id = ap.application_id)',
     `NOT ${followUpSentCondition}`,
     `(
       (${proposalReviewStatusExpr} = 'approved' AND p.id IS NOT NULL AND NOT ${manualBackloadCondition})
@@ -45262,7 +47718,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       sp.region_id AS assigned_user_region_id,
       ca.esdc_eligibility AS assessment_esdc_eligibility,
       bp.code AS budget_pot_code,
-      COALESCE(p.application_id, ap.application_id, a.id) AS application_id,
+      a.id AS application_id,
       c.case_context_json,
       cl.first_name AS client_first_name,
       cl.last_name AS client_last_name,
@@ -45290,7 +47746,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     LEFT JOIN iset_case_action_plan ap ON ap.id = COALESCE(p.action_plan_id, ci.action_plan_id)
     LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
     LEFT JOIN client cl ON cl.id = c.client_id
-    LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ap.application_id, ${buildCasePrimaryApplicationIdSql('c')})
+    LEFT JOIN iset_application a
+      ON a.id = COALESCE(p.application_id, ap.application_id)
+     AND a.case_id = c.id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = COALESCE(p.intervention_code, ci.intervention_code)
@@ -45307,7 +47765,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 
   try {
     const [rows] = await pool.query(sql, params);
-    const items = Array.isArray(rows) ? rows.map(r => {
+    const queueRows = filterOperationalInterventionRows(rows);
+    const items = queueRows.map(r => {
       const caseContext = safeJsonParse(r.case_context_json, null) || {};
       const contextPersonal = caseContext?.applicationPersonal || {};
       const contextAnswers = caseContext?.applicationAnswers || {};
@@ -45388,7 +47847,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         approval_request_type: approvalRequestType,
         approval_request_type_label: approvalRequestTypeLabel,
       };
-    }) : [];
+    });
     return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items });
   } catch (err) {
     if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
@@ -45452,6 +47911,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
     WHERE c.assigned_staff_profile_id = ?
+      AND ${buildOperationalInterventionSql('ci')}
       AND ${interventionDeliveryStatusExpr} IN (?, ?)
       AND (ci.start_date IS NOT NULL OR ci.end_date IS NOT NULL)
       AND (
@@ -45464,7 +47924,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
   const params = [staffId, 'in_progress', 'suspended', windowDateValue, windowDateValue];
   try {
     const [rows] = await pool.query(sql, params);
-    const items = Array.isArray(rows) ? rows.map(r => {
+    const queueRows = filterOperationalInterventionRows(rows);
+    const items = queueRows.map(r => {
       const preferred = normaliseString(r.submission_preferred_name);
       const first = normaliseString(r.submission_first_name);
       const last = normaliseString(r.submission_last_name);
@@ -45494,7 +47955,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         intervention_start_date: r.intervention_start_date || null,
         intervention_end_date: r.intervention_end_date || null
       };
-    }) : [];
+    });
     return res.json({ role, windowDays, items });
   } catch (err) {
     if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
@@ -45555,6 +48016,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     ${buildCasePrimaryApplicationJoinSql('c', 'a')}
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     WHERE c.assigned_staff_profile_id = ?
+      AND ${buildOperationalInterventionSql('ci')}
     ORDER BY COALESCE(pp.updated_at, pp.created_at) DESC, pp.id DESC, ppl.id ASC
     LIMIT 300
   `;
@@ -53128,6 +55590,13 @@ function handleAdminDocumentUpload(
           message: 'You do not have permission to upload EI verification documents.'
         });
       }
+      if (eiEligibilityStatus && !normalizeEsdcEligibilityValue(eiEligibilityStatus)) {
+        cleanupUploadedFile();
+        return res.status(422).json({
+          error: 'assessment_ei_status_invalid',
+          message: 'Select CRF, EI Active Claim, or EI Reach Back.'
+        });
+      }
     }
     let docTypeScope = null;
     if (docType) {
@@ -53162,6 +55631,9 @@ function handleAdminDocumentUpload(
     const metadataObj = {};
     if (label) metadataObj.label = label;
     if (docType) metadataObj.document_type = docType;
+    if (isEiVerificationDocument && eiEligibilityStatus) {
+      metadataObj.ei_eligibility_status = normalizeEsdcEligibilityValue(eiEligibilityStatus);
+    }
 
     try {
       const attachment = await resolveDocumentAttachmentContext({
@@ -53972,6 +56444,37 @@ app.put('/api/documents/:id', async (req, res) => {
     const errorCode = err?.code || 'document_link_validation_failed';
     return res.status(400).json({ error: errorCode });
   }
+  if (nextInterventionIds.length) {
+    try {
+      const placeholders = nextInterventionIds.map(() => '?').join(',');
+      const [interventionRows] = await pool.query(
+        `SELECT id, metadata_json
+           FROM iset_case_intervention
+          WHERE id IN (${placeholders})`,
+        nextInterventionIds
+      );
+      const interventionMap = new Map(
+        (interventionRows || []).map(row => [Number(row.id), row])
+      );
+      const missingInterventionIds = nextInterventionIds.filter(
+        id => !interventionMap.has(Number(id))
+      );
+      if (missingInterventionIds.length) {
+        return res.status(400).json({
+          error: 'interventions_not_found',
+          missingIds: missingInterventionIds,
+        });
+      }
+      interventionRows.forEach(row => {
+        assertOperationalInterventionRow(row, { operation: 'link an operational document to' });
+      });
+    } catch (error) {
+      return res.status(Number.isInteger(error?.status) ? error.status : 500).json({
+        error: error?.code || 'intervention_lookup_failed',
+        message: error?.publicMessage || undefined,
+      });
+    }
+  }
   try {
     const lineageScope = await preserveDocumentSourceLineage({
       documentRow: existingRow,
@@ -54143,7 +56646,7 @@ app.post('/api/documents/:id/link-interventions', async (req, res) => {
     try {
       const placeholders = interventionIds.map(() => '?').join(',');
       const [rows] = await pool.query(
-        `SELECT id
+        `SELECT id, metadata_json
            FROM iset_case_intervention
           WHERE id IN (${placeholders})`,
         interventionIds
@@ -54152,6 +56655,16 @@ app.post('/api/documents/:id/link-interventions', async (req, res) => {
       const missing = interventionIds.filter(id => !rowMap.has(Number(id)));
       if (missing.length) {
         return res.status(400).json({ error: 'interventions_not_found', missingIds: missing });
+      }
+      try {
+        rows.forEach(row => {
+          assertOperationalInterventionRow(row, { operation: 'link an EI verification document to' });
+        });
+      } catch (error) {
+        return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+          error: error?.code || 'applied_revision_evidence_read_only',
+          message: error?.publicMessage || error?.message,
+        });
       }
       const targetAccessError = await validateDocumentAttachmentContextAccess(req, {
         interventionIds,
@@ -54559,12 +57072,11 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
               d.application_id,
               d.case_id,
               d.action_plan_id,
-              apc.id AS action_plan_case_id,
-              ${buildCasePrimaryApplicationIdSql('apc')} AS action_plan_application_id,
+              ap.case_id AS action_plan_case_id,
+              ap.application_id AS action_plan_application_id,
               d.created_at AS uploaded_at
          FROM iset_document d
          LEFT JOIN iset_case_action_plan ap ON ap.id = d.action_plan_id
-         LEFT JOIN iset_case apc ON apc.id = ap.case_id
         WHERE d.applicant_user_id = ? AND d.status = 'active'`,
       [applicantId]
     );
@@ -54580,9 +57092,15 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
                 i.metadata_json,
                 i.case_id,
                 i.action_plan_id,
-                ${buildCasePrimaryApplicationIdSql('c')} AS application_id
+                p.application_id AS proposal_application_id,
+                ap.application_id AS action_plan_application_id,
+                a.case_id AS resolved_application_case_id
            FROM iset_case_intervention i
-           LEFT JOIN iset_case c ON c.id = i.case_id
+           LEFT JOIN iset_case_action_plan ap ON ap.id = i.action_plan_id
+           LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = i.id
+           LEFT JOIN iset_application a
+             ON a.id = COALESCE(p.application_id, ap.application_id)
+            AND a.case_id = i.case_id
           WHERE i.id = ?
           LIMIT 1`,
         [interventionId]
@@ -54590,12 +57108,44 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       if (!interventionRow) {
         return res.status(404).json({ error: 'intervention_not_found' });
       }
+      try {
+        assertOperationalInterventionRow(interventionRow, { operation: 'load an operational document checklist for' });
+      } catch (error) {
+        return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+          error: error?.code || 'applied_revision_evidence_read_only',
+          message: error?.publicMessage || error?.message,
+        });
+      }
       interventionStatusLower = normaliseCaseStatusValue(interventionRow.status || stageRaw) || '';
       interventionMetadata = parseMetadata(interventionRow.metadata_json) || {};
       interventionCaseId = normalisePositiveInteger(interventionRow.case_id);
-      interventionApplicationId = normalisePositiveInteger(interventionRow.application_id);
+      try {
+        interventionApplicationId = resolveInterventionApplicationScopeId(interventionRow, {
+          required: false,
+        });
+      } catch (scopeError) {
+        return res.status(Number(scopeError?.status) || 409).json({
+          error: scopeError?.code || 'intervention_application_scope_conflict',
+          message:
+            scopeError?.publicMessage ||
+            'The intervention application lineage could not be verified.',
+        });
+      }
+      if (
+        applicationId &&
+        interventionApplicationId &&
+        applicationId !== interventionApplicationId
+      ) {
+        return res.status(409).json({
+          error: 'intervention_application_scope_conflict',
+          message: 'The selected application does not match the intervention application.',
+        });
+      }
     }
-    const applicationAnswerMeta = await loadApplicationAnswers({ applicantId, applicationId });
+    const applicationAnswerMeta = await loadApplicationAnswers({
+      applicantId: isIntervention ? null : applicantId,
+      applicationId: isIntervention ? interventionApplicationId : applicationId,
+    });
     const applicationAnswers = applicationAnswerMeta.answers;
     const applicationExists = Boolean(
       applicationAnswerMeta.applicationId ||
@@ -54619,34 +57169,29 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       ? normalisePositiveInteger(interventionCaseId || resolvedCaseId)
       : resolvedCaseId;
     const checklistApplicationId = isIntervention
-      ? normalisePositiveInteger(interventionApplicationId || resolvedApplicationId)
+      ? normalisePositiveInteger(interventionApplicationId)
       : resolvedApplicationId;
     const applicationDocumentScope = checklistApplicationId
       ? await loadApplicationSubmissionDocumentScope(checklistApplicationId)
       : buildEmptyApplicationSubmissionDocumentScope();
     const signedChecklistDocTypeCounts = new Map();
-    if (applicantId && (checklistCaseId || checklistApplicationId)) {
+    if (applicantId && checklistApplicationId) {
       try {
-        const scopePredicates = [];
-        const scopeParams = [applicantId];
+        const scopePredicates = ['linked_message.application_id = ?'];
+        const scopeParams = [applicantId, checklistApplicationId];
         if (checklistCaseId) {
           scopePredicates.push('sr.case_id = ?');
           scopeParams.push(checklistCaseId);
-        }
-        if (checklistApplicationId) {
-          scopePredicates.push(`(${buildCasePrimaryApplicationIdSql('check_case')} = ? OR linked_message.application_id = ?)`);
-          scopeParams.push(checklistApplicationId, checklistApplicationId);
         }
         const [signedRequestRows] = await pool.query(
           `SELECT LOWER(COALESCE(sr.checklist_doc_type, '')) AS checklist_doc_type,
                   COUNT(DISTINCT sr.id) AS signed_count
              FROM signing_request sr
-             LEFT JOIN iset_case check_case ON check_case.id = sr.case_id
-             LEFT JOIN message_signing_request msr ON msr.signing_request_id = sr.id
-             LEFT JOIN messages linked_message ON linked_message.id = msr.message_id
+             JOIN message_signing_request msr ON msr.signing_request_id = sr.id
+             JOIN messages linked_message ON linked_message.id = msr.message_id
             WHERE sr.participant_user_id = ?
               AND sr.status = 'signed'
-              AND (${scopePredicates.join(' OR ')})
+              AND ${scopePredicates.join('\n              AND ')}
             GROUP BY LOWER(COALESCE(sr.checklist_doc_type, ''))`,
           scopeParams
         );
@@ -54794,9 +57339,14 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
         return false;
       }
       if (scope === 'action_plan') {
-        if (resolvedCaseId && Number(d.action_plan_case_id) === Number(resolvedCaseId)) return true;
-        if (resolvedApplicationId && Number(d.action_plan_application_id) === Number(resolvedApplicationId)) return true;
-        return false;
+        if (resolvedApplicationId) {
+          return Number(d.action_plan_application_id) === Number(resolvedApplicationId);
+        }
+        return Boolean(
+          resolvedCaseId &&
+          !normalisePositiveInteger(d.action_plan_application_id) &&
+          Number(d.action_plan_case_id) === Number(resolvedCaseId)
+        );
       }
       if (scope === 'case') {
         return resolvedCaseId && Number(d.case_id) === Number(resolvedCaseId);
@@ -55796,6 +58346,7 @@ app.get('/api/cases', async (req, res) => {
           SELECT 1
             FROM iset_case_intervention ci_funded
            WHERE ci_funded.case_id = c.id
+             AND ${buildOperationalInterventionSql('ci_funded')}
              AND ${fundedInterventionStatusExpr} IN (?, ?, ?, ?, ?)
              AND COALESCE(ci_funded.approved_amount, ci_funded.budget_amount, ci_funded.intervention_cost, 0) > 0
         )`
@@ -55995,6 +58546,7 @@ app.get('/api/cases', async (req, res) => {
             END
           ) AS total_intervention_count
         FROM iset_case_intervention ci
+        WHERE ${buildOperationalInterventionSql('ci')}
         GROUP BY ci.case_id
       ) intervention_counts ON intervention_counts.case_id = c.id
       LEFT JOIN (
@@ -56608,6 +59160,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
             END
           ) AS total_intervention_count
         FROM iset_case_intervention ci
+        WHERE ${buildOperationalInterventionSql('ci')}
         GROUP BY ci.case_id
       ) intervention_counts ON intervention_counts.case_id = c.id
       WHERE c.id = ?
@@ -56729,6 +59282,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
            SELECT COUNT(*)
            FROM iset_case_intervention ci
            WHERE ci.action_plan_id = ap.id
+             AND ${buildOperationalInterventionSql('ci')}
          ) AS intervention_count
        FROM iset_case_action_plan ap
        LEFT JOIN budget_pot bp
@@ -56745,6 +59299,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     const financeTotalsByIntervention = new Map();
     const financeTotalsByPot = new Map();
     const interventionsByPlan = new Map();
+    const appliedRevisionEvidenceByPlan = new Map();
     if (planIds.length > 0) {
       const [interventionRows] = await pool.query(
         `SELECT
@@ -56755,13 +59310,17 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
            p.review_status AS proposal_review_status,
            p.reviewed_at AS proposal_reviewed_at,
            p.source_intervention_id AS proposal_source_intervention_id,
-           COALESCE(p.application_id, ap.application_id, a.id) AS application_id,
+           p.application_id AS proposal_application_id,
+           ap.application_id AS action_plan_application_id,
+           a.case_id AS resolved_application_case_id,
+           COALESCE(p.application_id, ap.application_id) AS application_id,
            ${buildReviewWorkflowSelectColumns('rw')}
          FROM iset_case_intervention ci
          LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
          LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = ci.id
-         LEFT JOIN iset_case c_for_app ON c_for_app.id = ci.case_id
-         LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ap.application_id, ${buildCasePrimaryApplicationIdSql('c_for_app')})
+         LEFT JOIN iset_application a
+           ON a.id = COALESCE(p.application_id, ap.application_id)
+          AND a.case_id = ci.case_id
          LEFT JOIN iset_review_workflow rw
            ON rw.archived_at IS NULL
           AND rw.workflow_type = CASE
@@ -56780,9 +59339,13 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
          ORDER BY ci.start_date IS NULL, ci.start_date ASC, ci.id ASC`,
         [planIds]
       );
+      const {
+        operationalRows: operationalInterventionRows,
+        appliedRevisionEvidenceRows,
+      } = partitionAppliedRevisionEvidenceRows(interventionRows);
       const interventionIds = Array.from(
         new Set(
-          interventionRows
+          operationalInterventionRows
             .map(intervention => normalisePositiveInteger(intervention?.id))
             .filter(Boolean)
         )
@@ -56822,7 +59385,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         });
       }
       const twoStepReviewConfig = await readTwoStepReviewFeatureConfig(pool);
-      interventionRows.forEach(row => {
+      operationalInterventionRows.forEach(row => {
+        row.application_id = resolveInterventionApplicationScopeId(row, { required: false });
         row.two_step_review_enabled = isTwoStepReviewEnabled(
           twoStepReviewConfig,
           resolveInterventionReviewWorkflowType(row)
@@ -56837,15 +59401,35 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         if (!interventionsByPlan.has(key)) interventionsByPlan.set(key, []);
         interventionsByPlan.get(key).push(mapped);
       });
+      appliedRevisionEvidenceRows.forEach(row => {
+        row.application_id = resolveInterventionApplicationScopeId(row, { required: false });
+        row.two_step_review_enabled = isTwoStepReviewEnabled(
+          twoStepReviewConfig,
+          resolveInterventionReviewWorkflowType(row)
+        );
+        const mapped = mapAppliedRevisionEvidenceRow(row);
+        if (!mapped) return;
+        const key = row.action_plan_id || 0;
+        if (!appliedRevisionEvidenceByPlan.has(key)) {
+          appliedRevisionEvidenceByPlan.set(key, []);
+        }
+        appliedRevisionEvidenceByPlan.get(key).push(mapped);
+      });
     }
 
     const actionPlans = planRows.map(plan => {
       const interventions = interventionsByPlan.get(plan.id) || [];
+      const appliedRevisionEvidence = appliedRevisionEvidenceByPlan.get(plan.id) || [];
       const mapped = mapActionPlanRow({ ...plan, interventions });
       mapped.interventions = interventions;
       mapped.interventionCount = interventions.length;
+      mapped.appliedRevisionEvidence = appliedRevisionEvidence;
+      mapped.appliedRevisionEvidenceCount = appliedRevisionEvidence.length;
       return mapped;
     });
+    const appliedRevisionEvidence = actionPlans.flatMap(plan => (
+      Array.isArray(plan?.appliedRevisionEvidence) ? plan.appliedRevisionEvidence : []
+    ));
 
     const toCurrencyValue = value => {
       const numeric = Number(value);
@@ -57417,6 +60001,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       eligibility: normaliseString(row.assessment_esdc_eligibility) || null,
       counts,
       actionPlans,
+      appliedRevisionEvidence,
+      appliedRevisionEvidenceCount: appliedRevisionEvidence.length,
     };
 
     const firstDefined = (...values) => {
@@ -59303,6 +61889,15 @@ app.post('/api/cases/:id/cfa-versions', async (req, res) => {
   if (!actionPlanId) {
     return res.status(400).json({ error: 'invalid_action_plan_id' });
   }
+  const applicationId = normalisePositiveInteger(
+    req.body?.applicationId ?? req.body?.application_id
+  );
+  if (!applicationId) {
+    return res.status(400).json({
+      error: 'cfa_application_scope_required',
+      message: 'Choose the exact application before creating a funding agreement version.',
+    });
+  }
   const changeReasonRaw = typeof req.body?.changeReason === 'string' ? req.body.changeReason.trim() : '';
   const changeReason = CFA_CHANGE_REASONS.has(changeReasonRaw) ? changeReasonRaw : 'ADMIN_REISSUE';
   const changeSummary =
@@ -59318,6 +61913,12 @@ app.post('/api/cases/:id/cfa-versions', async (req, res) => {
     if (Number(planRow.case_id) !== Number(caseId)) {
       return res.status(409).json({ error: 'case_plan_mismatch' });
     }
+    if (normalisePositiveInteger(planRow.application_id) !== applicationId) {
+      return res.status(409).json({
+        error: 'cfa_application_scope_conflict',
+        message: 'The Action Plan does not belong to the selected application.',
+      });
+    }
     const accessError = validateCaseAccessForPlan(req, planRow);
     if (accessError) {
       return res.status(accessError.status).json(accessError.body);
@@ -59328,6 +61929,7 @@ app.post('/api/cases/:id/cfa-versions', async (req, res) => {
     const result = await createCfaVersionForPlan({
       caseId,
       actionPlanId,
+      applicationId,
       changeReason,
       changeSummary,
       actorUserId,
@@ -59373,13 +61975,17 @@ app.get('/api/action-plans/:id/interventions', async (req, res) => {
          p.review_status AS proposal_review_status,
          p.reviewed_at AS proposal_reviewed_at,
          p.source_intervention_id AS proposal_source_intervention_id,
-         COALESCE(p.application_id, ap.application_id, a.id) AS application_id,
+         p.application_id AS proposal_application_id,
+         ap.application_id AS action_plan_application_id,
+         a.case_id AS resolved_application_case_id,
+         COALESCE(p.application_id, ap.application_id) AS application_id,
          ${buildReviewWorkflowSelectColumns('rw')}
        FROM iset_case_intervention ci
        LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
        LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = ci.id
-       LEFT JOIN iset_case c_for_app ON c_for_app.id = ci.case_id
-       LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ap.application_id, ${buildCasePrimaryApplicationIdSql('c_for_app')})
+       LEFT JOIN iset_application a
+         ON a.id = COALESCE(p.application_id, ap.application_id)
+        AND a.case_id = ci.case_id
        LEFT JOIN iset_review_workflow rw
          ON rw.archived_at IS NULL
         AND rw.workflow_type = CASE
@@ -59399,14 +62005,32 @@ app.get('/api/action-plans/:id/interventions', async (req, res) => {
       [planId]
     );
     const twoStepReviewConfig = await readTwoStepReviewFeatureConfig(pool);
-    const interventions = rows.map(row => {
+    const {
+      operationalRows,
+      appliedRevisionEvidenceRows,
+    } = partitionAppliedRevisionEvidenceRows(rows);
+    const prepareInterventionRow = row => {
+      row.application_id = resolveInterventionApplicationScopeId(row, { required: false });
       row.two_step_review_enabled = isTwoStepReviewEnabled(
         twoStepReviewConfig,
         resolveInterventionReviewWorkflowType(row)
       );
+      return row;
+    };
+    const interventions = operationalRows.map(row => {
+      prepareInterventionRow(row);
       return mapInterventionRow(row);
     }).filter(Boolean);
-    res.status(200).json({ actionPlanId: planId, interventions });
+    const appliedRevisionEvidence = appliedRevisionEvidenceRows.map(row => {
+      prepareInterventionRow(row);
+      return mapAppliedRevisionEvidenceRow(row);
+    }).filter(Boolean);
+    res.status(200).json({
+      actionPlanId: planId,
+      interventions,
+      appliedRevisionEvidence,
+      appliedRevisionEvidenceCount: appliedRevisionEvidence.length,
+    });
   } catch (error) {
     console.error('GET /api/action-plans/:id/interventions failed:', error);
     res.status(500).json({ error: 'fetch_interventions_failed', detail: error?.message || String(error) });
@@ -59440,6 +62064,8 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     approvedAmount = null,
     actualAmount = null,
     metadata: metadataPayload = null,
+    approvalSourceInterventionId = null,
+    approvalSourceItemId = null,
     backloadMode = false,
     entryMode = null,
   } = req.body || {};
@@ -59588,6 +62214,18 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     status: interventionStatusPersistence.legacyStatus,
     delivery_status: interventionStatusPersistence.deliveryStatus,
   });
+  if (
+    !isBackloadMode &&
+    !new Set(['draft', 'submitted', 'approved']).has(
+      createInterventionState.reviewStatus || ''
+    )
+  ) {
+    return res.status(409).json({
+      error: 'intervention_review_context_required',
+      message:
+        'Create a draft or submit it for review. Returns and final decisions must be recorded on the existing proposal through the review workflow.',
+    });
+  }
   const isClosedStatusCreate =
     createInterventionState.deliveryStatus === 'completed' ||
     createInterventionState.deliveryStatus === 'cancelled';
@@ -59625,6 +62263,27 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       return res.status(accessError.status).json(accessError.body);
     }
 
+    if (
+      !isBackloadMode &&
+      ['submitted', 'approved'].includes(createInterventionState.reviewStatus || '')
+    ) {
+      try {
+        resolveInterventionApplicationScopeId({
+          case_id: planRow.case_id,
+          proposal_application_id: null,
+          action_plan_application_id: planRow.application_id,
+          resolved_application_case_id: planRow.application_case_id,
+        }, { required: true });
+      } catch (error) {
+        return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+          error: error?.code || error?.message || 'intervention_application_scope_required',
+          message:
+            error?.publicMessage ||
+            'Link the Action Plan to the exact application before submitting this intervention request.',
+        });
+      }
+    }
+
     const planStatus = normaliseActionPlanStatus(planRow.status, null);
     if (!isBackloadMode && (planStatus === 'archived' || planStatus === 'closed')) {
       return res.status(409).json({ error: 'plan_not_editable', message: 'Cannot add interventions to a closed or archived plan.' });
@@ -59643,6 +62302,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     }
 
     const role = inferUserRole(req);
+    let approvedMaterializationContext = null;
     if (
       !isBackloadMode &&
       ['approved', 'changes_requested', 'rejected'].includes(createInterventionState.reviewStatus || '') &&
@@ -59653,6 +62313,102 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         message: 'Only Decision Makers can record proposal decisions.',
       });
     }
+    if (
+      !isBackloadMode &&
+      createInterventionState.reviewStatus === 'approved'
+    ) {
+      const sourceInterventionId = normalisePositiveInteger(approvalSourceInterventionId);
+      const sourceItemId = normaliseString(approvalSourceItemId);
+      if (!sourceInterventionId || !sourceItemId) {
+        return res.status(409).json({
+          error: 'approved_intervention_review_context_required',
+          message: 'Approved interventions must be materialized from a proposal with a recorded final decision.',
+        });
+      }
+      const sourceInterventionRow = await fetchInterventionWithCase(sourceInterventionId);
+      if (!sourceInterventionRow) {
+        return res.status(404).json({
+          error: 'approved_intervention_source_not_found',
+          message: 'The approved proposal source could not be found.',
+        });
+      }
+      const sourceWorkflowSubject = buildInterventionReviewWorkflowSubject(sourceInterventionRow || {});
+      const sourceReviewWorkflow = sourceWorkflowSubject.workflowType
+        ? await fetchInterventionReviewWorkflow(pool, sourceWorkflowSubject)
+        : null;
+      try {
+        assertApprovedInterventionMaterializationWorkflow(
+          sourceInterventionRow,
+          sourceReviewWorkflow
+        );
+      } catch (error) {
+        return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+          error: error?.code || error?.message || 'approved_intervention_source_not_final',
+          message:
+            error?.publicMessage ||
+            error?.message ||
+            'The approved proposal source has no matching final workflow decision.',
+        });
+      }
+      const activeStaffProfileId = normalisePositiveInteger(resolveActiveStaffProfileId(req));
+      const decidingStaffProfileId = normalisePositiveInteger(
+        sourceReviewWorkflow?.nwac_decided_by_staff_profile_id
+      );
+      if (!activeStaffProfileId || activeStaffProfileId !== decidingStaffProfileId) {
+        return res.status(403).json({
+          error: 'approved_intervention_materialization_actor_forbidden',
+          message: 'Only the Decision Maker who recorded this proposal approval can materialize its additional interventions.',
+        });
+      }
+      try {
+        const sourceMetadata = safeJsonParse(sourceInterventionRow.metadata_json, {}) || {};
+        const trustedMaterializedTitle =
+          await fetchInterventionCodeLabel(pool, trimmedCode) ||
+          'Intervention';
+        const trustedMaterializedDuration = resolveInterventionDurationDaysForStorage({
+          durationDays: null,
+          startDate: startDateValue,
+          endDate: endDateValue,
+          deriveFromDates: true,
+        });
+        const trustedMaterializedNotes =
+          normaliseString(sourceMetadata.rationale ?? sourceMetadata.notes ?? null) || '';
+        approvedMaterializationContext = validateApprovedInterventionMaterializationRequest({
+          sourceInterventionRow,
+          sourceReviewWorkflow,
+          sourceItemId,
+          targetPlanId: planId,
+          targetCaseId: planRow.case_id,
+          requestedCode: trimmedCode,
+          requestedTitle: title,
+          expectedTitle: trustedMaterializedTitle,
+          requestedStartDate: startDateValue,
+          requestedEndDate: endDateValue,
+          requestedDurationDays: durationDays,
+          expectedDurationDays: trustedMaterializedDuration?.value,
+          requestedCost: plannedCostValue,
+          requestedNotes: notes,
+          expectedNotes: trustedMaterializedNotes,
+          requestedNoc: noc,
+          requestedNocVersion: nocVersion,
+          requestedApprovedAmount: approvedAmount,
+          requestedActualAmount: actualAmount,
+          requestedFundingStream: fundingStream,
+          requestedDeliveryStatus: deliveryStatusInput ?? deliveryStatusLegacyInput,
+        });
+        approvedMaterializationContext = {
+          ...approvedMaterializationContext,
+          sourceInterventionId,
+          sourceReviewWorkflow,
+          sourceInterventionRow,
+        };
+      } catch (error) {
+        return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+          error: error?.code || error?.message || 'approved_intervention_source_invalid',
+          message: error?.publicMessage || error?.message || 'The approved proposal source is invalid.',
+        });
+      }
+    }
     const planMetadata = safeJsonParse(planRow.metadata_json, null) || {};
     const planPostingContext = normalizePostingContext(planMetadata.postingContext) || 'external';
     let postingContext =
@@ -59662,7 +62418,13 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     }
 
     const identity = getRequesterIdentity(req);
-    const createdBy = identity.staffProfileId || null;
+    let createdBy = identity.staffProfileId || null;
+    if (approvedMaterializationContext?.sourceInterventionRow) {
+      createdBy =
+        normalisePositiveInteger(
+          approvedMaterializationContext.sourceInterventionRow.created_by_staff_profile_id
+        ) || createdBy;
+    }
 
     let trimmedPotId = (() => {
       if (typeof potId === 'string') return potId.trim();
@@ -59791,7 +62553,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     const metadata = metadataSource
       ? syncInterventionMetadataCompatibilityFromProposedInterventions({ ...metadataSource })
       : {};
-    const normalizedCostLines = Array.isArray(metadata.costLines)
+    let normalizedCostLines = Array.isArray(metadata.costLines)
       ? metadata.costLines.map(normalizeProposedCostLine).filter(Boolean)
       : [];
     if (normalizedCostLines.length && plannedCostAmount === null) {
@@ -59805,6 +62567,54 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
           });
         }
       }
+    }
+    if (approvedMaterializationContext) {
+      const sourceMetadata = approvedMaterializationContext.sourceMetadata || {};
+      const sourceItem = approvedMaterializationContext.sourceItem || {};
+      const trustedCostLines = Array.isArray(sourceItem.costLines)
+        ? sourceItem.costLines
+        : Array.isArray(sourceItem.cost_lines)
+          ? sourceItem.cost_lines
+          : [];
+      const trustedReview =
+        sourceMetadata.review && typeof sourceMetadata.review === 'object'
+          ? { ...sourceMetadata.review, decision: 'approved' }
+          : { decision: 'approved' };
+      Object.keys(metadata).forEach(key => delete metadata[key]);
+      Object.assign(metadata, {
+        snapshot: {
+          code: approvedMaterializationContext.normalizedSourceItem?.code || trimmedCode,
+          startDate: approvedMaterializationContext.normalizedSourceItem?.startDate || startDateValue,
+          endDate: approvedMaterializationContext.normalizedSourceItem?.endDate || endDateValue || null,
+          deliveryMode: sourceItem.deliveryMode || sourceItem.delivery_mode || null,
+          institution: sourceItem.institution || '',
+          programName: sourceItem.programName || sourceItem.program_name || '',
+          itpDetails: sourceItem.itpDetails || sourceItem.itp_details || '',
+          wageSubsidyDetails: sourceItem.wageSubsidyDetails || sourceItem.wage_subsidy_details || '',
+          nocVersion: approvedMaterializationContext.normalizedSourceItem?.nocVersion || '',
+          nocCode: approvedMaterializationContext.normalizedSourceItem?.noc || '',
+          costTotal: approvedMaterializationContext.normalizedSourceItem?.costTotal ?? plannedCostAmount ?? 0,
+          costLines: trustedCostLines,
+        },
+        costLines: trustedCostLines,
+        proposedInterventions: [sourceItem],
+        rationale: sourceMetadata.rationale || sourceMetadata.notes || '',
+        barriers: Array.isArray(sourceMetadata.barriers) ? sourceMetadata.barriers : [],
+        otherFundingDetails:
+          sourceMetadata.otherFundingDetails ||
+          sourceMetadata.other_funding_details ||
+          null,
+        childcareNeed: sourceMetadata.childcareNeed || sourceMetadata.childcare_need || '',
+        childcareFunding: sourceMetadata.childcareFunding || sourceMetadata.childcare_funding || '',
+        review: trustedReview,
+        approvalMaterialization: {
+          sourceInterventionId: approvedMaterializationContext.sourceInterventionId,
+          sourceItemId: normaliseString(approvalSourceItemId),
+          sourceWorkflowId: approvedMaterializationContext.sourceReviewWorkflow?.id || null,
+        },
+      });
+      syncInterventionMetadataCompatibilityFromProposedInterventions(metadata);
+      normalizedCostLines = trustedCostLines.map(normalizeProposedCostLine).filter(Boolean);
     }
     const ensure = (key, value) => {
       if (!Object.prototype.hasOwnProperty.call(metadata, key) || metadata[key] === undefined) {
@@ -59909,8 +62719,90 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       : [];
     const closedAtValue = isClosedStatusCreate && endDateValue ? `${endDateValue} 00:00:00` : null;
 
-    const [result] = await pool.query(
-      `INSERT INTO iset_case_intervention
+    const persistInterventionCreate = async (runner) => {
+      if (approvedMaterializationContext) {
+        const lockedSourceInterventionRow = await fetchInterventionWithCase(
+          approvedMaterializationContext.sourceInterventionId,
+          runner,
+          { forUpdate: true }
+        );
+        if (!lockedSourceInterventionRow) {
+          const sourceError = new Error('approved_intervention_source_not_found');
+          sourceError.code = 'approved_intervention_source_not_found';
+          sourceError.status = 404;
+          sourceError.publicMessage = 'The approved proposal source could not be found.';
+          throw sourceError;
+        }
+        const lockedSourceWorkflowSubject = buildInterventionReviewWorkflowSubject(
+          lockedSourceInterventionRow
+        );
+        const lockedSourceReviewWorkflow = await fetchInterventionReviewWorkflow(
+          runner,
+          lockedSourceWorkflowSubject,
+          { forUpdate: true }
+        );
+        const lockedSourceWorkflowApproval = assertApprovedInterventionMaterializationWorkflow(
+          lockedSourceInterventionRow,
+          lockedSourceReviewWorkflow
+        );
+        const activeStaffProfileId = normalisePositiveInteger(resolveActiveStaffProfileId(req));
+        const decidingStaffProfileId = normalisePositiveInteger(
+          lockedSourceReviewWorkflow?.nwac_decided_by_staff_profile_id
+        );
+        if (!activeStaffProfileId || activeStaffProfileId !== decidingStaffProfileId) {
+          const actorError = new Error('approved_intervention_materialization_actor_forbidden');
+          actorError.code = 'approved_intervention_materialization_actor_forbidden';
+          actorError.status = 403;
+          actorError.publicMessage =
+            'Only the Decision Maker who recorded this proposal approval can materialize its additional interventions.';
+          throw actorError;
+        }
+        const lockedMaterializationContext = validateApprovedInterventionMaterializationRequest({
+          sourceInterventionRow: lockedSourceInterventionRow,
+          sourceReviewWorkflow: lockedSourceReviewWorkflow,
+          sourceItemId: approvalSourceItemId,
+          targetPlanId: planId,
+          targetCaseId: planRow.case_id,
+          requestedCode: trimmedCode,
+          requestedTitle: title,
+          expectedTitle: approvedMaterializationContext.trustedTitle,
+          requestedStartDate: startDateValue,
+          requestedEndDate: endDateValue,
+          requestedDurationDays: durationDays,
+          expectedDurationDays: approvedMaterializationContext.trustedDurationDays,
+          requestedCost: plannedCostValue,
+          requestedNotes: notes,
+          expectedNotes: approvedMaterializationContext.trustedNotes,
+          requestedNoc: noc,
+          requestedNocVersion: nocVersion,
+          requestedApprovedAmount: approvedAmount,
+          requestedActualAmount: actualAmount,
+          requestedFundingStream: fundingStream,
+          requestedDeliveryStatus: deliveryStatusInput ?? deliveryStatusLegacyInput,
+        });
+        const replayRow = await findApprovedInterventionMaterializationReplay(runner, {
+          caseId: planRow.case_id,
+          actionPlanId: planId,
+          sourceInterventionId: approvedMaterializationContext.sourceInterventionId,
+          sourceItemId: approvalSourceItemId,
+          forUpdate: true,
+        });
+        if (replayRow) {
+          assertApprovedInterventionMaterializationReplayMatches(replayRow, {
+            sourceItem: lockedMaterializationContext.sourceItem,
+            sourceWorkflowId: lockedSourceWorkflowApproval.workflowId,
+          });
+          const existingRow = await fetchInterventionWithCase(replayRow.id, runner, { forUpdate: true });
+          return {
+            interventionId: normalisePositiveInteger(replayRow.id),
+            interventionRow: existingRow || replayRow,
+            materializationReplayed: true,
+          };
+        }
+      }
+
+      const [result] = await runner.query(
+        `INSERT INTO iset_case_intervention
          (case_id,
           action_plan_id,
           intervention_code,
@@ -59957,12 +62849,27 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         createdBy,
         reviewedByStaffProfileId,
         ...reviewedAtInsertParams,
-      ]
-    );
+        ]
+      );
 
-    await pool.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [planId]);
+      await runner.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [planId]);
+      const insertedInterventionId = result.insertId;
+      let insertedInterventionRow = await fetchInterventionWithCase(insertedInterventionId, runner);
+      await syncInterventionProposalCompatibility(insertedInterventionRow, runner);
+      insertedInterventionRow = await fetchInterventionWithCase(insertedInterventionId, runner);
+      return {
+        interventionId: insertedInterventionId,
+        interventionRow: insertedInterventionRow,
+        materializationReplayed: false,
+      };
+    };
 
-    const interventionId = result.insertId;
+    const persistedCreate = approvedMaterializationContext
+      ? await runInterventionDecisionCoreTransaction(pool, persistInterventionCreate)
+      : await persistInterventionCreate(pool);
+    const interventionId = persistedCreate.interventionId;
+    let interventionRow = persistedCreate.interventionRow;
+    const materializationReplayed = persistedCreate.materializationReplayed;
     if (isBackloadMode) {
       try {
         await seedParticipantDetailsFromBackloadIntervention({
@@ -59980,9 +62887,6 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         console.warn('[intervention] failed to seed participant details from backload intervention', seedErr?.message || seedErr);
       }
     }
-    let interventionRow = await fetchInterventionWithCase(interventionId);
-    await syncInterventionProposalCompatibility(interventionRow);
-    interventionRow = await fetchInterventionWithCase(interventionId);
     let interventionReviewWorkflowUpdated = null;
     if (
       !isBackloadMode &&
@@ -60015,6 +62919,10 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
               caseId: interventionRow.case_id,
               payload: {
                 case_id: interventionRow.case_id,
+                application_id:
+                  normalisePositiveInteger(interventionReviewWorkflowUpdated?.application_id) ||
+                  normalisePositiveInteger(reviewWorkflowSubject?.applicationId) ||
+                  null,
                 action_plan_id: planId,
                 intervention_id: interventionId,
                 proposal_id:
@@ -60066,6 +62974,9 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       interventionRow = await fetchInterventionWithCase(interventionId);
     }
     const payload = mapInterventionRow(interventionRow);
+    if (materializationReplayed) {
+      return res.status(200).json(payload);
+    }
     if (isBackloadMode) {
       try {
         const actorUserId = await resolveOrCreateUserIdFromAuth(req);
@@ -60084,7 +62995,14 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     }
     await refreshFinancePotSums();
     await markIlmpNeedsReviewForCase(planRow.case_id);
-    if (!isBackloadMode && shouldIncludeInterventionForCfa(createInterventionState)) {
+    if (
+      !isBackloadMode &&
+      shouldIncludeFundedInterventionForCfa(
+        createInterventionState,
+        interventionRow,
+        planRow?.funding_stream || null
+      )
+    ) {
       try {
         const actorUserId = await resolveOrCreateUserIdFromAuth(req);
         const staffProfileId = resolveActiveStaffProfileId(req);
@@ -60106,7 +63024,12 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     res.status(201).json(payload);
   } catch (error) {
     console.error('POST /api/action-plans/:id/interventions failed:', error);
-    res.status(500).json({ error: 'create_intervention_failed', detail: error?.message || String(error) });
+    const statusCode = Number.isInteger(error?.status) ? error.status : 500;
+    res.status(statusCode).json({
+      error: error?.code || 'create_intervention_failed',
+      message: error?.publicMessage || undefined,
+      detail: error?.message || String(error),
+    });
   }
 });
 
@@ -60126,6 +63049,7 @@ app.post('/api/interventions/:id/revise', async (req, res) => {
     if (accessError) {
       return res.status(accessError.status).json(accessError.body);
     }
+    assertOperationalInterventionRow(sourceRow, { operation: 'revise' });
 
     const sourceStatus = normaliseInterventionStatus(sourceRow.status, null);
     if (!REVISION_ELIGIBLE_INTERVENTION_STATUSES.has(sourceStatus)) {
@@ -60274,7 +63198,12 @@ app.post('/api/interventions/:id/revise', async (req, res) => {
     return res.status(201).json(mapInterventionRow(revisionRow));
   } catch (error) {
     console.error('POST /api/interventions/:id/revise failed:', error);
-    return res.status(500).json({ error: 'create_intervention_revision_failed', detail: error?.message || String(error) });
+    const status = Number.isInteger(error?.status) ? error.status : 500;
+    return res.status(status).json({
+      error: error?.code || 'create_intervention_revision_failed',
+      message: error?.publicMessage || undefined,
+      detail: status >= 500 ? (error?.message || String(error)) : undefined,
+    });
   }
 });
 
@@ -60294,6 +63223,7 @@ app.get('/api/interventions/:id/payment-lines', async (req, res) => {
     if (accessError) {
       return res.status(accessError.status).json(accessError.body);
     }
+    assertOperationalInterventionRow(interventionRow, { operation: 'load payment lines for' });
 
     const [rows] = await pool.query(
       `SELECT
@@ -60366,7 +63296,12 @@ app.get('/api/interventions/:id/payment-lines', async (req, res) => {
     });
   } catch (error) {
     console.error('GET /api/interventions/:id/payment-lines failed:', error);
-    return res.status(500).json({ error: 'fetch_intervention_payment_lines_failed', detail: error?.message || String(error) });
+    const status = Number.isInteger(error?.status) ? error.status : 500;
+    return res.status(status).json({
+      error: error?.code || 'fetch_intervention_payment_lines_failed',
+      message: error?.publicMessage || undefined,
+      detail: status >= 500 ? (error?.message || String(error)) : undefined,
+    });
   }
 });
 
@@ -60413,6 +63348,7 @@ app.post('/api/interventions/:id/assessment/recall', async (req, res) => {
       await conn.rollback();
       return res.status(accessError.status).json(accessError.body);
     }
+    assertOperationalInterventionRow(interventionRow, { operation: 'recall' });
 
     const currentState = resolveInterventionStateFields({
       status: interventionRow.status,
@@ -60439,8 +63375,11 @@ app.post('/api/interventions/:id/assessment/recall', async (req, res) => {
 
     const actorStaffProfileId = requesterStaffProfileId || null;
     const actorUserId = await resolveExistingUserIdFromAuth(req, conn);
-    const applicationId = await resolveApplicationIdForCaseId(interventionRow.case_id, conn);
     const workflowSourceRow = await fetchInterventionWithCase(interventionId, conn, { forUpdate: true });
+    const applicationId = resolveInterventionApplicationScopeId(
+      workflowSourceRow || interventionRow,
+      { required: true }
+    );
     const workflowSubject = buildInterventionReviewWorkflowSubject(workflowSourceRow || interventionRow);
     const workflowEnabled = await isReviewWorkflowEnabledForType(workflowSubject.workflowType, conn);
     if (workflowEnabled) {
@@ -60592,8 +63531,13 @@ app.post('/api/interventions/:id/assessment/recall', async (req, res) => {
     if (conn) {
       try { await conn.rollback(); } catch (_) {}
     }
+    const status = Number.isInteger(error?.status) ? error.status : 500;
     console.error('POST /api/interventions/:id/assessment/recall failed:', error);
-    return res.status(500).json({ error: 'intervention_recall_failed', detail: error?.message || String(error) });
+    return res.status(status).json({
+      error: error?.code || 'intervention_recall_failed',
+      message: error?.publicMessage || undefined,
+      detail: status >= 500 ? (error?.message || String(error)) : undefined,
+    });
   } finally {
     if (conn) conn.release();
   }
@@ -60642,6 +63586,7 @@ app.post('/api/interventions/:id/review-workflow/action', async (req, res) => {
       await conn.rollback();
       return res.status(accessError.status).json({ success: false, ...accessError.body });
     }
+    assertOperationalInterventionRow(interventionRow, { operation: 'perform a review action on' });
 
     const workflowSubject = buildInterventionReviewWorkflowSubject(interventionRow);
     const workflowEnabled = await isReviewWorkflowEnabledForType(workflowSubject.workflowType, conn);
@@ -60782,11 +63727,11 @@ app.post('/api/interventions/:id/review-workflow/action', async (req, res) => {
     console.error('POST /api/interventions/:id/review-workflow/action failed:', error);
     return res.status(status).json({
       success: false,
-      error: error?.message || 'intervention_review_action_failed',
+      error: error?.code || error?.message || 'intervention_review_action_failed',
       message:
-        error?.message === 'review_workflow_note_required'
+        error?.publicMessage || (error?.message === 'review_workflow_note_required'
           ? 'A note is required for this Regional Manager review action.'
-          : undefined,
+          : undefined),
     });
   } finally {
     if (conn) conn.release();
@@ -60975,6 +63920,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
     if (!interventionRow) {
       return res.status(404).json({ error: 'intervention_not_found' });
     }
+    assertOperationalInterventionRow(interventionRow, { operation: 'edit or activate' });
     const previousStatus = normaliseInterventionStatus(interventionRow.status);
     const previousInterventionState = resolveInterventionStateFields({
       status: interventionRow.status,
@@ -61044,9 +63990,25 @@ app.patch('/api/interventions/:id', async (req, res) => {
       }
     }
     const isApplyingApprovedRevision = Number.isInteger(revisionAppliedFromInterventionId);
+    if (isApplyingApprovedRevision && !canApplyApprovedInterventionRevision(req)) {
+      return res.status(403).json({
+        error: 'intervention_revision_decision_forbidden',
+        message: 'Only Decision Makers can approve and apply an intervention revision.',
+      });
+    }
     let revisionDraftRow = null;
     let revisionDraftMetadata = null;
+    let approvedRevisionApplicationContext = null;
+    const revisionAppliedAt = isApplyingApprovedRevision ? new Date().toISOString() : null;
     if (isApplyingApprovedRevision) {
+      try {
+        assertInterventionRevisionApplyPayloadOwnership({ body });
+      } catch (error) {
+        return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+          error: error?.code || error?.message || 'approved_revision_packet_mismatch',
+          message: error?.publicMessage || error?.message || 'The approved revision packet does not match.',
+        });
+      }
       if (!REVISION_ELIGIBLE_INTERVENTION_STATUSES.has(previousInterventionState.effectiveStatus || previousStatus)) {
         return res.status(409).json({
           error: 'invalid_revision_target_status',
@@ -61094,24 +64056,47 @@ app.patch('/api/interventions/:id', async (req, res) => {
       if (revisionApprovalBlock) {
         return res.status(403).json(revisionApprovalBlock);
       }
+      try {
+        approvedRevisionApplicationContext = validateApprovedInterventionRevisionApplicationRequest({
+          revisionDraftRow,
+          requestedCode: body.code,
+          requestedTitle: body.title,
+          requestedStartDate: startDateValue,
+          requestedEndDate: endDateValue,
+          requestedDurationDays: body.durationDays,
+          requestedCost: plannedCostValue,
+          requestedNotes: body.notes,
+          requestedNoc: body.noc,
+          requestedNocVersion: body.nocVersion,
+        });
+      } catch (error) {
+        return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+          error: error?.code || error?.message || 'approved_revision_packet_mismatch',
+          message: error?.publicMessage || error?.message || 'The approved revision packet does not match.',
+        });
+      }
       approvedRevisionReviewWorkflowSubject = buildInterventionReviewWorkflowSubject(revisionDraftRow);
       approvedRevisionReviewWorkflowEnabled = await isReviewWorkflowEnabledForType(
         approvedRevisionReviewWorkflowSubject.workflowType,
         pool
       );
-      if (approvedRevisionReviewWorkflowEnabled) {
-        const revisionReviewWorkflow = await fetchInterventionReviewWorkflow(
-          pool,
-          approvedRevisionReviewWorkflowSubject
-        );
-        if (!revisionReviewWorkflow || revisionReviewWorkflow.current_stage !== REVIEW_STAGES.NwacReview) {
-          return res.status(409).json({
-            error: 'review_workflow_not_ready_for_nwac',
-            message: 'The Regional Manager must submit this intervention revision for NWAC approval before it can be applied.',
-          });
-        }
-        approvedRevisionReviewWorkflowAction = REVIEW_ACTIONS.NwacApprove;
+      if (!approvedRevisionReviewWorkflowEnabled) {
+        return res.status(409).json({
+          error: 'intervention_revision_review_workflow_required',
+          message: 'This intervention revision requires the two-step review workflow before it can be applied.',
+        });
       }
+      const revisionReviewWorkflow = await fetchInterventionReviewWorkflow(
+        pool,
+        approvedRevisionReviewWorkflowSubject
+      );
+      if (!revisionReviewWorkflow || revisionReviewWorkflow.current_stage !== REVIEW_STAGES.NwacReview) {
+        return res.status(409).json({
+          error: 'review_workflow_not_ready_for_nwac',
+          message: 'The Regional Manager must submit this intervention revision for final decision before it can be applied.',
+        });
+      }
+      approvedRevisionReviewWorkflowAction = REVIEW_ACTIONS.NwacApprove;
     }
 
     const originalPlanId = interventionRow.action_plan_id;
@@ -61183,6 +64168,72 @@ app.patch('/api/interventions/:id', async (req, res) => {
       }
     }
 
+    const shouldInspectInterventionReviewWorkflow =
+      previousInterventionState.reviewStatus === 'changes_requested' ||
+      previousInterventionState.reviewStatus === 'approved' ||
+      previousInterventionState.reviewStatus === 'rejected' ||
+      (
+        statusChangeRequested &&
+        nextStatusPersistence?.reviewStatus === 'submitted'
+      );
+    if (
+      shouldInspectInterventionReviewWorkflow &&
+      interventionReviewWorkflowSubject.workflowType &&
+      !interventionReviewWorkflow
+    ) {
+      interventionReviewWorkflow = await fetchInterventionReviewWorkflow(
+        pool,
+        interventionReviewWorkflowSubject
+      );
+    }
+
+    try {
+      assertInterventionDecisionPayloadOwnership({
+        body,
+        isRecordingProposalDecision,
+      });
+    } catch (error) {
+      return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+        error: error?.code || error?.message || 'intervention_submitted_packet_immutable',
+        message: error?.publicMessage || error?.message || 'The submitted intervention packet is read-only.',
+      });
+    }
+
+    try {
+      assertInterventionFinalDecisionMutationAllowed({
+        reviewWorkflow: interventionReviewWorkflow,
+        interventionRow,
+        body,
+        nextStatusPersistence,
+        isApplyingApprovedRevision,
+      });
+    } catch (error) {
+      return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+        error: error?.code || error?.message || 'intervention_final_decision_locked',
+        message: error?.publicMessage || error?.message || 'This intervention decision is final.',
+      });
+    }
+
+    if (
+      previousInterventionState.reviewStatus === 'draft' ||
+      previousInterventionState.reviewStatus === 'changes_requested'
+    ) {
+      try {
+        assertInterventionSubmitterOwnedMutationAllowed({
+          interventionRow,
+          reviewWorkflow: interventionReviewWorkflow,
+          actorStaffProfileId: resolveActiveStaffProfileId(req),
+          actorRole: role || resolveStaffRole(req) || null,
+          proposalMutationRequested: true,
+        });
+      } catch (error) {
+        return res.status(Number.isInteger(error?.status) ? error.status : 403).json({
+          error: error?.code || error?.message || 'intervention_submitter_actor_forbidden',
+          message: error?.publicMessage || error?.message || 'This intervention request is not editable by the current user.',
+        });
+      }
+    }
+
     if (
       INTERVENTION_REVIEW_DECISION_SOURCE_STATUSES.has(previousReviewStatusForDecision) &&
       !isRecordingProposalDecision
@@ -61202,7 +64253,11 @@ app.patch('/api/interventions/:id', async (req, res) => {
     const previousSignature = previousSnapshot
       ? buildCfaInterventionSignature(previousSnapshot)
       : null;
-    const wasIncludedInCfa = shouldIncludeInterventionForCfa(previousInterventionState);
+    const wasIncludedInCfa = shouldIncludeFundedInterventionForCfa(
+      previousInterventionState,
+      interventionRow,
+      previousPlanFundingStream
+    );
 
     const parsedInterventionMetadata = safeJsonParse(interventionRow.metadata_json, {}) || {};
     const isManualBackloadRecord = parsedInterventionMetadata?.source === 'manual_backload';
@@ -61338,8 +64393,91 @@ app.patch('/api/interventions/:id', async (req, res) => {
     const params = [];
     let metadataChanged = false;
     const metadata = { ...parsedInterventionMetadata };
-    const metadataPayload =
+    const requestedMetadataPayload =
       body.metadata && typeof body.metadata === 'object' ? body.metadata : null;
+    let metadataPayload = requestedMetadataPayload;
+    if (approvedRevisionApplicationContext) {
+      const trustedRevisionMetadata = {
+        ...(approvedRevisionApplicationContext.revisionMetadata || {}),
+      };
+      [
+        'revision',
+        'recallHistory',
+        'recall_history',
+        'approvalLetterFollowUp',
+        'approval_letter_follow_up',
+        'approvalLetterFollowUpHistory',
+        'approval_letter_follow_up_history',
+        'lastAppliedRevision',
+        'last_applied_revision',
+        'revisionHistory',
+        'revision_history',
+      ].forEach(key => delete trustedRevisionMetadata[key]);
+      const requestedReview =
+        requestedMetadataPayload?.review && typeof requestedMetadataPayload.review === 'object'
+          ? requestedMetadataPayload.review
+          : {};
+      const trustedRequestedReview = {};
+      [
+        'eiStatus',
+        'ei_status',
+        'eiNotes',
+        'ei_notes',
+        'decision',
+        'decisionNotes',
+        'decision_notes',
+        'eiDocumentId',
+        'ei_document_id',
+      ].forEach(key => {
+        if (Object.prototype.hasOwnProperty.call(requestedReview, key)) {
+          trustedRequestedReview[key] = requestedReview[key];
+        }
+      });
+      metadataPayload = {
+        ...trustedRevisionMetadata,
+        review: {
+          ...(
+            trustedRevisionMetadata.review && typeof trustedRevisionMetadata.review === 'object'
+              ? trustedRevisionMetadata.review
+              : {}
+          ),
+          ...trustedRequestedReview,
+          decision: 'approved',
+        },
+      };
+    }
+    if (isRecordingProposalDecision || isApplyingApprovedRevision) {
+      const requestedDecisionStatus = isApplyingApprovedRevision
+        ? 'approved'
+        : nextReviewStatusForDecision;
+      const requestedDecisionReview =
+        requestedMetadataPayload?.review &&
+        typeof requestedMetadataPayload.review === 'object' &&
+        !Array.isArray(requestedMetadataPayload.review)
+          ? requestedMetadataPayload.review
+          : null;
+      try {
+        assertInterventionDecisionOutcomeConsistency({
+          requestedReviewStatus: requestedDecisionStatus,
+          review: requestedDecisionReview,
+        });
+        const requestedDecisionAction =
+          requestedDecisionStatus === 'approved'
+            ? REVIEW_ACTIONS.NwacApprove
+            : requestedDecisionStatus === 'rejected'
+              ? REVIEW_ACTIONS.NwacDeny
+              : REVIEW_ACTIONS.NwacRequestChanges;
+        assertInterventionDecisionNoteReady({
+          action: requestedDecisionAction,
+          review: requestedDecisionReview,
+        });
+      } catch (error) {
+        return res.status(Number.isInteger(error?.status) ? error.status : 422).json({
+          error: error?.code || error?.message || 'intervention_decision_invalid',
+          message: error?.publicMessage || error?.message || 'The intervention decision is invalid.',
+        });
+      }
+    }
     const metadataPayloadHasProposedInterventions =
       metadataPayload &&
       (
@@ -61355,6 +64493,32 @@ app.patch('/api/interventions/:id', async (req, res) => {
         syncInterventionMetadataCompatibilityFromProposedInterventions(metadata);
       }
       metadataChanged = true;
+    }
+    const interventionApprovalRequested = Boolean(
+      (isRecordingProposalDecision && nextStatusPersistence?.reviewStatus === 'approved') ||
+      isApplyingApprovedRevision
+    );
+    if (interventionApprovalRequested) {
+      try {
+        const eiApproval = assertInterventionApprovalEiFundingAlignment({
+          metadata,
+          planFundingStream: planRow?.funding_stream,
+        });
+        await assertInterventionEiEvidenceLink(pool, {
+          documentId: eiApproval.documentId,
+          caseId: interventionRow.case_id,
+          actionPlanId: planRow?.id || planId,
+          applicationId: planRow?.application_id || interventionRow.application_id || null,
+          interventionId,
+        });
+      } catch (error) {
+        return res.status(Number(error?.status) || 422).json({
+          error: error?.code || error?.message || 'intervention_ei_approval_blocked',
+          message:
+            error?.publicMessage ||
+            'Complete the EI status and Action Plan funding checks before approval.',
+        });
+      }
     }
     const planMetadata = safeJsonParse(planRow?.metadata_json, null) || {};
     const existingPostingContext =
@@ -61428,7 +64592,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
       const revisionEntry = pruneNullish({
         kind: revisionInfo.kind || 'approved_intervention',
         draftInterventionId: revisionDraftRow?.id ? String(revisionDraftRow.id) : null,
-        appliedAt: new Date().toISOString(),
+        appliedAt: revisionAppliedAt,
         sourceStatus: previousInterventionState.effectiveStatus || previousStatus || null,
         sourceTitle:
           revisionInfo.sourceTitle ||
@@ -61454,7 +64618,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
           ...followUpHistory,
           pruneNullish({
             ...existingApprovalLetterFollowUp,
-            archivedAt: revisionEntry.appliedAt || new Date().toISOString(),
+            archivedAt: revisionEntry.appliedAt || revisionAppliedAt,
             archivedReason: 'revision_applied',
           }),
         ].filter(Boolean);
@@ -61692,6 +64856,21 @@ app.patch('/api/interventions/:id', async (req, res) => {
       nextStatusPersistence?.reviewStatus === 'submitted' &&
       previousInterventionState.reviewStatus !== 'submitted';
     if (shouldStartInterventionReviewWorkflow) {
+      try {
+        resolveInterventionApplicationScopeId({
+          ...interventionRow,
+          case_id: interventionRow.case_id,
+          action_plan_application_id: planRow?.application_id,
+          resolved_application_case_id: planRow?.application_case_id,
+        }, { required: true });
+      } catch (error) {
+        return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+          error: error?.code || error?.message || 'intervention_application_scope_required',
+          message:
+            error?.publicMessage ||
+            'Link the Action Plan to the exact application before submitting this intervention request.',
+        });
+      }
       const workflowTypeForSubmission = resolveInterventionReviewWorkflowType({
         ...interventionRow,
         action_plan_id: isReassigning ? planId : interventionRow.action_plan_id,
@@ -61701,10 +64880,15 @@ app.patch('/api/interventions/:id', async (req, res) => {
       if (reviewWorkflowEnabled) {
         const transition = getReviewTransition({
           action: REVIEW_ACTIONS.SubmitForRmReview,
+          currentStage: interventionReviewWorkflow?.current_stage || null,
           workflowType: workflowTypeForSubmission,
           role: inferUserRole(req) || resolveStaffRole(req) || null,
         });
-        if (!transition.allowed) {
+        const isSystemAdministratorReturnedSubmitterSupport =
+          previousInterventionState.reviewStatus === 'changes_requested' &&
+          interventionReviewWorkflow?.current_stage === REVIEW_STAGES.ReturnedToSubmitter &&
+          canonicaliseAccessRole(role || resolveStaffRole(req) || null) === 'System Administrator';
+        if (!transition.allowed && !isSystemAdministratorReturnedSubmitterSupport) {
           return res.status(403).json({
             error: 'review_workflow_transition_forbidden',
             message: 'This role cannot submit this intervention into Regional Manager review.',
@@ -61751,6 +64935,33 @@ app.patch('/api/interventions/:id', async (req, res) => {
       esdcPayload.interventionRelatedNOCVersion = trimmedNocVersion || null;
     }
 
+    const potFromBody = (() => {
+      if (Object.prototype.hasOwnProperty.call(body, 'potId')) {
+        if (typeof body.potId === 'string') return body.potId.trim();
+        if (Number.isFinite(body.potId)) return String(body.potId);
+        return null;
+      }
+      const metadataPotId =
+        metadataCopy.potId ?? metadataCopy.budgetPotId ?? metadataCopy.budget_pot_id ?? null;
+      if (typeof metadataPotId === 'string') return metadataPotId.trim();
+      if (Number.isFinite(metadataPotId)) return String(metadataPotId);
+      return null;
+    })();
+    if (potFromBody) {
+      try {
+        await ensureChargeablePot({
+          runner: pool,
+          potId: potFromBody,
+          postingContext,
+        });
+      } catch (error) {
+        return res.status(error.status || 400).json({
+          error: error.code || 'invalid_pot',
+          message: error.message,
+        });
+      }
+    }
+
     if (metadataChanged) {
       updates.push('metadata_json = ?');
       params.push(Object.keys(metadataCopy).length ? JSON.stringify(metadataCopy) : null);
@@ -61762,114 +64973,255 @@ app.patch('/api/interventions/:id', async (req, res) => {
 
     params.push(interventionId);
     const sql = `UPDATE iset_case_intervention SET ${updates.join(', ')} WHERE id = ?`;
-    await pool.query(sql, params);
-
-    if (planId) {
-      await pool.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [planId]);
-    }
-    if (isReassigning && originalPlanId && originalPlanId !== planId) {
-      await pool.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [originalPlanId]);
-    }
-
-    let updatedRow = await fetchInterventionWithCase(interventionId);
-    await syncInterventionProposalCompatibility(updatedRow);
-    updatedRow = await fetchInterventionWithCase(interventionId);
-    let interventionReviewWorkflowUpdated = null;
-    let interventionDecisionCaseNote = null;
-    if (
-      statusChangeRequested &&
-      nextStatusPersistence?.reviewStatus === 'submitted' &&
-      previousInterventionState.reviewStatus !== 'submitted'
-    ) {
-      const reviewWorkflowSubject = buildInterventionReviewWorkflowSubject(updatedRow);
-      const reviewWorkflowEnabled = await isReviewWorkflowEnabledForType(
-        reviewWorkflowSubject.workflowType,
-        pool
+    const decisionCore = await runInterventionDecisionCoreTransaction(pool, async (connection) => {
+      const lockedInterventionRow = await fetchInterventionWithCase(
+        interventionId,
+        connection,
+        { forUpdate: true }
       );
-      if (reviewWorkflowEnabled) {
-        interventionReviewWorkflowUpdated = await startInterventionReviewWorkflow(pool, {
-          ...reviewWorkflowSubject,
+      assertInterventionDecisionCoreVersionCurrent(interventionRow, lockedInterventionRow);
+
+      let lockedRevisionDraftRow = null;
+      if (isApplyingApprovedRevision) {
+        lockedRevisionDraftRow = await fetchInterventionWithCase(
+          revisionAppliedFromInterventionId,
+          connection,
+          { forUpdate: true }
+        );
+        assertInterventionDecisionCoreVersionCurrent(revisionDraftRow, lockedRevisionDraftRow);
+      }
+
+      const [updateResult] = await connection.query(sql, params);
+      if (Number(updateResult?.affectedRows || 0) !== 1) {
+        const updateError = new Error('intervention_decision_write_failed');
+        updateError.code = 'intervention_decision_write_failed';
+        updateError.status = 409;
+        updateError.publicMessage = 'The intervention decision could not be recorded.';
+        throw updateError;
+      }
+
+      if (planId) {
+        await connection.query(
+          'UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?',
+          [planId]
+        );
+      }
+      if (isReassigning && originalPlanId && originalPlanId !== planId) {
+        await connection.query(
+          'UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?',
+          [originalPlanId]
+        );
+      }
+
+      let coreUpdatedRow = await fetchInterventionWithCase(interventionId, connection);
+      await syncInterventionProposalCompatibility(coreUpdatedRow, connection);
+      coreUpdatedRow = await fetchInterventionWithCase(interventionId, connection);
+      let coreWorkflowUpdated = null;
+      let coreDecisionCaseNote = null;
+      let coreMaterializedInterventions = [];
+
+      if (
+        statusChangeRequested &&
+        nextStatusPersistence?.reviewStatus === 'submitted' &&
+        previousInterventionState.reviewStatus !== 'submitted'
+      ) {
+        const reviewWorkflowSubject = buildInterventionReviewWorkflowSubject(coreUpdatedRow);
+        const reviewWorkflowEnabled = await isReviewWorkflowEnabledForType(
+          reviewWorkflowSubject.workflowType,
+          connection
+        );
+        if (reviewWorkflowEnabled) {
+          coreWorkflowUpdated = await startInterventionReviewWorkflow(connection, {
+            ...reviewWorkflowSubject,
+            actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+            actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+            metadata: {
+              source: 'intervention_proposal_submit',
+              reviewStatus: nextStatusPersistence.reviewStatus,
+            },
+          });
+        }
+      }
+
+      if (
+        isRecordingProposalDecision &&
+        interventionReviewWorkflowEnabled &&
+        interventionReviewWorkflowAction
+      ) {
+        const workflowSubject = buildInterventionReviewWorkflowSubject(coreUpdatedRow);
+        const decisionWorkflowNote = normaliseString(
+          metadata?.review?.decisionNotes ??
+          metadata?.review?.decision_notes ??
+          coreUpdatedRow?.review_notes ??
+          null
+        ) || null;
+        coreWorkflowUpdated = await applyInterventionReviewWorkflowAction(connection, {
+          ...workflowSubject,
+          action: interventionReviewWorkflowAction,
           actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
           actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
-          metadata: {
-            source: 'intervention_proposal_submit',
-            reviewStatus: nextStatusPersistence.reviewStatus,
+          note: decisionWorkflowNote,
+          payload: {
+            source: 'intervention_proposal_nwac_decision',
+            reviewStatus: nextReviewStatusForDecision,
           },
         });
+        const { actorName: decisionActorName } = resolveRequestActor(req) || {};
+        const decisionActorDisplayName =
+          await resolveStaffDisplayName(connection, req) || decisionActorName || null;
+        coreDecisionCaseNote = await insertReviewWorkflowCaseNote(connection, req, {
+          caseId: coreUpdatedRow?.case_id || lockedInterventionRow?.case_id || null,
+          workflowType: workflowSubject.workflowType,
+          action: interventionReviewWorkflowAction,
+          actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+          actorDisplayName: decisionActorDisplayName || decisionActorName,
+          note: decisionWorkflowNote,
+        });
+        if (
+          interventionReviewWorkflowAction === REVIEW_ACTIONS.NwacApprove &&
+          workflowSubject.workflowType === REVIEW_WORKFLOW_TYPES.InterventionProposal
+        ) {
+          coreMaterializedInterventions =
+            await materializeApprovedInterventionProposalAdditionalItems(connection, {
+              sourceInterventionRow: coreUpdatedRow,
+              sourceReviewWorkflow: coreWorkflowUpdated,
+              actionPlanId: coreUpdatedRow.action_plan_id || planId,
+              caseId: coreUpdatedRow.case_id || lockedInterventionRow.case_id,
+              potId: potFromBody,
+              postingContext,
+              reviewedByStaffProfileId: resolveActiveStaffProfileId(req) || null,
+              eiDocumentId: normalisePositiveInteger(
+                metadata?.review?.eiDocumentId ?? metadata?.review?.ei_document_id
+              ),
+            });
+        }
       }
-    }
-    if (
-      isRecordingProposalDecision &&
-      interventionReviewWorkflowEnabled &&
-      interventionReviewWorkflowAction
-    ) {
-      const workflowSubject = buildInterventionReviewWorkflowSubject(updatedRow);
-      const decisionWorkflowNote = normaliseString(
-        metadata?.review?.decisionNotes ??
-        metadata?.review?.decision_notes ??
-        updatedRow?.review_notes ??
-        null
-      ) || null;
-      interventionReviewWorkflowUpdated = await applyInterventionReviewWorkflowAction(pool, {
-        ...workflowSubject,
-        action: interventionReviewWorkflowAction,
-        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
-        actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
-        note: decisionWorkflowNote,
-        payload: {
-          source: 'intervention_proposal_nwac_decision',
-          reviewStatus: nextReviewStatusForDecision,
-        },
-      });
-      const { actorName: decisionActorName } = resolveRequestActor(req) || {};
-      const decisionActorDisplayName = await resolveStaffDisplayName(pool, req) || decisionActorName || null;
-      interventionDecisionCaseNote = await insertReviewWorkflowCaseNote(pool, req, {
-        caseId: updatedRow?.case_id || interventionRow?.case_id || null,
-        workflowType: workflowSubject.workflowType,
-        action: interventionReviewWorkflowAction,
-        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
-        actorDisplayName: decisionActorDisplayName || decisionActorName,
-        note: decisionWorkflowNote,
-      });
-    }
-    if (
-      isApplyingApprovedRevision &&
-      approvedRevisionReviewWorkflowEnabled &&
-      approvedRevisionReviewWorkflowAction &&
-      approvedRevisionReviewWorkflowSubject
-    ) {
-      const revisionDecisionWorkflowNote = normaliseString(
-        revisionDraftMetadata?.review?.decisionNotes ??
-        revisionDraftMetadata?.review?.decision_notes ??
-        null
-      ) || null;
-      interventionReviewWorkflowUpdated = await applyInterventionReviewWorkflowAction(pool, {
-        ...approvedRevisionReviewWorkflowSubject,
-        action: approvedRevisionReviewWorkflowAction,
-        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
-        actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
-        note: revisionDecisionWorkflowNote,
-        payload: {
-          source: 'intervention_revision_nwac_decision',
-          reviewStatus: 'approved',
-          appliedToInterventionId: interventionId,
-        },
-      });
-      const { actorName: revisionDecisionActorName } = resolveRequestActor(req) || {};
-      const revisionDecisionActorDisplayName = await resolveStaffDisplayName(pool, req) || revisionDecisionActorName || null;
-      interventionDecisionCaseNote = await insertReviewWorkflowCaseNote(pool, req, {
-        caseId: revisionDraftRow?.case_id || updatedRow?.case_id || interventionRow?.case_id || null,
-        workflowType: approvedRevisionReviewWorkflowSubject.workflowType,
-        action: approvedRevisionReviewWorkflowAction,
-        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
-        actorDisplayName: revisionDecisionActorDisplayName || revisionDecisionActorName,
-        note: revisionDecisionWorkflowNote,
-      });
-    }
-    if (interventionReviewWorkflowUpdated) {
-      updatedRow = await fetchInterventionWithCase(interventionId);
-    }
+
+      if (
+        isApplyingApprovedRevision &&
+        approvedRevisionReviewWorkflowEnabled &&
+        approvedRevisionReviewWorkflowAction &&
+        approvedRevisionReviewWorkflowSubject
+      ) {
+        const revisionDecisionWorkflowNote = normaliseString(
+          metadata?.review?.decisionNotes ??
+          metadata?.review?.decision_notes ??
+          null
+        ) || null;
+        const lockedRevisionWorkflowSubject = buildInterventionReviewWorkflowSubject(
+          lockedRevisionDraftRow
+        );
+        coreWorkflowUpdated = await applyInterventionReviewWorkflowAction(connection, {
+          ...lockedRevisionWorkflowSubject,
+          action: approvedRevisionReviewWorkflowAction,
+          actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+          actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+          note: revisionDecisionWorkflowNote,
+          payload: {
+            source: 'intervention_revision_nwac_decision',
+            reviewStatus: 'approved',
+            appliedToInterventionId: interventionId,
+          },
+        });
+
+        const lockedRevisionMetadata = safeJsonParse(
+          lockedRevisionDraftRow?.metadata_json,
+          {}
+        ) || {};
+        lockedRevisionMetadata.review = {
+          ...(
+            lockedRevisionMetadata.review && typeof lockedRevisionMetadata.review === 'object'
+              ? lockedRevisionMetadata.review
+              : {}
+          ),
+          ...(
+            metadata?.review && typeof metadata.review === 'object'
+              ? metadata.review
+              : {}
+          ),
+          decision: 'approved',
+        };
+        lockedRevisionMetadata.revisionApplication = pruneNullish({
+          status: 'applied',
+          appliedToInterventionId: String(interventionId),
+          appliedAt: revisionAppliedAt,
+          appliedByStaffProfileId: resolveActiveStaffProfileId(req) || null,
+        });
+        const [revisionUpdateResult] = await connection.query(
+          `UPDATE iset_case_intervention
+              SET status = 'approved',
+                  delivery_status = 'planned',
+                  reviewed_by_staff_profile_id = ?,
+                  reviewed_at = NOW(),
+                  review_notes = ?,
+                  metadata_json = ?,
+                  updated_at = NOW()
+            WHERE id = ?`,
+          [
+            resolveActiveStaffProfileId(req) || null,
+            revisionDecisionWorkflowNote,
+            JSON.stringify(lockedRevisionMetadata),
+            revisionAppliedFromInterventionId,
+          ]
+        );
+        if (Number(revisionUpdateResult?.affectedRows || 0) !== 1) {
+          const revisionError = new Error('intervention_revision_finalize_failed');
+          revisionError.code = 'intervention_revision_finalize_failed';
+          revisionError.status = 409;
+          revisionError.publicMessage = 'The approved intervention revision could not be finalized.';
+          throw revisionError;
+        }
+        let finalizedRevisionRow = await fetchInterventionWithCase(
+          revisionAppliedFromInterventionId,
+          connection
+        );
+        await syncInterventionProposalCompatibility(finalizedRevisionRow, connection);
+        finalizedRevisionRow = await fetchInterventionWithCase(
+          revisionAppliedFromInterventionId,
+          connection
+        );
+
+        const { actorName: revisionDecisionActorName } = resolveRequestActor(req) || {};
+        const revisionDecisionActorDisplayName =
+          await resolveStaffDisplayName(connection, req) || revisionDecisionActorName || null;
+        coreDecisionCaseNote = await insertReviewWorkflowCaseNote(connection, req, {
+          caseId:
+            lockedRevisionDraftRow?.case_id ||
+            coreUpdatedRow?.case_id ||
+            lockedInterventionRow?.case_id ||
+            null,
+          workflowType: lockedRevisionWorkflowSubject.workflowType,
+          action: approvedRevisionReviewWorkflowAction,
+          actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+          actorDisplayName: revisionDecisionActorDisplayName || revisionDecisionActorName,
+          note: revisionDecisionWorkflowNote,
+        });
+      }
+
+      if (coreWorkflowUpdated) {
+        coreUpdatedRow = await fetchInterventionWithCase(interventionId, connection);
+      }
+      return {
+        updatedRow: coreUpdatedRow,
+        interventionReviewWorkflowUpdated: coreWorkflowUpdated,
+        interventionDecisionCaseNote: coreDecisionCaseNote,
+        materializedInterventions: coreMaterializedInterventions,
+      };
+    });
+    let updatedRow = decisionCore.updatedRow;
+    const interventionReviewWorkflowUpdated = decisionCore.interventionReviewWorkflowUpdated;
+    const interventionDecisionCaseNote = decisionCore.interventionDecisionCaseNote;
     const payload = mapInterventionRow(updatedRow);
+    if (decisionCore.materializedInterventions.length) {
+      payload.materializedInterventionIds = decisionCore.materializedInterventions
+        .map(item => normalisePositiveInteger(item.interventionId))
+        .filter(Boolean);
+      payload.materializedInterventions = decisionCore.materializedInterventions.map(item => ({
+        id: normalisePositiveInteger(item.interventionId),
+        sourceItemId: item.sourceItemId,
+        replayed: Boolean(item.replayed),
+      }));
+    }
     const nextInterventionState = statusChangeRequested
       ? resolveInterventionStateFields({
           status: statusPersistence.legacyStatus,
@@ -61935,6 +65287,10 @@ app.patch('/api/interventions/:id', async (req, res) => {
           caseId: updatedRow.case_id,
           payload: {
             case_id: updatedRow.case_id,
+            application_id:
+              normalisePositiveInteger(interventionReviewWorkflowUpdated?.application_id) ||
+              normalisePositiveInteger(interventionReviewWorkflowSubject?.applicationId) ||
+              null,
             action_plan_id: updatedRow.action_plan_id || planId || null,
             intervention_id: updatedRow.id || interventionId,
             proposal_id: interventionReviewWorkflowUpdated?.proposal_id || interventionReviewWorkflowSubject?.proposalId || null,
@@ -61999,8 +65355,25 @@ app.patch('/api/interventions/:id', async (req, res) => {
           caseId: updatedRow.case_id,
 	          payload: appendReviewNotePayloadFields({
 	            case_id: updatedRow.case_id,
+	            application_id:
+	              normalisePositiveInteger(interventionReviewWorkflowUpdated?.application_id) ||
+	              normalisePositiveInteger(interventionReviewWorkflow?.application_id) ||
+	              normalisePositiveInteger(
+	                (isApplyingApprovedRevision
+	                  ? approvedRevisionReviewWorkflowSubject
+	                  : interventionReviewWorkflowSubject)?.applicationId
+	              ) ||
+	              null,
 	            action_plan_id: updatedRow.action_plan_id || planId || null,
 	            intervention_id: updatedRow.id || interventionId,
+	            proposal_id:
+	              normalisePositiveInteger(interventionReviewWorkflowUpdated?.proposal_id) ||
+	              normalisePositiveInteger(
+	                (isApplyingApprovedRevision
+	                  ? approvedRevisionReviewWorkflowSubject
+	                  : interventionReviewWorkflowSubject)?.proposalId
+	              ) ||
+	              null,
 	            revision_intervention_id: isApplyingApprovedRevision ? revisionAppliedFromInterventionId : null,
             source_intervention_id: isApplyingApprovedRevision
               ? (updatedRow.id || interventionId)
@@ -62042,6 +65415,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
           }, decisionReason, interventionDecisionCaseNote),
           actorId,
           actorName: actorDisplayName || actorName,
+	          actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
         });
       } catch (eventErr) {
         console.warn('[events] intervention decision event failed', eventErr?.message || eventErr);
@@ -62082,43 +65456,68 @@ app.patch('/api/interventions/:id', async (req, res) => {
         console.error('[assessment-pdf] intervention assessment generation failed:', err?.message || err);
       }
     }
+    const finalInterventionAssessmentOutcome = isApplyingApprovedRevision
+      ? 'approved'
+      : nextInterventionState.reviewStatus === 'approved'
+        ? 'approved'
+        : nextInterventionState.reviewStatus === 'rejected'
+          ? 'denied'
+          : null;
+    const shouldGenerateFinalAssessmentPdf = Boolean(finalInterventionAssessmentOutcome) && (
+      isApplyingApprovedRevision ||
+      previousInterventionState.reviewStatus !== nextInterventionState.reviewStatus
+    );
     const shouldGenerateApprovedAssessmentPdf =
-      (
-        previousInterventionState.reviewStatus !== 'approved' &&
-        nextInterventionState.reviewStatus === 'approved'
-      ) ||
-      isApplyingApprovedRevision;
-    if (shouldGenerateApprovedAssessmentPdf) {
+      shouldGenerateFinalAssessmentPdf && finalInterventionAssessmentOutcome === 'approved';
+    if (shouldGenerateFinalAssessmentPdf) {
       try {
         const { actorName } = resolveRequestActor(req);
         const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
-        const approvedSignatureFallback = {
+        const decisionSignatureFallback = {
           signerName: actorDisplayName || actorName || null,
           signedAt: new Date().toISOString()
         };
         const actorUserId = await resolveOrCreateUserIdFromAuth(req);
+        const finalReviewSubjectRow = isApplyingApprovedRevision ? revisionDraftRow : updatedRow;
+        const finalSnapshotSourceRow = isApplyingApprovedRevision
+          ? revisionDraftRow
+          : revisionSourceInterventionId
+            ? await fetchInterventionWithCase(revisionSourceInterventionId)
+            : null;
         await generateAndStoreInterventionAssessmentPdf({
           caseId: updatedRow?.case_id || interventionRow?.case_id || null,
           interventionRow: updatedRow,
-          sourceInterventionRow: isApplyingApprovedRevision ? revisionDraftRow : null,
+          sourceInterventionRow: finalSnapshotSourceRow,
+          reviewSubjectInterventionRow: finalReviewSubjectRow,
           actorUserId,
-          approvedSignature: approvedSignatureFallback,
-          approved: true,
+          approvedSignature: decisionSignatureFallback,
+          finalDecisionOutcome: finalInterventionAssessmentOutcome,
           connection: pool
         });
       } catch (err) {
-        console.error('[assessment-pdf] approved intervention assessment generation failed:', err?.message || err);
+        console.error('[assessment-pdf] final intervention assessment generation failed:', err?.message || err);
       }
     }
     const nextPlanFundingStream =
       planRow?.funding_stream || updatedRow?.plan_funding_stream || null;
     const nextSnapshot = buildCfaInterventionSnapshot(updatedRow, nextPlanFundingStream);
     const nextSignature = nextSnapshot ? buildCfaInterventionSignature(nextSnapshot) : null;
-    const isIncludedInCfa = shouldIncludeInterventionForCfa(nextInterventionState);
+    const isIncludedInCfa = shouldIncludeFundedInterventionForCfa(
+      nextInterventionState,
+      updatedRow,
+      nextPlanFundingStream
+    );
+    const isZeroFundedFinalApproval =
+      shouldGenerateApprovedAssessmentPdf &&
+      !interventionHasFundedCostLines(updatedRow, nextPlanFundingStream);
     const snapshotChanged = previousSignature !== nextSignature;
     const summaryLabel = payload?.title || (payload?.code ? `Intervention ${payload.code}` : 'Intervention');
     const cfaTargets = [];
-    if (isReassigning) {
+    if (isZeroFundedFinalApproval) {
+      // An approved request without funded cost lines produces an approval letter only.
+      // Do not regenerate or supersede a plan CFA merely because another intervention
+      // on the same plan remains funded.
+    } else if (isReassigning) {
       if (wasIncludedInCfa && Number.isInteger(originalPlanId)) {
         cfaTargets.push({
           actionPlanId: originalPlanId,
@@ -62153,28 +65552,6 @@ app.patch('/api/interventions/:id', async (req, res) => {
       if (planStatusLower === 'draft') {
         await pool.query('UPDATE iset_case_action_plan SET status = ?, activated_at = NOW(), updated_at = NOW() WHERE id = ?', ['active', planId]);
         await recomputeCaseStatus(planRow.case_id, null, { allowReopenFinal: true });
-      }
-    }
-    const potFromBody =
-      (() => {
-        if (Object.prototype.hasOwnProperty.call(body, 'potId')) {
-          if (typeof body.potId === 'string') return body.potId.trim();
-          if (Number.isFinite(body.potId)) return String(body.potId);
-          return null;
-        }
-        return payload.potId || null;
-      })();
-    let glProjectCodeUsed = null;
-    if (potFromBody) {
-      try {
-        const { glProjectCodeUsed: gl } = await ensureChargeablePot({
-          runner: pool,
-          potId: potFromBody,
-          postingContext
-        });
-        glProjectCodeUsed = gl;
-      } catch (err) {
-        return res.status(err.status || 400).json({ error: err.code || 'invalid_pot', message: err.message });
       }
     }
     const historicalBackloadPotId =
@@ -62238,7 +65615,12 @@ app.patch('/api/interventions/:id', async (req, res) => {
     res.status(200).json(payload);
   } catch (error) {
     console.error('PATCH /api/interventions/:id failed:', error);
-    res.status(500).json({ error: 'update_intervention_failed', detail: error?.message || String(error) });
+    const statusCode = Number.isInteger(error?.status) ? error.status : 500;
+    res.status(statusCode).json({
+      error: error?.code || 'update_intervention_failed',
+      message: error?.publicMessage || undefined,
+      detail: error?.message || String(error),
+    });
   }
 });
 
@@ -62318,6 +65700,7 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     if (!interventionRow) {
       return res.status(404).json({ error: 'intervention_not_found' });
     }
+    assertOperationalInterventionRow(interventionRow, { operation: 'close' });
 
     const planId = interventionRow.action_plan_id;
     if (!planId) {
@@ -62338,6 +65721,18 @@ app.post('/api/interventions/:id/close', async (req, res) => {
       status: interventionRow.status,
       delivery_status: interventionRow.delivery_status || null,
     });
+    const metadata = safeJsonParse(interventionRow.metadata_json, null) || {};
+    try {
+      const finalApproval = isManualBackloadInterventionMetadata(metadata)
+        ? null
+        : await resolveInterventionFinalApprovalWorkflow(pool, interventionRow);
+      assertInterventionCloseAllowed(interventionRow, { finalApproval });
+    } catch (error) {
+      return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+        error: error?.code || error?.message || 'intervention_close_requires_final_approval',
+        message: error?.publicMessage || error?.message || 'This intervention is not ready to close.',
+      });
+    }
     if (isInterventionClosedStatus(currentInterventionState)) {
       return res.status(200).json(mapInterventionRow(interventionRow));
     }
@@ -62348,7 +65743,6 @@ app.post('/api/interventions/:id/close', async (req, res) => {
       });
     }
 
-    const metadata = safeJsonParse(interventionRow.metadata_json, null) || {};
     const statusPersistence = buildInterventionStatusPersistence(statusValue, {
       deliveryStatus: deliveryStatusValue ?? interventionRow.delivery_status ?? null,
     });
@@ -62459,7 +65853,12 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     res.status(200).json(payload);
   } catch (error) {
     console.error('POST /api/interventions/:id/close failed:', error);
-    res.status(500).json({ error: 'close_intervention_failed', detail: error?.message || String(error) });
+    const status = Number.isInteger(error?.status) ? error.status : 500;
+    res.status(status).json({
+      error: error?.code || 'close_intervention_failed',
+      message: error?.publicMessage || undefined,
+      detail: status >= 500 ? (error?.message || String(error)) : undefined,
+    });
   }
 });
 
@@ -62479,6 +65878,20 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
     if (accessError) {
       return res.status(accessError.status).json(accessError.body);
     }
+    assertOperationalInterventionRow(interventionRow, { operation: 'delete' });
+
+    try {
+      assertInterventionDeleteAllowed({
+        interventionRow,
+        actorStaffProfileId: resolveActiveStaffProfileId(req),
+        actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+      });
+    } catch (error) {
+      return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+        error: error?.code || error?.message || 'intervention_delete_forbidden',
+        message: error?.publicMessage || error?.message || 'This intervention cannot be deleted.',
+      });
+    }
 
     const planStatusRaw = String(interventionRow.action_plan_status || '').toLowerCase();
     if (planStatusRaw === 'closed' || planStatusRaw === 'archived') {
@@ -62489,17 +65902,9 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
       });
     }
 
-    const status = normaliseInterventionStatus(interventionRow.status);
     const interventionMetadata = safeJsonParse(interventionRow.metadata_json, {}) || {};
     const isManualBackloadRecord = interventionMetadata?.source === 'manual_backload';
-    const wasIncludedInCfa = shouldIncludeInterventionForCfa(status);
-    if (!OPEN_INTERVENTION_PROPOSAL_STATUSES.has(status) && !['approved', 'rejected'].includes(status)) {
-      return res.status(409).json({
-        error: 'invalid_status',
-        detail: 'only_deletable_interventions_allowed',
-        message: 'Only draft, submitted, in-review, changes requested, approved, or denied interventions can be deleted. Close or cancel instead.'
-      });
-    }
+    const wasIncludedInCfa = false;
 
     const [draftPacketRows] = await pool.query(
       "SELECT id FROM payment_packet WHERE intervention_id = ? AND status IN ('draft','ready_to_send')",
@@ -62570,7 +65975,12 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
     res.status(200).json({ success: true, deleted: true, id: interventionId });
   } catch (error) {
     console.error('POST /api/interventions/:id/delete failed:', error);
-    res.status(500).json({ error: 'delete_intervention_failed', detail: error?.message || String(error) });
+    const status = Number.isInteger(error?.status) ? error.status : 500;
+    res.status(status).json({
+      error: error?.code || 'delete_intervention_failed',
+      message: error?.publicMessage || undefined,
+      detail: status >= 500 ? (error?.message || String(error)) : undefined,
+    });
   }
 });
 
@@ -62749,6 +66159,15 @@ app.post('/api/cases/:id/reopen-recovery', async (req, res) => {
         await connection.rollback();
         return res.status(404).json({ error: 'intervention_not_found' });
       }
+      try {
+        assertOperationalInterventionRow(selectedInterventionRow, { operation: 'reactivate' });
+      } catch (error) {
+        await connection.rollback();
+        return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+          error: error?.code || 'applied_revision_evidence_read_only',
+          message: error?.publicMessage || error?.message,
+        });
+      }
       if (!isInterventionClosedStatus(selectedInterventionRow)) {
         await connection.rollback();
         return res.status(409).json({
@@ -62877,8 +66296,9 @@ app.post('/api/cases/:id/reopen-recovery', async (req, res) => {
               closed_at = NULL,
               open_intervention_count = (
                 SELECT COUNT(*)
-                  FROM iset_case_intervention ci
+                 FROM iset_case_intervention ci
                  WHERE ci.case_id = c.id
+                   AND ${buildOperationalInterventionSql('ci')}
                    AND (
                      LOWER(TRIM(COALESCE(ci.delivery_status, ''))) IN ('planned', 'in_progress', 'suspended')
                      OR (
@@ -62889,8 +66309,9 @@ app.post('/api/cases/:id/reopen-recovery', async (req, res) => {
               ),
               total_intervention_count = (
                 SELECT COUNT(*)
-                  FROM iset_case_intervention ci
+                 FROM iset_case_intervention ci
                  WHERE ci.case_id = c.id
+                   AND ${buildOperationalInterventionSql('ci')}
                    AND (
                      LOWER(TRIM(COALESCE(ci.delivery_status, ''))) IN ('planned', 'in_progress', 'suspended', 'completed', 'cancelled')
                      OR (
@@ -63122,7 +66543,9 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
         WHERE ci.action_plan_id = ?`,
       [planId]
     );
-    const mappedInterventions = interventionRows.map(mapInterventionRow).filter(Boolean);
+    const { operationalRows: operationalInterventionRows } =
+      partitionAppliedRevisionEvidenceRows(interventionRows);
+    const mappedInterventions = operationalInterventionRows.map(mapInterventionRow).filter(Boolean);
     const openInterventions = mappedInterventions
       .map(item => ({
         item,
@@ -63167,7 +66590,11 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
     }
 
     const [[maxIntervention]] = await pool.query(
-      "SELECT MAX(end_date) AS latest_end FROM iset_case_intervention WHERE action_plan_id = ? AND status NOT IN ('draft','submitted')",
+      `SELECT MAX(ci.end_date) AS latest_end
+         FROM iset_case_intervention ci
+        WHERE ci.action_plan_id = ?
+          AND ci.status NOT IN ('draft','submitted')
+          AND ${buildOperationalInterventionSql('ci')}`,
       [planId]
     );
     const latestInterventionEnd = maxIntervention?.latest_end ? toDateOnly(maxIntervention.latest_end) : null;
@@ -63349,10 +66776,16 @@ app.post('/api/action-plans/:id/delete', async (req, res) => {
     }
 
     const [interventionRows] = await pool.query(
-      'SELECT id, status FROM iset_case_intervention WHERE action_plan_id = ?',
+      `SELECT id, action_plan_id, intervention_code, status, delivery_status, metadata_json
+         FROM iset_case_intervention
+        WHERE action_plan_id = ?`,
       [planId]
     );
-    const mappedInterventions = interventionRows
+    const {
+      operationalRows: operationalInterventionRows,
+      appliedRevisionEvidenceRows,
+    } = partitionAppliedRevisionEvidenceRows(interventionRows);
+    const mappedInterventions = operationalInterventionRows
       .map(mapInterventionRow)
       .filter(Boolean)
       .map(item => ({
@@ -63360,11 +66793,20 @@ app.post('/api/action-plans/:id/delete', async (req, res) => {
         title: item.title || item.code || `Intervention ${item.id}`,
         status: item.status || 'unknown',
       }));
-    if (mappedInterventions.length > 0) {
+    const appliedRevisionEvidence = appliedRevisionEvidenceRows
+      .map(mapAppliedRevisionEvidenceRow)
+      .filter(Boolean);
+    if (mappedInterventions.length > 0 || appliedRevisionEvidence.length > 0) {
       return res.status(409).json({
-        error: 'open_interventions_block_delete',
-        message: 'Delete all interventions linked to this plan before deleting the plan.',
-        interventions: mappedInterventions
+        error: appliedRevisionEvidence.length
+          ? 'retained_revision_evidence_blocks_plan_delete'
+          : 'open_interventions_block_delete',
+        message: appliedRevisionEvidence.length
+          ? 'This plan contains retained revision decision evidence and cannot be deleted. The evidence must remain available for audit.'
+          : 'Delete all draft interventions linked to this plan before deleting the plan.',
+        interventions: mappedInterventions,
+        appliedRevisionEvidence,
+        retainedEvidenceCount: appliedRevisionEvidence.length,
       });
     }
 
@@ -63699,7 +67141,11 @@ app.patch('/api/action-plans/:id', async (req, res) => {
         });
       }
       const [[maxIntervention]] = await pool.query(
-        "SELECT MAX(end_date) AS latest_end FROM iset_case_intervention WHERE action_plan_id = ? AND status NOT IN ('draft','submitted')",
+        `SELECT MAX(ci.end_date) AS latest_end
+           FROM iset_case_intervention ci
+          WHERE ci.action_plan_id = ?
+            AND ci.status NOT IN ('draft','submitted')
+            AND ${buildOperationalInterventionSql('ci')}`,
         [planId]
       );
       const latestInterventionEnd = maxIntervention?.latest_end ? toDateOnly(maxIntervention.latest_end) : null;
@@ -63882,7 +67328,8 @@ app.patch('/api/action-plans/:id', async (req, res) => {
                                            '$.budgetPotId', ?,
                                            '$.budgetPot', ?),
                   updated_at = NOW()
-            WHERE action_plan_id = ?`,
+            WHERE action_plan_id = ?
+              AND ${buildOperationalInterventionSql('iset_case_intervention')}`,
           [newBudgetPotId, newBudgetPotId, newBudgetPotId, planId]
         );
         if (newBudgetPotId) {
@@ -63890,14 +67337,16 @@ app.patch('/api/action-plans/:id', async (req, res) => {
             `UPDATE finance_transaction ft
               JOIN iset_case_intervention i ON i.id = ft.case_intervention_id
                SET ft.budget_pot_id = ?, ft.updated_at = NOW()
-             WHERE i.action_plan_id = ?`,
+             WHERE i.action_plan_id = ?
+               AND ${buildOperationalInterventionSql('i')}`,
             [newBudgetPotId, planId]
           );
         } else {
           await pool.query(
             `DELETE ft FROM finance_transaction ft
               JOIN iset_case_intervention i ON i.id = ft.case_intervention_id
-             WHERE i.action_plan_id = ?`,
+             WHERE i.action_plan_id = ?
+               AND ${buildOperationalInterventionSql('i')}`,
             [planId]
           );
         }
@@ -66255,6 +69704,20 @@ app.post('/api/reminders', async (req, res) => {
       allowGlobal: true,
     });
     if (accessError) return res.status(accessError.status).json(accessError.body);
+    if (Number.isInteger(interventionIdValue)) {
+      const interventionRow = await fetchInterventionWithCase(interventionIdValue);
+      if (!interventionRow) {
+        return res.status(404).json({ error: 'intervention_not_found' });
+      }
+      try {
+        assertOperationalInterventionRow(interventionRow, { operation: 'attach a reminder to' });
+      } catch (error) {
+        return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+          error: error?.code || 'applied_revision_evidence_read_only',
+          message: error?.publicMessage || error?.message,
+        });
+      }
+    }
 
     const insertSql = `INSERT INTO iset_case_reminder
       (case_id, application_id, action_plan_id, intervention_id, title, description, category, status, due_at, completed_at, completed_by_staff_profile_id, assigned_staff_profile_id, metadata_json, created_by_staff_profile_id, updated_by_staff_profile_id)
@@ -66570,6 +70033,20 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
       allowGlobal: true,
     });
     if (targetAccessError) return res.status(targetAccessError.status).json(targetAccessError.body);
+  }
+  if (interventionProvided && nextInterventionId) {
+    const interventionRow = await fetchInterventionWithCase(nextInterventionId);
+    if (!interventionRow) {
+      return res.status(404).json({ error: 'intervention_not_found' });
+    }
+    try {
+      assertOperationalInterventionRow(interventionRow, { operation: 'attach a reminder to' });
+    } catch (error) {
+      return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
+        error: error?.code || 'applied_revision_evidence_read_only',
+        message: error?.publicMessage || error?.message,
+      });
+    }
   }
 
   updates.push('updated_by_staff_profile_id = ?');
@@ -67468,6 +70945,443 @@ function createCaseMessageHttpError(status, error, message, details = null) {
   return routeError;
 }
 
+function resolveCaseMessageFundingSigningWorkflowKind(workflow = {}) {
+  const normalizeKey = value => (
+    normaliseString(value) || ''
+  ).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const documentType = normalizeKey(workflow?.document_type ?? workflow?.documentType);
+  const workflowName = normalizeKey(workflow?.name);
+  if (
+    documentType === 'funding_agreement' ||
+    documentType === 'client_funding_agreement' ||
+    (!documentType && workflowName.includes('funding') && workflowName.includes('agreement'))
+  ) {
+    return 'funding_agreement';
+  }
+  if (
+    documentType === 'eft_form' ||
+    documentType === 'eft_or_wire_transfer_form' ||
+    documentType === 'eft_or_wire_transfer_direct_deposit_form' ||
+    (!documentType && workflowName.split('_').includes('eft'))
+  ) {
+    return 'eft_form';
+  }
+  return null;
+}
+
+function assertCaseMessagePostApprovalSourceApplication({
+  selectedApplicationId,
+  approvedApplicationId,
+  finalApprovalRecorded = false,
+  sourceType = 'application',
+} = {}) {
+  const selectedId = normalisePositiveInteger(selectedApplicationId);
+  const approvedId = normalisePositiveInteger(approvedApplicationId);
+  if (!finalApprovalRecorded) {
+    throw createCaseMessageHttpError(
+      422,
+      'funding_forms_final_approval_required',
+      'Funding forms can only be sent after the Decision Maker records final approval.',
+      { sourceType }
+    );
+  }
+  if (!selectedId || !approvedId || selectedId !== approvedId) {
+    throw createCaseMessageHttpError(
+      409,
+      'funding_forms_application_scope_conflict',
+      'The funding forms do not belong to the selected approved application.',
+      {
+        sourceType,
+        selectedApplicationId: selectedId || null,
+        approvedApplicationId: approvedId || null,
+      }
+    );
+  }
+  return {
+    enforced: true,
+    selectedApplicationId: selectedId,
+    approvedApplicationId: approvedId,
+    sourceType,
+  };
+}
+
+function assertCaseMessageFundingFormsPostApproval({
+  attachmentRows,
+  selectedApplicationId,
+  approvedApplicationId,
+  finalApprovalRecorded = false,
+  hasFundedCostLines = false,
+  sourceType = 'application',
+  documentTypeFallbackByWorkflowId = null,
+} = {}) {
+  const fundingForms = (Array.isArray(attachmentRows) ? attachmentRows : [])
+    .map(row => {
+      const workflowId = normalisePositiveInteger(row?.id);
+      const fallbackDocumentType = workflowId && documentTypeFallbackByWorkflowId instanceof Map
+        ? normaliseString(documentTypeFallbackByWorkflowId.get(workflowId))
+        : null;
+      const kind = resolveCaseMessageFundingSigningWorkflowKind(row) || (
+        fallbackDocumentType
+          ? resolveCaseMessageFundingSigningWorkflowKind({
+              ...row,
+              document_type: fallbackDocumentType,
+            })
+          : null
+      );
+      return kind
+        ? {
+            kind,
+            workflowId: workflowId || null,
+            hasAuthoritativeDocumentType: Boolean(
+              normaliseString(row?.document_type ?? row?.documentType) || fallbackDocumentType
+            ),
+          }
+        : null;
+    })
+    .filter(Boolean);
+  if (!fundingForms.length) {
+    return { enforced: false, reason: 'no_funding_forms' };
+  }
+  const sourceScope = assertCaseMessagePostApprovalSourceApplication({
+    selectedApplicationId,
+    approvedApplicationId,
+    finalApprovalRecorded,
+    sourceType,
+  });
+  const untypedFundingForm = fundingForms.find(form => !form.hasAuthoritativeDocumentType);
+  if (untypedFundingForm) {
+    throw createCaseMessageHttpError(
+      409,
+      'funding_forms_workflows_invalid',
+      'A selected funding form has no authoritative document type and cannot be sent safely.',
+      {
+        workflowId: untypedFundingForm.workflowId,
+        sourceType,
+      }
+    );
+  }
+  if (!hasFundedCostLines) {
+    throw createCaseMessageHttpError(
+      422,
+      'funding_forms_not_applicable',
+      'This approval has no funded cost lines, so a funding agreement or EFT form cannot be sent.',
+      {
+        sourceType,
+        applicationId: sourceScope.selectedApplicationId,
+        fundingFormKinds: Array.from(new Set(fundingForms.map(form => form.kind))),
+      }
+    );
+  }
+  return {
+    ...sourceScope,
+    fundingFormKinds: Array.from(new Set(fundingForms.map(form => form.kind))),
+  };
+}
+
+function resolveCaseMessageDecisionOutcome(
+  applicationStatusRaw,
+  caseStatusRaw,
+  explicitDecisionRaw = null
+) {
+  const normalizeStatusValue = value => {
+    if (!value) return '';
+    return String(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
+  };
+  const approvedCaseStatuses = new Set([
+    'initiated',
+    'active',
+    'dormant',
+    'ready_to_close',
+    'closed',
+    'archived',
+    'approved',
+  ]);
+  const deniedCaseStatuses = new Set([
+    'in_review',
+    'pending_approval',
+    'pending',
+    'open',
+    'submitted',
+  ]);
+  const explicitDecision = normalizeStatusValue(explicitDecisionRaw);
+  if (explicitDecision === 'approved' || explicitDecision === 'approve') return 'approved';
+  if (['denied', 'not_approved', 'reject', 'rejected', 'declined'].includes(explicitDecision)) {
+    return 'denied';
+  }
+  const appStatus = normalizeStatusValue(applicationStatusRaw);
+  const caseStatus = normalizeStatusValue(caseStatusRaw);
+  if (!appStatus) return null;
+  if (appStatus === 'approved') return 'approved';
+  if (appStatus === 'rejected' || appStatus === 'declined') return 'denied';
+  if (appStatus === 'decision_ready' || appStatus === 'completed') {
+    if (approvedCaseStatuses.has(caseStatus)) return 'approved';
+    if (deniedCaseStatuses.has(caseStatus)) return 'denied';
+  }
+  return null;
+}
+
+function resolveCaseMessageApplicationDecisionAuthorization({
+  selectedApplicationId,
+  applicationRow,
+  caseStatus,
+  explicitDecision = null,
+  reviewWorkflow = null,
+} = {}) {
+  const selectedId = normalisePositiveInteger(selectedApplicationId);
+  const applicationId = normalisePositiveInteger(
+    applicationRow?.application_id ?? applicationRow?.id
+  );
+  if (reviewWorkflow) {
+    const workflowApplicationId = normalisePositiveInteger(reviewWorkflow.application_id);
+    if (!selectedId || workflowApplicationId !== selectedId) {
+      return {
+        outcome: null,
+        applicationId: workflowApplicationId || null,
+        reason: 'workflow_application_scope_mismatch',
+        authoritativeSource: 'review_workflow',
+      };
+    }
+    if (reviewWorkflow.current_stage !== REVIEW_STAGES.FinalDecisionRecorded) {
+      return {
+        outcome: null,
+        applicationId: workflowApplicationId,
+        reason: 'review_not_final',
+        authoritativeSource: 'review_workflow',
+      };
+    }
+    const workflowDecision = (normaliseString(reviewWorkflow.nwac_decision) || '')
+      .toLowerCase();
+    const outcome = workflowDecision === 'approved'
+      ? 'approved'
+      : workflowDecision === 'denied'
+        ? 'denied'
+        : null;
+    return {
+      outcome,
+      applicationId: workflowApplicationId,
+      reason: outcome ? 'workflow_final_decision' : 'workflow_final_decision_invalid',
+      authoritativeSource: 'review_workflow',
+    };
+  }
+
+  const outcome = applicationId === selectedId
+    ? resolveCaseMessageDecisionOutcome(
+        applicationRow?.application_status ?? applicationRow?.status,
+        caseStatus,
+        applicationRow?.decision_outcome || explicitDecision
+      )
+    : null;
+  return {
+    outcome,
+    applicationId: applicationId || null,
+    reason: applicationId !== selectedId
+      ? 'application_scope_mismatch'
+      : outcome
+        ? 'legacy_final_decision'
+        : 'application_not_decided',
+    authoritativeSource: 'legacy_application',
+  };
+}
+
+function assertCaseMessageApplicationDecisionLetters({
+  attachmentRows,
+  selectedApplicationId,
+  applicationRow,
+  caseStatus,
+  explicitDecision = null,
+  reviewWorkflow = null,
+} = {}) {
+  const decisionLetterRows = (Array.isArray(attachmentRows) ? attachmentRows : [])
+    .filter(row => Boolean(resolveWorkflowDecisionLetterDocumentType(row?.document_type)));
+  if (!decisionLetterRows.length) {
+    return { enforced: false, reason: 'no_decision_letters' };
+  }
+  const authorization = resolveCaseMessageApplicationDecisionAuthorization({
+    selectedApplicationId,
+    applicationRow,
+    caseStatus,
+    explicitDecision,
+    reviewWorkflow,
+  });
+  const allowedDocumentType = authorization.outcome === 'approved'
+    ? 'assessment_approval_letter'
+    : authorization.outcome === 'denied'
+      ? 'assessment_denial_letter'
+      : null;
+  if (
+    !allowedDocumentType ||
+    decisionLetterRows.some(row => row.document_type !== allowedDocumentType)
+  ) {
+    throw createCaseMessageHttpError(
+      422,
+      'invalid_letter_attachment',
+      'Decision letter forms can only be sent for the current application decision.',
+      {
+        applicationId: authorization.applicationId,
+        decisionReason: authorization.reason,
+      }
+    );
+  }
+  return {
+    enforced: true,
+    allowedDocumentType,
+    ...authorization,
+  };
+}
+
+function resolveCaseMessageApplicationFundingApproval({
+  selectedApplicationId,
+  applicationRow,
+  caseStatus,
+  explicitDecision = null,
+  reviewWorkflow = null,
+} = {}) {
+  const selectedId = normalisePositiveInteger(selectedApplicationId);
+  const applicationId = normalisePositiveInteger(
+    applicationRow?.application_id ?? applicationRow?.id
+  );
+  if (reviewWorkflow) {
+    const workflowApplicationId = normalisePositiveInteger(reviewWorkflow.application_id);
+    const workflowDecision = (
+      normaliseString(reviewWorkflow.nwac_decision) || ''
+    ).toLowerCase();
+    return {
+      finalApprovalRecorded:
+        workflowApplicationId === selectedId &&
+        reviewWorkflow.current_stage === REVIEW_STAGES.FinalDecisionRecorded &&
+        (workflowDecision === 'approved' || workflowDecision === 'approve'),
+      approvedApplicationId: workflowApplicationId || null,
+      reason: workflowApplicationId !== selectedId
+        ? 'workflow_application_scope_mismatch'
+        : reviewWorkflow.current_stage !== REVIEW_STAGES.FinalDecisionRecorded
+          ? 'review_not_final'
+          : workflowDecision === 'approved' || workflowDecision === 'approve'
+            ? 'workflow_final_approval'
+            : 'workflow_not_approved',
+    };
+  }
+  const decisionOutcome = resolveCaseMessageDecisionOutcome(
+    applicationRow?.application_status ?? applicationRow?.status,
+    caseStatus,
+    applicationRow?.decision_outcome || explicitDecision
+  );
+  return {
+    finalApprovalRecorded: applicationId === selectedId && decisionOutcome === 'approved',
+    approvedApplicationId: applicationId || null,
+    reason: applicationId !== selectedId
+      ? 'application_scope_mismatch'
+      : decisionOutcome === 'approved'
+        ? 'legacy_final_approval'
+        : 'application_not_approved',
+  };
+}
+
+async function fetchCaseMessageInterventionFundingRow(
+  connection,
+  { caseId, interventionId, forUpdate = false } = {}
+) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedInterventionId = normalisePositiveInteger(interventionId);
+  if (!normalizedCaseId || !normalizedInterventionId) return null;
+  const [[row]] = await connection.query(
+    `SELECT i.id,
+            i.status,
+            i.start_date,
+            i.end_date,
+            i.intervention_cost,
+            i.budget_amount,
+            i.approved_amount,
+            i.intervention_code,
+            i.related_noc,
+            i.related_noc_version,
+            i.notes,
+            i.metadata_json,
+            i.esdc_intervention_json,
+            i.funding_stream_decision AS funding_stream,
+            ap.funding_stream AS plan_funding_stream
+       FROM iset_case_intervention i
+       LEFT JOIN iset_case_action_plan ap ON ap.id = i.action_plan_id
+      WHERE i.id = ?
+        AND i.case_id = ?
+      LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
+    [normalizedInterventionId, normalizedCaseId]
+  );
+  return row || null;
+}
+
+async function resolveCaseMessageFundingApprovalContext({
+  connection,
+  caseId,
+  selectedApplicationId,
+  requestedInterventionId = null,
+  applicationRow,
+  caseStatus,
+  applicationAssessmentContext = null,
+  forUpdate = false,
+} = {}) {
+  const interventionId = normalisePositiveInteger(requestedInterventionId);
+  if (interventionId) {
+    let interventionEligibility;
+    try {
+      interventionEligibility = await resolveApprovedInterventionProposalLetterEligibility({
+        connection,
+        caseId,
+        interventionId,
+        forUpdate,
+      });
+    } catch (error) {
+      if (Number.isInteger(error?.status) && (error?.code || error?.message)) {
+        throw createCaseMessageHttpError(
+          error.status,
+          error.code || error.message,
+          error.publicMessage || 'The intervention application scope could not be verified.'
+        );
+      }
+      throw error;
+    }
+    const interventionRow = await fetchCaseMessageInterventionFundingRow(connection, {
+      caseId,
+      interventionId,
+      forUpdate,
+    });
+    return {
+      sourceType: 'intervention',
+      finalApprovalRecorded: Boolean(interventionEligibility?.eligible),
+      approvedApplicationId: normalisePositiveInteger(interventionEligibility?.applicationId),
+      hasFundedCostLines: interventionHasFundedCostLines(
+        interventionRow,
+        interventionRow?.plan_funding_stream || null
+      ),
+      interventionEligibility,
+    };
+  }
+
+  const applicationId = normalisePositiveInteger(selectedApplicationId);
+  const reviewWorkflow = await fetchApplicationAssessmentReviewWorkflow(
+    connection,
+    { applicationId },
+    { forUpdate }
+  );
+  const assessmentRow = await fetchApplicationAssessmentRow(connection, {
+    caseId,
+    applicationId,
+  });
+  const applicationApproval = resolveCaseMessageApplicationFundingApproval({
+    selectedApplicationId: applicationId,
+    applicationRow,
+    caseStatus,
+    explicitDecision:
+      applicationAssessmentContext?.assessment_nwac_review_status || null,
+    reviewWorkflow,
+  });
+  return {
+    sourceType: 'application',
+    ...applicationApproval,
+    hasFundedCostLines: assessmentHasFundedCostLines(assessmentRow),
+    reviewWorkflow,
+  };
+}
+
 function validateAutoFundingWorkflowAttachmentResolution(workflowResolution) {
   const rawAttachments = workflowResolution?.attachments;
   const normalizedAttachments = normalizeCaseMessageSigningAttachments(rawAttachments);
@@ -67924,42 +71838,26 @@ const handlePostCaseSecureMessage = async (req, res) => {
     const hasApprovalLetterAttachment = attachmentRows.some(
       row => row.document_type === 'assessment_approval_letter'
     );
+    const hasSelectedFundingFormAttachment = attachmentRows.some(
+      row => Boolean(resolveCaseMessageFundingSigningWorkflowKind(row))
+    );
+    let fundingApprovalContext = null;
+    if (hasApprovalLetterAttachment || hasSelectedFundingFormAttachment) {
+      fundingApprovalContext = await resolveCaseMessageFundingApprovalContext({
+        connection: pool,
+        caseId,
+        selectedApplicationId: caseApplicationId,
+        requestedInterventionId,
+        applicationRow: caseRow,
+        caseStatus: caseRow?.case_lifecycle_status || caseRow?.case_status,
+        applicationAssessmentContext,
+      });
+    }
     if (hasApprovalLetterAttachment) {
-      let shouldAttachFundingForms = false;
-      if (requestedInterventionId) {
-        const [[interventionFundingRow]] = await pool.query(
-          `SELECT i.id,
-                  i.status,
-                  i.start_date,
-                  i.end_date,
-                  i.intervention_cost,
-                  i.budget_amount,
-                  i.approved_amount,
-                  i.intervention_code,
-                  i.related_noc,
-                  i.related_noc_version,
-                  i.notes,
-                  i.metadata_json,
-                  i.esdc_intervention_json,
-                  i.funding_stream_decision AS funding_stream,
-                  ap.funding_stream AS plan_funding_stream
-             FROM iset_case_intervention i
-             LEFT JOIN iset_case_action_plan ap ON ap.id = i.action_plan_id
-            WHERE i.id = ? AND i.case_id = ?
-            LIMIT 1`,
-          [requestedInterventionId, caseId]
-        );
-        shouldAttachFundingForms = interventionHasFundedCostLines(
-          interventionFundingRow,
-          interventionFundingRow?.plan_funding_stream || null
-        );
-      } else {
-        const assessmentRow = await fetchApplicationAssessmentRow(pool, {
-          caseId,
-          applicationId: caseRow?.application_id || null,
-        });
-        shouldAttachFundingForms = assessmentHasFundedCostLines(assessmentRow);
-      }
+      const shouldAttachFundingForms = Boolean(
+        fundingApprovalContext?.finalApprovalRecorded &&
+        fundingApprovalContext?.hasFundedCostLines
+      );
       if (shouldAttachFundingForms) {
         const workflowResolution = await resolveAutoFundingFormsAttachments(pool);
         if (workflowResolution.missing.length) {
@@ -68042,74 +71940,71 @@ const handlePostCaseSecureMessage = async (req, res) => {
       }
     }
     assertUniqueVersionedSigningWorkflowAttachments(attachmentRows);
+    if (attachmentRows.some(row => Boolean(resolveCaseMessageFundingSigningWorkflowKind(row)))) {
+      fundingApprovalContext = fundingApprovalContext || await resolveCaseMessageFundingApprovalContext({
+        connection: pool,
+        caseId,
+        selectedApplicationId: caseApplicationId,
+        requestedInterventionId,
+        applicationRow: caseRow,
+        caseStatus: caseRow?.case_lifecycle_status || caseRow?.case_status,
+        applicationAssessmentContext,
+      });
+      assertCaseMessageFundingFormsPostApproval({
+        attachmentRows,
+        selectedApplicationId: caseApplicationId,
+        approvedApplicationId: fundingApprovalContext.approvedApplicationId,
+        finalApprovalRecorded: fundingApprovalContext.finalApprovalRecorded,
+        hasFundedCostLines: fundingApprovalContext.hasFundedCostLines,
+        sourceType: fundingApprovalContext.sourceType,
+        documentTypeFallbackByWorkflowId: serverDocumentTypeFallbackByWorkflowId,
+      });
+    }
     if (attachmentRows.length) {
-      const approvedCaseStatuses = new Set([
-        'initiated',
-        'active',
-        'dormant',
-        'ready_to_close',
-        'closed',
-        'archived',
-        'approved'
-      ]);
-      const deniedCaseStatuses = new Set([
-        'in_review',
-        'pending_approval',
-        'pending',
-        'open',
-        'submitted'
-      ]);
-      const normalizeStatusValue = value => {
-        if (!value) return '';
-        return String(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
-      };
-      const resolveDecisionOutcome = (applicationStatusRaw, caseStatusRaw, explicitDecisionRaw = null) => {
-        const explicitDecision = normalizeStatusValue(explicitDecisionRaw);
-        if (explicitDecision === 'approved' || explicitDecision === 'approve') return 'approved';
-        if (['denied', 'not_approved', 'reject', 'rejected', 'declined'].includes(explicitDecision)) return 'denied';
-        const appStatus = normalizeStatusValue(applicationStatusRaw);
-        const caseStatus = normalizeStatusValue(caseStatusRaw);
-        if (!appStatus) return null;
-        if (appStatus === 'approved') return 'approved';
-        if (appStatus === 'rejected' || appStatus === 'declined') return 'denied';
-        if (appStatus === 'decision_ready' || appStatus === 'completed') {
-          if (approvedCaseStatuses.has(caseStatus)) return 'approved';
-          if (deniedCaseStatuses.has(caseStatus)) return 'denied';
-          return null;
-        }
-        return null;
-      };
       const letterAttachments = attachmentRows.filter(row => (
         Boolean(resolveWorkflowDecisionLetterDocumentType(row.document_type))
       ));
       if (letterAttachments.length) {
         let allowedDocTypes = new Set();
         if (requestedInterventionId) {
-          requestedInterventionLetterEligibility = await resolveApprovedInterventionProposalLetterEligibility({
-            connection: pool,
-            caseId,
-            interventionId: requestedInterventionId,
-          });
+          requestedInterventionLetterEligibility =
+            fundingApprovalContext?.interventionEligibility ||
+            await resolveApprovedInterventionProposalLetterEligibility({
+              connection: pool,
+              caseId,
+              interventionId: requestedInterventionId,
+            });
           if (!requestedInterventionLetterEligibility.eligible) {
             return res.status(422).json({
               error: 'invalid_letter_attachment',
               message: 'Intervention approval letters can only be sent for an approved intervention proposal or approved revision on this case.'
             });
           }
+          assertCaseMessagePostApprovalSourceApplication({
+            selectedApplicationId: caseApplicationId,
+            approvedApplicationId: requestedInterventionLetterEligibility.applicationId,
+            finalApprovalRecorded: true,
+            sourceType: 'intervention',
+          });
           allowedDocTypes = new Set(['assessment_approval_letter']);
         } else {
-          const decisionOutcome = resolveDecisionOutcome(
-	            caseRow?.application_status,
-	            caseRow?.case_lifecycle_status || caseRow?.case_status,
-	            caseRow?.decision_outcome ||
-	              applicationAssessmentContext?.assessment_nwac_review_status ||
-	              null
-	          );
-          allowedDocTypes = decisionOutcome === 'approved'
-            ? new Set(['assessment_approval_letter'])
-            : decisionOutcome === 'denied'
-            ? new Set(['assessment_denial_letter'])
-            : new Set();
+          const applicationReviewWorkflow =
+            fundingApprovalContext?.reviewWorkflow ||
+            await fetchApplicationAssessmentReviewWorkflow(pool, {
+              applicationId: caseApplicationId,
+            });
+          const decisionLetterAuthorization = assertCaseMessageApplicationDecisionLetters({
+            attachmentRows: letterAttachments,
+            selectedApplicationId: caseApplicationId,
+            applicationRow: caseRow,
+            caseStatus: caseRow?.case_lifecycle_status || caseRow?.case_status,
+            explicitDecision:
+              caseRow?.decision_outcome ||
+              applicationAssessmentContext?.assessment_nwac_review_status ||
+              null,
+            reviewWorkflow: applicationReviewWorkflow,
+          });
+          allowedDocTypes = new Set([decisionLetterAuthorization.allowedDocumentType]);
         }
         const invalidLetters = letterAttachments.filter(row => !allowedDocTypes.has(row.document_type));
         if (!allowedDocTypes.size || invalidLetters.length) {
@@ -68189,6 +72084,9 @@ const handlePostCaseSecureMessage = async (req, res) => {
             LIMIT 1`,
           [requestedInterventionId, caseId]
         );
+        if (interventionRow) {
+          assertOperationalInterventionRow(interventionRow, { operation: 'prefill an attendance report for' });
+        }
         attendanceIntervention = interventionRow || null;
       }
       const attendanceAssessment = await fetchApplicationAssessmentRow(pool, {
@@ -68218,7 +72116,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
     messageWriteTransactionStarted = true;
     if (attachmentRows.length) {
       const [[lockedApplicationRow]] = await messageWriteConnection.query(
-        `SELECT id
+        `SELECT id, status, lifecycle_status, decision_outcome
            FROM iset_application
           WHERE id = ?
             AND case_id = ?
@@ -68233,6 +72131,13 @@ const handlePostCaseSecureMessage = async (req, res) => {
         );
       }
       await lockCaseForVersionedSigning(messageWriteConnection, caseId);
+      const [[lockedCaseRow]] = await messageWriteConnection.query(
+        `SELECT status, lifecycle_status, case_context_json
+           FROM iset_case
+          WHERE id = ?
+          LIMIT 1`,
+        [caseId]
+      );
 
       // The catalogue was preflighted before starting expensive PDF work, but
       // it is mutable configuration. Lock and re-read the exact selected rows
@@ -68260,6 +72165,99 @@ const handlePostCaseSecureMessage = async (req, res) => {
       }
       attachmentRows = lockedAttachmentRows;
       assertUniqueVersionedSigningWorkflowAttachments(attachmentRows);
+      const hasLockedFundingForms = attachmentRows.some(
+        row => Boolean(resolveCaseMessageFundingSigningWorkflowKind(row))
+      );
+      const lockedDecisionLetterAttachments = attachmentRows.filter(row => (
+        Boolean(resolveWorkflowDecisionLetterDocumentType(row.document_type))
+      ));
+      const hasLockedInterventionApprovalLetter = Boolean(
+        requestedInterventionId &&
+        lockedDecisionLetterAttachments.some(
+          row => row.document_type === 'assessment_approval_letter'
+        )
+      );
+      const lockedCaseContext = safeJsonParse(lockedCaseRow?.case_context_json, null) || {};
+      const lockedApplicationAssessmentContext = resolveApplicationAssessmentCaseContext(
+        lockedCaseContext,
+        caseApplicationId
+      );
+      let lockedFundingApprovalContext = null;
+      if (hasLockedFundingForms || hasLockedInterventionApprovalLetter) {
+        lockedFundingApprovalContext = await resolveCaseMessageFundingApprovalContext({
+          connection: messageWriteConnection,
+          caseId,
+          selectedApplicationId: caseApplicationId,
+          requestedInterventionId,
+          applicationRow: lockedApplicationRow,
+          caseStatus: lockedCaseRow?.lifecycle_status || lockedCaseRow?.status,
+          applicationAssessmentContext: lockedApplicationAssessmentContext,
+          forUpdate: true,
+        });
+        if (hasLockedInterventionApprovalLetter) {
+          requestedInterventionLetterEligibility =
+            lockedFundingApprovalContext.interventionEligibility;
+          if (!requestedInterventionLetterEligibility?.eligible) {
+            throw createCaseMessageHttpError(
+              422,
+              'invalid_letter_attachment',
+              'Intervention approval letters can only be sent for an approved intervention proposal or approved revision on this case.'
+            );
+          }
+          assertCaseMessagePostApprovalSourceApplication({
+            selectedApplicationId: caseApplicationId,
+            approvedApplicationId: requestedInterventionLetterEligibility.applicationId,
+            finalApprovalRecorded: true,
+            sourceType: 'intervention',
+          });
+        }
+        if (hasLockedFundingForms) {
+          assertCaseMessageFundingFormsPostApproval({
+            attachmentRows,
+            selectedApplicationId: caseApplicationId,
+            approvedApplicationId: lockedFundingApprovalContext.approvedApplicationId,
+            finalApprovalRecorded: lockedFundingApprovalContext.finalApprovalRecorded,
+            hasFundedCostLines: lockedFundingApprovalContext.hasFundedCostLines,
+            sourceType: lockedFundingApprovalContext.sourceType,
+            documentTypeFallbackByWorkflowId: serverDocumentTypeFallbackByWorkflowId,
+          });
+        }
+      }
+      if (lockedDecisionLetterAttachments.length) {
+        if (requestedInterventionId) {
+          if (
+            !hasLockedInterventionApprovalLetter ||
+            lockedDecisionLetterAttachments.some(
+              row => row.document_type !== 'assessment_approval_letter'
+            )
+          ) {
+            throw createCaseMessageHttpError(
+              422,
+              'invalid_letter_attachment',
+              'Intervention approval letters can only be sent for an approved intervention proposal or approved revision on this case.'
+            );
+          }
+        } else {
+          const lockedApplicationReviewWorkflow =
+            lockedFundingApprovalContext?.reviewWorkflow ||
+            await fetchApplicationAssessmentReviewWorkflow(
+              messageWriteConnection,
+              { applicationId: caseApplicationId },
+              { forUpdate: true }
+            );
+          assertCaseMessageApplicationDecisionLetters({
+            attachmentRows: lockedDecisionLetterAttachments,
+            selectedApplicationId: caseApplicationId,
+            applicationRow: lockedApplicationRow,
+            caseStatus: lockedCaseRow?.lifecycle_status || lockedCaseRow?.status,
+            explicitDecision:
+              lockedApplicationRow?.decision_outcome ||
+              lockedApplicationAssessmentContext?.assessment_nwac_review_status ||
+              null,
+            reviewWorkflow: lockedApplicationReviewWorkflow,
+          });
+        }
+      }
       requiredSigningSchemasByWorkflowId = await buildRequiredSigningWorkflowSchemas(
         messageWriteConnection,
         attachmentRows
@@ -68299,6 +72297,11 @@ const handlePostCaseSecureMessage = async (req, res) => {
               LIMIT 1`,
             [requestedInterventionId, caseId]
           );
+          if (interventionDraftSourceRow) {
+            assertOperationalInterventionRow(interventionDraftSourceRow, {
+              operation: 'generate a funding agreement for',
+            });
+          }
           const actionPlanId = normalisePositiveInteger(interventionDraftSourceRow?.action_plan_id);
           if (actionPlanId) {
             const sourceMetadata = safeJsonParse(interventionDraftSourceRow?.metadata_json, {}) || {};
@@ -68434,6 +72437,9 @@ const handlePostCaseSecureMessage = async (req, res) => {
           [requestedInterventionId, caseId]
         );
         if (selectedIntervention) {
+          assertOperationalInterventionRow(selectedIntervention, {
+            operation: 'prefill a financial overview for',
+          });
           interventionRow = selectedIntervention;
         } else {
           console.warn(
@@ -68449,6 +72455,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
                   intervention_code, metadata_json, esdc_intervention_json, created_at
              FROM iset_case_intervention
             WHERE case_id = ?
+              AND ${buildOperationalInterventionSql('iset_case_intervention')}
             ORDER BY created_at DESC`,
           [caseId]
         );
@@ -68978,6 +72985,10 @@ const handlePostCaseSecureMessage = async (req, res) => {
       caseRow?.applicant_email ||
       null;
     const effectiveAssessorName = fromNameValue || assessorDisplayName || null;
+    const messageInterventionEligibility =
+      requestedInterventionLetterEligibility ||
+      fundingApprovalContext?.interventionEligibility ||
+      null;
     try {
       await captureCaseEvent({
         type: STAFF_SECURE_MESSAGE_SENT_EVENT_TYPE,
@@ -68999,6 +73010,15 @@ const handlePostCaseSecureMessage = async (req, res) => {
           assessor_name: effectiveAssessorName,
           applicant_name: effectiveApplicantName,
           tracking_id: trackingReference || null,
+          case_id: caseId,
+          application_id: caseApplicationId || null,
+          action_plan_id:
+            normalisePositiveInteger(messageInterventionEligibility?.actionPlanId) ||
+            null,
+          intervention_id: requestedInterventionId || null,
+          proposal_id:
+            normalisePositiveInteger(messageInterventionEligibility?.proposalId) ||
+            null,
         },
         trackingId: trackingReference || null,
         actorId: requestActorId || null,
@@ -75615,6 +79635,193 @@ const fetchInterventionsById = async ({ ids, connection }) => {
   return map;
 };
 
+function assertOperationalPaymentInterventionIds({
+  interventionIds,
+  interventionMap,
+  operation = 'use for payment processing',
+} = {}) {
+  const ids = Array.from(new Set(
+    (Array.isArray(interventionIds) ? interventionIds : Array.from(interventionIds || []))
+      .map(normalisePositiveInteger)
+      .filter(Boolean)
+  ));
+  if (!ids.length) return { enforced: false, reason: 'no_intervention_targets' };
+  const missingInterventionIds = ids.filter(id => !interventionMap?.has?.(Number(id)));
+  if (missingInterventionIds.length) {
+    const error = new Error('payment_intervention_not_found');
+    error.code = 'payment_intervention_not_found';
+    error.status = 409;
+    error.publicMessage = 'One or more selected interventions could not be verified for payment processing.';
+    error.interventionIds = missingInterventionIds;
+    throw error;
+  }
+  ids.forEach(id => {
+    assertOperationalInterventionRow(interventionMap.get(Number(id)), { operation });
+  });
+  return { enforced: true, interventionIds: ids };
+}
+
+const APPLIED_REVISION_EVIDENCE_PAYMENT_WARNING =
+  'linked_to_retained_applied_revision_evidence';
+
+function collectPaymentInterventionIds({ packetRow = null, lineRows = [] } = {}) {
+  const ids = new Set();
+  const packetInterventionId = normalisePositiveInteger(
+    packetRow?.intervention_id ?? packetRow?.interventionId ?? null
+  );
+  if (packetInterventionId) ids.add(packetInterventionId);
+  (Array.isArray(lineRows) ? lineRows : []).forEach(lineRow => {
+    const lineInterventionId = normalisePositiveInteger(
+      lineRow?.intervention_id ?? lineRow?.interventionId ?? null
+    );
+    if (lineInterventionId) ids.add(lineInterventionId);
+  });
+  return Array.from(ids);
+}
+
+function buildPaymentHistoryIntegrityFields({
+  interventionIds = [],
+  interventionMap = new Map(),
+  recordKind = 'payment_history',
+} = {}) {
+  const normalizedIds = Array.from(new Set(
+    (Array.isArray(interventionIds) ? interventionIds : Array.from(interventionIds || []))
+      .map(normalisePositiveInteger)
+      .filter(Boolean)
+  ));
+  const evidenceIds = normalizedIds.filter(id =>
+    isAppliedRevisionEvidenceIntervention(interventionMap?.get?.(Number(id)))
+  );
+  return buildPaymentHistoryIntegrityFieldsFromEvidenceIds({ evidenceIds, recordKind });
+}
+
+function buildPaymentHistoryIntegrityFieldsFromEvidenceIds({
+  evidenceIds = [],
+  recordKind = 'payment_history',
+} = {}) {
+  const normalizedEvidenceIds = Array.from(new Set(
+    (Array.isArray(evidenceIds) ? evidenceIds : Array.from(evidenceIds || []))
+      .map(normalisePositiveInteger)
+      .filter(Boolean)
+  ));
+  const hasEvidenceLink = normalizedEvidenceIds.length > 0;
+  const warnings = hasEvidenceLink ? [APPLIED_REVISION_EVIDENCE_PAYMENT_WARNING] : [];
+  return {
+    operational: !hasEvidenceLink,
+    recordKind: hasEvidenceLink
+      ? `${recordKind}_applied_revision_evidence_history`
+      : recordKind,
+    record_kind: hasEvidenceLink
+      ? `${recordKind}_applied_revision_evidence_history`
+      : recordKind,
+    isAppliedRevisionEvidenceHistory: hasEvidenceLink,
+    is_applied_revision_evidence_history: hasEvidenceLink,
+    appliedRevisionEvidenceInterventionIds: normalizedEvidenceIds.map(String),
+    applied_revision_evidence_intervention_ids: normalizedEvidenceIds.map(String),
+    integrityWarnings: warnings,
+    integrity_warnings: warnings,
+  };
+}
+
+function assertOperationalPaymentHistoryRecord(record, { operation = 'process payments' } = {}) {
+  if (!record?.isAppliedRevisionEvidenceHistory && !record?.is_applied_revision_evidence_history) {
+    return { enforced: false, reason: 'operational_payment_history' };
+  }
+  const error = new Error('applied_revision_evidence_read_only');
+  error.code = 'applied_revision_evidence_read_only';
+  error.status = 409;
+  error.publicMessage =
+    `This payment history is linked to retained revision evidence and cannot be used to ${operation}.`;
+  error.interventionIds =
+    record.appliedRevisionEvidenceInterventionIds ||
+    record.applied_revision_evidence_intervention_ids ||
+    [];
+  throw error;
+}
+
+async function resolvePaymentPacketHistoryIntegrityFields({
+  packetId,
+  lineId = null,
+  connection = null,
+  recordKind = 'payment_history',
+} = {}) {
+  const runner = connection || pool;
+  const { packetRow, lineRows } = await fetchPaymentPacketInterventionContext({
+    packetId,
+    lineId,
+    connection: runner,
+  });
+  const interventionIds = collectPaymentInterventionIds({ packetRow, lineRows });
+  const interventionMap = await fetchInterventionsById({ ids: interventionIds, connection: runner });
+  return buildPaymentHistoryIntegrityFields({
+    interventionIds,
+    interventionMap,
+    recordKind,
+  });
+}
+
+async function fetchPaymentPacketInterventionContext({
+  packetId,
+  lineId = null,
+  connection = null,
+} = {}) {
+  const runner = connection || pool;
+  const packetValue = parsePaymentPacketId(packetId);
+  if (!runner || !Number.isFinite(packetValue)) {
+    const error = new Error('payment_packet_not_found');
+    error.code = 'payment_packet_not_found';
+    error.status = 404;
+    throw error;
+  }
+  const [[packetRow]] = await runner.query(
+    'SELECT id, intervention_id FROM payment_packet WHERE id = ? LIMIT 1',
+    [packetValue]
+  );
+  if (!packetRow) {
+    const error = new Error('payment_packet_not_found');
+    error.code = 'payment_packet_not_found';
+    error.status = 404;
+    throw error;
+  }
+  const [allLineRows] = await runner.query(
+    'SELECT id, payment_packet_id, intervention_id, status FROM payment_packet_line WHERE payment_packet_id = ?',
+    [packetValue]
+  );
+  const lineValue = parsePaymentLineId(lineId);
+  const lineRows = Number.isFinite(lineValue)
+    ? (allLineRows || []).filter(row => Number(row.id) === lineValue)
+    : (allLineRows || []).filter(row => row.status !== 'cancelled');
+  if (Number.isFinite(lineValue) && lineRows.length === 0) {
+    const error = new Error('payment_line_not_found');
+    error.code = 'payment_line_not_found';
+    error.status = 404;
+    throw error;
+  }
+  return { packetRow, lineRows };
+}
+
+async function assertOperationalPaymentPacketTargets({
+  packetId,
+  lineId = null,
+  connection = null,
+  operation = 'use for payment processing',
+} = {}) {
+  const runner = connection || pool;
+  const { packetRow, lineRows } = await fetchPaymentPacketInterventionContext({
+    packetId,
+    lineId,
+    connection: runner,
+  });
+  const interventionIds = collectPaymentInterventionIds({ packetRow, lineRows });
+  const interventionMap = await fetchInterventionsById({ ids: interventionIds, connection: runner });
+  const result = assertOperationalPaymentInterventionIds({
+    interventionIds,
+    interventionMap,
+    operation,
+  });
+  return { ...result, packetRow, lineRows, interventionMap };
+}
+
 const isManualBackloadInterventionRow = interventionRow => {
   if (!interventionRow) return false;
   const metadata = safeJsonParse(interventionRow.metadata_json, {}) || {};
@@ -75747,6 +79954,7 @@ const fetchAssessmentFundingRow = async ({ caseId, applicationId = null, connect
 
 const resolveFundingAuthorizationForIntervention = async ({ interventionRow, caseId, applicationId = null, connection }) => {
   if (!interventionRow && !caseId) return null;
+  if (isAppliedRevisionEvidenceIntervention(interventionRow)) return null;
   const runner = connection || pool;
   let source = null;
   let caps = null;
@@ -76617,9 +80825,35 @@ async function hydratePaymentPackets(packetRows, connection = null, options = {}
     lineIds: lineRows.map(row => row.id),
     connection: runner,
   });
+  const packetRowMap = new Map(
+    packetRows.map(row => [String(row.id), row])
+  );
+  const allPaymentInterventionIds = new Set();
+  packetRows.forEach(row => {
+    collectPaymentInterventionIds({ packetRow: row }).forEach(id =>
+      allPaymentInterventionIds.add(id)
+    );
+  });
+  lineRows.forEach(row => {
+    collectPaymentInterventionIds({ lineRows: [row] }).forEach(id =>
+      allPaymentInterventionIds.add(id)
+    );
+  });
+  const paymentInterventionMap = await fetchInterventionsById({
+    ids: Array.from(allPaymentInterventionIds),
+    connection: runner,
+  });
 
   packetRows.forEach(row => {
     const packet = mapPaymentPacketRow(row);
+    const packetLineRows = lineRows.filter(lineRow =>
+      String(lineRow.payment_packet_id) === String(row.id)
+    );
+    Object.assign(packet, buildPaymentHistoryIntegrityFields({
+      interventionIds: collectPaymentInterventionIds({ packetRow: row, lineRows: packetLineRows }),
+      interventionMap: paymentInterventionMap,
+      recordKind: 'payment_packet',
+    }));
     packet.lines = [];
     packet.baselineEvidence = [];
     packet.documents = [];
@@ -76635,6 +80869,16 @@ async function hydratePaymentPackets(packetRows, connection = null, options = {}
     const packet = packetMap.get(packetId);
     if (!packet) return;
     const line = mapPaymentLineRow(row);
+    const packetRow = packetRowMap.get(packetId) || null;
+    const effectiveInterventionId =
+      normalisePositiveInteger(row.intervention_id) ||
+      normalisePositiveInteger(packetRow?.intervention_id) ||
+      null;
+    Object.assign(line, buildPaymentHistoryIntegrityFields({
+      interventionIds: effectiveInterventionId ? [effectiveInterventionId] : [],
+      interventionMap: paymentInterventionMap,
+      recordKind: 'payment_line',
+    }));
     line.evidenceChecklist = [];
     line.followUpEvents = [];
     line.reportingUnit = packet.reportingUnit || packet.reporting_unit || null;
@@ -76753,11 +80997,14 @@ async function hydratePaymentPackets(packetRows, connection = null, options = {}
 
     const interventionIdList = Array.from(interventionIds).filter(Number.isFinite);
     if (interventionIdList.length) {
-      const interventionMap = await fetchInterventionsById({ ids: interventionIdList, connection: runner });
+      const interventionMap = paymentInterventionMap;
       const usageMap = await fetchFundingUsageForInterventions({ interventionIds: interventionIdList, connection: runner });
       const authMap = new Map();
       for (const id of interventionIdList) {
         const interventionRow = interventionMap.get(Number(id)) || null;
+        if (isAppliedRevisionEvidenceIntervention(interventionRow)) {
+          continue;
+        }
         const caseId =
           interventionRow?.case_id ||
           interventionCaseMap.get(String(id)) ||
@@ -77575,6 +81822,7 @@ async function createAutoPaymentPacketFromIntervention({
 
   const runner = connection;
   if (!runner || !interventionRow) return null;
+  assertOperationalInterventionRow(interventionRow, { operation: 'create an automatic payment packet for' });
   const interventionId = Number(interventionRow.id);
   if (!Number.isFinite(interventionId)) return null;
   let resolvedActorUserId = Number.isFinite(Number(actorUserId)) ? Number(actorUserId) : null;
@@ -77953,6 +82201,13 @@ async function createFinanceTransactionForLine({ lineRow, packetRow, connection 
   const runner = connection || pool;
   const lineId = Number(lineRow.id);
   if (!Number.isFinite(lineId)) return null;
+  const interventionIds = collectPaymentInterventionIds({ packetRow, lineRows: [lineRow] });
+  const interventionMap = await fetchInterventionsById({ ids: interventionIds, connection: runner });
+  assertOperationalPaymentInterventionIds({
+    interventionIds,
+    interventionMap,
+    operation: 'post a finance transaction',
+  });
   const [[existingLink]] = await runner.query(
     'SELECT finance_transaction_id FROM payment_line_transaction WHERE payment_packet_line_id = ? LIMIT 1',
     [lineId]
@@ -78118,20 +82373,38 @@ async function fetchPaymentBatchById(batchId, connection = null) {
       ORDER BY bl.id ASC`,
     [batchId]
   );
-  const lines = (lineRows || []).map(row => ({
-    lineId: row.payment_packet_line_id ? String(row.payment_packet_line_id) : null,
-    packetId: row.payment_packet_id ? String(row.payment_packet_id) : null,
-    caseId: row.case_id || null,
-    clientName: resolveClientNameFromRow(row) || null,
-    paymentType: row.payment_type || null,
-    payeeName: row.payee_name || null,
-    amount: Number(row.amount || 0),
-    currency: row.currency || 'CAD',
-    status: row.status || null,
-    potName: row.pot_name || null,
-    potCode: row.pot_code || null,
-  }));
-  return { ...mapPaymentBatchRow(batchRow), lines };
+  const lines = [];
+  for (const row of lineRows || []) {
+    const integrity = await resolvePaymentPacketHistoryIntegrityFields({
+      packetId: row.payment_packet_id,
+      lineId: row.payment_packet_line_id,
+      connection: runner,
+      recordKind: 'payment_batch_line',
+    });
+    lines.push({
+      lineId: row.payment_packet_line_id ? String(row.payment_packet_line_id) : null,
+      packetId: row.payment_packet_id ? String(row.payment_packet_id) : null,
+      caseId: row.case_id || null,
+      clientName: resolveClientNameFromRow(row) || null,
+      paymentType: row.payment_type || null,
+      payeeName: row.payee_name || null,
+      amount: Number(row.amount || 0),
+      currency: row.currency || 'CAD',
+      status: row.status || null,
+      potName: row.pot_name || null,
+      potCode: row.pot_code || null,
+      ...integrity,
+    });
+  }
+  const evidenceIds = lines.flatMap(line => line.appliedRevisionEvidenceInterventionIds || []);
+  return {
+    ...mapPaymentBatchRow(batchRow),
+    ...buildPaymentHistoryIntegrityFieldsFromEvidenceIds({
+      evidenceIds,
+      recordKind: 'payment_batch',
+    }),
+    lines,
+  };
 }
 
 async function fetchPaymentBatchExportRows(batchId, connection = null) {
@@ -78168,27 +82441,38 @@ async function fetchPaymentBatchExportRows(batchId, connection = null) {
       ORDER BY pbl.id ASC`,
     [batchId]
   );
-  return (rows || []).map(row => ({
-    batchId: row.batch_id ? String(row.batch_id) : null,
-    packetId: row.payment_packet_id ? String(row.payment_packet_id) : null,
-    lineId: row.line_id ? String(row.line_id) : null,
-    caseId: row.case_id ? String(row.case_id) : null,
-    caseNumber: row.case_number || null,
-    clientName: resolveClientNameFromRow(row) || null,
-    paymentType: row.payment_type || null,
-    payeeType: row.payee_type || null,
-    payeeName: row.payee_name || null,
-    amount: Number(row.amount || 0),
-    currency: row.currency || 'CAD',
-    potCode: row.pot_code || null,
-    potName: row.pot_name || null,
-    fundingStream: row.pot_funding_source || null,
-    reportingUnit: row.reporting_unit || null,
-    servicePeriodStart: toDateOnlyString(row.service_period_start),
-    servicePeriodEnd: toDateOnlyString(row.service_period_end),
-    requestedPaymentDate: toDateOnlyString(row.requested_payment_date),
-    status: row.line_status || null,
-  }));
+  const mappedRows = [];
+  for (const row of rows || []) {
+    const integrity = await resolvePaymentPacketHistoryIntegrityFields({
+      packetId: row.payment_packet_id,
+      lineId: row.line_id,
+      connection: runner,
+      recordKind: 'payment_batch_export_line',
+    });
+    mappedRows.push({
+      batchId: row.batch_id ? String(row.batch_id) : null,
+      packetId: row.payment_packet_id ? String(row.payment_packet_id) : null,
+      lineId: row.line_id ? String(row.line_id) : null,
+      caseId: row.case_id ? String(row.case_id) : null,
+      caseNumber: row.case_number || null,
+      clientName: resolveClientNameFromRow(row) || null,
+      paymentType: row.payment_type || null,
+      payeeType: row.payee_type || null,
+      payeeName: row.payee_name || null,
+      amount: Number(row.amount || 0),
+      currency: row.currency || 'CAD',
+      potCode: row.pot_code || null,
+      potName: row.pot_name || null,
+      fundingStream: row.pot_funding_source || null,
+      reportingUnit: row.reporting_unit || null,
+      servicePeriodStart: toDateOnlyString(row.service_period_start),
+      servicePeriodEnd: toDateOnlyString(row.service_period_end),
+      requestedPaymentDate: toDateOnlyString(row.requested_payment_date),
+      status: row.line_status || null,
+      ...integrity,
+    });
+  }
+  return mappedRows;
 }
 
 const formatCurrencyCad = value => {
@@ -78272,6 +82556,8 @@ const buildPaymentLedgerCsv = rows => {
     'Intervention ID',
     'Reporting Unit',
     'Evidence Document IDs',
+    'Record Kind',
+    'Integrity Warnings',
   ];
   const lines = [headers.map(formatCsvValue).join(',')];
   (rows || []).forEach(row => {
@@ -78284,6 +82570,8 @@ const buildPaymentLedgerCsv = rows => {
       row.interventionId,
       row.reportingUnit,
       row.evidenceDocumentIds?.join(',') || '',
+      row.recordKind || null,
+      row.integrityWarnings?.join(',') || '',
     ];
     lines.push(line.map(formatCsvValue).join(','));
   });
@@ -78316,6 +82604,17 @@ async function fetchPaymentLedgerExportRows(connection = null) {
       ORDER BY ft.id ASC`,
     [MANUAL_BACKLOAD_FINANCE_SOURCE]
   );
+  const interventionIds = new Set();
+  (rows || []).forEach(row => {
+    collectPaymentInterventionIds({
+      packetRow: { intervention_id: row.case_intervention_id },
+      lineRows: [{ intervention_id: row.intervention_id }],
+    }).forEach(id => interventionIds.add(id));
+  });
+  const interventionMap = await fetchInterventionsById({
+    ids: Array.from(interventionIds),
+    connection: runner,
+  });
   return (rows || []).map(row => {
     const meta = safeJsonParse(row.metadata, {}) || {};
     let evidenceDocumentIds = [];
@@ -78327,6 +82626,10 @@ async function fetchPaymentLedgerExportRows(connection = null) {
         .map(entry => entry.trim())
         .filter(Boolean);
     }
+    const rowInterventionIds = collectPaymentInterventionIds({
+      packetRow: { intervention_id: row.case_intervention_id },
+      lineRows: [{ intervention_id: row.intervention_id }],
+    });
     return {
       transactionId: row.transaction_id ? String(row.transaction_id) : null,
       postingDate: toDateOnlyString(row.transaction_date || row.posted_at),
@@ -78346,6 +82649,11 @@ async function fetchPaymentLedgerExportRows(connection = null) {
           : null,
       reportingUnit: row.reporting_unit || meta.reportingUnit || meta.reporting_unit || null,
       evidenceDocumentIds,
+      ...buildPaymentHistoryIntegrityFields({
+        interventionIds: rowInterventionIds,
+        interventionMap,
+        recordKind: 'payment_ledger_transaction',
+      }),
     };
   });
 }
@@ -80008,7 +84316,15 @@ async function fetchPaymentCommunicationById(commId, connection = null) {
       LIMIT 1`,
     [commId]
   );
-  return row ? mapPaymentCommunicationRow(row) : null;
+  if (!row) return null;
+  const mapped = mapPaymentCommunicationRow(row);
+  const integrity = await resolvePaymentPacketHistoryIntegrityFields({
+    packetId: row.payment_packet_id,
+    lineId: row.payment_packet_line_id,
+    connection: runner,
+    recordKind: 'payment_communication',
+  });
+  return { ...mapped, ...integrity };
 }
 
 async function fetchPaymentCommunications({ packetId = null, connection = null, limit = 200 } = {}) {
@@ -80032,7 +84348,23 @@ async function fetchPaymentCommunications({ packetId = null, connection = null, 
       LIMIT ?`,
     [...params, cappedLimit]
   );
-  return (rows || []).map(mapPaymentCommunicationRow);
+  const mapped = [];
+  const integrityCache = new Map();
+  for (const row of rows || []) {
+    const key = `${row.payment_packet_id || ''}:${row.payment_packet_line_id || ''}`;
+    let integrity = integrityCache.get(key);
+    if (!integrity) {
+      integrity = await resolvePaymentPacketHistoryIntegrityFields({
+        packetId: row.payment_packet_id,
+        lineId: row.payment_packet_line_id,
+        connection: runner,
+        recordKind: 'payment_communication',
+      });
+      integrityCache.set(key, integrity);
+    }
+    mapped.push({ ...mapPaymentCommunicationRow(row), ...integrity });
+  }
+  return mapped;
 }
 
 async function createPaymentCommunication({
@@ -80096,7 +84428,15 @@ async function fetchPaymentFollowUpEventById(eventId, connection = null) {
       LIMIT 1`,
     [eventId]
   );
-  return row ? mapPaymentFollowUpEventRow(row) : null;
+  if (!row) return null;
+  const mapped = mapPaymentFollowUpEventRow(row);
+  const integrity = await resolvePaymentPacketHistoryIntegrityFields({
+    packetId: row.payment_packet_id,
+    lineId: row.payment_packet_line_id,
+    connection: runner,
+    recordKind: 'payment_follow_up_event',
+  });
+  return { ...mapped, ...integrity };
 }
 
 async function fetchPaymentFollowUpEvents({ packetId, lineId = null, connection = null, limit = 200 } = {}) {
@@ -80120,7 +84460,23 @@ async function fetchPaymentFollowUpEvents({ packetId, lineId = null, connection 
       LIMIT ?`,
     [...params, cappedLimit]
   );
-  return (rows || []).map(mapPaymentFollowUpEventRow);
+  const mapped = [];
+  const integrityCache = new Map();
+  for (const row of rows || []) {
+    const key = `${row.payment_packet_id || ''}:${row.payment_packet_line_id || ''}`;
+    let integrity = integrityCache.get(key);
+    if (!integrity) {
+      integrity = await resolvePaymentPacketHistoryIntegrityFields({
+        packetId: row.payment_packet_id,
+        lineId: row.payment_packet_line_id,
+        connection: runner,
+        recordKind: 'payment_follow_up_event',
+      });
+      integrityCache.set(key, integrity);
+    }
+    mapped.push({ ...mapPaymentFollowUpEventRow(row), ...integrity });
+  }
+  return mapped;
 }
 
 async function createPaymentFollowUpEvent({
@@ -81920,6 +86276,7 @@ async function readFinanceInterventionReportRawRows(
   const financeInterventionDeliveryStatusExpr = buildInterventionDeliveryStatusSql('ci');
   const where = [
     `${financeInterventionDeliveryStatusExpr} IN (${FINANCE_INTERVENTION_REPORT_INCLUDED_DELIVERY_STATUSES.map(() => '?').join(', ')})`,
+    buildOperationalInterventionSql('ci'),
   ];
   const params = [...FINANCE_INTERVENTION_REPORT_INCLUDED_DELIVERY_STATUSES];
   const clientProvinceExpr = `COALESCE(
@@ -83453,6 +87810,15 @@ app.get('/api/finance/transactions', async (req, res) => {
         LIMIT ?`,
       [...params, cappedLimit]
     );
+    const transactionInterventionIds = Array.from(new Set(
+      (rows || [])
+        .map(row => normalisePositiveInteger(row.case_intervention_id))
+        .filter(Boolean)
+    ));
+    const transactionInterventionMap = await fetchInterventionsById({
+      ids: transactionInterventionIds,
+      connection: pool,
+    });
     const mapped = rows.map(row => ({
       id: row.id,
       caseId: row.case_id,
@@ -83466,6 +87832,11 @@ app.get('/api/finance/transactions', async (req, res) => {
       transactionDate: row.transaction_date,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      ...buildPaymentHistoryIntegrityFields({
+        interventionIds: row.case_intervention_id ? [row.case_intervention_id] : [],
+        interventionMap: transactionInterventionMap,
+        recordKind: 'finance_transaction',
+      }),
     }));
     res.status(200).json(mapped);
   } catch (err) {
@@ -83524,6 +87895,11 @@ app.get('/api/finance/intacct/submissions', async (req, res) => {
       });
     }
 
+    const hydratedPacketHistory = await hydratePaymentPackets(rows || [], pool);
+    const packetHistoryMap = new Map(
+      hydratedPacketHistory.map(packet => [String(packet.id), packet])
+    );
+
     const items = [];
     (rows || []).forEach(row => {
       const metadata = safeJsonParse(row.metadata, {}) || {};
@@ -83561,6 +87937,11 @@ app.get('/api/finance/intacct/submissions', async (req, res) => {
           latestAttempt?.errorMessage ||
           latestAttempt?.error_message ||
           null,
+        ...buildPaymentHistoryIntegrityFieldsFromEvidenceIds({
+          evidenceIds:
+            packetHistoryMap.get(String(row.id))?.appliedRevisionEvidenceInterventionIds || [],
+          recordKind: 'intacct_submission',
+        }),
       });
     });
 
@@ -83607,7 +87988,24 @@ app.get('/api/finance/reconciliation/transactions', async (req, res) => {
         LIMIT ? OFFSET ?`,
       [MANUAL_BACKLOAD_FINANCE_SOURCE, limit, offset]
     );
-    res.status(200).json({ items: (rows || []).map(buildReconciliationTransaction) });
+    const reconciliationInterventionIds = Array.from(new Set(
+      (rows || [])
+        .map(row => normalisePositiveInteger(row.case_intervention_id))
+        .filter(Boolean)
+    ));
+    const reconciliationInterventionMap = await fetchInterventionsById({
+      ids: reconciliationInterventionIds,
+      connection: pool,
+    });
+    const items = (rows || []).map(row => ({
+      ...buildReconciliationTransaction(row),
+      ...buildPaymentHistoryIntegrityFields({
+        interventionIds: row.case_intervention_id ? [row.case_intervention_id] : [],
+        interventionMap: reconciliationInterventionMap,
+        recordKind: 'reconciliation_transaction',
+      }),
+    }));
+    res.status(200).json({ items });
   } catch (err) {
     console.error('[finance] failed to list reconciliation transactions', err);
     res.status(500).json({ error: 'failed_to_list_reconciliation_transactions' });
@@ -84907,6 +89305,11 @@ app.post('/api/finance/payment-communications', async (req, res) => {
     req?.staffProfile?.email ||
     null;
   try {
+    await assertOperationalPaymentPacketTargets({
+      packetId,
+      connection: pool,
+      operation: 'record an operational payment communication',
+    });
     const communication = await createPaymentCommunication({
       packetId,
       direction,
@@ -84924,7 +89327,11 @@ app.post('/api/finance/payment-communications', async (req, res) => {
     res.status(201).json(communication);
   } catch (err) {
     console.error('[payments] failed to create communication log', err);
-    res.status(500).json({ error: 'failed_to_create_payment_communication' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    res.status(status).json({
+      error: err?.code || 'failed_to_create_payment_communication',
+      message: err?.publicMessage || undefined,
+    });
   }
 });
 
@@ -85005,6 +89412,12 @@ async function handleRecordPaymentFollowUp(req, res, { packetId, lineId = null }
       await conn.rollback();
       return res.status(409).json({ error: 'payment_packet_not_sent' });
     }
+    await assertOperationalPaymentPacketTargets({
+      packetId: packetValue,
+      lineId: Number.isFinite(lineValue) ? lineValue : null,
+      connection: conn,
+      operation: 'record a payment follow-up',
+    });
 
     if (documentId) {
       const [[docRow]] = await conn.query(
@@ -85098,7 +89511,11 @@ async function handleRecordPaymentFollowUp(req, res, { packetId, lineId = null }
   } catch (err) {
     try { await conn.rollback(); } catch {}
     console.error('[payments] failed to record follow-up', err);
-    return res.status(500).json({ error: 'failed_to_record_payment_follow_up' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    return res.status(status).json({
+      error: err?.code || 'failed_to_record_payment_follow_up',
+      message: err?.publicMessage || undefined,
+    });
   } finally {
     conn.release();
   }
@@ -85237,6 +89654,11 @@ app.post('/api/finance/payment-packets', async (req, res) => {
     if (interventionIdsForPacket.size) {
       const ids = Array.from(interventionIdsForPacket);
       const packetInterventionMap = await fetchInterventionsById({ ids, connection: conn });
+      assertOperationalPaymentInterventionIds({
+        interventionIds: ids,
+        interventionMap: packetInterventionMap,
+        operation: 'use for payment packet creation',
+      });
       const historicalOnlyInterventionIds = ids.filter(id =>
         isManualBackloadInterventionRow(packetInterventionMap.get(Number(id)))
       );
@@ -85530,7 +89952,11 @@ app.post('/api/finance/payment-packets', async (req, res) => {
   } catch (err) {
     await conn.rollback();
     console.error('[payments] failed to create payment packet', err);
-    res.status(500).json({ error: 'failed_to_create_payment_packet' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    res.status(status).json({
+      error: err?.code || 'failed_to_create_payment_packet',
+      message: err?.publicMessage || undefined,
+    });
   } finally {
     conn.release();
   }
@@ -85550,6 +89976,13 @@ app.put('/api/finance/payment-packets/:id', async (req, res) => {
     const existingAccessError = await validatePaymentPacketAccess(req, packetId);
     if (existingAccessError) {
       return res.status(existingAccessError.status).json(existingAccessError.body);
+    }
+    const [[existingPacketTarget]] = await pool.query(
+      'SELECT intervention_id FROM payment_packet WHERE id = ? LIMIT 1',
+      [packetId]
+    );
+    if (!existingPacketTarget) {
+      return res.status(404).json({ error: 'payment_packet_not_found' });
     }
     const fields = [];
     const params = [];
@@ -85618,6 +90051,17 @@ app.put('/api/finance/payment-packets/:id', async (req, res) => {
         return res.status(targetAccessError.status).json(targetAccessError.body);
       }
     }
+    const nextInterventionId = Object.prototype.hasOwnProperty.call(nextValues, 'intervention_id')
+      ? nextValues.intervention_id
+      : normalisePositiveInteger(existingPacketTarget.intervention_id);
+    if (nextInterventionId) {
+      const interventionMap = await fetchInterventionsById({ ids: [nextInterventionId], connection: pool });
+      assertOperationalPaymentInterventionIds({
+        interventionIds: [nextInterventionId],
+        interventionMap,
+        operation: 'use for payment packet updates',
+      });
+    }
     params.push(packetId);
     await pool.query(
       `UPDATE payment_packet SET ${fields.join(', ')}, updated_at = NOW() WHERE id = ?`,
@@ -85631,7 +90075,11 @@ app.put('/api/finance/payment-packets/:id', async (req, res) => {
     res.status(200).json(packet);
   } catch (err) {
     console.error('[payments] failed to update payment packet', err);
-    res.status(500).json({ error: 'failed_to_update_payment_packet' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    res.status(status).json({
+      error: err?.code || 'failed_to_update_payment_packet',
+      message: err?.publicMessage || undefined,
+    });
   }
 });
 
@@ -85722,6 +90170,23 @@ app.post('/api/finance/payment-packets/:id/validate', async (req, res) => {
         WHERE ppl.payment_packet_id = ?`,
       [packetId]
     );
+
+    const operationalInterventionIds = Array.from(new Set(
+      (lineRows || [])
+        .map(line => normalisePositiveInteger(line.intervention_id))
+        .filter(Boolean)
+        .concat(packetRow.intervention_id ? [normalisePositiveInteger(packetRow.intervention_id)] : [])
+        .filter(Boolean)
+    ));
+    const operationalInterventionMap = await fetchInterventionsById({
+      ids: operationalInterventionIds,
+      connection: conn,
+    });
+    assertOperationalPaymentInterventionIds({
+      interventionIds: operationalInterventionIds,
+      interventionMap: operationalInterventionMap,
+      operation: 'validate a payment packet for',
+    });
 
     const intacctConfig = await readIntacctIntegrationConfig(conn);
     const submissionMode = normalizeIntacctSubmissionMode(intacctConfig?.submissionMode);
@@ -85821,7 +90286,11 @@ app.post('/api/finance/payment-packets/:id/validate', async (req, res) => {
   } catch (err) {
     await conn.rollback();
     console.error('[payments] failed to validate payment packet', err);
-    return res.status(500).json({ error: 'failed_to_validate_payment_packet' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    return res.status(status).json({
+      error: err?.code || 'failed_to_validate_payment_packet',
+      message: err?.publicMessage || undefined,
+    });
   } finally {
     conn.release();
   }
@@ -85836,6 +90305,11 @@ app.get('/api/finance/payment-packets/:id/submission-attempts', async (req, res)
   const accessError = await validatePaymentPacketAccess(req, packetId);
   if (accessError) return res.status(accessError.status).json(accessError.body);
   try {
+    const integrity = await resolvePaymentPacketHistoryIntegrityFields({
+      packetId,
+      connection: pool,
+      recordKind: 'payment_submission_attempt',
+    });
     const [rows] = await pool.query(
       `SELECT id, submission_key, mode, status, attempt_count, provider_message_id,
               error_json, created_at, updated_at, completed_at
@@ -85860,6 +90334,7 @@ app.get('/api/finance/payment-packets/:id/submission-attempts', async (req, res)
         createdAt: row.created_at || null,
         updatedAt: row.updated_at || null,
         completedAt: row.completed_at || null,
+        ...integrity,
       };
     }));
   } catch (error) {
@@ -85948,6 +90423,24 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       [packetId]
     );
     const activeLines = (lineRows || []).filter(row => row.status !== 'cancelled');
+    if (nextStatus !== 'cancelled') {
+      const operationalInterventionIds = Array.from(new Set(
+        activeLines
+          .map(line => normalisePositiveInteger(line.intervention_id))
+          .filter(Boolean)
+          .concat(packetRow.intervention_id ? [normalisePositiveInteger(packetRow.intervention_id)] : [])
+          .filter(Boolean)
+      ));
+      const operationalInterventionMap = await fetchInterventionsById({
+        ids: operationalInterventionIds,
+        connection: conn,
+      });
+      assertOperationalPaymentInterventionIds({
+        interventionIds: operationalInterventionIds,
+        interventionMap: operationalInterventionMap,
+        operation: 'advance a payment packet for',
+      });
+    }
     const totalAmount = activeLines.reduce((sum, row) => sum + Number(row.amount || 0), 0);
     const maxLineAmount = activeLines.reduce((max, row) => {
       const value = Number(row.amount || 0);
@@ -86547,7 +91040,11 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
   } catch (err) {
     await conn.rollback();
     console.error('[payments] failed to update payment packet status', err);
-    res.status(500).json({ error: 'failed_to_update_payment_packet_status' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    res.status(status).json({
+      error: err?.code || 'failed_to_update_payment_packet_status',
+      message: err?.publicMessage || undefined,
+    });
   } finally {
     conn.release();
   }
@@ -86688,6 +91185,11 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
       new Set(lineInputs.map(line => line.interventionId).filter(Boolean))
     );
     const interventionMap = await fetchInterventionsById({ ids: interventionIds, connection: conn });
+    assertOperationalPaymentInterventionIds({
+      interventionIds,
+      interventionMap,
+      operation: 'add payment lines for',
+    });
     const blockedInterventionIds = interventionIds.filter(id => {
       const intervention = interventionMap.get(Number(id));
       return intervention && isPaymentBlockedInterventionStatus(intervention.status);
@@ -86828,7 +91330,11 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
   } catch (err) {
     await conn.rollback();
     console.error('[payments] failed to add payment lines', err);
-    res.status(500).json({ error: 'failed_to_add_payment_lines' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    res.status(status).json({
+      error: err?.code || 'failed_to_add_payment_lines',
+      message: err?.publicMessage || undefined,
+    });
   } finally {
     conn.release();
   }
@@ -87075,6 +91581,11 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
       new Set(lineInputs.map(line => line.interventionId).filter(Boolean))
     );
     const interventionMap = await fetchInterventionsById({ ids: interventionIds, connection: conn });
+    assertOperationalPaymentInterventionIds({
+      interventionIds,
+      interventionMap,
+      operation: 'add recurring payment lines for',
+    });
     const blockedInterventionIds = interventionIds.filter(id => {
       const intervention = interventionMap.get(Number(id));
       return intervention && isPaymentBlockedInterventionStatus(intervention.status);
@@ -87216,7 +91727,11 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
   } catch (err) {
     await conn.rollback();
     console.error('[payments] failed to add recurring payment lines', err);
-    res.status(500).json({ error: 'failed_to_add_recurring_payment_lines' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    res.status(status).json({
+      error: err?.code || 'failed_to_add_recurring_payment_lines',
+      message: err?.publicMessage || undefined,
+    });
   } finally {
     conn.release();
   }
@@ -87423,6 +91938,11 @@ app.put('/api/finance/payment-lines/:id', async (req, res) => {
       ids: primaryInterventionId ? [primaryInterventionId] : [],
       connection: pool,
     });
+    assertOperationalPaymentInterventionIds({
+      interventionIds: primaryInterventionId ? [primaryInterventionId] : [],
+      interventionMap,
+      operation: 'update a payment line for',
+    });
     const intervention = primaryInterventionId
       ? interventionMap.get(Number(primaryInterventionId))
       : null;
@@ -87514,7 +92034,11 @@ app.put('/api/finance/payment-lines/:id', async (req, res) => {
     res.status(200).json(mapPaymentLineRow(lineRow));
   } catch (err) {
     console.error('[payments] failed to update payment line', err);
-    res.status(500).json({ error: 'failed_to_update_payment_line' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    res.status(status).json({
+      error: err?.code || 'failed_to_update_payment_line',
+      message: err?.publicMessage || undefined,
+    });
   }
 });
 
@@ -87559,7 +92083,7 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
       return res.status(400).json({ error: 'actor_user_required' });
     }
     const [[lineRow]] = await conn.query(
-      `SELECT ppl.*, pp.case_id, pp.intervention_id, pp.client_id, pp.status AS packet_status, pp.confirmed_at,
+      `SELECT ppl.*, pp.case_id, pp.intervention_id AS packet_intervention_id, pp.client_id, pp.status AS packet_status, pp.confirmed_at,
               pp.metadata AS packet_metadata, pp.requester_user_id
          FROM payment_packet_line ppl
          LEFT JOIN payment_packet pp ON pp.id = ppl.payment_packet_id
@@ -87575,6 +92099,21 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
     if (accessError) {
       await conn.rollback();
       return res.status(accessError.status).json(accessError.body);
+    }
+    if (nextStatus !== 'cancelled') {
+      const operationalInterventionIds = Array.from(new Set([
+        normalisePositiveInteger(lineRow.intervention_id),
+        normalisePositiveInteger(lineRow.packet_intervention_id),
+      ].filter(Boolean)));
+      const operationalInterventionMap = await fetchInterventionsById({
+        ids: operationalInterventionIds,
+        connection: conn,
+      });
+      assertOperationalPaymentInterventionIds({
+        interventionIds: operationalInterventionIds,
+        interventionMap: operationalInterventionMap,
+        operation: 'advance a payment line for',
+      });
     }
     const fromStatus = lineRow.status || null;
     const simplePaidWorkflow = SIMPLE_PAYMENT_WORKFLOW && nextStatus === 'paid';
@@ -87995,7 +92534,11 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
   } catch (err) {
     await conn.rollback();
     console.error('[payments] failed to update payment line status', err);
-    res.status(500).json({ error: 'failed_to_update_payment_line_status' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    res.status(status).json({
+      error: err?.code || 'failed_to_update_payment_line_status',
+      message: err?.publicMessage || undefined,
+    });
   } finally {
     conn.release();
   }
@@ -88056,6 +92599,12 @@ app.post('/api/finance/payment-packets/:id/documents', async (req, res) => {
     if (!packetRow) {
       return res.status(404).json({ error: 'payment_packet_not_found' });
     }
+    await assertOperationalPaymentPacketTargets({
+      packetId,
+      lineId: Number.isFinite(lineId) ? lineId : null,
+      connection: pool,
+      operation: 'attach evidence to a payment packet',
+    });
     let lineRow = null;
     if (lineId) {
       const [[resolvedLineRow]] = await pool.query(
@@ -88137,7 +92686,11 @@ app.post('/api/finance/payment-packets/:id/documents', async (req, res) => {
     res.status(201).json(mapPaymentDocumentRow(evidenceRow));
   } catch (err) {
     console.error('[payments] failed to attach payment document', err);
-    res.status(500).json({ error: 'failed_to_attach_payment_document' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    res.status(status).json({
+      error: err?.code || 'failed_to_attach_payment_document',
+      message: err?.publicMessage || undefined,
+    });
   }
 });
 
@@ -88214,6 +92767,11 @@ app.put('/api/finance/payment-documents/:id', async (req, res) => {
     if (!existingLink) {
       return res.status(404).json({ error: 'payment_document_not_found' });
     }
+    await assertOperationalPaymentPacketTargets({
+      packetId: existingLink.payment_packet_id,
+      connection: pool,
+      operation: 'verify or update payment evidence',
+    });
     const accessError = await validatePaymentPacketAccess(req, existingLink.payment_packet_id);
     if (accessError) {
       return res.status(accessError.status).json(accessError.body);
@@ -88241,7 +92799,11 @@ app.put('/api/finance/payment-documents/:id', async (req, res) => {
     res.status(200).json(mapPaymentDocumentRow(row));
   } catch (err) {
     console.error('[payments] failed to update payment document', err);
-    res.status(500).json({ error: 'failed_to_update_payment_document' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    res.status(status).json({
+      error: err?.code || 'failed_to_update_payment_document',
+      message: err?.publicMessage || undefined,
+    });
   }
 });
 
@@ -88294,7 +92856,18 @@ app.get('/api/finance/payment-batches', async (req, res) => {
       `SELECT * FROM payment_batch ${where} ORDER BY updated_at DESC, id DESC LIMIT ?`,
       params
     );
-    res.status(200).json(rows.map(mapPaymentBatchRow));
+    const batches = [];
+    for (const row of rows || []) {
+      const hydrated = await fetchPaymentBatchById(Number(row.id), pool);
+      const integrity = hydrated
+        ? buildPaymentHistoryIntegrityFieldsFromEvidenceIds({
+            evidenceIds: hydrated.appliedRevisionEvidenceInterventionIds || [],
+            recordKind: 'payment_batch',
+          })
+        : buildPaymentHistoryIntegrityFieldsFromEvidenceIds({ recordKind: 'payment_batch' });
+      batches.push({ ...mapPaymentBatchRow(row), ...integrity });
+    }
+    res.status(200).json(batches);
   } catch (err) {
     console.error('[payments] failed to list payment batches', err);
     res.status(500).json({ error: 'failed_to_list_payment_batches' });
@@ -88360,6 +92933,14 @@ app.post('/api/finance/payment-batches', async (req, res) => {
       await conn.rollback();
       return res.status(404).json({ error: 'payment_lines_not_found', missingLineIds });
     }
+    for (const lineRow of lineRows) {
+      await assertOperationalPaymentPacketTargets({
+        packetId: lineRow.payment_packet_id,
+        lineId: lineRow.id,
+        connection: conn,
+        operation: 'add a line to a payment batch',
+      });
+    }
 
     const currency = lineRows[0]?.currency || 'CAD';
     const mismatchedCurrency = lineRows.find(row => (row.currency || 'CAD') !== currency);
@@ -88388,7 +92969,11 @@ app.post('/api/finance/payment-batches', async (req, res) => {
   } catch (err) {
     await conn.rollback();
     console.error('[payments] failed to create payment batch', err);
-    res.status(500).json({ error: 'failed_to_create_payment_batch' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    res.status(status).json({
+      error: err?.code || 'failed_to_create_payment_batch',
+      message: err?.publicMessage || undefined,
+    });
   } finally {
     conn.release();
   }
@@ -88428,6 +93013,10 @@ app.post('/api/finance/payment-batches/:id/status', async (req, res) => {
     if (!batchRow) {
       return res.status(404).json({ error: 'payment_batch_not_found' });
     }
+    const existingBatch = await fetchPaymentBatchById(batchId, pool);
+    assertOperationalPaymentHistoryRecord(existingBatch, {
+      operation: 'change a payment batch status',
+    });
     if (nextStatus === 'approved') {
       if (!actorUserId) {
         return res.status(400).json({ error: 'actor_user_required' });
@@ -88486,7 +93075,11 @@ app.post('/api/finance/payment-batches/:id/status', async (req, res) => {
     res.status(200).json(batch);
   } catch (err) {
     console.error('[payments] failed to update payment batch status', err);
-    res.status(500).json({ error: 'failed_to_update_payment_batch_status' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    res.status(status).json({
+      error: err?.code || 'failed_to_update_payment_batch_status',
+      message: err?.publicMessage || undefined,
+    });
   }
 });
 
@@ -88504,6 +93097,13 @@ app.post('/api/finance/payment-batches/:id/export', async (req, res) => {
     return res.status(400).json({ error: 'actor_user_required' });
   }
   try {
+    const batch = await fetchPaymentBatchById(batchId, pool);
+    if (!batch) {
+      return res.status(404).json({ error: 'payment_batch_not_found' });
+    }
+    assertOperationalPaymentHistoryRecord(batch, {
+      operation: 'export a payment batch',
+    });
     const rows = await fetchPaymentBatchExportRows(batchId);
     if (!rows.length) {
       return res.status(404).json({ error: 'payment_batch_not_found' });
@@ -88546,7 +93146,11 @@ app.post('/api/finance/payment-batches/:id/export', async (req, res) => {
     return res.end(buffer);
   } catch (err) {
     console.error('[payments] failed to export payment batch', err);
-    return res.status(500).json({ error: 'failed_to_export_payment_batch' });
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    return res.status(status).json({
+      error: err?.code || 'failed_to_export_payment_batch',
+      message: err?.publicMessage || undefined,
+    });
   }
 });
 
@@ -92603,6 +97207,7 @@ app.post('/api/cases/:id/assessment/recall', async (req, res) => {
       applicationId,
       caseId,
       documentTypes: ['case_assessment'],
+      excludeInterventionDocuments: true,
       connection: conn,
     });
     const recalledVersionNumber = latestSubmittedDoc?.versionNumber || null;
@@ -93275,6 +97880,7 @@ app.put('/api/cases/:id', async (req, res) => {
   let requiredAssessmentDocsGenerated = false;
   let eligibilityCorrectionEvent = null;
   let eligibilityOnlyAssessmentPayload = false;
+  let assessmentEiEvidencePresent = null;
   const applicationJoinSql = requestedApplicationId
     ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
     : buildCasePrimaryApplicationJoinSql('c', 'a');
@@ -93433,8 +98039,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       const assessmentRow = await fetchApplicationAssessmentRow(conn, { caseId, applicationId });
       const existingEligibility = normaliseString(assessmentRow?.esdc_eligibility) || null;
       const incomingEligibility = normaliseString(body.assessment_esdc_eligibility) || null;
-      const existingKey = (existingEligibility || '').toLowerCase();
-      const incomingKey = (incomingEligibility || '').toLowerCase();
+      const existingKey =
+        normalizeEsdcEligibilityValue(existingEligibility) || (existingEligibility || '').toLowerCase();
+      const incomingKey =
+        normalizeEsdcEligibilityValue(incomingEligibility) || (incomingEligibility || '').toLowerCase();
       const eligibilityChanged = existingKey !== incomingKey;
       if (!eligibilityRoleAllowlist.has(roleKey)) {
         if (eligibilityChanged) {
@@ -93447,6 +98055,25 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           });
         }
       } else if (eligibilityChanged) {
+        assessmentEiEvidencePresent = await hasActiveApplicationAssessmentEiEvidence(conn, {
+          caseId,
+          applicationId,
+        });
+        try {
+          assertApplicationAssessmentEiEligibilityChangeEvidence({
+            previousEligibility: existingEligibility,
+            nextEligibility: incomingEligibility,
+            hasVerificationEvidence: assessmentEiEvidencePresent,
+          });
+        } catch (error) {
+          await conn.rollback();
+          return res.status(Number(error?.status) || 422).json({
+            success: false,
+            error: error?.code || error?.message || 'assessment_ei_verification_required',
+            message: error?.publicMessage || 'Upload an EI verification document before changing the EI status.',
+            lock: lockCheck.lock || null,
+          });
+        }
         const [[dependencyRow]] = await conn.query(
           `SELECT
               (SELECT COUNT(*)
@@ -93864,6 +98491,38 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
             assessmentSubmittedForWorkflow,
         }
       );
+    }
+
+    if (assessmentSubmittedForWorkflow) {
+      if (!existingAssessmentRow) {
+        existingAssessmentRow = await fetchApplicationAssessmentRow(conn, { caseId, applicationId });
+      }
+      const previousEligibility = normaliseString(existingAssessmentRow?.esdc_eligibility) || null;
+      const effectiveEligibility = eligibilityUpdateRequested
+        ? (normaliseString(body.assessment_esdc_eligibility) || null)
+        : previousEligibility;
+      if (assessmentEiEvidencePresent === null) {
+        assessmentEiEvidencePresent = await hasActiveApplicationAssessmentEiEvidence(conn, {
+          caseId,
+          applicationId,
+        });
+      }
+      try {
+        assertApplicationAssessmentEiSubmissionReady({
+          reviewWorkflow: applicationAssessmentReviewWorkflow,
+          previousEligibility,
+          nextEligibility: effectiveEligibility,
+          hasVerificationEvidence: assessmentEiEvidencePresent,
+        });
+      } catch (error) {
+        await conn.rollback();
+        return res.status(Number(error?.status) || 422).json({
+          success: false,
+          error: error?.code || error?.message || 'assessment_ei_status_required',
+          message: error?.publicMessage || 'Complete the EI verification before submitting this assessment.',
+          lock: lockCheck.lock || null,
+        });
+      }
     }
 
     try {
@@ -94825,12 +99484,14 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         applicationId: documentCaseRow.application_id,
         caseId,
         documentTypes: ['case_assessment'],
+        excludeInterventionDocuments: true,
         connection: conn
       });
       const latestVersionedDoc = await fetchLatestAssessmentDocumentInfo({
         applicationId: documentCaseRow.application_id,
         caseId,
         documentTypes: ['case_assessment', 'case_assessment_approved'],
+        excludeInterventionDocuments: true,
         connection: conn
       });
       const assessmentVersionNumber = ((latestVersionedDoc?.versionNumber || 0) + 1);
@@ -95548,13 +100209,19 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         caseId,
         payload: {
           tracking_id: trackingId,
+          application_id: caseRow?.application_id || applicationId || null,
+          workflow_type: applicationAssessmentReviewWorkflowEnabled
+            ? REVIEW_WORKFLOW_TYPES.ApplicationAssessment
+            : null,
+          review_stage: applicationAssessmentReviewWorkflowUpdated?.current_stage || null,
           message: coordinatorName
-            ? 'Assessment submitted by coordinator: ' + coordinatorName + '.'
-            : 'Assessment submitted by coordinator.',
+            ? 'Assessment submitted for Regional Manager review by ' + coordinatorName + '.'
+            : 'Assessment submitted for Regional Manager review.',
         },
         trackingId,
         actorId,
         actorName: coordinatorName || actorName,
+        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
       });
     } else {
       console.debug('[events] assessment_submitted not emitted', {
@@ -95621,53 +100288,74 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       hasAssessmentPayload &&
       (beforeAssessmentBudgetPotId !== afterAssessmentPotId ||
         beforeAssessmentPostingContext !== afterAssessmentPostingContext);
-    const reviewTransitionedToApproved =
+    const finalAssessmentDecisionOutcome = afterAssessmentReviewStatus === 'approve'
+      ? 'approved'
+      : afterAssessmentReviewStatus === 'reject'
+        ? 'denied'
+        : null;
+    const reviewTransitionedToFinal =
       hasAssessmentPayload &&
-      beforeAssessmentReviewStatus !== 'approve' &&
-      afterAssessmentReviewStatus === 'approve';
-    const approvedSignatureFallback =
-      assessmentReviewStatusProvided && afterAssessmentReviewStatus === 'approve'
+      Boolean(finalAssessmentDecisionOutcome) &&
+      beforeAssessmentReviewStatus !== afterAssessmentReviewStatus;
+    const decisionSignatureFallback =
+      assessmentReviewStatusProvided && finalAssessmentDecisionOutcome
         ? {
             signerName: actorDisplayName || actorName || null,
             signedAt: requestSignatureTimestamp
           }
         : null;
-    const shouldGenerateApprovedAssessmentPdf =
+    const shouldGenerateFinalAssessmentPdf =
       assessmentHasApplicationId &&
-      afterAssessmentReviewStatus === 'approve' &&
-      (budgetPotOrPostingChanged || reviewTransitionedToApproved);
+      Boolean(finalAssessmentDecisionOutcome) &&
+      (reviewTransitionedToFinal || (
+        finalAssessmentDecisionOutcome === 'approved' && budgetPotOrPostingChanged
+      ));
     const generateAndStoreAssessmentPdf = async ({
-      approved = false,
+      finalDecisionOutcome = null,
       submittedSignature = null,
-      approvedSignature = null
+      decisionSignature = null
     } = {}) => {
+      const normalizedFinalOutcome = normalizeAssessmentFinalDecisionOutcome(finalDecisionOutcome);
+      const isFinalDecisionPacket = Boolean(normalizedFinalOutcome);
+      const applicationWorkflowSubject = {
+        workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+        caseId,
+        applicationId: caseRow.application_id,
+      };
+      const applicationAssessmentSubjectKey = buildReviewSubjectKey(applicationWorkflowSubject);
       const applicantContext = await fetchAssessmentApplicantContext({
         applicationId: caseRow.application_id,
         applicantUserId: caseRow.applicant_user_id
       });
-      const signatureContext = approved
+      const signatureContext = isFinalDecisionPacket
         ? await fetchAssessmentPdfSignatureContext({
             caseId,
             applicationId: caseRow.application_id,
             submittedFallback: submittedSignature,
-            approvedFallback: approvedSignature
+            approvedFallback: decisionSignature,
+            finalDecisionOutcome: normalizedFinalOutcome,
           })
         : {
             submittedSignature: submittedSignature || null,
             reviewSignature: null,
             approvedSignature: null
           };
+      const resolvedFinalOutcome = isFinalDecisionPacket
+        ? (signatureContext.finalDecisionOutcome || normalizedFinalOutcome)
+        : null;
       const latestSubmittedDoc = await fetchLatestAssessmentDocumentInfo({
         applicationId: caseRow.application_id,
         caseId,
-        documentTypes: ['case_assessment']
+        documentTypes: ['case_assessment'],
+        excludeInterventionDocuments: true,
       });
       const latestVersionedDoc = await fetchLatestAssessmentDocumentInfo({
         applicationId: caseRow.application_id,
         caseId,
-        documentTypes: ['case_assessment', 'case_assessment_approved']
+        documentTypes: ['case_assessment', 'case_assessment_approved'],
+        excludeInterventionDocuments: true,
       });
-      const assessmentVersionNumber = approved
+      const assessmentVersionNumber = isFinalDecisionPacket
         ? (
             latestSubmittedDoc?.versionNumber ||
             latestVersionedDoc?.versionNumber ||
@@ -95676,7 +100364,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         : ((latestVersionedDoc?.versionNumber || 0) + 1);
       const previousSubmittedVersionNumber = latestSubmittedDoc?.versionNumber || null;
       const previousSubmittedSnapshot = latestSubmittedDoc?.snapshot || null;
-      const assessmentVariant = approved ? 'approved' : 'submitted';
+      const assessmentVariant = isFinalDecisionPacket ? 'final' : 'submitted';
       const referenceNumber = applicantContext.trackingId || trackingId;
       const currentSnapshot = await buildAssessmentPdfSnapshot({
         caseRow,
@@ -95690,9 +100378,15 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         referenceNumber,
         caseContext: afterCaseContext,
         recommendationSignature: signatureContext.submittedSignature,
-        reviewSignature: approved ? signatureContext.reviewSignature : null,
-        approvalSignature: approved ? signatureContext.approvedSignature : null,
-        includeAgreementSection: approved,
+        reviewSignature: isFinalDecisionPacket ? signatureContext.reviewSignature : null,
+        approvalSignature: isFinalDecisionPacket ? signatureContext.approvedSignature : null,
+        includeAgreementSection: isFinalDecisionPacket,
+        finalDecisionOutcome: resolvedFinalOutcome,
+        rmReviewNote: signatureContext.rmReviewNote || null,
+        decisionNote:
+          signatureContext.decisionNote ||
+          normaliseString(currentSnapshot?.denial_reason) ||
+          null,
         versionNumber: assessmentVersionNumber,
         variant: assessmentVariant
       });
@@ -95704,18 +100398,42 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         actorUserId: actorId,
         trackingId: referenceNumber,
         pdfBuffer,
-        documentType: approved ? 'case_assessment_approved' : 'case_assessment',
-        label: approved
-          ? `Approved case manager assessment v${assessmentVersionNumber}`
+        documentType: isFinalDecisionPacket ? 'case_assessment_approved' : 'case_assessment',
+        label: isFinalDecisionPacket
+          ? `Final assessment packet v${assessmentVersionNumber} - ${resolvedFinalOutcome === 'approved' ? 'Approved' : 'Denied'}`
           : `Case manager assessment v${assessmentVersionNumber}`,
-        fileNamePrefix: approved ? 'approved-case-manager-assessment' : 'case-manager-assessment',
+        fileNamePrefix: isFinalDecisionPacket ? 'final-assessment-packet' : 'case-manager-assessment',
         versionNumber: assessmentVersionNumber,
         variant: assessmentVariant,
+        finalDecisionOutcome: resolvedFinalOutcome,
         snapshot: currentSnapshot,
+        extraMetadata: isFinalDecisionPacket ? {
+          assessment_source: 'application_assessment_final_decision',
+          assessment_subject_key: applicationAssessmentSubjectKey,
+          assessment_workflow_type: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+          assessment_final_outcome: resolvedFinalOutcome,
+          assessment_final_evidence: isFinalDecisionPacket
+            ? buildAssessmentFinalEvidenceMetadata({
+                finalDecisionOutcome:
+                  signatureContext.finalDecisionOutcome || normalizedFinalOutcome,
+                assessmentSubjectKey: applicationAssessmentSubjectKey,
+                workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+                workflowSubject: applicationWorkflowSubject,
+                submittedSignature: signatureContext.submittedSignature,
+                reviewSignature: signatureContext.reviewSignature,
+                decisionSignature: signatureContext.approvedSignature,
+                rmReviewNote: signatureContext.rmReviewNote,
+                decisionNote:
+                  signatureContext.decisionNote ||
+                  normaliseString(currentSnapshot?.denial_reason) ||
+                  null,
+              })
+            : null,
+        } : null,
         archivePreviousActive: false,
         replaceExistingVersion: true
       });
-      if (!approved && previousSubmittedVersionNumber && hasAssessmentSnapshotContent(previousSubmittedSnapshot)) {
+      if (!isFinalDecisionPacket && previousSubmittedVersionNumber && hasAssessmentSnapshotContent(previousSubmittedSnapshot)) {
         const redlineBuffer = await generateAssessmentPdfBuffer({
           caseRow,
           applicantName: applicantContext.applicantName,
@@ -95815,15 +100533,15 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       }
     }
 
-    if (shouldGenerateApprovedAssessmentPdf) {
+    if (shouldGenerateFinalAssessmentPdf) {
       try {
         await generateAndStoreAssessmentPdf({
-          approved: true,
+          finalDecisionOutcome: finalAssessmentDecisionOutcome,
           submittedSignature: submittedSignatureFallback,
-          approvedSignature: approvedSignatureFallback
+          decisionSignature: decisionSignatureFallback
         });
       } catch (err) {
-        console.error('[assessment-pdf] approved assessment generation failed:', err?.message || err);
+        console.error('[assessment-pdf] final assessment generation failed:', err?.message || err);
       }
     }
 
@@ -97686,9 +102404,66 @@ const adminRepairExports = {
   assertApplicationAssessmentReviewOwnedStatusMutationAllowed,
   assertApplicationAssessmentMutationStageAllowed,
   assertApplicationAssessmentReturnedToSubmitterActor,
+  assertInterventionReturnedToSubmitterActor,
+  assertInterventionSubmitterOwnedMutationAllowed,
+  assertInterventionFinalDecisionMutationAllowed,
+  assertInterventionDecisionPayloadOwnership,
+  assertInterventionDecisionOutcomeConsistency,
+  assertInterventionDecisionNoteReady,
+  isInterventionDecisionMakerRole,
+  canApplyApprovedInterventionRevision,
+  resolveExactFinalApprovedInterventionWorkflow,
+  resolveExactFinalApprovedInterventionWorkflowWithRow,
+  assertApprovedInterventionMaterializationWorkflow,
+  resolveInterventionFinalApprovalWorkflow,
+  resolveApprovedInterventionProposalLetterEligibilityFromRow,
+  resolveApprovedInterventionProposalLetterEligibility,
+  assertInterventionCloseAllowed,
+  assertInterventionDeleteAllowed,
+  buildInterventionDecisionCoreVersion,
+  assertInterventionDecisionCoreVersionCurrent,
+  runInterventionDecisionCoreTransaction,
+  hasActiveApplicationAssessmentEiEvidence,
+  assertApplicationAssessmentEiEligibilityChangeEvidence,
+  assertApplicationAssessmentEiSubmissionReady,
+  resolveInterventionReviewEiDetails,
+  assertInterventionApprovalEiFundingAlignment,
+  assertInterventionEiEvidenceLink,
+  validateApprovedInterventionMaterializationRequest,
+  resolveApprovedInterventionMaterializationKey,
+  buildApprovedInterventionMaterializationItemSignature,
+  assertApprovedInterventionMaterializationReplayMatches,
+  findApprovedInterventionMaterializationReplay,
+  materializeApprovedInterventionProposalAdditionalItems,
+  validateApprovedInterventionRevisionApplicationRequest,
+  assertInterventionRevisionApplyPayloadOwnership,
+  isAppliedRevisionEvidenceIntervention,
+  buildAppliedRevisionEvidenceSql,
+  buildOperationalInterventionSql,
+  partitionAppliedRevisionEvidenceRows,
+  filterOperationalInterventionRows,
+  mapAppliedRevisionEvidenceRow,
+  assertOperationalInterventionRow,
+  assertOperationalPaymentInterventionIds,
+  collectPaymentInterventionIds,
+  buildPaymentHistoryIntegrityFields,
+  buildPaymentHistoryIntegrityFieldsFromEvidenceIds,
+  assertOperationalPaymentHistoryRecord,
+  resolvePaymentPacketHistoryIntegrityFields,
+  assertOperationalPaymentPacketTargets,
+  interventionHasCfaFunding,
+  cfaSnapshotHasFunding,
+  shouldIncludeFundedInterventionForCfa,
   createCfaVersionForPlan,
   ensureAutoPlanAndInterventionFromAssessment,
   startInterventionReviewWorkflow,
+  buildAssessmentAgreementSectionHtml,
+  buildAssessmentPdfFields,
+  buildAssessmentVersionLabel,
+  buildAssessmentDocumentMetadata,
+  normalizeAssessmentFinalDecisionOutcome,
+  mergeAssessmentSignatureEvidence,
+  buildAssessmentFinalEvidenceMetadata,
   storeAssessmentPdfDocument,
   storeFundingOverviewPdfDocument,
   storeFundingAgreementPdfDocument,
@@ -97696,6 +102471,8 @@ const adminRepairExports = {
   generateAndStoreInterventionAssessmentPdf,
   generateAndStoreRevisionAssessmentPdf,
   fetchInterventionWithCase,
+  resolveInterventionApplicationScopeId,
+  fetchAssessmentPdfSignatureContext,
   buildRegionalSnapshotPayload,
   resolveSigningRequestMessageScope,
   reconcileApplicationDocumentRequestAfterSigning,
@@ -97703,6 +102480,13 @@ const adminRepairExports = {
   setDocsRequestedFromSecureMessage,
   normalizeCaseMessageSigningAttachments,
   validateCaseMessageSigningAttachmentRequest,
+  resolveCaseMessageFundingSigningWorkflowKind,
+  assertCaseMessagePostApprovalSourceApplication,
+  assertCaseMessageFundingFormsPostApproval,
+  resolveCaseMessageDecisionOutcome,
+  resolveCaseMessageApplicationDecisionAuthorization,
+  assertCaseMessageApplicationDecisionLetters,
+  resolveCaseMessageApplicationFundingApproval,
   validateAutoFundingWorkflowAttachmentResolution,
   assertUniqueVersionedSigningWorkflowAttachments,
   resolveEligibleSigningWorkflowRows,

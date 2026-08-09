@@ -51,4 +51,31 @@ describe('Document checklist route', () => {
     expect(denialOverride).toBeGreaterThan(explicitStageBranch);
     expect(requestedStagePayload).toBeGreaterThan(denialOverride);
   });
+
+  test('intervention checklists use proposal and Action Plan application lineage without a case-primary fallback', () => {
+    const routeSource = extractRouteBlock('get', '/api/applicants/:id/document-checklist');
+
+    expect(routeSource).toContain('p.application_id AS proposal_application_id');
+    expect(routeSource).toContain('ap.application_id AS action_plan_application_id');
+    expect(routeSource).toContain('resolveInterventionApplicationScopeId(interventionRow');
+    expect(routeSource).toContain('applicationId: isIntervention ? interventionApplicationId : applicationId');
+    expect(routeSource).toContain('? normalisePositiveInteger(interventionApplicationId)');
+    expect(routeSource).toContain('return Number(d.action_plan_application_id) === Number(resolvedApplicationId);');
+    expect(routeSource).toContain('!normalisePositiveInteger(d.action_plan_application_id)');
+    expect(routeSource).not.toContain('buildCasePrimaryApplicationIdSql');
+  });
+
+  test('signed checklist forms require the exact selected application and cannot match by case OR application', () => {
+    const routeSource = extractRouteBlock('get', '/api/applicants/:id/document-checklist');
+    const signedCountStart = routeSource.indexOf("const scopePredicates = ['linked_message.application_id = ?']");
+    const signedCountEnd = routeSource.indexOf('const normalizedDocs =', signedCountStart);
+    const signedCountSource = routeSource.slice(signedCountStart, signedCountEnd);
+
+    expect(signedCountStart).toBeGreaterThanOrEqual(0);
+    expect(signedCountSource).toContain('JOIN message_signing_request msr');
+    expect(signedCountSource).toContain('JOIN messages linked_message');
+    expect(signedCountSource).toContain("scopePredicates.join('\\n              AND ')");
+    expect(signedCountSource).not.toContain("scopePredicates.join(' OR ')");
+    expect(signedCountSource).not.toContain('buildCasePrimaryApplicationIdSql');
+  });
 });

@@ -28,7 +28,10 @@ function extractFunction(name, nextName) {
 describe('Financial Overview document policy', () => {
   test('assessment submission preserves a version-managed overview linked to the current application', async () => {
     const connection = {
-      query: jest.fn().mockResolvedValue([[{ has_version: 1 }]]),
+      query: jest.fn()
+        .mockResolvedValueOnce([[{ id: 501, metadata: null }]])
+        .mockResolvedValueOnce([[{ document_id: 501, funding_overview_version_id: 601 }]])
+        .mockResolvedValueOnce([[{ id: 601 }]]),
     };
 
     await expect(
@@ -39,17 +42,84 @@ describe('Financial Overview document policy', () => {
       })
     ).resolves.toBe(true);
 
-    expect(connection.query).toHaveBeenCalledWith(
-      expect.stringContaining('JOIN funding_overview_series s'),
-      [172, 103]
-    );
-    const [sql] = connection.query.mock.calls[0];
-    expect(sql).toContain('FROM iset_document d');
-    expect(sql).toContain('LEFT JOIN funding_overview_version_documents vd');
-    expect(sql).toContain("JSON_EXTRACT(d.metadata, '$.funding_overview_version_id')");
-    expect(sql).toContain('d.application_id = ?');
-    expect(sql).toContain("d.document_category = 'financial_overview'");
-    expect(sql).toContain("d.status = 'active'");
+    expect(connection.query).toHaveBeenCalledTimes(3);
+    const [documentSql, documentParams] = connection.query.mock.calls[0];
+    const [linkSql, linkParams] = connection.query.mock.calls[1];
+    const [versionSql, versionParams] = connection.query.mock.calls[2];
+    expect(documentParams).toEqual([172, 103]);
+    expect(documentSql).toContain('FROM `iset_document` AS `d`');
+    expect(documentSql).toContain('`d`.`application_id` = ?');
+    expect(documentSql).not.toContain('JOIN');
+    expect(linkSql).toContain('FROM `funding_overview_version_documents` AS `vd`');
+    expect(linkParams).toEqual([501]);
+    expect(versionSql).toContain('JOIN `funding_overview_series` AS `s`');
+    expect(versionSql).toContain('ON `s`.`id` = `v`.`series_id`');
+    expect(versionParams).toEqual([601, 172]);
+    expect(versionSql).not.toContain('JSON_EXTRACT');
+  });
+
+  test('metadata-only compatibility resolves a scoped positive version id before the FK-backed case check', async () => {
+    const connection = {
+      query: jest.fn()
+        .mockResolvedValueOnce([[
+          { id: 502, metadata: JSON.stringify({ funding_overview_version_id: '602' }) },
+        ]])
+        .mockResolvedValueOnce([[]])
+        .mockResolvedValueOnce([[{ id: 602 }]]),
+    };
+
+    await expect(
+      hasVersionManagedFinancialOverview(connection, { caseId: 172, applicationId: 103 })
+    ).resolves.toBe(true);
+
+    expect(connection.query.mock.calls[2][1]).toEqual([602, 172]);
+  });
+
+  test.each([
+    ['malformed JSON', '{not-json', 'financial_overview_metadata_invalid'],
+    ['non-positive metadata version', { funding_overview_version_id: 0 }, 'financial_overview_metadata_version_invalid'],
+    ['partially numeric metadata version', { funding_overview_version_id: '602oops' }, 'financial_overview_metadata_version_invalid'],
+  ])('%s fails closed before relationship queries', async (_label, metadata, code) => {
+    const connection = {
+      query: jest.fn().mockResolvedValueOnce([[{ id: 502, metadata }]]),
+    };
+
+    await expect(
+      hasVersionManagedFinancialOverview(connection, { caseId: 172, applicationId: 103 })
+    ).rejects.toMatchObject({ code });
+    expect(connection.query).toHaveBeenCalledTimes(1);
+  });
+
+  test('conflicting link and metadata version ids fail closed before the version lookup', async () => {
+    const connection = {
+      query: jest.fn()
+        .mockResolvedValueOnce([[
+          { id: 502, metadata: { funding_overview_version_id: 602 } },
+        ]])
+        .mockResolvedValueOnce([[
+          { document_id: 502, funding_overview_version_id: 603 },
+        ]]),
+    };
+
+    await expect(
+      hasVersionManagedFinancialOverview(connection, { caseId: 172, applicationId: 103 })
+    ).rejects.toMatchObject({ code: 'financial_overview_version_claim_conflict' });
+    expect(connection.query).toHaveBeenCalledTimes(2);
+  });
+
+  test('a version claim outside the exact case fails closed', async () => {
+    const connection = {
+      query: jest.fn()
+        .mockResolvedValueOnce([[
+          { id: 502, metadata: { funding_overview_version_id: 602 } },
+        ]])
+        .mockResolvedValueOnce([[]])
+        .mockResolvedValueOnce([[]]),
+    };
+
+    await expect(
+      hasVersionManagedFinancialOverview(connection, { caseId: 172, applicationId: 103 })
+    ).rejects.toMatchObject({ code: 'financial_overview_version_scope_invalid' });
   });
 
   test('explicit Financial Overview preservation requires an active current-application document', async () => {
@@ -117,7 +187,7 @@ describe('Financial Overview document policy', () => {
     ).resolves.toBe(false);
 
     expect(connection.query).toHaveBeenCalledWith(
-      expect.stringContaining('d.application_id = ?'),
+      expect.stringContaining('`d`.`application_id` = ?'),
       [172, 104]
     );
   });
@@ -145,11 +215,11 @@ describe('Financial Overview document policy', () => {
 
     const [sql, params] = connection.query.mock.calls[0];
     expect(params).toEqual([103]);
-    expect(sql).toContain("d.document_category = 'financial_overview'");
-    expect(sql).toContain('d.signing_request_id IS NULL');
-    expect(sql).toContain("JSON_EXTRACT(d.metadata, '$.funding_overview_version_id') IS NULL");
-    expect(sql).toContain('FROM funding_overview_version_documents vd');
-    expect(sql).toContain('vd.document_id = d.id');
+    expect(sql).toContain("`d`.`document_category` = 'financial_overview'");
+    expect(sql).toContain('`d`.`signing_request_id` IS NULL');
+    expect(sql).toContain("JSON_EXTRACT(`d`.`metadata`, '$.funding_overview_version_id') IS NULL");
+    expect(sql).toContain('FROM `funding_overview_version_documents` AS `vd`');
+    expect(sql).toContain('`vd`.`document_id` = `d`.`id`');
   });
 
   test('assessment generation is wired to the preservation policy without changing application-form replacement', () => {

@@ -42,13 +42,13 @@ const HomeDashboardHelp = () => {
         <li>Use metrics as a workload snapshot, then drill into the matching record list from any count.</li>
         <li>Keep a personal list of tagged files that need follow-up.</li>
         {isRegionalManager ? (
-          <li>Use the Pending Review queue to review submitted application assessments, new intervention proposals, and proposed intervention changes before they move to final decision.</li>
+          <li>Use Pending Review for first review and for Decision Maker change requests returned to you. Return ordinary review work to the submitter or send it upward; returned Decision Maker requests must be forwarded down with a note.</li>
         ) : null}
         {isNwacAdmin ? (
           <li>Use the Pending Decision queue to review submitted application assessments, new intervention proposals, and proposed intervention changes, then complete the final decision inside the workspace.</li>
         ) : null}
         {(isRegionalManager || isNwacAdmin || isCoordinator) ? (
-          <li>Use Pending Completion to catch post-decision applications and approved intervention proposal/revision follow-ups that still need letters, documents, signatures, or final completion.</li>
+          <li>Use Pending Completion for post-decision letters and completion work. Funded approvals may include the exact application or Action Plan CFA and signatures; zero-funding approvals do not.</li>
         ) : null}
         {isSystemAdmin ? (
           <li>Use the operations snapshot to triage reporting blockers, applicant-account backlog, and staff access hygiene before opening deeper admin tools.</li>
@@ -163,7 +163,9 @@ How to answer:
 - When helping coordinators, connect queue names to training expectations such as prompt acknowledgement of new applications, documented follow-up attempts for missing information, keeping all files tracked, and following active cases through check-ins and closure.
 - Explain that metrics can drill into the same Work Queue Items table, while tagging is a personal follow-up tool.
 - For final-decision users, mention that Pending Decision opens a decision-focused table. For Regional Managers, mention that Pending Review opens submitted application assessments, new intervention proposals, and proposed intervention changes waiting for RM review or returned to RM after the Decision Maker requested changes. Clarify that final decisions are completed inside the workspace by Decision Makers.
-- For coordinators, final-decision users, and Regional Managers, explain that Pending Completion is the post-decision stage for application completion and approved intervention proposal/revision approval-letter follow-up.
+- Explain the downward path: Decision Maker-requested changes return to the RM first; the RM forwards them to the recorded submitter, and corrected work passes RM review again.
+- Explain that EI status controls CRF/EI funding alignment, while the active review stage controls queue ownership.
+- For coordinators, final-decision users, and Regional Managers, explain that Pending Completion is post-decision work. Funded approvals may require the exact application/Action Plan-linked CFA and signatures; zero-funding approvals do not. CFA work is not another approval stage.
 - Mention Add widget and Reset layout only as secondary page controls, not the main purpose of the page.
 - Avoid product-tour language unless the user specifically asks about layout or mechanics.`;
 

@@ -12,7 +12,9 @@
       "Prepare approval letters",
       "Approval letters",
       "Generate drafts",
-      "Send client approval letter"
+      "Send client approval letter",
+      "Client Funding Agreement",
+      "funded cost lines"
     ],
     "forbiddenPatterns": [
       "Approvals area",
@@ -40,6 +42,7 @@
       "approval letters",
       "funding forms and signatures",
       "approved intervention proposal",
+      "Client Funding Agreement",
       "until the application is completed or closed"
     ],
     "forbiddenPatterns": [
@@ -121,8 +124,9 @@
       "Approval and decision",
       "Request changes",
       "decision notes",
-      "send back",
-      "case manager"
+      "Regional Manager first",
+      "recorded submitter",
+      "Regional Manager review again"
     ],
     "forbiddenPatterns": [
       "deny the application",
@@ -134,6 +138,91 @@
       "src/helpPanelContents/applicationAssessmentHelp.js",
       "docs/widgets/admin/application-assessment-widget.md",
       "isetadminserver.js"
+    ],
+    "status": "verified"
+  },
+  {
+    "id": "two-step-review-up-down",
+    "domain": "Two-Step Review",
+    "route": "/application-case/:id",
+    "helpTitle": "Application assessment workflow",
+    "role": "Regional Manager",
+    "prompt": "How does two-step review move work up for approval and back down for changes?",
+    "expectedAnchors": [
+      "Submit for review",
+      "Pending Review",
+      "Submit for final decision",
+      "Pending Decision",
+      "Regional Manager first",
+      "recorded submitter"
+    ],
+    "forbiddenPatterns": [
+      "Regional Manager records the final decision",
+      "Decision Maker sends changes directly to the coordinator",
+      "any Regional Manager can edit"
+    ],
+    "sourceRefs": [
+      "docs/guides/rm-two-step-review-user-guide.md",
+      "src/widgets/CoordinatorAssessmentWidget.js",
+      "src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx",
+      "src/helpPanelContents/homeApprovalsItemsHelp.js"
+    ],
+    "status": "verified"
+  },
+  {
+    "id": "two-step-review-ei-gates",
+    "domain": "Two-Step Review",
+    "route": "/application-case/:id",
+    "helpTitle": "Application assessment workflow",
+    "role": "ISET Coordinator",
+    "prompt": "Where do EI status checks fit in two-step review?",
+    "expectedAnchors": [
+      "signed consent",
+      "CRF",
+      "EI Active Claim",
+      "EI Reach Back",
+      "funding stream",
+      "final approval"
+    ],
+    "forbiddenPatterns": [
+      "EI status controls the review queue",
+      "change EI to match the budget pot",
+      "every proposal needs EI before RM review"
+    ],
+    "sourceRefs": [
+      "docs/guides/rm-two-step-review-user-guide.md",
+      "src/widgets/CoordinatorAssessmentWidget.js",
+      "src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx",
+      "src/helpPanelContents/applicationAssessmentHelp.js",
+      "src/helpPanelContents/caseWorkspaceProposedInterventionsHelp.js"
+    ],
+    "status": "verified"
+  },
+  {
+    "id": "two-step-review-cfa-production",
+    "domain": "Two-Step Review",
+    "route": "/application-case/:id",
+    "helpTitle": "Application assessment workflow",
+    "role": "NWAC Administrator",
+    "prompt": "When is the Client Funding Agreement produced in the review workflow?",
+    "expectedAnchors": [
+      "final approval",
+      "funded cost lines",
+      "Client Funding Agreement",
+      "EFT/Wire Transfer",
+      "exact application",
+      "post-approval"
+    ],
+    "forbiddenPatterns": [
+      "CFA is the final decision",
+      "CFA controls Pending Review",
+      "reuse an older application agreement"
+    ],
+    "sourceRefs": [
+      "docs/guides/rm-two-step-review-user-guide.md",
+      "isetadminserver.js",
+      "src/widgets/CoordinatorAssessmentWidget.js",
+      "src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx"
     ],
     "status": "verified"
   },

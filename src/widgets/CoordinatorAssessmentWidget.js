@@ -4654,7 +4654,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         : currentStep === 'decision'
           ? isReviewWithRegionalManager
             ? requiresSubmitterCorrectionReturn
-              ? 'Return this reopened assessment to the Coordinator with correction notes. It cannot be submitted for another final decision until the Coordinator corrects and resubmits it.'
+              ? 'Return this reopened assessment to the original submitter with correction notes. It cannot be submitted for another final decision until the submitter corrects and resubmits it.'
               : 'Review the submitted assessment and either return it with notes or submit it for final decision.'
             : isReviewWithNwac
               ? 'Review the Regional Manager sign-off, confirm the program decision, and capture any required approval notes.'
@@ -8235,7 +8235,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
       requiresSubmitterCorrectionReturn
     ) {
       setValidationAlert([
-        'Return this reopened assessment to the Coordinator for correction before submitting it for another final decision.'
+        'Return this reopened assessment to the original submitter for correction before submitting it for another final decision.'
       ]);
       return;
     }
@@ -8325,8 +8325,8 @@ ${JSON.stringify(aiContext, null, 2)}`;
           action === ASSESSMENT_REVIEW_ACTIONS.rmSubmitToNwac
             ? 'Assessment submitted for final decision.'
             : action === ASSESSMENT_REVIEW_ACTIONS.rmForwardChangesToSubmitter
-              ? 'Requested changes forwarded to the Coordinator.'
-              : 'Assessment returned to the Coordinator with notes.',
+              ? 'Requested changes forwarded to the submitter.'
+              : 'Assessment returned to the submitter with notes.',
         dismissible: true,
         statusIconAriaLabel: 'Success'
       });
@@ -8835,12 +8835,20 @@ ${JSON.stringify(aiContext, null, 2)}`;
     !isPostDecisionStatus &&
     isPendingApprovalStatus &&
     (
-      !twoStepReviewEnabled ||
-      !hasReviewWorkflow ||
-      (
-        reviewStage === ASSESSMENT_REVIEW_STAGES.rmReview &&
-        isCurrentReviewWorkflowSubmitter
-      )
+      (!twoStepReviewEnabled || !hasReviewWorkflow)
+        ? (
+            isAssessor ||
+            isIsetCoordinator ||
+            isRegionalManager ||
+            roleKey === 'systemadministrator'
+          )
+        : (
+            reviewStage === ASSESSMENT_REVIEW_STAGES.rmReview &&
+            (
+              isCurrentReviewWorkflowSubmitter ||
+              roleKey === 'systemadministrator'
+            )
+          )
     ) &&
     assessmentSubmitted &&
     !isEditingAssessment;
@@ -11422,7 +11430,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
         key: `assessment-${reviewStage}`,
         type: 'warning',
         header: 'Decision Maker requested changes',
-        content: 'The assessment is back with the Regional Manager before it returns to the Coordinator.',
+        content: 'The assessment is back with the Regional Manager before it returns to the submitter.',
         dismissible: false,
       };
     }
@@ -11446,8 +11454,8 @@ ${JSON.stringify(aiContext, null, 2)}`;
   const regionalManagerReviewContent = isReviewWithRegionalManager ? (
     <SpaceBetween size="m">
       {requiresSubmitterCorrectionReturn && reviewStage === ASSESSMENT_REVIEW_STAGES.rmReview && (
-        <Alert type="warning" header="Coordinator correction required">
-          This assessment was reopened after a final decision. Return it to the Coordinator for correction before it can be submitted for another final decision.
+        <Alert type="warning" header="Submitter correction required">
+          This assessment was reopened after a final decision. Return it to the original submitter for correction before it can be submitted for another final decision.
         </Alert>
       )}
       {reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToRm && (
@@ -11470,8 +11478,8 @@ ${JSON.stringify(aiContext, null, 2)}`;
         }
         description={
           reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToRm
-            ? "Required when forwarding the Decision Maker's requested changes to the Coordinator."
-            : 'Required when returning the assessment to the Coordinator.'
+            ? "Required when forwarding the Decision Maker's requested changes to the submitter."
+            : 'Required when returning the assessment to the submitter.'
         }
       >
         <Textarea
@@ -11490,7 +11498,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
             loading={reviewWorkflowActionLoading === ASSESSMENT_REVIEW_ACTIONS.rmForwardChangesToSubmitter}
             disabled={!canRegionalManagerReview || Boolean(reviewWorkflowActionLoading)}
           >
-            Forward changes to Coordinator
+            Forward changes to submitter
           </Button>
         ) : (
           <Button
@@ -11499,7 +11507,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
             loading={reviewWorkflowActionLoading === ASSESSMENT_REVIEW_ACTIONS.rmReturnToSubmitter}
             disabled={!canRegionalManagerReview || Boolean(reviewWorkflowActionLoading)}
           >
-            Return to Coordinator
+            Return to submitter
           </Button>
         )}
         {reviewStage !== ASSESSMENT_REVIEW_STAGES.returnedToRm && !requiresSubmitterCorrectionReturn && (

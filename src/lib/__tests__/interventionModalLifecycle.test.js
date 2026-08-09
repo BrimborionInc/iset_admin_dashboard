@@ -51,6 +51,18 @@ describe("intervention and action plan modal lifecycle persistence", () => {
     expect(createRoute).toContain("...reviewedAtInsertParams");
   });
 
+  test("ordinary creates cannot synthesize an in-review, returned, or denied decision state", () => {
+    const createRoute = extractBetween(
+      serverSource,
+      "app.post('/api/action-plans/:id/interventions'",
+      "app.get('/api/interventions/:id/payment-lines'"
+    );
+
+    expect(createRoute).toContain("new Set(['draft', 'submitted', 'approved'])");
+    expect(createRoute).toContain("error: 'intervention_review_context_required'");
+    expect(createRoute).toContain("error: 'approved_intervention_review_context_required'");
+  });
+
   test("close endpoint blocks open interventions on closed or archived plans", () => {
     const closeRoute = extractBetween(
       serverSource,
@@ -70,6 +82,48 @@ describe("intervention and action plan modal lifecycle persistence", () => {
     expect(contextSource).toContain("payload.budgetPotId");
     expect(contextSource).toContain("payload.budget_pot_id");
     expect(contextSource).not.toContain("potId: payload.potId || payload.fundingStream || null");
+  });
+
+  test("viewing an exact final-workflow intervention locks proposal facts without blocking legacy operational edits", () => {
+    const widgetSource = readRepoFile("src/pages/Caseworking/caseWorkspace/widgets/InterventionsWidget.jsx");
+    const openView = extractBetween(
+      widgetSource,
+      "const openWizardView = useCallback(",
+      "const openCloseModal = useCallback("
+    );
+
+    expect(openView).toContain(
+      "setForceReadOnly(!canModify || isInterventionFinalDecisionRecorded(target));"
+    );
+    expect(openView).not.toContain("setForceReadOnly(true);");
+  });
+
+  test("ordinary delete controls are limited to an owner-editable draft", () => {
+    const widgetSource = readRepoFile("src/pages/Caseworking/caseWorkspace/widgets/InterventionsWidget.jsx");
+    const statusSource = readRepoFile("src/utils/interventionStatus.js");
+
+    expect(statusSource).toContain('INTERVENTION_DELETABLE_STATUSES = new Set(["draft"])');
+    expect(widgetSource).toContain("const canEditDraft = canEditInterventionAssessmentBody({");
+    expect(widgetSource).toContain('return [{ id: "view", text: "View intervention" }];');
+  });
+
+  test("a successful wizard autosave advances the dirty baseline for the next step", () => {
+    const widgetSource = readRepoFile("src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx");
+    expect(widgetSource).toContain(
+      "const isDirty = JSON.stringify(form) !== JSON.stringify(initialFormRef.current);"
+    );
+    expect(widgetSource).not.toContain("const isDirty = useMemo(");
+  });
+
+  test("approved revision evidence is removed from the operational client list immediately", () => {
+    const widgetSource = readRepoFile("src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx");
+    const revisionCompletionStart = widgetSource.indexOf('header: "Revision workflow complete"');
+    expect(revisionCompletionStart).toBeGreaterThanOrEqual(0);
+    const nextBranch = widgetSource.indexOf('} else {', revisionCompletionStart);
+    const revisionCompletion = widgetSource.slice(revisionCompletionStart, nextBranch);
+
+    expect(revisionCompletion).toContain("await refresh().catch(() => {});");
+    expect(revisionCompletion).toContain("partitioned out of operational intervention rows");
   });
 
   test("editing an intervention resolves Paid from independently from its parent plan", () => {

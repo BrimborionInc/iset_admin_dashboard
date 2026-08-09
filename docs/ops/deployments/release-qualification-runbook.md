@@ -100,7 +100,21 @@ Known qualification-granularity gap (recorded 2026-07-20): the current evidence 
 
 ## Phase 1 — local DEV qualification
 
-Run the resolved mandatory suite. This uses local resources and real DEV MySQL only. It must not use TEST or PROD credentials.
+Run the metadata-only DEV database gate first. It pins both configured and live native-label identity to the recorded 2026-08-09 target (`172.26.176.1` / `root` / `iset_intake` / `3306`; server `DESKTOP-PDFA51K`; principal `root@172.26.%`; MySQL `8.0.40`), discovers every declared object individually, and hashes its create definition, full columns, indexes, and constraints. It performs zero ordinary reads, transactions, fixtures, residue queries, or cleanup:
+
+```bash
+node scripts/real-mysql-release-contract.js --target-env dev --schema-preflight-only --json
+```
+
+If a prior rollback fixture failed after mutation began, do not assume rollback or best-effort cleanup was sufficient. Before another fixture attempt, run the same exact identity/full-DDL preflight followed by the contract's guarded residue-only audit:
+
+```bash
+node scripts/real-mysql-release-contract.js --target-env dev --residue-audit-only --json
+```
+
+This mode performs ten single-table, finished-statement-guarded native `COUNT(*)` checks for the release fixture scopes. It performs no fixture mutation, rollback, or cleanup. Any nonzero count or metadata/statement admission failure is `NO-GO` and must be investigated before another ordinary fixture run.
+
+Then run the resolved mandatory suite. The machine inventory repeats this gate as `real-mysql-schema-preflight` before the schema plan and full real-MySQL contract. This uses local resources and real DEV MySQL only. It must not use TEST or PROD credentials.
 
 ```bash
 npm run release:qualify -- run \
@@ -116,10 +130,14 @@ Use the same `--full` and `--operation` flags as the plan. The qualifier runs al
 
 Local database effects are bounded:
 
-- schema plan and privacy ERM are read-only;
-- the release MySQL contract inserts a synthetic staff profile, import claim, event, and delivery inside one transaction, rolls back, then proves zero residue;
+- every SQL-bearing DEV qualifier pins the configured/live identity, captures current one-object-at-a-time structural metadata, and validates the finished ordinary statement immediately before driver execution; helper-issued runtime-readiness, payment, privacy, and Financial Overview policy SQL is not exempt;
+- the DEV schema plan proves the pinned database/host/port/principal/version identity, discovers and hashes full migration-ledger DDL metadata when present, and permits only one guarded qualified ledger read; it never creates the ledger;
+- privacy ERM is read-only;
+- the release MySQL contract runs its full structural preflight before readiness reads, inserts synthetic staff/import/event/delivery and document-policy fixtures inside one transaction, rolls back, then proves zero residue;
 - the payment fixture is transaction/rollback only and does not call email or a provider;
 - build and browser outputs live under `tmp/release-qualification/`, generated build metadata is restored, and the local HTTP/browser processes are closed.
+
+A schema or finished-statement failure before mutation closes the connection without rollback, residue reads, or cleanup SQL. Once any fixture mutation is dispatched, failure handling must roll back and still run every guarded zero-residue assertion before surfacing the original and cleanup results together.
 
 Pass criteria: decision is `GO`, every required check is `passed`, cleanup counters are zero, and validation succeeds against the still-frozen source:
 

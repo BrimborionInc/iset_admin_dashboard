@@ -2,6 +2,11 @@
 
 const path = require('path');
 const { spawnSync } = require('child_process');
+const {
+  assertNoMigrationChecksumDrift,
+  classifyMigrationFailures,
+  getCanonicalMigrationFiles,
+} = require('../src/lib/sharedSchemaMigrationRunner');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const EXPECTED_ACCOUNT_ID = '124355655255';
@@ -182,43 +187,68 @@ function runtimeCommands(candidate, paymentRollback) {
   return commands;
 }
 
-function runSchemaPlan(args) {
-  const output = run(process.execPath, [
-    path.join(REPO_ROOT, 'scripts', 'path-schema-migrate.js'),
-    'plan', '--target-env', 'test', '--profile', args.profile, '--region', args.region, '--json',
-  ]);
-  const plan = JSON.parse(output || '{}');
-  if (Number(plan.pendingCount) !== 0) throw new Error(`TEST has ${plan.pendingCount} pending canonical migration(s)`);
-  if (Number(plan.failureCount || 0) !== 0) throw new Error(`TEST migration ledger has ${plan.failureCount} failed attempt(s)`);
-  return { pendingCount: plan.pendingCount, failureCount: plan.failureCount || 0 };
+function runSchemaPlan(args, instanceId) {
+  const invocation = sendSsm(args, instanceId, [
+    'set -euo pipefail',
+    'cd /opt/nwac/admin-dashboard',
+    'node scripts/path-test-migration-ledger.js --env-file /opt/nwac/admin-dashboard/.env.test --json',
+  ], 'PATH TEST guarded migration ledger');
+  let report;
+  try {
+    report = JSON.parse(invocation.output || '{}');
+  } catch (_) {
+    throw new Error(`Unable to parse guarded TEST migration ledger: ${String(invocation.output || '').slice(0, 1000)}`);
+  }
+  if (report.status !== 'passed' || !report.schemaSafety?.preflightComplete) {
+    throw new Error(`TEST migration ledger schema proof was incomplete: ${JSON.stringify(report).slice(0, 1000)}`);
+  }
+  const migrations = getCanonicalMigrationFiles();
+  const rows = Array.isArray(report.rows) ? report.rows : [];
+  assertNoMigrationChecksumDrift(migrations, rows);
+  const successful = new Set(
+    rows
+      .filter(row => Number(row.success) === 1)
+      .map(row => `${row.filename}|${row.checksum}`)
+  );
+  const pendingCount = migrations.filter(migration => !successful.has(`${migration.file}|${migration.checksum}`)).length;
+  const failures = classifyMigrationFailures(migrations, rows);
+  const failureCount = failures.unresolved.length;
+  if (pendingCount !== 0) throw new Error(`TEST has ${pendingCount} pending canonical migration(s)`);
+  if (failureCount !== 0) throw new Error(`TEST migration ledger has ${failureCount} failed attempt(s)`);
+  return {
+    pendingCount,
+    failureCount,
+    trackingTableExists: report.trackingTableExists,
+    schemaSafety: report.schemaSafety,
+    instanceId,
+    commandId: invocation.commandId,
+  };
 }
 
-function runSqlMetrics(args) {
-  const sql = `SELECT
-    (SELECT COUNT(*) FROM iset_event_delivery WHERE status IN ('pending','processing','sending') AND updated_at < NOW(3) - INTERVAL 10 MINUTE) AS stale_deliveries,
-    (SELECT COUNT(*) FROM iset_event_delivery WHERE status IN ('dead_letter','ambiguous')) AS held_deliveries,
-    (SELECT COUNT(*) FROM iset_runtime_config WHERE scope='runtime' AND k='service.announcement' AND JSON_EXTRACT(v, '$.enabled') = TRUE) AS active_announcements,
-    (SELECT CASE
-       WHEN COUNT(*) = 1 AND MAX(JSON_EXTRACT(v, '$.enabled') = FALSE) = 1 THEN 0
-       ELSE 1
-     END FROM iset_runtime_config WHERE scope='finance' AND k='email.routing') AS unsafe_finance_routing,
-    (SELECT COUNT(*) FROM iset_runtime_config WHERE scope='finance' AND k='intacct.integration' AND (JSON_EXTRACT(v, '$.enabled') = TRUE OR JSON_UNQUOTE(JSON_EXTRACT(v, '$.submissionMode')) = 'intacct_rest')) AS enabled_intacct;
-`;
-  const output = run('bash', [
-    path.join(REPO_ROOT, 'scripts', 'run-test-sql-via-ssm.sh'),
-    '--sql', sql,
-    '--profile', args.profile,
-    '--region', args.region,
-  ]);
-  const lines = output.trim().split(/\r?\n/u).filter(Boolean);
-  const headerIndex = lines.findIndex(line => line.startsWith('stale_deliveries\t'));
-  if (headerIndex < 0 || !lines[headerIndex + 1]) throw new Error('Unable to parse TEST runtime metrics');
-  const headers = lines[headerIndex].split('\t');
-  const values = lines[headerIndex + 1].split('\t').map(Number);
-  const metrics = Object.fromEntries(headers.map((header, index) => [header, values[index]]));
+function runSqlMetrics(args, instanceId) {
+  const invocation = sendSsm(args, instanceId, [
+    'set -euo pipefail',
+    'cd /opt/nwac/admin-dashboard',
+    'node scripts/path-test-runtime-metrics.js --env-file /opt/nwac/admin-dashboard/.env.test --json',
+  ], 'PATH TEST guarded runtime metrics');
+  let report;
+  try {
+    report = JSON.parse(invocation.output || '{}');
+  } catch (_) {
+    throw new Error(`Unable to parse guarded TEST runtime metrics: ${String(invocation.output || '').slice(0, 1000)}`);
+  }
+  if (report.status !== 'passed' || !report.schemaSafety?.preflightComplete) {
+    throw new Error(`TEST runtime metrics schema proof was incomplete: ${JSON.stringify(report).slice(0, 1000)}`);
+  }
+  const metrics = report.metrics || {};
   const nonZero = Object.entries(metrics).filter(([, value]) => value !== 0);
   if (nonZero.length) throw new Error(`TEST runtime blocker metrics are non-zero: ${JSON.stringify(Object.fromEntries(nonZero))}`);
-  return metrics;
+  return {
+    ...metrics,
+    schemaSafety: report.schemaSafety,
+    instanceId,
+    commandId: invocation.commandId,
+  };
 }
 
 function maintenanceStatus(args) {
@@ -237,7 +267,8 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   const identity = assertTestIdentity(args);
   const maintenance = maintenanceStatus(args);
-  const metrics = runSqlMetrics(args);
+  const onlineInstances = discoverOnlineInstances(args);
+  const metrics = runSqlMetrics(args, onlineInstances[0]);
   if (args.maintenanceOnly) {
     const result = { schemaVersion: 1, status: 'passed', mode: 'maintenance-only', identity, maintenance, metrics };
     console.log(args.json ? JSON.stringify(result, null, 2) : 'TEST maintenance cleanup: PASS');
@@ -245,8 +276,8 @@ function main() {
   }
 
   const candidate = requiredCandidateEnvironment();
-  const schema = runSchemaPlan(args);
-  const instances = discoverOnlineInstances(args).map(instanceId =>
+  const schema = runSchemaPlan(args, onlineInstances[0]);
+  const instances = onlineInstances.map(instanceId =>
     sendSsm(args, instanceId, runtimeCommands(candidate, args.paymentRollback), 'PATH TEST release postflight')
   );
   const result = {

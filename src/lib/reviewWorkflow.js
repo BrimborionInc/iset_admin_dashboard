@@ -35,6 +35,7 @@ const VALID_REVIEW_STAGES = new Set(Object.values(REVIEW_STAGES));
 const ADMIN_REVIEW_ROLE_KEYS = new Set(['systemadministrator', 'nwacadministrator']);
 const RM_REVIEW_ROLE_KEYS = new Set(['regionalmanager']);
 const SUBMITTER_ROLE_KEYS = new Set(['isetcoordinator']);
+const SYSTEM_ADMIN_ROLE_KEYS = new Set(['systemadministrator']);
 
 function normalizeRoleKey(role) {
   return String(role || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
@@ -60,6 +61,10 @@ function isNwacDecisionRole(role) {
 
 function isSubmitterRole(role) {
   return SUBMITTER_ROLE_KEYS.has(normalizeRoleKey(role));
+}
+
+function isSystemAdministratorRole(role) {
+  return SYSTEM_ADMIN_ROLE_KEYS.has(normalizeRoleKey(role));
 }
 
 function parseReviewWorkflowMetadata(value) {
@@ -132,9 +137,14 @@ function getReviewTransition({ action, currentStage, role, workflowType, workflo
   const normalizedWorkflowType = normalizeReviewWorkflowType(workflowType);
 
   if (actionKey === REVIEW_ACTIONS.SubmitForRmReview) {
+    const canStartFromStage =
+      !normalizedStage ||
+      normalizedStage === REVIEW_STAGES.ReturnedToSubmitter ||
+      normalizedStage === REVIEW_STAGES.Withdrawn;
     return {
       allowed:
         Boolean(normalizedWorkflowType) &&
+        canStartFromStage &&
         (
           isSubmitterRole(role) ||
           isRegionalManagerRole(role)
@@ -199,7 +209,7 @@ function getReviewTransition({ action, currentStage, role, workflowType, workflo
       allowed: normalizedStage === REVIEW_STAGES.NwacReview && isNwacDecisionRole(role),
       nextStage: REVIEW_STAGES.FinalDecisionRecorded,
       nextOwnerRole: null,
-      requiresNote: false,
+      requiresNote: actionKey === REVIEW_ACTIONS.NwacDeny,
       nwacDecision: actionKey === REVIEW_ACTIONS.NwacApprove ? 'approved' : 'denied',
       recordsFinalDecision: true,
     };
@@ -210,7 +220,11 @@ function getReviewTransition({ action, currentStage, role, workflowType, workflo
       allowed:
         normalizedStage !== REVIEW_STAGES.FinalDecisionRecorded &&
         normalizedStage !== REVIEW_STAGES.Withdrawn &&
-        (isSubmitterRole(role) || isNwacDecisionRole(role)),
+        (
+          isSubmitterRole(role) ||
+          isRegionalManagerRole(role) ||
+          isSystemAdministratorRole(role)
+        ),
       nextStage: REVIEW_STAGES.Withdrawn,
       nextOwnerRole: null,
       requiresNote: false,
@@ -246,6 +260,7 @@ module.exports = {
   isRegionalManagerRole,
   isReviewStageLockedForSubmitter,
   isSubmitterRole,
+  isSystemAdministratorRole,
   isTwoStepReviewEnabled,
   normalizeReviewStage,
   normalizeReviewWorkflowType,

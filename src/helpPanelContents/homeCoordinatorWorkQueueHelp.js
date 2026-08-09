@@ -20,8 +20,8 @@ const HomeCoordinatorWorkQueueHelp = () => (
         <li><strong>EI Verification Pending:</strong> cases waiting for EI consent or verification before the assessment can move forward.</li>
         <li><strong>Ready to assess:</strong> files that appear ready for the assessment and recommendation work.</li>
         <li><strong>Missing Docs / Follow-ups Needed:</strong> applications waiting on the applicant.</li>
-        <li><strong>Submitted for Review:</strong> application assessments and new/revised intervention proposals you submitted for Regional Manager or final decision review.</li>
-        <li><strong>Pending Completion:</strong> approved application assessments that still need approval-letter, document, signature, or final completion work; denied applications stay here only until the denial letter is sent.</li>
+        <li><strong>Submitted for Review:</strong> application assessments and new/revised intervention proposals you submitted into the Regional Manager and Decision Maker review path. Submitted packets remain read-only unless they are returned to you.</li>
+        <li><strong>Pending Completion:</strong> decided applications that still need letter or completion work. Funded approvals may require the exact application&apos;s Client Funding Agreement and funding-form signatures; zero-funding approvals do not. Denied applications stay here only until the denial letter is sent.</li>
         <li><strong>Active Clients</strong>, <strong>Payments &amp; Proof Due</strong>, and <strong>Follow-ups &amp; File Closure Due:</strong> active case-management work after approval.</li>
       </ul>
     </Box>
@@ -37,11 +37,11 @@ You are assisting with the ISET Coordinator Work Queue widget on the NWAC ISET h
 Explain the coordinator queue cards in staff language and connect them to the next job step, not just the UI:
 - My Applications -> open the assigned file; keep decision-recorded applications here until completion follow-through is done.
 - My Clients -> open an assigned client case file in Case Workspace.
-- EI Verification Pending -> check consent/verification requirements before assessment.
+- EI Verification Pending -> confirm signed consent and ask authorized staff to record the verified CRF, EI Active Claim, or EI Reach Back status before the application assessment moves forward.
 - Ready to assess -> complete the assessment and recommendation.
 - Missing Docs / Follow-ups Needed -> contact the applicant, request missing items, and document the attempt.
-- Submitted for Review -> monitor application assessments and intervention proposals/revisions submitted for Regional Manager or final decision review.
-- Pending Completion / Active Clients / Payments / Follow-ups -> continue post-decision and active case-management work after approval or denial, including approved intervention proposal/revision approval-letter follow-up.
+- Submitted for Review -> monitor the two-step route; if work is returned, only the recorded submitter edits and resubmits it through Regional Manager review.
+- Pending Completion / Active Clients / Payments / Follow-ups -> continue post-decision and active case-management work. Funded approvals may require the exact application/Action Plan-linked CFA and signatures; CFA work is not another review decision.
 
 Always mention that the selected card drives the Work Queue Items table, and that Work queue preferences lets the user show or hide queue cards in this browser.
 `;

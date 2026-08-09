@@ -2,7 +2,7 @@
 
 Status: UAT prompts/checklists and testing reference material.
 
-Last Updated: 2026-07-13
+Last Updated: 2026-08-09
 
 These docs support manual/UAT validation. They do not replace automated tests, route smokes, database smokes, or live environment checks required by `docs/AGENTS.md`.
 
@@ -18,6 +18,7 @@ When touching testing docs, include the environment, date, and scope the checkli
 
 ## Browser Workflow Smokes
 
+- `rm-two-step-review-assurance-2026-08-09.md`: current defect audit, Case 76/Application 123 evidence boundary, candidate controls, local browser/test evidence, expanded deployed TEST acceptance, and explicit reliability residuals.
 - `browser-workflow-smoke-automation.md`: lessons and reusable pattern from the repeat-application assessment release for DB/API fixtures, authenticated browser smokes, deployed TEST routing, cleanup, and approval-workflow automation.
 - `payments-workflow-automation.md`: payment transformation automation plan, safety-regression command, rollback DEV DB smoke, authenticated API/browser smoke entrypoints, and the 2026-05-11 TEST rehearsal evidence for the NWAC email workflow.
 - `admin-console-bug-swatting-audit-2026-05-28.md`: first audit snapshot for the PATH admin-console bug-swatting program, including current lint/test failures and seed backlog items.

@@ -6,7 +6,11 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { createLiveSchemaGuard } = require('./two-step-review-test-smoke');
 
+const EXPECTED_AWS_ACCOUNT = '124355655255';
+const EXPECTED_AWS_ARN = 'arn:aws:iam::124355655255:user/CODEX_CLI_Admin';
+const EXPECTED_REMOTE_AWS_ARN = 'arn:aws:iam::124355655255:user/SES_backend';
 const DEFAULT_PROFILE = 'nwac-test';
 const DEFAULT_REGION = 'ca-central-1';
 const DEFAULT_BUCKET = 'nwac-test-artifacts';
@@ -14,6 +18,11 @@ const DEFAULT_PORTAL_ENV = path.resolve(__dirname, '..', '..', 'ISET-intake', '.
 const DEFAULT_ADMIN_ENV = path.resolve(__dirname, '..', '.env.test');
 const DEFAULT_PUBLIC_API_ORIGIN = 'https://nwac-public-test.awentech.ca';
 const DEFAULT_LOCAL_BASE_URL = 'http://127.0.0.1:5000';
+const EXPECTED_TEST_DATABASE = 'iset_intake';
+const EXPECTED_TEST_DATABASE_HOSTNAME = 'ip-172-16-0-199';
+const EXPECTED_TEST_DATABASE_PORT = 3306;
+const EXPECTED_TEST_DATABASE_PRINCIPAL = 'app_admin@10.48.%';
+const EXPECTED_TEST_DATABASE_VERSION = '8.0.42';
 
 function parseArgs(argv) {
   const args = {
@@ -36,7 +45,9 @@ function parseArgs(argv) {
     else if (token === '--instance-id') args.instanceId = argv[++index];
     else if (token === '--portal-env') args.portalEnv = argv[++index];
     else if (token === '--admin-env') args.adminEnv = argv[++index];
-    else if (token === '--keep-fixture') args.keepFixture = true;
+    else if (token === '--keep-fixture') {
+      throw new Error('--keep-fixture is disabled: release smoke must prove zero TEST residue.');
+    }
     else if (token === '--skip-browser') args.skipBrowser = true;
     else if (token === '--privacy-denials') args.privacyDenials = true;
     else if (token === '--json') args.json = true;
@@ -67,7 +78,6 @@ function usage() {
     '  --admin-env PATH   Admin .env.test used for staff pool values.',
     '  --skip-browser     Run API/data checks only.',
     '  --privacy-denials  Provision staff identities and run strict live denials before cleanup.',
-    '  --keep-fixture     Keep DB fixture and Cognito users for inspection.',
     '  --json             Emit JSON summary.',
   ].join('\n'));
 }
@@ -258,35 +268,6 @@ function deleteCognitoUser({ email, poolId }, options) {
   }
 }
 
-function uploadRemoteScript(remoteScript, { key }, options) {
-  const tempFile = path.join(os.tmpdir(), `applicant-scope-smoke-${process.pid}-${Date.now()}.js`);
-  fs.writeFileSync(tempFile, remoteScript, 'utf8');
-  try {
-    aws([
-      's3',
-      'cp',
-      tempFile,
-      `s3://${options.bucket}/${key}`,
-      '--only-show-errors',
-    ], options);
-  } finally {
-    fs.rmSync(tempFile, { force: true });
-  }
-}
-
-function deleteRemoteScript({ key }, options) {
-  try {
-    aws([
-      's3',
-      'rm',
-      `s3://${options.bucket}/${key}`,
-      '--only-show-errors',
-    ], options);
-  } catch (_) {
-    // Best effort only.
-  }
-}
-
 function sendRemoteCommand(instanceId, commandLines, comment, options) {
   const paramsFile = path.join(os.tmpdir(), `applicant-scope-params-${process.pid}-${Date.now()}.json`);
   fs.writeFileSync(paramsFile, JSON.stringify({ commands: commandLines }), 'utf8');
@@ -359,6 +340,18 @@ function summarizeResult(result) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   options.bucket = options.bucket || DEFAULT_BUCKET;
+  if (options.region !== DEFAULT_REGION) {
+    throw new Error(`Region ${options.region} did not match expected TEST region ${DEFAULT_REGION}.`);
+  }
+  if (options.bucket !== DEFAULT_BUCKET) {
+    throw new Error(`Staging bucket ${options.bucket} did not match expected TEST artifact bucket ${DEFAULT_BUCKET}.`);
+  }
+  const identity = awsJson(['sts', 'get-caller-identity'], options);
+  if (identity?.Account !== EXPECTED_AWS_ACCOUNT || identity?.Arn !== EXPECTED_AWS_ARN) {
+    throw new Error(
+      `AWS identity ${identity?.Account || 'unknown'} / ${identity?.Arn || 'unknown'} did not match the authorized TEST operator.`
+    );
+  }
   if (!fs.existsSync(options.portalEnv)) {
     throw new Error(`Portal env file not found: ${options.portalEnv}`);
   }
@@ -368,6 +361,18 @@ async function main() {
     portalEnv.COGNITO_PORTAL_USER_POOL_ID ||
     portalEnv.COGNITO_USER_POOL_ID;
   if (!poolId) throw new Error('COGNITO_USER_POOL_ID not found in portal env.');
+  const expectedDbName = String(portalEnv.DB_NAME || '').trim();
+  const expectedDbHost = String(portalEnv.DB_HOST || '').trim();
+  const expectedDbUser = String(portalEnv.DB_USER || '').trim();
+  const expectedDbPort = Number(portalEnv.DB_PORT || 3306);
+  if (
+    expectedDbName !== EXPECTED_TEST_DATABASE ||
+    !expectedDbHost ||
+    !expectedDbUser ||
+    expectedDbPort !== EXPECTED_TEST_DATABASE_PORT
+  ) {
+    throw new Error('Portal TEST database target did not match the exact expected release-smoke target.');
+  }
 
   let staffPoolId = '';
   let staffClientId = '';
@@ -416,13 +421,79 @@ async function main() {
     },
   ] : [];
   const createdUsers = [];
-  let remoteKey = null;
   let result = null;
 
   try {
     console.log('[applicant-scope-smoke] Discovering TEST app instance...');
     const instanceId = discoverInstanceId(options);
     console.log(`[applicant-scope-smoke] Using ${instanceId}`);
+
+    const runRemote = ({ preflightOnly }) => {
+      const commandLines = [
+        'set -euo pipefail',
+        `test "$(aws sts get-caller-identity --query Arn --output text --region ${shellQuote(options.region)})" = ${shellQuote(EXPECTED_REMOTE_AWS_ARN)}`,
+        'cd /opt/nwac/portal',
+        [
+          `FIXTURE_STAMP=${shellQuote(preflightOnly ? `${stamp}-preflight` : stamp)}`,
+          `SCHEMA_PREFLIGHT_ONLY=${preflightOnly ? '1' : '0'}`,
+          `APPLICANT_SCOPE_EXPECTED_DB_NAME=${shellQuote(expectedDbName)}`,
+          `APPLICANT_SCOPE_EXPECTED_DB_HOST=${shellQuote(expectedDbHost)}`,
+          `APPLICANT_SCOPE_EXPECTED_DB_USER=${shellQuote(expectedDbUser)}`,
+          `APPLICANT_SCOPE_EXPECTED_DB_SERVER_HOSTNAME=${shellQuote(EXPECTED_TEST_DATABASE_HOSTNAME)}`,
+          `APPLICANT_SCOPE_EXPECTED_DB_PORT=${shellQuote(expectedDbPort)}`,
+          `APPLICANT_SCOPE_EXPECTED_DB_PRINCIPAL=${shellQuote(EXPECTED_TEST_DATABASE_PRINCIPAL)}`,
+          `APPLICANT_SCOPE_EXPECTED_DB_VERSION=${shellQuote(EXPECTED_TEST_DATABASE_VERSION)}`,
+          `KEEP_FIXTURE=0`,
+          `RUN_BROWSER=${options.skipBrowser ? '0' : '1'}`,
+          `RUN_PRIVACY_DENIALS=${options.privacyDenials ? '1' : '0'}`,
+          `PRIVACY_STAFF_USERS_JSON=${shellQuote(preflightOnly ? '[]' : JSON.stringify(staffUsers.map(user => ({
+            key: user.key,
+            email: user.email,
+            sub: user.sub,
+            role: user.role,
+            session: user.session,
+          }))))}`,
+          `PORTAL_LOCAL_BASE_URL=${shellQuote(DEFAULT_LOCAL_BASE_URL)}`,
+          `PUBLIC_API_ORIGIN=${shellQuote(DEFAULT_PUBLIC_API_ORIGIN)}`,
+          ...(preflightOnly ? [] : [
+            `APPLICANT_A_EMAIL=${shellQuote(applicantA.email)}`,
+            `APPLICANT_A_PASSWORD=${shellQuote(applicantA.password)}`,
+            `APPLICANT_A_SUB=${shellQuote(applicantA.sub)}`,
+            `APPLICANT_B_EMAIL=${shellQuote(applicantB.email)}`,
+            `APPLICANT_B_PASSWORD=${shellQuote(applicantB.password)}`,
+            `APPLICANT_B_SUB=${shellQuote(applicantB.sub)}`,
+          ]),
+          `node ${shellQuote('/opt/nwac/admin-dashboard/scripts/applicant-scope-guard-test-smoke.js')} --remote-runner`,
+        ].join(' '),
+      ];
+      const commandId = sendRemoteCommand(
+        instanceId,
+        commandLines,
+        preflightOnly
+          ? 'Codex applicant scope guard TEST schema preflight'
+          : 'Codex applicant scope guard TEST smoke',
+        options
+      );
+      console.log(`[applicant-scope-smoke] SSM command ${commandId}`);
+      const invocation = waitForCommand(instanceId, commandId, options);
+      const remoteResult = parseRemoteResult(invocation?.Stdout);
+      if (invocation?.Status !== 'Success') {
+        const stderr = invocation?.Stderr ? `\n${invocation.Stderr}` : '';
+        throw new Error(`Remote smoke failed with status ${invocation?.Status || 'unknown'}${stderr}`);
+      }
+      if (!remoteResult) {
+        throw new Error(`Remote smoke finished but did not emit a parseable result.\n${invocation?.Stdout || ''}`);
+      }
+      const failures = (remoteResult.checks || []).filter(check => check.status === 'FAIL');
+      if (failures.length) throw new Error(`${failures.length} applicant scope smoke check(s) failed.`);
+      return remoteResult;
+    };
+
+    console.log('[applicant-scope-smoke] Proving TEST target and live schema before creating any fixture...');
+    const preflight = runRemote({ preflightOnly: true });
+    if (!preflight?.schemaSafety?.preflightComplete) {
+      throw new Error('Remote TEST schema preflight did not return complete live-DDL evidence.');
+    }
 
     console.log('[applicant-scope-smoke] Creating temporary TEST applicant Cognito users...');
     applicantA.sub = createCognitoUser({ ...applicantA, poolId }, options);
@@ -435,64 +506,13 @@ async function main() {
       user.session = authenticateStaffUser({ ...user, poolId: staffPoolId, clientId: staffClientId }, options);
       createdUsers.push(user);
     }
-
-    remoteKey = `ssm-scripts/applicant-scope-smoke-${stamp}.js`;
-    const remoteScript = `(${remoteRunner.toString()})();\n`;
-    uploadRemoteScript(remoteScript, { key: remoteKey }, options);
-
-    const remotePath = `/tmp/applicant-scope-smoke-${stamp}.js`;
-    const commandLines = [
-      'set -euo pipefail',
-      `aws s3 cp ${shellQuote(`s3://${options.bucket}/${remoteKey}`)} ${shellQuote(remotePath)} --region ${shellQuote(options.region)} --only-show-errors`,
-      `trap 'rm -f ${shellQuote(remotePath)}' EXIT`,
-      'cd /opt/nwac/portal',
-      [
-        `FIXTURE_STAMP=${shellQuote(stamp)}`,
-        `APPLICANT_A_EMAIL=${shellQuote(applicantA.email)}`,
-        `APPLICANT_A_PASSWORD=${shellQuote(applicantA.password)}`,
-        `APPLICANT_A_SUB=${shellQuote(applicantA.sub)}`,
-        `APPLICANT_B_EMAIL=${shellQuote(applicantB.email)}`,
-        `APPLICANT_B_PASSWORD=${shellQuote(applicantB.password)}`,
-        `APPLICANT_B_SUB=${shellQuote(applicantB.sub)}`,
-        `KEEP_FIXTURE=${options.keepFixture ? '1' : '0'}`,
-        `RUN_BROWSER=${options.skipBrowser ? '0' : '1'}`,
-        `RUN_PRIVACY_DENIALS=${options.privacyDenials ? '1' : '0'}`,
-        `PRIVACY_STAFF_USERS_JSON=${shellQuote(JSON.stringify(staffUsers.map(user => ({
-          key: user.key,
-          email: user.email,
-          sub: user.sub,
-          role: user.role,
-          session: user.session,
-        }))))}`,
-        `PORTAL_LOCAL_BASE_URL=${shellQuote(DEFAULT_LOCAL_BASE_URL)}`,
-        `PUBLIC_API_ORIGIN=${shellQuote(DEFAULT_PUBLIC_API_ORIGIN)}`,
-        `node ${shellQuote(remotePath)}`,
-      ].join(' '),
-      `rm -f ${shellQuote(remotePath)}`,
-    ];
-
     console.log('[applicant-scope-smoke] Running deployed TEST portal smoke through SSM...');
-    const commandId = sendRemoteCommand(instanceId, commandLines, 'Codex applicant scope guard TEST smoke', options);
-    console.log(`[applicant-scope-smoke] SSM command ${commandId}`);
-    const invocation = waitForCommand(instanceId, commandId, options);
-    result = parseRemoteResult(invocation?.Stdout);
-    if (invocation?.Status !== 'Success') {
-      const stderr = invocation?.Stderr ? `\n${invocation.Stderr}` : '';
-      throw new Error(`Remote smoke failed with status ${invocation?.Status || 'unknown'}${stderr}`);
-    }
-    if (!result) {
-      throw new Error(`Remote smoke finished but did not emit a parseable result.\n${invocation?.Stdout || ''}`);
-    }
+    result = runRemote({ preflightOnly: false });
     if (!options.json) {
       console.log(summarizeResult(result));
       console.log(`[applicant-scope-smoke] Fixture IDs: ${JSON.stringify(result.fixtureIds)}`);
     }
-    const failures = (result.checks || []).filter(check => check.status === 'FAIL');
-    if (failures.length) {
-      throw new Error(`${failures.length} applicant scope smoke check(s) failed.`);
-    }
   } finally {
-    if (remoteKey) deleteRemoteScript({ key: remoteKey }, options);
     if (!options.keepFixture) {
       for (const user of createdUsers.reverse()) {
         deleteCognitoUser({ email: user.email, poolId: user.poolId || poolId }, options);
@@ -529,27 +549,59 @@ function remoteRunner() {
     checks: [],
     fixtureIds: {},
     cleanup: null,
+    schemaSafety: null,
   };
 
+  const preflightOnly = process.env.SCHEMA_PREFLIGHT_ONLY === '1';
   const config = {
     stamp: requiredEnv('FIXTURE_STAMP'),
+    preflightOnly,
     keepFixture: process.env.KEEP_FIXTURE === '1',
     runBrowser: process.env.RUN_BROWSER !== '0',
     runPrivacyDenials: process.env.RUN_PRIVACY_DENIALS === '1',
     privacyStaffUsers: JSON.parse(process.env.PRIVACY_STAFF_USERS_JSON || '[]'),
     localBaseUrl: stripTrailingSlash(process.env.PORTAL_LOCAL_BASE_URL || 'http://127.0.0.1:5000'),
     publicApiOrigin: stripTrailingSlash(process.env.PUBLIC_API_ORIGIN || 'https://nwac-public-test.awentech.ca'),
-    applicantA: {
+    expectedDatabase: requiredEnv('APPLICANT_SCOPE_EXPECTED_DB_NAME'),
+    expectedDbHost: requiredEnv('APPLICANT_SCOPE_EXPECTED_DB_HOST'),
+    expectedDbUser: requiredEnv('APPLICANT_SCOPE_EXPECTED_DB_USER'),
+    expectedDbServerHostname: requiredEnv('APPLICANT_SCOPE_EXPECTED_DB_SERVER_HOSTNAME'),
+    expectedDbPort: Number(requiredEnv('APPLICANT_SCOPE_EXPECTED_DB_PORT')),
+    expectedDbPrincipal: requiredEnv('APPLICANT_SCOPE_EXPECTED_DB_PRINCIPAL'),
+    expectedDbVersion: requiredEnv('APPLICANT_SCOPE_EXPECTED_DB_VERSION'),
+    applicantA: preflightOnly ? null : {
       email: requiredEnv('APPLICANT_A_EMAIL'),
       password: requiredEnv('APPLICANT_A_PASSWORD'),
       sub: requiredEnv('APPLICANT_A_SUB'),
     },
-    applicantB: {
+    applicantB: preflightOnly ? null : {
       email: requiredEnv('APPLICANT_B_EMAIL'),
       password: requiredEnv('APPLICANT_B_PASSWORD'),
       sub: requiredEnv('APPLICANT_B_SUB'),
     },
   };
+
+  const REQUIRED_TABLES = Object.freeze([
+    'canada_region',
+    'client',
+    'input_json_state',
+    'iset_application',
+    'iset_application_draft_dynamic',
+    'iset_application_file',
+    'iset_application_submission',
+    'iset_case',
+    'iset_case_intervention',
+    'iset_document',
+    'message_item',
+    'message_signing_request',
+    'messages',
+    'payment_packet',
+    'pending_uploads',
+    'signing_request',
+    'staff_profiles',
+    'staff_region',
+    'user',
+  ]);
 
   const fixture = {
     suffix: config.stamp.replace(/[^a-zA-Z0-9]+/g, '').slice(-12),
@@ -558,7 +610,10 @@ function remoteRunner() {
   };
 
   let connection = null;
+  let schemaGuard = null;
   let seeded = false;
+  let fixtureMutationStarted = false;
+  let cleanupSuppressedForSchemaSafety = false;
 
   main()
     .then(() => {
@@ -582,6 +637,29 @@ function remoteRunner() {
     connection = await mysql.createConnection(dbConfig());
     progress('db connected');
     try {
+      schemaGuard = createLiveSchemaGuard({
+        connection,
+        expectedDatabase: config.expectedDatabase,
+        expectedHost: config.expectedDbHost,
+        expectedUser: config.expectedDbUser,
+        expectedDatabaseHostname: config.expectedDbServerHostname,
+        expectedPort: config.expectedDbPort,
+        expectedPrincipal: config.expectedDbPrincipal,
+        expectedVersion: config.expectedDbVersion,
+        configuredDatabase: requiredEnv('DB_NAME'),
+        configuredHost: requiredEnv('DB_HOST'),
+        configuredUser: requiredEnv('DB_USER'),
+        configuredPort: Number(process.env.DB_PORT || 3306),
+        requiredTables: REQUIRED_TABLES,
+        cryptoModule: require('crypto'),
+      });
+      result.schemaSafety = await schemaGuard.preflight();
+      pass('TEST DB identity and live schema preflight proved', {
+        identity: result.schemaSafety.identity,
+        ddlHashes: result.schemaSafety.ddlHashes,
+      });
+      if (config.preflightOnly) return;
+      fixtureMutationStarted = true;
       await seedFixture();
       seeded = true;
       progress('fixture seeded');
@@ -602,11 +680,22 @@ function remoteRunner() {
         result.cleanup = 'kept';
         progress('fixture kept');
       }
+    } catch (error) {
+      const code = String(error?.code || '');
+      cleanupSuppressedForSchemaSafety =
+        !fixtureMutationStarted && (
+          code.startsWith('schema_guard_') ||
+          String(error?.message || '').startsWith('schema_guard_')
+        );
+      throw error;
     } finally {
-      if (!config.keepFixture && seeded) {
+      if (!config.keepFixture && fixtureMutationStarted && !cleanupSuppressedForSchemaSafety) {
         await cleanupFixture();
         progress('fixture cleaned up');
+      } else if (cleanupSuppressedForSchemaSafety) {
+        result.cleanup = 'suppressed_after_schema_safety_failure';
       }
+      if (schemaGuard) result.schemaSafety = schemaGuard.evidence();
       if (connection) {
         await connection.end();
         progress('db connection closed');
@@ -667,7 +756,8 @@ function remoteRunner() {
   }
 
   async function query(sql, params = []) {
-    return connection.query(sql, params);
+    if (!schemaGuard) throw new Error('schema_guard_not_initialized');
+    return schemaGuard.execute(sql, params);
   }
 
   async function insert(sql, params = []) {
@@ -683,7 +773,7 @@ function remoteRunner() {
     progress('seed cleanup starting');
     await cleanupFixture({ quiet: true });
     progress('seed cleanup complete');
-    await connection.beginTransaction();
+    await query('START TRANSACTION');
     try {
       const suffix = fixture.suffix;
       fixture.staffEmail = `codex.portal.scope.${suffix}.staff@example.com`;
@@ -890,7 +980,7 @@ function remoteRunner() {
       );
       progress('seed signing links complete');
 
-      await connection.commit();
+      await query('COMMIT');
       progress('seed transaction committed');
       result.fixtureIds = {
         userA: fixture.userA,
@@ -912,7 +1002,7 @@ function remoteRunner() {
       pass('TEST synthetic wrong-applicant fixture seeded', result.fixtureIds);
     } catch (error) {
       progress(`seed failed: ${error.message || String(error)}`);
-      await connection.rollback();
+      await query('ROLLBACK');
       throw error;
     }
   }
@@ -924,23 +1014,24 @@ function remoteRunner() {
       fixture.staffEmail || `codex.portal.scope.${fixture.suffix}.staff@example.com`,
     ];
     const markerLike = `%"stamp":"${config.stamp}"%`;
+    let transactionStarted = false;
     try {
       progress('cleanup starting');
-      if (fixture.userA && fixture.userB && fixture.staffUser) {
-        await cleanupByFixtureIds();
-      } else {
-        await cleanupByMarkerAndEmail({ emails, markerLike });
-      }
+      await query('START TRANSACTION');
+      transactionStarted = true;
+      // Re-resolve exact smoke ownership inside the cleanup transaction instead
+      // of trusting insert IDs retained from an earlier transaction.
+      await cleanupByMarkerAndEmail({ emails, markerLike });
       const allEmails = [...emails, ...config.privacyStaffUsers.map(user => user.email)];
       const emailPlaceholders = allEmails.map(() => '?').join(',');
       const [residueRows] = await query(
         `SELECT
-           (SELECT COUNT(*) FROM user WHERE email IN (${emailPlaceholders})) AS user_rows,
-           (SELECT COUNT(*) FROM staff_profiles WHERE email IN (${emailPlaceholders})) AS staff_rows,
-           (SELECT COUNT(*) FROM iset_case WHERE case_context_json IS NOT NULL AND CAST(case_context_json AS CHAR) LIKE ?) AS case_rows,
-           (SELECT COUNT(*) FROM iset_application_file WHERE file_path LIKE ?) AS portal_document_rows,
-           (SELECT COUNT(*) FROM iset_document WHERE file_path LIKE ?) AS admin_document_rows,
-           (SELECT COUNT(*) FROM payment_packet WHERE CAST(COALESCE(metadata, JSON_OBJECT()) AS CHAR) LIKE ?) AS payment_rows`,
+           (SELECT COUNT(*) FROM user u WHERE u.email IN (${emailPlaceholders})) AS \`user_rows\`,
+           (SELECT COUNT(*) FROM staff_profiles sp WHERE sp.email IN (${emailPlaceholders})) AS \`staff_rows\`,
+           (SELECT COUNT(*) FROM iset_case ic WHERE ic.case_context_json IS NOT NULL AND CAST(ic.case_context_json AS CHAR) LIKE ?) AS \`case_rows\`,
+           (SELECT COUNT(*) FROM iset_application_file iaf WHERE iaf.file_path LIKE ?) AS \`portal_document_rows\`,
+           (SELECT COUNT(*) FROM iset_document idoc WHERE idoc.file_path LIKE ?) AS \`admin_document_rows\`,
+           (SELECT COUNT(*) FROM payment_packet pp WHERE CAST(COALESCE(pp.metadata, JSON_OBJECT()) AS CHAR) LIKE ?) AS \`payment_rows\``,
         [
           ...allEmails,
           ...allEmails,
@@ -953,12 +1044,15 @@ function remoteRunner() {
       const residue = residueRows?.[0] || {};
       const nonZeroResidue = Object.fromEntries(Object.entries(residue).filter(([, value]) => Number(value) !== 0));
       if (Object.keys(nonZeroResidue).length) throw new Error(`TEST fixture residue remains: ${JSON.stringify(nonZeroResidue)}`);
+      await query('COMMIT');
+      transactionStarted = false;
       if (!options.quiet) {
         result.cleanup = 'deleted';
         pass('TEST synthetic fixture cleaned up with zero residue', residue);
       }
       progress('cleanup complete');
     } catch (error) {
+      if (transactionStarted) await query('ROLLBACK').catch(() => {});
       if (!options.quiet) {
         fail('TEST synthetic fixture cleaned up', { error: error.message || String(error) });
       }
@@ -1043,47 +1137,47 @@ function remoteRunner() {
   async function cleanupByMarkerAndEmail({ emails, markerLike }) {
     const privacyEmails = config.privacyStaffUsers.map(user => user.email);
     progress('cleanup fallback signing links');
-    await query('DELETE FROM message_signing_request WHERE signing_request_id IN (SELECT id FROM signing_request WHERE created_by_user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?)))', emails);
-    await query('DELETE FROM message_signing_request WHERE message_id IN (SELECT id FROM messages WHERE subject IN (?, ?))', [fixture.subjectA || '', fixture.subjectB || '']);
+    await query('DELETE FROM message_signing_request AS msr WHERE msr.signing_request_id IN (SELECT sr.id FROM signing_request AS sr WHERE sr.created_by_user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?)))', emails);
+    await query('DELETE FROM message_signing_request AS msr WHERE msr.message_id IN (SELECT m.id FROM messages AS m WHERE m.subject IN (?, ?))', [fixture.subjectA || '', fixture.subjectB || '']);
     progress('cleanup fallback signing requests');
-    await query('DELETE FROM signing_request WHERE created_by_user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?)) OR participant_user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', [...emails, ...emails]);
+    await query('DELETE FROM signing_request AS sr WHERE sr.created_by_user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?)) OR sr.participant_user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?))', [...emails, ...emails]);
     progress('cleanup fallback messages');
-    await query('DELETE FROM message_item WHERE owner_user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', emails);
-    await query('DELETE FROM messages WHERE subject IN (?, ?) OR sender_user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?)) OR recipient_user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', [
+    await query('DELETE FROM message_item AS mi WHERE mi.owner_user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?))', emails);
+    await query('DELETE FROM messages AS m WHERE m.subject IN (?, ?) OR m.sender_user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?)) OR m.recipient_user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?))', [
       fixture.subjectA || '',
       fixture.subjectB || '',
       ...emails,
       ...emails,
     ]);
     progress('cleanup fallback app/case rows');
-    await query("DELETE FROM payment_packet WHERE CAST(COALESCE(metadata, JSON_OBJECT()) AS CHAR) LIKE ?", [markerLike]);
-    await query("DELETE FROM iset_document WHERE CAST(COALESCE(metadata, JSON_OBJECT()) AS CHAR) LIKE ? OR file_path LIKE ?", [markerLike, `privacy-denial-test/${config.stamp}/%`]);
-    await query('DELETE FROM iset_application_file WHERE file_path LIKE ?', [`privacy-denial-test/${config.stamp}/%`]);
-    await query('DELETE FROM iset_case_intervention WHERE CAST(metadata_json AS CHAR) LIKE ?', [markerLike]);
-    await query('DELETE FROM iset_application WHERE CAST(payload_json AS CHAR) LIKE ?', [markerLike]);
-    await query('DELETE FROM iset_application_submission WHERE CAST(intake_payload AS CHAR) LIKE ?', [markerLike]);
-    await query('DELETE FROM iset_case WHERE case_context_json IS NOT NULL AND CAST(case_context_json AS CHAR) LIKE ?', [markerLike]);
+    await query("DELETE FROM payment_packet AS pp WHERE CAST(COALESCE(pp.metadata, JSON_OBJECT()) AS CHAR) LIKE ?", [markerLike]);
+    await query("DELETE FROM iset_document AS idoc WHERE CAST(COALESCE(idoc.metadata, JSON_OBJECT()) AS CHAR) LIKE ? OR idoc.file_path LIKE ?", [markerLike, `privacy-denial-test/${config.stamp}/%`]);
+    await query('DELETE FROM iset_application_file AS iaf WHERE iaf.file_path LIKE ?', [`privacy-denial-test/${config.stamp}/%`]);
+    await query('DELETE FROM iset_case_intervention AS ici WHERE CAST(ici.metadata_json AS CHAR) LIKE ?', [markerLike]);
+    await query('DELETE FROM iset_application AS ia WHERE CAST(ia.payload_json AS CHAR) LIKE ?', [markerLike]);
+    await query('DELETE FROM iset_application_submission AS ias WHERE CAST(ias.intake_payload AS CHAR) LIKE ?', [markerLike]);
+    await query('DELETE FROM iset_case AS ic WHERE ic.case_context_json IS NOT NULL AND CAST(ic.case_context_json AS CHAR) LIKE ?', [markerLike]);
     progress('cleanup fallback identity rows');
-    await query('DELETE FROM client WHERE applicant_account_email IN (?, ?) OR applicant_cognito_sub IN (?, ?)', [
+    await query('DELETE FROM client AS c WHERE c.applicant_account_email IN (?, ?) OR c.applicant_cognito_sub IN (?, ?)', [
       config.applicantA.email,
       config.applicantB.email,
       config.applicantA.sub,
       config.applicantB.sub,
     ]);
-    await query('DELETE FROM staff_profiles WHERE email = ? OR cognito_sub = ?', [
+    await query('DELETE FROM staff_profiles AS sp WHERE sp.email = ? OR sp.cognito_sub = ?', [
       fixture.staffEmail || `codex.portal.scope.${fixture.suffix}.staff@example.com`,
       fixture.staffSub || `scope-staff-${fixture.suffix}`,
     ]);
     if (privacyEmails.length) {
       const placeholders = privacyEmails.map(() => '?').join(',');
-      await query(`DELETE FROM staff_region WHERE staff_profile_id IN (SELECT id FROM staff_profiles WHERE email IN (${placeholders}))`, privacyEmails);
-      await query(`DELETE FROM staff_profiles WHERE email IN (${placeholders})`, privacyEmails);
-      await query(`DELETE FROM user WHERE email IN (${placeholders})`, privacyEmails);
+      await query(`DELETE FROM staff_region AS sr WHERE sr.staff_profile_id IN (SELECT sp.id FROM staff_profiles AS sp WHERE sp.email IN (${placeholders}))`, privacyEmails);
+      await query(`DELETE FROM staff_profiles AS sp WHERE sp.email IN (${placeholders})`, privacyEmails);
+      await query(`DELETE FROM user AS u WHERE u.email IN (${placeholders})`, privacyEmails);
     }
-    await query('DELETE FROM input_json_state WHERE user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', emails);
-    await query('DELETE FROM iset_application_draft_dynamic WHERE user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', emails);
-    await query('DELETE FROM pending_uploads WHERE user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', emails);
-    await query('DELETE FROM user WHERE email IN (?, ?, ?)', emails);
+    await query('DELETE FROM input_json_state AS ijs WHERE ijs.user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?))', emails);
+    await query('DELETE FROM iset_application_draft_dynamic AS iadd WHERE iadd.user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?))', emails);
+    await query('DELETE FROM pending_uploads AS pu WHERE pu.user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?))', emails);
+    await query('DELETE FROM user AS u WHERE u.email IN (?, ?, ?)', emails);
   }
 
   const responseTimeouts = new WeakMap();
@@ -1563,7 +1657,11 @@ function remoteRunner() {
   }
 }
 
-main().catch(error => {
-  console.error('[applicant-scope-smoke] Failed:', error.message || error);
-  process.exitCode = 1;
-});
+if (process.argv.includes('--remote-runner')) {
+  remoteRunner();
+} else {
+  main().catch(error => {
+    console.error('[applicant-scope-smoke] Failed:', error.message || error);
+    process.exitCode = 1;
+  });
+}

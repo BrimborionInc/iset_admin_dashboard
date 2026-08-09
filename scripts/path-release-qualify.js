@@ -107,7 +107,8 @@ function gitFiles(repo) {
 }
 
 function repoState(repo) {
-  if (repo === 'intacctMock' && !fs.existsSync(path.join(REPOSITORIES[repo], '.git'))) {
+  const isGitWorktree = runGit(repo, ['rev-parse', '--is-inside-work-tree'], true).trim() === 'true';
+  if (repo === 'intacctMock' && !isGitWorktree) {
     const files = [];
     function visit(current, relative = '') {
       fs.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).forEach(entry => {

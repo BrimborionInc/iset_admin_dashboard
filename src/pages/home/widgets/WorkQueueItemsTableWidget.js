@@ -119,6 +119,22 @@ export const updateApplicationEligibility = ({ fetcher, caseId, applicationId, v
   });
 };
 
+export const appendWorkQueueEiVerificationUploadFields = ({
+  formData,
+  file,
+  eligibilityStatus,
+  caseId,
+  applicationId,
+}) => {
+  formData.append('file', file);
+  formData.append('label', 'EI Verification');
+  formData.append('documentType', 'ei_verification');
+  formData.append('eligibilityStatus', eligibilityStatus);
+  if (caseId) formData.append('caseId', caseId);
+  if (applicationId) formData.append('applicationId', applicationId);
+  return formData;
+};
+
 const formatDateOnly = value => {
   if (!value) return null;
   const date = new Date(value);
@@ -1811,12 +1827,13 @@ const WorkQueueItemsTableWidget = ({
           body: JSON.stringify({})
         });
       }
-      const formData = new FormData();
-      formData.append('file', eligibilityFile);
-      formData.append('label', 'EI Verification');
-      formData.append('documentType', 'ei_verification');
-      if (caseId) formData.append('caseId', caseId);
-      if (applicationId) formData.append('applicationId', applicationId);
+      const formData = appendWorkQueueEiVerificationUploadFields({
+        formData: new FormData(),
+        file: eligibilityFile,
+        eligibilityStatus: value,
+        caseId,
+        applicationId,
+      });
       const uploadResponse = await apiFetch(`/api/applicants/${resolvedApplicantId}/documents/upload`, {
         method: 'POST',
         body: formData

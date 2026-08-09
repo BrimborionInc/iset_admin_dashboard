@@ -1,10 +1,10 @@
 # Browser Workflow Smoke Automation
 
-Status: current guidance from the 2026-05-08/09 application-assessment containment release, updated with the 2026-08-06 post-decision correction-return regression.
+Status: current guidance from the 2026-05-08/09 application-assessment containment release, updated with the 2026-08-09 intervention identity and correction matrix.
 
 Audience: Codex threads and developers building or rehearsing browser-level workflow smokes for PATH.
 
-Last Updated: 2026-08-07
+Last Updated: 2026-08-09
 
 ## Purpose
 
@@ -248,7 +248,9 @@ The Case Workspace Intervention Assessment two-step workflow has a deeper local 
 - Script: `scripts/intervention-assessment-workflow-browser-smoke.js`
 - NPM alias: `npm run smoke:intervention-assessment:workflow:browser`
 
-This smoke loads the real local React bundle at `http://localhost:3001/cases/1?entry=approval&approvalType=intervention&interventionId=101&planId=10`, injects deterministic Coordinator, Regional Manager, and NWAC Administrator sessions, and stubs proposal/revision API responses. It covers RM draft new-proposal submit, RM draft revision submit, RM return to submitter, RM submit to final decision, Decision Maker review with the RM note visible and Shelley-threshold warning present for high-value requests, Decision Maker-requested changes returning to RM, RM forwarding notes to the submitter, submitter-visible Decision Maker/RM notes, revision final-decision review, and approved proposal/revision communication deep links that expose the approval/funding-revision letter follow-up controls. The stubbed submit/review endpoints call `src/lib/reviewWorkflow.js` so the browser smoke fails when the role/workflow/stage transition matrix would reject the action.
+This smoke loads the real local React bundle at `http://localhost:3001/cases/1?entry=approval&approvalType=intervention&interventionId=101&planId=10`, injects deterministic Coordinator, Regional Manager, NWAC Administrator, and System Administrator sessions, and stubs proposal/revision API responses. Its returned-work identity matrix covers both a new proposal and a revision for six actor cases: the recorded Coordinator submitter, a different Coordinator, a different Regional Manager, the Decision Maker, System Administrator technical support, and a Regional Manager who is also the recorded submitter. Non-owners remain read-only and produce no PATCH/review mutation. The same-person RM journey proves returned edit, one correction autosave, resubmission to `rm_review`, no premature RM shortcut, and a separate post-resubmission RM sign-off to `nwac_review`.
+
+The full 2026-08-09 matrix passed 12/12 scenarios against a fresh production build. It also asserts that intervention-code/NOC reference requests settle after initial hydration and that wizard navigation does not emit repeated identical returned-body autosaves. Earlier workflow coverage remains: RM draft proposal/revision submission, RM return, escalation to final decision, Decision Maker review and request-changes routing, forwarded notes, Shelley-threshold warning, final proposal/revision review, and post-approval communication deep links. Stubbed submit/review endpoints call `src/lib/reviewWorkflow.js`, so browser behavior still fails when the shared role/stage transition contract rejects an action. This local deterministic pass is required evidence, not a substitute for the exact deployed TEST role journey.
 
 ## Existing Intervention Paid From Reference
 
@@ -258,11 +260,13 @@ The Case Workspace existing-intervention editor has a focused compiled-browser s
 - Release-suite ID: `intervention-posting-context`
 
 The smoke loads `/cases/1` as a Regional Manager with a deterministic internal
-intervention under an external action plan. It verifies that `Paid from` remains
-`Internal (NWAC)` when the intervention is viewed and edited, that the PATCH
-request preserves `postingContext=internal`, and that the refreshed intervention
-reopens with the same saved value. It also checks that Case Workspace API traffic
-settles after the save and reopen sequence.
+manual-backload intervention under an external Action Plan. It verifies that
+`Paid from` remains `Internal (NWAC)` when that historical operational record is
+viewed and edited, that its PATCH preserves `postingContext=internal`, and that
+the refreshed intervention reopens with the same value. A second exact-
+application fixture with `final_decision_recorded` review lineage proves that a
+finally reviewed proposal remains read-only and emits no additional PATCH. It
+also checks that Case Workspace API traffic settles after both paths.
 
 ## Automation Backlog
 

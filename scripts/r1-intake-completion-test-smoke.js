@@ -8,6 +8,8 @@ const { execFileSync } = require('child_process');
 const { createLiveSchemaGuard } = require('./two-step-review-test-smoke');
 
 const TEST_ACCOUNT_ID = '124355655255';
+const EXPECTED_AWS_ARN = 'arn:aws:iam::124355655255:user/CODEX_CLI_Admin';
+const EXPECTED_REMOTE_AWS_ARN = 'arn:aws:iam::124355655255:user/SES_backend';
 const DEFAULT_PROFILE = 'nwac-test';
 const DEFAULT_REGION = 'ca-central-1';
 const DEFAULT_BUCKET = 'nwac-test-artifacts';
@@ -17,6 +19,7 @@ const EXPECTED_TEST_DATABASE = 'iset_intake';
 const EXPECTED_TEST_DATABASE_HOSTNAME = 'ip-172-16-0-199';
 const EXPECTED_TEST_DATABASE_PORT = 3306;
 const EXPECTED_TEST_DATABASE_PRINCIPAL = 'app_admin@10.48.%';
+const EXPECTED_TEST_DATABASE_VERSION = '8.0.42';
 
 function parseArgs(argv) {
   const args = {
@@ -221,35 +224,6 @@ function cognitoUserIsAbsent({ email, poolId }, options) {
   }
 }
 
-function uploadRemoteScript(source, key, options) {
-  const tempFile = path.join(os.tmpdir(), `r1-intake-smoke-${process.pid}-${Date.now()}.js`);
-  fs.writeFileSync(tempFile, source, 'utf8');
-  try {
-    aws([
-      's3',
-      'cp',
-      tempFile,
-      `s3://${options.bucket}/${key}`,
-      '--only-show-errors',
-    ], options);
-  } finally {
-    fs.rmSync(tempFile, { force: true });
-  }
-}
-
-function deleteRemoteScript(key, options) {
-  try {
-    aws([
-      's3',
-      'rm',
-      `s3://${options.bucket}/${key}`,
-      '--only-show-errors',
-    ], options);
-  } catch (_) {
-    // The disposable runner object is best-effort cleanup; DB/object evidence is remote-runner-owned.
-  }
-}
-
 function sendRemoteCommand(instanceId, commands, comment, options) {
   const paramsFile = path.join(os.tmpdir(), `r1-intake-params-${process.pid}-${Date.now()}.json`);
   fs.writeFileSync(paramsFile, JSON.stringify({ commands }), 'utf8');
@@ -321,8 +295,8 @@ async function main() {
     throw new Error(`Portal env file not found: ${options.portalEnv}`);
   }
   const identity = awsJson(['sts', 'get-caller-identity'], options);
-  if (String(identity?.Account || '') !== TEST_ACCOUNT_ID) {
-    throw new Error(`Refusing to run outside TEST account ${TEST_ACCOUNT_ID}.`);
+  if (String(identity?.Account || '') !== TEST_ACCOUNT_ID || identity?.Arn !== EXPECTED_AWS_ARN) {
+    throw new Error(`Refusing to run outside authorized TEST operator ${EXPECTED_AWS_ARN}.`);
   }
 
   const portalEnv = readEnvFile(options.portalEnv);
@@ -353,7 +327,6 @@ async function main() {
     familyName: `R1 ${suffix}`,
   };
   let cognitoCreated = false;
-  let remoteKey = null;
   let result = null;
   let runError = null;
 
@@ -361,19 +334,10 @@ async function main() {
     const instanceId = discoverInstanceId(options);
     console.log(`[r1-intake-test] TEST identity ${identity.Arn}`);
     console.log(`[r1-intake-test] Using ${instanceId}`);
-    remoteKey = `ssm-scripts/r1-intake-completion-${stamp}.js`;
-    uploadRemoteScript(
-      `const createLiveSchemaGuard = ${createLiveSchemaGuard.toString()};\n(${remoteRunner.toString()})();\n`,
-      remoteKey,
-      options
-    );
-
     const runRemote = async ({ preflightOnly }) => {
-      const remotePath = `/tmp/r1-intake-completion-${stamp}${preflightOnly ? '-preflight' : ''}.js`;
       const commands = [
         'set -euo pipefail',
-        `aws s3 cp ${shellQuote(`s3://${options.bucket}/${remoteKey}`)} ${shellQuote(remotePath)} --region ${shellQuote(options.region)} --only-show-errors`,
-        `trap 'rm -f ${shellQuote(remotePath)}' EXIT`,
+        `test "$(aws sts get-caller-identity --query Arn --output text --region ${shellQuote(options.region)})" = ${shellQuote(EXPECTED_REMOTE_AWS_ARN)}`,
         'cd /opt/nwac/portal',
         [
           `FIXTURE_STAMP=${shellQuote(preflightOnly ? `${stamp}-preflight` : stamp)}`,
@@ -384,6 +348,7 @@ async function main() {
           `R1_EXPECTED_DB_SERVER_HOSTNAME=${shellQuote(EXPECTED_TEST_DATABASE_HOSTNAME)}`,
           `R1_EXPECTED_DB_PORT=${shellQuote(expectedDbPort)}`,
           `R1_EXPECTED_DB_PRINCIPAL=${shellQuote(EXPECTED_TEST_DATABASE_PRINCIPAL)}`,
+          `R1_EXPECTED_DB_VERSION=${shellQuote(EXPECTED_TEST_DATABASE_VERSION)}`,
           `KEEP_FIXTURE=${options.keepFixture ? '1' : '0'}`,
           `PORTAL_LOCAL_BASE_URL=${shellQuote(DEFAULT_LOCAL_BASE_URL)}`,
           ...(preflightOnly ? [] : [
@@ -391,7 +356,7 @@ async function main() {
             `APPLICANT_PASSWORD=${shellQuote(applicant.password)}`,
             `APPLICANT_SUB=${shellQuote(applicant.sub)}`,
           ]),
-          `node ${shellQuote(remotePath)}`,
+          `node ${shellQuote('/opt/nwac/admin-dashboard/scripts/r1-intake-completion-test-smoke.js')} --remote-runner`,
         ].join(' '),
       ];
       const commandId = sendRemoteCommand(
@@ -428,7 +393,6 @@ async function main() {
   } catch (error) {
     runError = error;
   } finally {
-    if (remoteKey) deleteRemoteScript(remoteKey, options);
     if (cognitoCreated && !options.keepFixture) {
       try {
         deleteCognitoUser({ email: applicant.email, poolId }, options);
@@ -484,6 +448,7 @@ function remoteRunner() {
     expectedDbServerHostname: requiredEnv('R1_EXPECTED_DB_SERVER_HOSTNAME'),
     expectedDbPort: Number(requiredEnv('R1_EXPECTED_DB_PORT')),
     expectedDbPrincipal: requiredEnv('R1_EXPECTED_DB_PRINCIPAL'),
+    expectedDbVersion: requiredEnv('R1_EXPECTED_DB_VERSION'),
   };
   const REQUIRED_TABLES = Object.freeze([
     'client',
@@ -539,6 +504,7 @@ function remoteRunner() {
         expectedDatabaseHostname: config.expectedDbServerHostname,
         expectedPort: config.expectedDbPort,
         expectedPrincipal: config.expectedDbPrincipal,
+        expectedVersion: config.expectedDbVersion,
         configuredDatabase: requiredEnv('DB_NAME'),
         configuredHost: requiredEnv('DB_HOST'),
         configuredUser: requiredEnv('DB_USER'),
@@ -1199,7 +1165,7 @@ function remoteRunner() {
   }
 
   async function cleanupFixture({ quiet = false } = {}) {
-    await connection.beginTransaction();
+    await query('START TRANSACTION');
     let fixture;
     let objectKeys = [];
     const objectFailures = [];
@@ -1254,9 +1220,9 @@ function remoteRunner() {
         await query(`DELETE FROM user_session_audit WHERE user_id IN (${placeholders(params)})`, params);
         await query(`DELETE FROM user WHERE id IN (${placeholders(params)})`, params);
       }
-      await connection.commit();
+      await query('COMMIT');
     } catch (error) {
-      await connection.rollback();
+      await query('ROLLBACK');
       throw error;
     }
 
@@ -1309,7 +1275,11 @@ function remoteRunner() {
   }
 }
 
-main().catch(error => {
-  console.error('[r1-intake-test] Failed:', error?.message || error);
-  process.exitCode = 1;
-});
+if (process.argv.includes('--remote-runner')) {
+  remoteRunner();
+} else {
+  main().catch(error => {
+    console.error('[r1-intake-test] Failed:', error?.message || error);
+    process.exitCode = 1;
+  });
+}

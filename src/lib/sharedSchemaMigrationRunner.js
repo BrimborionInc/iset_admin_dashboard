@@ -157,9 +157,67 @@ function getCanonicalMigrationFiles({ migrationsDir = CANONICAL_MIGRATIONS_DIR }
   });
 }
 
+function quoteTrackingTableIdentifier(trackingTable) {
+  const identifier = String(trackingTable || '');
+  if (!/^[A-Za-z0-9_]+$/u.test(identifier)) {
+    const error = new Error(`Invalid schema migration tracking table: ${identifier || '(empty)'}`);
+    error.code = 'schema_migration_tracking_table_invalid';
+    throw error;
+  }
+  return `\`${identifier}\``;
+}
+
+function buildAppliedMigrationRowsSql(trackingTable = DEFAULT_TRACKING_TABLE) {
+  const quotedTable = quoteTrackingTableIdentifier(trackingTable);
+  return `SELECT ${quotedTable}.\`filename\`,
+                ${quotedTable}.\`checksum\`,
+                ${quotedTable}.\`success\`,
+                ${quotedTable}.\`applied_at\`,
+                ${quotedTable}.\`duration_ms\`,
+                ${quotedTable}.\`error_snippet\`
+           FROM ${quotedTable}
+          ORDER BY ${quotedTable}.\`applied_at\` ASC,
+                   ${quotedTable}.\`id\` ASC`;
+}
+
+function buildSharedSchemaMigrationPlan({
+  appliedRows = [],
+  migrations,
+  migrationsDir,
+  trackingTable = DEFAULT_TRACKING_TABLE,
+  trackingTableExists = true,
+  schemaEvidence = null,
+}) {
+  assertNoMigrationChecksumDrift(migrations, appliedRows);
+  const successfulAppliedMap = new Map(
+    appliedRows
+      .filter(row => Number(row.success) === 1)
+      .map(row => [`${row.filename}|${row.checksum}`, row])
+  );
+  const pending = migrations.filter(migration => !successfulAppliedMap.has(`${migration.file}|${migration.checksum}`));
+  const failures = classifyMigrationFailures(migrations, appliedRows);
+
+  return {
+    trackingTable,
+    trackingTableExists,
+    migrationsDir,
+    totalFilesystemMigrations: migrations.length,
+    appliedCount: appliedRows.filter(row => Number(row.success) === 1).length,
+    failureCount: failures.unresolved.length,
+    failures: failures.unresolved,
+    historicalFailureCount: failures.historical.length,
+    historicalFailures: failures.historical,
+    pendingCount: pending.length,
+    applied: appliedRows,
+    pending,
+    schemaEvidence,
+  };
+}
+
 async function ensureTrackingTable(pool, { trackingTable = DEFAULT_TRACKING_TABLE } = {}) {
+  const quotedTable = quoteTrackingTableIdentifier(trackingTable);
   await pool.query(
-    `CREATE TABLE IF NOT EXISTS ${trackingTable} (
+    `CREATE TABLE IF NOT EXISTS ${quotedTable} (
       id INT AUTO_INCREMENT PRIMARY KEY,
       filename VARCHAR(255) NOT NULL,
       checksum CHAR(64) NOT NULL,
@@ -172,45 +230,48 @@ async function ensureTrackingTable(pool, { trackingTable = DEFAULT_TRACKING_TABL
   );
 }
 
-async function fetchAppliedMigrationRows(pool, { trackingTable = DEFAULT_TRACKING_TABLE } = {}) {
-  const [rows] = await pool.query(
-    `SELECT filename, checksum, success, applied_at, duration_ms, error_snippet
-       FROM ${trackingTable}
-      ORDER BY applied_at ASC, id ASC`
-  );
+async function fetchAppliedMigrationRows(pool, {
+  trackingTable = DEFAULT_TRACKING_TABLE,
+  schemaGuard = null,
+} = {}) {
+  const sql = buildAppliedMigrationRowsSql(trackingTable);
+  const [rows] = schemaGuard
+    ? await schemaGuard.execute(sql)
+    : await pool.query(sql);
   return rows || [];
 }
 
 async function planPendingSharedSchemaMigrations(pool, options = {}) {
   const trackingTable = options.trackingTable || DEFAULT_TRACKING_TABLE;
   const migrationsDir = options.migrationsDir || CANONICAL_MIGRATIONS_DIR;
-
-  await ensureTrackingTable(pool, { trackingTable });
-
-  const appliedRows = await fetchAppliedMigrationRows(pool, { trackingTable });
   const migrations = getCanonicalMigrationFiles({ migrationsDir });
-  assertNoMigrationChecksumDrift(migrations, appliedRows);
-  const successfulAppliedMap = new Map(
-    appliedRows
-      .filter(row => Number(row.success) === 1)
-      .map(row => [`${row.filename}|${row.checksum}`, row])
-  );
-  const pending = migrations.filter(migration => !successfulAppliedMap.has(`${migration.file}|${migration.checksum}`));
-  const failures = classifyMigrationFailures(migrations, appliedRows);
+  const schemaGuard = options.schemaGuard;
+  if (
+    !schemaGuard ||
+    typeof schemaGuard.preflight !== 'function' ||
+    typeof schemaGuard.objectExists !== 'function' ||
+    typeof schemaGuard.execute !== 'function' ||
+    typeof schemaGuard.evidence !== 'function'
+  ) {
+    const error = new Error('Schema migration plan requires a live identity/DDL guard');
+    error.code = 'schema_migration_plan_guard_required';
+    throw error;
+  }
 
-  return {
-    trackingTable,
+  await schemaGuard.preflight();
+  const trackingTableExists = schemaGuard.objectExists(trackingTable, 'table');
+  const appliedRows = trackingTableExists
+    ? await fetchAppliedMigrationRows(pool, { trackingTable, schemaGuard })
+    : [];
+
+  return buildSharedSchemaMigrationPlan({
+    appliedRows,
+    migrations,
     migrationsDir,
-    totalFilesystemMigrations: migrations.length,
-    appliedCount: appliedRows.filter(row => Number(row.success) === 1).length,
-    failureCount: failures.unresolved.length,
-    failures: failures.unresolved,
-    historicalFailureCount: failures.historical.length,
-    historicalFailures: failures.historical,
-    pendingCount: pending.length,
-    applied: appliedRows,
-    pending,
-  };
+    trackingTable,
+    trackingTableExists,
+    schemaEvidence: schemaGuard.evidence(),
+  });
 }
 
 function splitStatements(sql) {
@@ -239,9 +300,23 @@ function isSkippableStatementError(error) {
 
 async function applyPendingSharedSchemaMigrations(pool, options = {}) {
   const logger = options.logger || console;
-  const plan = await planPendingSharedSchemaMigrations(pool, options);
+  const trackingTable = options.trackingTable || DEFAULT_TRACKING_TABLE;
+  const migrationsDir = options.migrationsDir || CANONICAL_MIGRATIONS_DIR;
+
+  // Apply/startup owns this mutation boundary. The read-only plan path never
+  // creates the ledger and cannot reach this helper.
+  await ensureTrackingTable(pool, { trackingTable });
+  const appliedRows = await fetchAppliedMigrationRows(pool, { trackingTable });
+  const plan = buildSharedSchemaMigrationPlan({
+    appliedRows,
+    migrations: getCanonicalMigrationFiles({ migrationsDir }),
+    migrationsDir,
+    trackingTable,
+    trackingTableExists: true,
+  });
 
   if (!plan.pending.length) {
+    logger.log('[migrations] No pending migrations');
     return {
       ...plan,
       attempted: [],
@@ -251,6 +326,14 @@ async function applyPendingSharedSchemaMigrations(pool, options = {}) {
 
   const attempted = [];
   let haltedOnFailure = false;
+
+  logger.log(
+    '[migrations] Applying',
+    plan.pending.length,
+    'migration(s) from',
+    `${plan.migrationsDir}:`,
+    plan.pending.map(item => item.file).join(', ')
+  );
 
   for (const migration of plan.pending) {
     const start = Date.now();
@@ -289,8 +372,9 @@ async function applyPendingSharedSchemaMigrations(pool, options = {}) {
     }
 
     const duration = Date.now() - start;
+    const quotedTrackingTable = quoteTrackingTableIdentifier(plan.trackingTable);
     await pool.query(
-      `INSERT INTO ${plan.trackingTable} (filename, checksum, duration_ms, success, error_snippet)
+      `INSERT INTO ${quotedTrackingTable} (filename, checksum, duration_ms, success, error_snippet)
        VALUES (?,?,?,?,?)
        ON DUPLICATE KEY UPDATE
          applied_at = CURRENT_TIMESTAMP,
@@ -342,21 +426,13 @@ async function runStartupSharedSchemaMigrations(pool, options = {}) {
   }
 
   const dryRun = toBoolean(process.env.AUTO_MIGRATIONS_DRY_RUN, false);
-  const plan = await planPendingSharedSchemaMigrations(pool, options);
-
-  if (!plan.pending.length) {
-    logger.log('[migrations] No pending migrations');
-    return {
-      skipped: false,
-      dryRun,
-      ...plan,
-      attempted: [],
-      haltedOnFailure: false,
-    };
-  }
-
   if (dryRun) {
-    logger.log('[migrations] DRY RUN pending migrations:', plan.pending.map(item => item.file));
+    const plan = await planPendingSharedSchemaMigrations(pool, options);
+    if (!plan.pending.length) {
+      logger.log('[migrations] No pending migrations');
+    } else {
+      logger.log('[migrations] DRY RUN pending migrations:', plan.pending.map(item => item.file));
+    }
     return {
       skipped: false,
       dryRun: true,
@@ -365,14 +441,6 @@ async function runStartupSharedSchemaMigrations(pool, options = {}) {
       haltedOnFailure: false,
     };
   }
-
-  logger.log(
-    '[migrations] Applying',
-    plan.pending.length,
-    'migration(s) from',
-    plan.migrationsDir + ':',
-    plan.pending.map(item => item.file).join(', ')
-  );
   return applyPendingSharedSchemaMigrations(pool, options);
 }
 
@@ -387,6 +455,9 @@ module.exports = {
   assertNoMigrationChecksumDrift,
   assertMigrationApplySucceeded,
   classifyMigrationFailures,
+  quoteTrackingTableIdentifier,
+  buildAppliedMigrationRowsSql,
+  buildSharedSchemaMigrationPlan,
   ensureTrackingTable,
   fetchAppliedMigrationRows,
   getSharedSchemaInventory,

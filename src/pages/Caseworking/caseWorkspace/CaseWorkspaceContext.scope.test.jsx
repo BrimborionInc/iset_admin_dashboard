@@ -27,7 +27,7 @@ const workspacePayload = ({ caseId, applicationId, label }) => ({
   applicationId,
   caseNumber: label,
   client: { id: caseId, firstName: label, lastName: "Participant" },
-  actionPlans: [{ id: caseId * 10, title: `${label} plan`, interventions: [] }],
+  actionPlans: [{ id: caseId * 10, applicationId, title: `${label} plan`, interventions: [] }],
 });
 
 let latestWorkspace;
@@ -111,6 +111,7 @@ describe("CaseWorkspaceProvider route ownership", () => {
       await newA.promise;
     });
     await waitFor(() => expect(latestWorkspace.caseData?.caseNumber).toBe("New Route A"));
+    expect(latestWorkspace.caseData?.actionPlans?.[0]?.applicationId).toBe(11);
 
     await act(async () => {
       oldA.resolve(response(workspacePayload({ caseId: 1, applicationId: 10, label: "Old Route A" })));
@@ -177,5 +178,81 @@ describe("CaseWorkspaceProvider route ownership", () => {
     const abandonedCalls = apiFetch.mock.calls.filter(([url]) => url.startsWith("/api/cases/4/"));
     expect(abandonedCalls).toHaveLength(1);
     expect(latestWorkspace.caseData?.caseNumber).toBe("Current");
+  });
+
+  test("caches an intentionally empty reference response instead of refetching forever", async () => {
+    apiFetch.mockImplementation((url, options = {}) => {
+      if (options.method === "DELETE") return Promise.resolve(response({}));
+      if (url === "/api/reference/intervention-codes") {
+        return Promise.resolve(response({ codes: [] }));
+      }
+      if (url === "/api/reference/noc-versions") {
+        return Promise.resolve(response({ versions: [] }));
+      }
+      return Promise.resolve(response(workspacePayload({
+        caseId: 6,
+        applicationId: 60,
+        label: "Reference cache",
+      })));
+    });
+
+    renderWorkspace(6, 60);
+    await waitFor(() => expect(latestWorkspace.caseData?.applicationId).toBe(60));
+
+    await act(async () => {
+      await latestWorkspace.loadInterventionCodes();
+      await latestWorkspace.loadNocVersions();
+    });
+    await waitFor(() => expect(latestWorkspace.interventionCodesLoading).toBe(false));
+    await act(async () => {
+      await latestWorkspace.loadInterventionCodes();
+      await latestWorkspace.loadNocVersions();
+    });
+
+    expect(apiFetch.mock.calls.filter(([url]) => url === "/api/reference/intervention-codes")).toHaveLength(1);
+    expect(apiFetch.mock.calls.filter(([url]) => url === "/api/reference/noc-versions")).toHaveLength(1);
+  });
+
+  test("keeps applied revision evidence separate from operational interventions and counts", async () => {
+    const payload = workspacePayload({ caseId: 7, applicationId: 70, label: "Revision evidence" });
+    payload.counts = { openInterventions: 1, totalInterventions: 1 };
+    payload.actionPlans[0].interventions = [{
+      id: 701,
+      status: "approved",
+      deliveryStatus: "planned",
+      title: "Operational intervention",
+    }];
+    payload.actionPlans[0].appliedRevisionEvidence = [{
+      id: 702,
+      status: "approved",
+      deliveryStatus: "planned",
+      title: "Applied revision decision",
+      operational: false,
+      recordKind: "applied_revision_evidence",
+      isAppliedRevisionEvidence: true,
+      metadata: { revisionApplication: { status: "applied" } },
+    }];
+    apiFetch.mockResolvedValue(response(payload));
+
+    renderWorkspace(7, 70);
+    await waitFor(() => expect(latestWorkspace.caseData?.applicationId).toBe(70));
+
+    const [plan] = latestWorkspace.caseData.actionPlans;
+    expect(plan.interventions.map(item => item.id)).toEqual([701]);
+    expect(plan.interventionCount).toBe(1);
+    expect(plan.appliedRevisionEvidence).toEqual([
+      expect.objectContaining({
+        id: 702,
+        operational: false,
+        recordKind: "applied_revision_evidence",
+        isAppliedRevisionEvidence: true,
+      }),
+    ]);
+    expect(latestWorkspace.caseData.appliedRevisionEvidence.map(item => item.id)).toEqual([702]);
+    expect(latestWorkspace.caseData.appliedRevisionEvidenceCount).toBe(1);
+    expect(latestWorkspace.caseData.counts).toMatchObject({
+      openInterventions: 1,
+      totalInterventions: 1,
+    });
   });
 });

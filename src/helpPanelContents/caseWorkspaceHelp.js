@@ -48,6 +48,12 @@ const CaseWorkspaceHelp = ({ tutorial, onRestartTutorial, onEndTutorial }) => {
         happens separately after the final decision is recorded.
       </p>
       <p>
+        Review work moves submitter to Regional Manager to Decision Maker. A Decision Maker request
+        comes back to the Regional Manager first, then the RM forwards it to the recorded submitter.
+        The packet stays read-only with reviewers. EI status controls CRF/EI funding alignment, while
+        the review stage controls queue ownership.
+      </p>
+      <p>
         This workspace is also where authorized staff record historical casework that already existed outside PATH.
         Use the <strong>Case header</strong> quick actions <strong>Add existing action plan</strong>,{" "}
         <strong>Add existing intervention</strong>, and <strong>Upload existing documents</strong> to record
@@ -78,6 +84,7 @@ const CaseWorkspaceHelp = ({ tutorial, onRestartTutorial, onEndTutorial }) => {
         <li>Record meaningful client contact, follow-up attempts, and decisions in the file.</li>
         <li>Use documents and notes together so the case can stand on its own during review or audit.</li>
         <li>Follow through after the intervention ends, including outcome tracking and the required post-intervention follow-up, including the 12-week follow-up where it applies, before closing the file.</li>
+        <li>For a funded final approval, send the client letter with the exact Action Plan&apos;s CFA and EFT/Wire Transfer form. Zero-funding approvals, denials, and requested changes do not start CFA signing.</li>
       </ul>
 
       <h3>Layout tips</h3>
@@ -123,6 +130,9 @@ Focus on the staff workflow:
 - confirm the right case and current participant details;
 - manage action plans and interventions against the client's goals;
 - if the file was opened from Pending Review or Pending Decision, explain that the workspace is intentionally focused on the selected proposal and the active review step; any decision-letter follow-up happens separately after the final decision is committed;
+- explain the two-step route when relevant: the RM returns ordinary review work to the recorded submitter or submits it for final decision; Decision Maker-requested changes return to the RM first and must be forwarded to the submitter, then pass RM review again;
+- explain that EI status controls CRF/EI Action Plan alignment but review stage controls queue ownership; a new proposal can enter RM review before EI is final, but approval cannot be recorded without the EI result;
+- explain that funded final approvals send the exact Action Plan/application-linked CFA and EFT form during client-letter follow-up, while zero-funding approvals have no CFA package; CFA signing is not another review stage;
 - record notes, documents, and client contact;
 - explain that authorized users can use the Case Header quick actions \`Add existing action plan\`, \`Add existing intervention\`, and \`Upload existing documents\` to backload historical casework without inventing intake or approval records;
 - when backload questions come up, mention the key guardrails: archived plans cannot receive existing interventions, closed plans only accept completed/cancelled interventions, in-progress or suspended interventions require an active plan, and historic documents stay case-based when there is no linked application;

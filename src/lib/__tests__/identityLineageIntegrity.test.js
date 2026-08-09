@@ -69,7 +69,10 @@ describe('R5a identity and application lineage integrity', () => {
     expect(planRoute).toContain('actionPlanApplicationId');
     expect(server).toContain('(case_id, application_id, name, status, agreement_number');
     expect(server).toContain('application_id = COALESCE(VALUES(application_id), iset_intervention_proposal.application_id)');
-    expect(server).toContain('COALESCE(p.application_id, ap.application_id, a.id) AS application_id');
+    expect(server).not.toContain('COALESCE(p.application_id, ap.application_id, a.id) AS application_id');
+    expect(server).toContain('p.application_id AS proposal_application_id');
+    expect(server).toContain('ap.application_id AS action_plan_application_id');
+    expect(server).toContain('resolveInterventionApplicationScopeId');
   });
 
   test('contact-note attribution has no email fallback after the subject resolver', () => {

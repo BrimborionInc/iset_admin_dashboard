@@ -16,6 +16,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
+const { createLiveMysqlSchemaGuard } = require('./lib/live-mysql-schema-guard');
 
 try {
   require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
@@ -34,12 +35,98 @@ const BASELINE_EVIDENCE_TYPES = [
   'IndigenousIdentity',
   'BandFundingConfirmationOrDenial',
 ];
+const EXPECTED_DEV_DATABASE_IDENTITY = Object.freeze({
+  configured: Object.freeze({
+    host: '172.26.176.1',
+    port: 3306,
+    user: 'root',
+    database: 'iset_intake',
+  }),
+  live: Object.freeze({
+    database: 'iset_intake',
+    serverHostname: 'DESKTOP-PDFA51K',
+    port: 3306,
+    currentUser: 'root@172.26.%',
+    version: '8.0.40',
+  }),
+});
+const EXPECTED_TEST_DATABASE_IDENTITY = Object.freeze({
+  configured: Object.freeze({
+    host: 'nwac-test-db.cluster-cn4yoy2s4w5t.ca-central-1.rds.amazonaws.com',
+    port: 3306,
+    user: 'app_admin',
+    database: 'iset_intake',
+  }),
+  live: Object.freeze({
+    database: 'iset_intake',
+    serverHostname: 'ip-172-16-0-199',
+    port: 3306,
+    currentUser: 'app_admin@10.48.%',
+    version: '8.0.42',
+  }),
+});
+const AUTHORIZED_PAYMENT_DATABASE_IDENTITIES = [
+  EXPECTED_DEV_DATABASE_IDENTITY,
+  EXPECTED_TEST_DATABASE_IDENTITY,
+];
+const PAYMENT_SCHEMA_OBJECTS = [
+  'budget_pot',
+  'client',
+  'esdc_intervention_code',
+  'finance_transaction',
+  'iset_application',
+  'iset_application_submission',
+  'iset_case',
+  'iset_case_intervention',
+  'iset_document',
+  'payment_batch_line',
+  'payment_followup_event',
+  'payment_line_transaction',
+  'payment_override',
+  'payment_packet',
+  'payment_packet_communication',
+  'payment_packet_document',
+  'payment_packet_line',
+  'payment_status_event',
+  'user',
+].map(name => ({ name, type: 'table' }));
+const PAYMENT_OUTPUT_ALIASES = [
+  'applications',
+  'budget_pots',
+  'cases',
+  'clients',
+  'documents',
+  'finance_transactions',
+  'interventions',
+  'packet_lines',
+  'packets',
+  'submissions',
+  'users',
+];
+const PAYMENT_TABLE_ALIASES = [
+  'fixture_application',
+  'fixture_budget_pot',
+  'fixture_case',
+  'fixture_client',
+  'fixture_document',
+  'fixture_finance_transaction',
+  'fixture_intervention',
+  'fixture_packet',
+  'fixture_packet_line',
+  'fixture_submission',
+  'fixture_user',
+  'ft',
+  'intervention_reference',
+  'plt',
+  'ppl',
+];
 
 function parseArgs(argv) {
   const args = {
     api: false,
     browser: false,
     keepFixture: false,
+    schemaPreflightOnly: false,
     requireLive: false,
     json: false,
     help: false,
@@ -62,6 +149,8 @@ function parseArgs(argv) {
       args.api = true;
     } else if (token === '--keep-fixture') {
       args.keepFixture = true;
+    } else if (token === '--schema-preflight-only') {
+      args.schemaPreflightOnly = true;
     } else if (token === '--require-live') {
       args.requireLive = true;
     } else if (token === '--json') {
@@ -95,6 +184,7 @@ function usage() {
     '  --api                  Run authenticated API smoke against local/admin backend.',
     '  --browser              Run API smoke and then Puppeteer UI smoke.',
     '  --keep-fixture         Commit and keep the synthetic fixture after API/browser mode.',
+    '  --schema-preflight-only Prove an authorized DEV/TEST identity and full required schema; run no ordinary SQL.',
     '  --require-live         Treat skipped API/browser checks as failures.',
     '  --admin-base URL       Admin API base URL. Default: http://localhost:5001.',
     '  --frontend-base URL    Frontend URL for browser smoke. Default: http://localhost:5001.',
@@ -134,6 +224,44 @@ function getDbConfig() {
     throw new Error('DB_HOST, DB_USER, and DB_NAME must be set');
   }
   return config;
+}
+
+function resolveAuthorizedPaymentDatabaseIdentity(dbConfig) {
+  const configured = {
+    host: String(dbConfig?.host || '').trim(),
+    port: Number(dbConfig?.port),
+    user: String(dbConfig?.user || '').trim(),
+    database: String(dbConfig?.database || '').trim(),
+  };
+  const expected = AUTHORIZED_PAYMENT_DATABASE_IDENTITIES.find(candidate => (
+    candidate.configured.host === configured.host
+    && candidate.configured.port === configured.port
+    && candidate.configured.user === configured.user
+    && candidate.configured.database === configured.database
+  ));
+  if (!expected) throw new Error('payments_smoke_configured_database_target_not_authorized');
+  return expected;
+}
+
+function createPaymentsSchemaGuard(connection, dbConfig, guardFactory = createLiveMysqlSchemaGuard) {
+  const expectedDatabaseIdentity = resolveAuthorizedPaymentDatabaseIdentity(dbConfig);
+  return guardFactory({
+    connection,
+    expectedIdentity: {
+      ...expectedDatabaseIdentity.live,
+      configuredHost: expectedDatabaseIdentity.configured.host,
+      configuredUser: expectedDatabaseIdentity.configured.user,
+    },
+    configuredIdentity: {
+      host: dbConfig.host,
+      port: Number(dbConfig.port),
+      user: dbConfig.user,
+      database: dbConfig.database,
+    },
+    requiredObjects: PAYMENT_SCHEMA_OBJECTS,
+    allowedOutputAliases: PAYMENT_OUTPUT_ALIASES,
+    allowedTableAliases: PAYMENT_TABLE_ALIASES,
+  });
 }
 
 function stampValue() {
@@ -194,30 +322,26 @@ function authHeaders(extra = {}) {
   return headers;
 }
 
-async function tableExists(connection, tableName) {
-  const [[row]] = await connection.query(
-    `SELECT COUNT(*) AS count
-       FROM information_schema.tables
-      WHERE table_schema = DATABASE()
-        AND table_name = ?`,
-    [tableName]
+async function resolveCompatibleInterventionCode(connection) {
+  const [rows] = await connection.query(
+    `SELECT \`intervention_reference\`.\`code\`
+       FROM \`esdc_intervention_code\` AS \`intervention_reference\`
+      WHERE \`intervention_reference\`.\`is_active\` = ?
+      ORDER BY \`intervention_reference\`.\`display_order\`, \`intervention_reference\`.\`code\`
+      LIMIT 1`,
+    [1]
   );
-  return Number(row?.count || 0) === 1;
+  const interventionCode = Number(rows?.[0]?.code);
+  if (!Number.isInteger(interventionCode) || interventionCode <= 0) {
+    throw new Error('payments_smoke_compatible_intervention_code_unavailable');
+  }
+  return interventionCode;
 }
 
-async function columnExists(connection, tableName, columnName) {
-  const [[row]] = await connection.query(
-    `SELECT COUNT(*) AS count
-       FROM information_schema.columns
-      WHERE table_schema = DATABASE()
-        AND table_name = ?
-        AND column_name = ?`,
-    [tableName, columnName]
-  );
-  return Number(row?.count || 0) === 1;
-}
-
-async function createBaseFixture(connection) {
+async function createBaseFixture(connection, { interventionCode, fixtureState = {} } = {}) {
+  if (!Number.isInteger(Number(interventionCode)) || Number(interventionCode) <= 0) {
+    throw new Error('payments_smoke_intervention_code_not_preflighted');
+  }
   const stamp = stampValue();
   const suffix = shortStamp(stamp);
   const applicantEmail = `payments-smoke-${suffix}@example.invalid`;
@@ -225,6 +349,17 @@ async function createBaseFixture(connection) {
   const applicantName = `Payments Smoke ${suffix}`;
   const caseNumber = `PAYSMOKE-${suffix}`.slice(0, 32);
   const potCode = `PAYSMOKE-${suffix}`.slice(0, 64);
+  Object.assign(fixtureState, {
+    stamp,
+    suffix,
+    marker,
+    applicantName,
+    applicantEmail,
+    caseNumber,
+    payeeName: applicantName,
+    lineAmount: 125.25,
+    mutationStarted: false,
+  });
 
   const [userResult] = await connection.query(
     `INSERT INTO user (name, email, email_verified, preferred_language)
@@ -232,6 +367,8 @@ async function createBaseFixture(connection) {
     [applicantName, applicantEmail]
   );
   const userId = Number(userResult.insertId);
+  fixtureState.mutationStarted = true;
+  fixtureState.userId = userId;
 
   const [clientResult] = await connection.query(
     `INSERT INTO client
@@ -252,6 +389,7 @@ async function createBaseFixture(connection) {
     ]
   );
   const clientId = Number(clientResult.insertId);
+  fixtureState.clientId = clientId;
 
   const caseContext = {
     ...marker,
@@ -272,6 +410,7 @@ async function createBaseFixture(connection) {
     [caseNumber, clientId, JSON.stringify(caseContext)]
   );
   const caseId = Number(caseResult.insertId);
+  fixtureState.caseId = caseId;
 
   const payload = {
     ...marker,
@@ -298,6 +437,7 @@ async function createBaseFixture(connection) {
     ]
   );
   const submissionId = Number(submissionResult.insertId);
+  fixtureState.submissionId = submissionId;
 
   const [applicationResult] = await connection.query(
     `INSERT INTO iset_application
@@ -306,6 +446,7 @@ async function createBaseFixture(connection) {
     [submissionId, clientId, caseId, JSON.stringify(payload)]
   );
   const applicationId = Number(applicationResult.insertId);
+  fixtureState.applicationId = applicationId;
 
   const [potResult] = await connection.query(
     `INSERT INTO budget_pot
@@ -314,6 +455,7 @@ async function createBaseFixture(connection) {
     [`Payments Smoke Pot ${suffix}`, potCode, JSON.stringify(marker)]
   );
   const budgetPotId = Number(potResult.insertId);
+  fixtureState.budgetPotId = budgetPotId;
 
   const interventionMetadata = {
     ...marker,
@@ -324,11 +466,12 @@ async function createBaseFixture(connection) {
     `INSERT INTO iset_case_intervention
        (case_id, intervention_code, status, delivery_status, start_date, end_date,
         intervention_cost, budget_amount, approved_amount, notes, metadata_json, eligibility_result, funding_stream_decision)
-     VALUES (?, 1, 'approved', 'planned', CURRENT_DATE(), DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY),
+     VALUES (?, ?, 'approved', 'planned', CURRENT_DATE(), DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY),
         5000.00, 5000.00, 5000.00, 'Synthetic payments workflow smoke intervention.', CAST(? AS JSON), 'eligible', 'CRF')`,
-    [caseId, JSON.stringify(interventionMetadata)]
+    [caseId, Number(interventionCode), JSON.stringify(interventionMetadata)]
   );
   const interventionId = Number(interventionResult.insertId);
+  fixtureState.interventionId = interventionId;
 
   const documents = [];
   for (const evidenceType of BASELINE_EVIDENCE_TYPES) {
@@ -357,9 +500,10 @@ async function createBaseFixture(connection) {
       evidenceType,
       filePath,
     });
+    fixtureState.documents = [...documents];
   }
 
-  return {
+  return Object.assign(fixtureState, {
     stamp,
     suffix,
     marker,
@@ -376,7 +520,7 @@ async function createBaseFixture(connection) {
     applicantEmail,
     payeeName: applicantName,
     lineAmount: 125.25,
-  };
+  });
 }
 
 async function createDirectWorkflowFixture(connection, fixture) {
@@ -533,17 +677,17 @@ async function countFixtureRows(connection, stamp) {
   const jsonNeedle = `%"stamp":"${stamp}"%`;
   const [[row]] = await connection.query(
     `SELECT
-       (SELECT COUNT(*) FROM user WHERE email = ?) AS users,
-       (SELECT COUNT(*) FROM client WHERE applicant_account_email = ?) AS clients,
-       (SELECT COUNT(*) FROM iset_case WHERE case_number LIKE ?) AS cases,
-       (SELECT COUNT(*) FROM iset_application_submission WHERE reference_number LIKE ?) AS submissions,
-       (SELECT COUNT(*) FROM iset_application WHERE CAST(payload_json AS CHAR) LIKE ?) AS applications,
-       (SELECT COUNT(*) FROM iset_case_intervention WHERE CAST(metadata_json AS CHAR) LIKE ?) AS interventions,
-       (SELECT COUNT(*) FROM budget_pot WHERE CAST(metadata AS CHAR) LIKE ?) AS budget_pots,
-       (SELECT COUNT(*) FROM iset_document WHERE file_path LIKE ?) AS documents,
-       (SELECT COUNT(*) FROM payment_packet WHERE CAST(metadata AS CHAR) LIKE ?) AS packets,
-       (SELECT COUNT(*) FROM payment_packet_line WHERE CAST(metadata AS CHAR) LIKE ?) AS packet_lines,
-       (SELECT COUNT(*) FROM finance_transaction WHERE CAST(metadata AS CHAR) LIKE ?) AS finance_transactions`,
+       (SELECT COUNT(*) FROM \`user\` AS \`fixture_user\` WHERE \`fixture_user\`.\`email\` = ?) AS \`users\`,
+       (SELECT COUNT(*) FROM \`client\` AS \`fixture_client\` WHERE \`fixture_client\`.\`applicant_account_email\` = ?) AS \`clients\`,
+       (SELECT COUNT(*) FROM \`iset_case\` AS \`fixture_case\` WHERE \`fixture_case\`.\`case_number\` LIKE ?) AS \`cases\`,
+       (SELECT COUNT(*) FROM \`iset_application_submission\` AS \`fixture_submission\` WHERE \`fixture_submission\`.\`reference_number\` LIKE ?) AS \`submissions\`,
+       (SELECT COUNT(*) FROM \`iset_application\` AS \`fixture_application\` WHERE CAST(\`fixture_application\`.\`payload_json\` AS CHAR) LIKE ?) AS \`applications\`,
+       (SELECT COUNT(*) FROM \`iset_case_intervention\` AS \`fixture_intervention\` WHERE CAST(\`fixture_intervention\`.\`metadata_json\` AS CHAR) LIKE ?) AS \`interventions\`,
+       (SELECT COUNT(*) FROM \`budget_pot\` AS \`fixture_budget_pot\` WHERE CAST(\`fixture_budget_pot\`.\`metadata\` AS CHAR) LIKE ?) AS \`budget_pots\`,
+       (SELECT COUNT(*) FROM \`iset_document\` AS \`fixture_document\` WHERE \`fixture_document\`.\`file_path\` LIKE ?) AS \`documents\`,
+       (SELECT COUNT(*) FROM \`payment_packet\` AS \`fixture_packet\` WHERE CAST(\`fixture_packet\`.\`metadata\` AS CHAR) LIKE ?) AS \`packets\`,
+       (SELECT COUNT(*) FROM \`payment_packet_line\` AS \`fixture_packet_line\` WHERE CAST(\`fixture_packet_line\`.\`metadata\` AS CHAR) LIKE ?) AS \`packet_lines\`,
+       (SELECT COUNT(*) FROM \`finance_transaction\` AS \`fixture_finance_transaction\` WHERE CAST(\`fixture_finance_transaction\`.\`metadata\` AS CHAR) LIKE ?) AS \`finance_transactions\``,
     [
       `payments-smoke-${shortStamp(stamp)}@example.invalid`,
       `payments-smoke-${shortStamp(stamp)}@example.invalid`,
@@ -583,47 +727,26 @@ async function loadPaymentSnapshot(connection, packetId) {
     [packetId]
   );
   const [transactions] = await connection.query(
-    `SELECT ft.id, ft.status, ft.amount, plt.payment_packet_line_id
-       FROM finance_transaction ft
-       JOIN payment_line_transaction plt ON plt.finance_transaction_id = ft.id
-       JOIN payment_packet_line ppl ON ppl.id = plt.payment_packet_line_id
-      WHERE ppl.payment_packet_id = ?
-      ORDER BY ft.id`,
+    `SELECT \`ft\`.\`id\`, \`ft\`.\`status\`, \`ft\`.\`amount\`, \`plt\`.\`payment_packet_line_id\`
+       FROM \`finance_transaction\` AS \`ft\`
+       JOIN \`payment_line_transaction\` AS \`plt\`
+         ON \`plt\`.\`finance_transaction_id\` = \`ft\`.\`id\`
+       JOIN \`payment_packet_line\` AS \`ppl\`
+         ON \`ppl\`.\`id\` = \`plt\`.\`payment_packet_line_id\`
+      WHERE \`ppl\`.\`payment_packet_id\` = ?
+      ORDER BY \`ft\`.\`id\``,
     [packetId]
   );
   return { packet, lines, documents, followUps, communications, transactions };
 }
 
-async function runDbRollbackSmoke(connection, results) {
-  const requiredTables = [
-    'payment_packet',
-    'payment_packet_line',
-    'payment_packet_document',
-    'payment_packet_communication',
-    'payment_followup_event',
-    'finance_transaction',
-    'payment_line_transaction',
-  ];
-  for (const table of requiredTables) {
-    expect(results, `${table} table exists`, await tableExists(connection, table), { table });
-  }
-  expect(
-    results,
-    'payment_packet_document has line-level evidence column',
-    await columnExists(connection, 'payment_packet_document', 'payment_packet_line_id'),
-    { table: 'payment_packet_document', column: 'payment_packet_line_id' }
-  );
-  expect(
-    results,
-    'payment_packet has follow-up status column',
-    await columnExists(connection, 'payment_packet', 'follow_up_status'),
-    { table: 'payment_packet', column: 'follow_up_status' }
-  );
-
+async function runDbRollbackSmoke(connection, results, { interventionCode } = {}) {
+  let transactionStarted = false;
+  const fixture = {};
   await connection.beginTransaction();
-  let fixture = null;
+  transactionStarted = true;
   try {
-    fixture = await createBaseFixture(connection);
+    await createBaseFixture(connection, { interventionCode, fixtureState: fixture });
     await createDirectWorkflowFixture(connection, fixture);
     const snapshot = await loadPaymentSnapshot(connection, fixture.packetId);
     const line = snapshot.lines[0] || null;
@@ -670,65 +793,110 @@ async function runDbRollbackSmoke(connection, results) {
     );
     return { fixtureRolledBack: true, stamp: fixture.stamp };
   } catch (error) {
-    try {
-      await connection.rollback();
-    } catch (_) {}
+    if (transactionStarted && fixture.mutationStarted) {
+      const recoveryErrors = [];
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        recoveryErrors.push(rollbackError);
+      }
+      if (recoveryErrors.length === 0) {
+        try {
+          const counts = await countFixtureRows(connection, fixture.stamp);
+          if (!Object.values(counts).every(value => value === 0)) {
+            const residueError = new Error('payments_smoke_rollback_residue_detected');
+            residueError.code = 'payments_smoke_rollback_residue_detected';
+            residueError.counts = counts;
+            recoveryErrors.push(residueError);
+          }
+        } catch (residueError) {
+          recoveryErrors.push(residueError);
+        }
+      }
+      if (recoveryErrors.length) {
+        const aggregate = new AggregateError(
+          [error, ...recoveryErrors],
+          'payments_smoke_rollback_recovery_failed',
+          { cause: error }
+        );
+        aggregate.code = 'payments_smoke_rollback_recovery_failed';
+        throw aggregate;
+      }
+    }
     throw error;
   }
 }
 
 async function cleanupFixture(connection, fixture) {
-  if (!fixture?.stamp) return null;
-  const packetIds = [];
-  if (fixture.packetId) packetIds.push(Number(fixture.packetId));
-  const [extraPacketRows] = await connection.query(
-    'SELECT id FROM payment_packet WHERE CAST(metadata AS CHAR) LIKE ?',
-    [`%"stamp":"${fixture.stamp}"%`]
-  );
-  (extraPacketRows || []).forEach(row => {
-    const id = Number(row.id);
-    if (Number.isFinite(id) && !packetIds.includes(id)) packetIds.push(id);
-  });
-
-  if (packetIds.length) {
-    const placeholders = packetIds.map(() => '?').join(',');
-    const [lineRows] = await connection.query(
-      `SELECT id FROM payment_packet_line WHERE payment_packet_id IN (${placeholders})`,
-      packetIds
+  if (!fixture?.stamp || !fixture.mutationStarted) return null;
+  let transactionStarted = false;
+  await connection.beginTransaction();
+  transactionStarted = true;
+  try {
+    const packetIds = [];
+    if (fixture.packetId) packetIds.push(Number(fixture.packetId));
+    const [extraPacketRows] = await connection.query(
+      'SELECT id FROM payment_packet WHERE CAST(metadata AS CHAR) LIKE ?',
+      [`%"stamp":"${fixture.stamp}"%`]
     );
-    const lineIds = (lineRows || []).map(row => Number(row.id)).filter(Number.isFinite);
-    if (lineIds.length) {
-      const linePlaceholders = lineIds.map(() => '?').join(',');
-      await connection.query(
-        `DELETE plt FROM payment_line_transaction plt WHERE plt.payment_packet_line_id IN (${linePlaceholders})`,
-        lineIds
+    (extraPacketRows || []).forEach(row => {
+      const id = Number(row.id);
+      if (Number.isFinite(id) && !packetIds.includes(id)) packetIds.push(id);
+    });
+
+    if (packetIds.length) {
+      const placeholders = packetIds.map(() => '?').join(',');
+      const [lineRows] = await connection.query(
+        `SELECT id FROM payment_packet_line WHERE payment_packet_id IN (${placeholders})`,
+        packetIds
       );
+      const lineIds = (lineRows || []).map(row => Number(row.id)).filter(Number.isFinite);
+      if (lineIds.length) {
+        const linePlaceholders = lineIds.map(() => '?').join(',');
+        await connection.query(
+          `DELETE \`plt\`
+             FROM \`payment_line_transaction\` AS \`plt\`
+            WHERE \`plt\`.\`payment_packet_line_id\` IN (${linePlaceholders})`,
+          lineIds
+        );
+        await connection.query(
+          `DELETE FROM payment_batch_line WHERE payment_packet_line_id IN (${linePlaceholders})`,
+          lineIds
+        );
+      }
       await connection.query(
-        `DELETE FROM payment_batch_line WHERE payment_packet_line_id IN (${linePlaceholders})`,
-        lineIds
+        `DELETE \`ft\`
+           FROM \`finance_transaction\` AS \`ft\`
+          WHERE CAST(\`ft\`.\`metadata\` AS CHAR) LIKE ?
+             OR \`ft\`.\`evidence_ref\` IN (${packetIds.map(() => '?').join(',')})`,
+        [`%"stamp":"${fixture.stamp}"%`, ...packetIds.map(id => `payment_packet:${id}`)]
       );
+      await connection.query(`DELETE FROM payment_packet_document WHERE payment_packet_id IN (${placeholders})`, packetIds);
+      await connection.query(`DELETE FROM payment_packet_communication WHERE payment_packet_id IN (${placeholders})`, packetIds);
+      await connection.query(`DELETE FROM payment_followup_event WHERE payment_packet_id IN (${placeholders})`, packetIds);
+      await connection.query(`DELETE FROM payment_status_event WHERE payment_packet_id IN (${placeholders})`, packetIds);
+      await connection.query(`DELETE FROM payment_override WHERE payment_packet_id IN (${placeholders})`, packetIds);
+      await connection.query(`DELETE FROM payment_packet_line WHERE payment_packet_id IN (${placeholders})`, packetIds);
+      await connection.query(`DELETE FROM payment_packet WHERE id IN (${placeholders})`, packetIds);
     }
-    await connection.query(
-      `DELETE ft FROM finance_transaction ft WHERE CAST(ft.metadata AS CHAR) LIKE ? OR ft.evidence_ref IN (${packetIds.map(() => '?').join(',')})`,
-      [`%"stamp":"${fixture.stamp}"%`, ...packetIds.map(id => `payment_packet:${id}`)]
-    );
-    await connection.query(`DELETE FROM payment_packet_document WHERE payment_packet_id IN (${placeholders})`, packetIds);
-    await connection.query(`DELETE FROM payment_packet_communication WHERE payment_packet_id IN (${placeholders})`, packetIds);
-    await connection.query(`DELETE FROM payment_followup_event WHERE payment_packet_id IN (${placeholders})`, packetIds);
-    await connection.query(`DELETE FROM payment_status_event WHERE payment_packet_id IN (${placeholders})`, packetIds);
-    await connection.query(`DELETE FROM payment_override WHERE payment_packet_id IN (${placeholders})`, packetIds);
-    await connection.query(`DELETE FROM payment_packet_line WHERE payment_packet_id IN (${placeholders})`, packetIds);
-    await connection.query(`DELETE FROM payment_packet WHERE id IN (${placeholders})`, packetIds);
-  }
 
-  await connection.query('DELETE FROM iset_document WHERE file_path LIKE ?', [`payments-smoke/${fixture.stamp}/%`]);
-  if (fixture.interventionId) await connection.query('DELETE FROM iset_case_intervention WHERE id = ?', [fixture.interventionId]);
-  if (fixture.applicationId) await connection.query('DELETE FROM iset_application WHERE id = ?', [fixture.applicationId]);
-  if (fixture.submissionId) await connection.query('DELETE FROM iset_application_submission WHERE id = ?', [fixture.submissionId]);
-  if (fixture.caseId) await connection.query('DELETE FROM iset_case WHERE id = ?', [fixture.caseId]);
-  if (fixture.clientId) await connection.query('DELETE FROM client WHERE id = ?', [fixture.clientId]);
-  if (fixture.budgetPotId) await connection.query('DELETE FROM budget_pot WHERE id = ?', [fixture.budgetPotId]);
-  if (fixture.userId) await connection.query('DELETE FROM user WHERE id = ?', [fixture.userId]);
+    await connection.query('DELETE FROM iset_document WHERE file_path LIKE ?', [`payments-smoke/${fixture.stamp}/%`]);
+    if (fixture.interventionId) await connection.query('DELETE FROM iset_case_intervention WHERE id = ?', [fixture.interventionId]);
+    if (fixture.applicationId) await connection.query('DELETE FROM iset_application WHERE id = ?', [fixture.applicationId]);
+    if (fixture.submissionId) await connection.query('DELETE FROM iset_application_submission WHERE id = ?', [fixture.submissionId]);
+    if (fixture.caseId) await connection.query('DELETE FROM iset_case WHERE id = ?', [fixture.caseId]);
+    if (fixture.clientId) await connection.query('DELETE FROM client WHERE id = ?', [fixture.clientId]);
+    if (fixture.budgetPotId) await connection.query('DELETE FROM budget_pot WHERE id = ?', [fixture.budgetPotId]);
+    if (fixture.userId) await connection.query('DELETE FROM user WHERE id = ?', [fixture.userId]);
+    await connection.commit();
+  } catch (error) {
+    if (transactionStarted && fixture.mutationStarted) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+    throw error;
+  }
 
   return countFixtureRows(connection, fixture.stamp);
 }
@@ -873,7 +1041,7 @@ async function resolveActorUserIdFromToken(connection) {
   return row?.id ? Number(row.id) : null;
 }
 
-async function runApiSmoke(connection, args, results) {
+async function runApiSmoke(connection, args, results, { interventionCode, fixtureState = {} } = {}) {
   const tokens = tokenEnv();
   const baseUrl = normalizeBaseUrl(args.adminBase, DEFAULT_ADMIN_BASE_URL);
   if (!tokens.idToken) {
@@ -885,7 +1053,7 @@ async function runApiSmoke(connection, args, results) {
     return null;
   }
 
-  const fixture = await createBaseFixture(connection);
+  const fixture = await createBaseFixture(connection, { interventionCode, fixtureState });
   const createdPacket = await apiRequest({
     baseUrl,
     path: '/api/finance/payment-packets',
@@ -1317,6 +1485,10 @@ function renderHuman(result) {
   const lines = [];
   lines.push(`Payments workflow smoke: ${result.pass ? 'PASS' : 'FAIL'}`);
   lines.push(`Mode: ${result.mode}`);
+  if (result.mode === 'schema-preflight-only') {
+    lines.push('Exact authorized database identity and required object metadata proven; no ordinary SQL was executed.');
+    lines.push(`Verified objects: ${Object.keys(result.schemaEvidence?.objects || {}).length}`);
+  }
   if (result.fixture?.packetId) {
     lines.push(`Fixture packet ${result.fixture.packetId}, case ${result.fixture.caseId}, line ${result.fixture.lineId || 'n/a'}`);
   }
@@ -1337,38 +1509,52 @@ function renderHuman(result) {
   return lines.join('\n');
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    console.log(usage());
-    return;
-  }
-  if (typeof fetch !== 'function' && (args.api || args.browser)) {
-    throw new Error('Node.js global fetch is required for --api/--browser. Use Node 18+.');
+async function runPaymentsWorkflowSmoke({
+  connection,
+  args,
+  dbConfig,
+  guardFactory = createLiveMysqlSchemaGuard,
+}) {
+  const guard = createPaymentsSchemaGuard(connection, dbConfig, guardFactory);
+  const schemaEvidence = await guard.preflight();
+  if (args.schemaPreflightOnly) {
+    return {
+      pass: true,
+      mode: 'schema-preflight-only',
+      fixture: null,
+      fixtureCommitted: false,
+      cleanupCounts: null,
+      rollback: null,
+      results: [],
+      schemaEvidence,
+    };
   }
 
-  args.adminBase = normalizeBaseUrl(args.adminBase, DEFAULT_ADMIN_BASE_URL);
-  args.frontendBase = normalizeBaseUrl(args.frontendBase, DEFAULT_FRONTEND_BASE_URL);
-  const connection = await mysql.createConnection(getDbConfig());
+  const guardedConnection = guard.createGuardedConnection();
+  const interventionCode = await resolveCompatibleInterventionCode(guardedConnection);
   const results = [];
+  const fixtureState = {};
   let fixture = null;
   let cleanupCounts = null;
   let rollback = null;
+  let workflowCompleted = false;
 
   try {
     if (args.api || args.browser) {
-      fixture = await runApiSmoke(connection, args, results);
+      fixture = await runApiSmoke(guardedConnection, args, results, { interventionCode, fixtureState });
       if (args.browser && fixture) {
         await runBrowserSmoke(args, fixture, results);
       } else if (args.browser && !fixture) {
         skip(results, 'Puppeteer payments UI smoke', { reason: 'API fixture did not run' });
       }
     } else {
-      rollback = await runDbRollbackSmoke(connection, results);
+      rollback = await runDbRollbackSmoke(guardedConnection, results, { interventionCode });
     }
+    workflowCompleted = true;
   } finally {
-    if (fixture && !args.keepFixture) {
-      cleanupCounts = await cleanupFixture(connection, fixture);
+    const cleanupTarget = fixture || (fixtureState.mutationStarted ? fixtureState : null);
+    if (cleanupTarget && (!args.keepFixture || !workflowCompleted)) {
+      cleanupCounts = await cleanupFixture(guardedConnection, cleanupTarget);
       if (cleanupCounts) {
         expect(
           results,
@@ -1378,13 +1564,12 @@ async function main() {
         );
       }
     }
-    await connection.end();
   }
 
   const skipped = results.filter(entry => entry.status === 'SKIP').length;
   const failed = results.filter(entry => entry.status === 'FAIL').length;
   const passAll = failed === 0 && (!args.requireLive || skipped === 0);
-  const output = {
+  return {
     pass: passAll,
     mode: args.browser ? 'api+browser' : args.api ? 'api' : 'db-rollback',
     fixture,
@@ -1392,18 +1577,63 @@ async function main() {
     cleanupCounts,
     rollback,
     results,
+    schemaEvidence: guard.evidence(),
   };
+}
+
+async function main({ argv = process.argv.slice(2), mysqlModule = mysql } = {}) {
+  const args = parseArgs(argv);
+  if (args.help) {
+    console.log(usage());
+    return null;
+  }
+  if (typeof fetch !== 'function' && (args.api || args.browser)) {
+    throw new Error('Node.js global fetch is required for --api/--browser. Use Node 18+.');
+  }
+
+  args.adminBase = normalizeBaseUrl(args.adminBase, DEFAULT_ADMIN_BASE_URL);
+  args.frontendBase = normalizeBaseUrl(args.frontendBase, DEFAULT_FRONTEND_BASE_URL);
+  const dbConfig = getDbConfig();
+  resolveAuthorizedPaymentDatabaseIdentity(dbConfig);
+  const connection = await mysqlModule.createConnection(dbConfig);
+  let output;
+  try {
+    output = await runPaymentsWorkflowSmoke({ connection, args, dbConfig });
+  } finally {
+    await connection.end();
+  }
   if (args.json) {
     console.log(JSON.stringify(output, null, 2));
   } else {
     console.log(renderHuman(output));
   }
-  if (!passAll) {
+  if (!output.pass) {
     process.exitCode = 1;
   }
+  return output;
 }
 
-main().catch(error => {
-  console.error(`payments-workflow-smoke failed: ${error.stack || error.message || error}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(error => {
+    console.error(`payments-workflow-smoke failed: ${error.stack || error.message || error}`);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  EXPECTED_DEV_DATABASE_IDENTITY,
+  EXPECTED_TEST_DATABASE_IDENTITY,
+  PAYMENT_SCHEMA_OBJECTS,
+  cleanupFixture,
+  countFixtureRows,
+  createBaseFixture,
+  createPaymentsSchemaGuard,
+  forceSubmittedForFollowUp,
+  main,
+  parseArgs,
+  resolveCompatibleInterventionCode,
+  resolveAuthorizedPaymentDatabaseIdentity,
+  runApiSmoke,
+  runDbRollbackSmoke,
+  runPaymentsWorkflowSmoke,
+};

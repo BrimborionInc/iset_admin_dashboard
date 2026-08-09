@@ -39,7 +39,7 @@ function createDriver({
     },
   };
   if (omitTable) delete tables[omitTable];
-  const query = jest.fn(async (sql) => {
+  const query = jest.fn(async (sql, params = []) => {
     if (['START TRANSACTION', 'COMMIT', 'ROLLBACK'].includes(sql)) {
       return [{ affectedRows: 0 }, []];
     }
@@ -52,8 +52,9 @@ function createDriver({
         'VERSION()': '8.0.40',
       }], []];
     }
-    if (sql === 'SHOW TABLES') {
-      return [Object.keys(tables).map(table => ({ Tables_in_iset_intake: table })), []];
+    if (sql === 'SHOW FULL TABLES FROM `iset_intake` LIKE ?') {
+      const table = params[0];
+      return [tables[table] ? [{ Tables_in_iset_intake: table, Table_type: 'BASE TABLE' }] : [], []];
     }
     const createMatch = /^SHOW CREATE TABLE `([^`]+)`$/.exec(sql);
     if (createMatch && tables[createMatch[1]]) {
@@ -63,6 +64,10 @@ function createDriver({
     if (columnsMatch && tables[columnsMatch[1]]) {
       return [tables[columnsMatch[1]].columns, []];
     }
+    if (/^SHOW INDEX FROM `([^`]+)`$/.test(sql)) return [[], []];
+    if (sql.includes('information_schema.TABLE_CONSTRAINTS')) return [[], []];
+    if (sql.includes('information_schema.KEY_COLUMN_USAGE')) return [[], []];
+    if (sql.includes('information_schema.KEYWORDS')) return [[], []];
     throw new Error(`unexpected raw query: ${sql}`);
   });
   const execute = jest.fn(async () => [[{ id: 1 }], []]);
@@ -382,9 +387,9 @@ describe('two-step TEST smoke live-schema guard', () => {
       'utf8'
     );
 
-    expect(source.match(/connection\.query\(/g) || []).toHaveLength(2);
+    expect(source.match(/connection\.query\(/g) || []).toHaveLength(3);
     expect(source.match(/connection\.execute\(/g) || []).toHaveLength(1);
-    expect(source).toContain('return connection.query(sql);');
+    expect(source).toContain('return params.length ? connection.query(sql, params) : connection.query(sql);');
     expect(source).toContain('return connection.query(String(sql).trim());');
     expect(source).toContain('return schemaGuard.execute(sql, params);');
     expect(source).not.toMatch(/connection\.(?:beginTransaction|commit|rollback)\(/);
@@ -461,6 +466,37 @@ describe('two-step TEST smoke live-schema guard', () => {
     expect(source).toContain('application assessment: four new DB documents map one-to-one to four exact S3 object versions');
     expect(source).toContain('application assessment: corrected resubmission reaches the Decision Maker exact-application queue');
     expect(source).toContain('application assessment: exact dual-role journey leaves sibling reminders byte-for-byte unchanged');
+    expect(source).toContain("metadata?.assessment_final_evidence");
+    expect(source).toContain("metadata?.assessment_variant === 'final'");
+    expect(source).toContain('Number(evidence?.workflowId) === Number(workflowId)');
+    expect(source).toContain('json(evidence?.subject) === json(expectedSubject)');
+    expect(source).toContain("row?.label === `Final assessment packet v${versionNumber} - ${outcomeLabel}`");
+    expect(source).toContain("label: 'application assessment approval'");
+    expect(source).toContain("label: 'application assessment denial'");
+    expect(source).toContain("label: 'intervention proposal approval'");
+    expect(source).toContain("label: 'intervention proposal denial'");
+    expect(source).toContain("label: 'intervention revision approval'");
+    expect(source).toContain("label: 'intervention revision denial'");
+    expect(source).toContain('application assessment: final decision retry leaves exactly one active final packet');
+    expect(source).toContain('intervention revision: Decision Maker request changes returns to RM without a final packet');
+    expect(source).toContain('json(actualLinkIds) === json(expectedLinkIds)');
+    expect(source.match(/assertReturnedInterventionRejectsDifferentSubmitter\(\{/g) || []).toHaveLength(3);
+    expect(source).toContain('case-authorized non-submitter Regional Manager cannot PATCH returned facts');
+    expect(source).toContain('case-authorized non-submitter Regional Manager cannot resubmit returned work');
+    expect(source).toContain('intervention proposal: recorded original submitter can edit and resubmit to RM review');
+    expect(source).toContain('intervention revision: recorded original submitter can edit and resubmit to RM review');
+    expect(source).toContain('intervention proposal: Decision Maker payload cannot alter submitter-owned proposal facts');
+    expect(source).toContain('intervention proposal: final decision atomically materializes every additional frozen proposal item');
+    expect(source).toContain('intervention proposal: additional materialized item preserves exact application, plan, source key, and approved evidence');
+    expect(source).toContain('two-step-intervention-additional-${fixture.suffix}');
+    expect(source).toContain('intervention revision: Decision Maker apply payload cannot alter submitter-owned revision facts');
+    expect(source.match(/assertFinalInterventionCannotReopen\(\{/g) || []).toHaveLength(5);
+    expect(source).toContain("label: 'intervention proposal final approval'");
+    expect(source).toContain("label: 'intervention proposal final rejection'");
+    expect(source).toContain("label: 'intervention revision final approval'");
+    expect(source).toContain("label: 'intervention revision final rejection'");
+    expect(source).toContain('intervention proposal: direct approved synthesis requires trusted final-decision materialization context');
+    expect(source).toContain('intervention proposal: trusted materialization contract rejects the already-materialized primary item');
     expect(source).toContain("'user_session_audit'");
     expect(source).toContain("'iset_event_delivery'");
     expect(source).toContain("'iset_event_receipt'");
@@ -508,7 +544,7 @@ describe('two-step TEST smoke live-schema guard', () => {
     expect(source).toContain("'iset_event_delivery'");
     expect(source).toContain('DELETE FROM client_applicant_account_event WHERE client_id IN');
     expect(source).not.toContain('DELETE FROM client_applicant_account_event WHERE id IN');
-    expect(source.indexOf('await connection.beginTransaction();')).toBeLessThan(
+    expect(source.indexOf("await query('START TRANSACTION');")).toBeLessThan(
       source.indexOf('fixture = await resolveFixtureRows();')
     );
     expect(source).toContain('suppressed_after_schema_safety_failure');

@@ -27,6 +27,7 @@ const EXPECTED_TEST_DATABASE = 'iset_intake';
 const EXPECTED_TEST_DATABASE_HOSTNAME = 'ip-172-16-0-199';
 const EXPECTED_TEST_DATABASE_PORT = 3306;
 const EXPECTED_TEST_DATABASE_PRINCIPAL = 'app_admin@10.48.%';
+const EXPECTED_TEST_DATABASE_VERSION = '8.0.42';
 const EXPECTED_AWS_ARN = 'arn:aws:iam::124355655255:user/CODEX_CLI_Admin';
 const EXPECTED_TEST_ASG = 'nwac-test-asg';
 const EXPECTED_TEST_STAFF_POOL = 'ca-central-1_uvypDUOwa';
@@ -49,11 +50,13 @@ function createLiveSchemaGuard({
   expectedDatabaseHostname,
   expectedPort,
   expectedPrincipal,
+  expectedVersion = null,
   configuredDatabase,
   configuredHost,
   configuredUser,
   configuredPort,
   requiredTables,
+  absentColumns = [],
   cryptoModule,
 }) {
   if (!connection || typeof connection.query !== 'function' || typeof connection.execute !== 'function') {
@@ -72,24 +75,33 @@ function createLiveSchemaGuard({
   if (!required.length || required.some(table => !/^[A-Za-z0-9_]+$/.test(String(table)))) {
     throw new Error('schema_guard_required_tables_invalid');
   }
+  const forbiddenColumns = absentColumns.map(value => {
+    const match = /^([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)$/.exec(String(value || ''));
+    if (!match) throw new Error('schema_guard_absent_column_expectation_invalid');
+    return { table: normalizeIdentifier(match[1]), column: normalizeIdentifier(match[2]) };
+  });
+  if (expectedVersion !== null && !String(expectedVersion || '').trim()) {
+    throw new Error('schema_guard_expected_version_invalid');
+  }
 
   const IDENTITY_SQL =
     'SELECT DATABASE(), @@hostname, @@port, CURRENT_USER(), VERSION()';
   const SQL_KEYWORDS = new Set([
     'add', 'all', 'alter', 'and', 'as', 'asc', 'between', 'by', 'case', 'char',
-    'collate', 'date', 'decimal', 'delete', 'desc', 'distinct',
+    'collate', 'date', 'day', 'decimal', 'delete', 'desc', 'distinct',
     'duplicate', 'else', 'end', 'escape', 'exists', 'false', 'from', 'group',
     'having', 'in', 'insert', 'into', 'is', 'join', 'json', 'key', 'left', 'like',
     'limit', 'not', 'null', 'on', 'or', 'order', 'outer', 'regexp', 'right',
     'select', 'set', 'signed', 'then', 'true', 'unsigned', 'update', 'values',
-    'when', 'where', 'with', 'year_month',
+    'when', 'where', 'with', 'year_month', 'interval', 'minute',
   ]);
   const TABLE_ALIAS_STOP_WORDS = new Set([
     'where', 'left', 'right', 'inner', 'outer', 'join', 'on', 'order', 'group',
     'limit', 'set', 'values', 'having', 'union', 'for', 'use', 'force',
   ]);
   const MYSQL_BUILTINS = new Set([
-    'cast', 'count', 'current_date', 'json_extract', 'json_unquote', 'now',
+    'cast', 'coalesce', 'count', 'current_date', 'date_add', 'date_sub',
+    'json_extract', 'json_object', 'json_unquote', 'now',
   ]);
   const MYSQL_CAST_TARGET_TYPES = new Set([
     'binary', 'char', 'date', 'datetime', 'decimal', 'json', 'signed', 'time', 'unsigned', 'year_month',
@@ -194,25 +206,44 @@ function createLiveSchemaGuard({
   function metadataStatementKind(sql) {
     const normalized = String(sql || '').trim().replace(/\s+/g, ' ');
     if (normalized === IDENTITY_SQL) return 'identity';
-    if (/^SHOW TABLES$/i.test(normalized)) return 'tables';
+    if (/^SHOW FULL TABLES FROM `?[A-Za-z0-9_]+`? LIKE \?$/i.test(normalized)) return 'object';
     if (/^SHOW CREATE TABLE `?[A-Za-z0-9_]+`?$/i.test(normalized)) return 'create';
     if (/^SHOW FULL COLUMNS FROM `?[A-Za-z0-9_]+`?$/i.test(normalized)) return 'columns';
+    if (/^SHOW INDEX FROM `?[A-Za-z0-9_]+`?$/i.test(normalized)) return 'indexes';
+    if (/^SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE FROM information_schema\.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = \? ORDER BY CONSTRAINT_NAME$/i.test(normalized)) return 'constraints';
+    if (/^SELECT CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME, ORDINAL_POSITION FROM information_schema\.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = \? ORDER BY CONSTRAINT_NAME, ORDINAL_POSITION$/i.test(normalized)) return 'constraint-columns';
+    if (/^SELECT WORD, RESERVED FROM information_schema\.KEYWORDS WHERE WORD = \?$/i.test(normalized)) return 'keyword';
     return null;
   }
 
-  async function metadataQuery(sql) {
+  async function metadataQuery(sql, params = []) {
     const kind = metadataStatementKind(sql);
     if (!kind) {
       throw guardError('schema_guard_raw_query_not_metadata', String(sql).slice(0, 120));
     }
-    if (kind === 'create' || kind === 'columns') {
+    if (kind === 'object') {
+      const table = normalizeIdentifier(params[0]);
+      if (params.length !== 1 || !required.map(normalizeIdentifier).includes(table)) {
+        throw guardError('schema_guard_metadata_table_not_expected', table || 'unknown');
+      }
+    }
+    if (kind === 'create' || kind === 'columns' || kind === 'indexes') {
       const match = /(?:TABLE|FROM)\s+`?([A-Za-z0-9_]+)`?$/i.exec(String(sql).trim());
       const table = normalizeIdentifier(match?.[1]);
       if (!table || !discoveredTables?.has(table)) {
         throw guardError('schema_guard_metadata_table_not_discovered', table || 'unknown');
       }
     }
-    return connection.query(sql);
+    if (kind === 'constraints' || kind === 'constraint-columns') {
+      const table = normalizeIdentifier(params[0]);
+      if (params.length !== 1 || !discoveredTables?.has(table)) {
+        throw guardError('schema_guard_metadata_table_not_discovered', table || 'unknown');
+      }
+    }
+    if (kind === 'keyword' && (params.length !== 1 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(params[0] || '')))) {
+      throw guardError('schema_guard_metadata_alias_invalid', String(params[0] || 'unknown'));
+    }
+    return params.length ? connection.query(sql, params) : connection.query(sql);
   }
 
   function extractTableRefs(maskedSql) {
@@ -701,17 +732,25 @@ function createLiveSchemaGuard({
     if (currentAccount !== expectedUser) {
       throw guardError('schema_guard_wrong_database_user', `${currentAccount || 'null'} != ${expectedUser}`);
     }
-    if (!/^8\./.test(String(identity.version))) {
+    if (expectedVersion !== null && String(identity.version) !== String(expectedVersion)) {
+      throw guardError('schema_guard_database_engine_unverified', `${identity.version}:${expectedVersion}`);
+    }
+    if (expectedVersion === null && !/^8\./.test(String(identity.version))) {
       throw guardError('schema_guard_database_engine_unverified', identity.version);
     }
-    const [tableRows] = await metadataQuery('SHOW TABLES');
-    const discovered = new Set((tableRows || []).map(tableRow => normalizeIdentifier(Object.values(tableRow)[0])));
-    discoveredTables = discovered;
-    const missing = required.filter(table => !discovered.has(normalizeIdentifier(table)));
-    if (missing.length) throw guardError('schema_guard_required_table_missing', missing.join(','));
-
+    discoveredTables = new Set();
     for (const requestedTable of required) {
       const table = normalizeIdentifier(requestedTable);
+      const [objectRows] = await metadataQuery(
+        `SHOW FULL TABLES FROM ${quoteIdentifier(expectedDatabase)} LIKE ?`,
+        [table]
+      );
+      const objectRow = Array.isArray(objectRows) ? objectRows[0] : null;
+      const objectValues = objectRow ? Object.values(objectRow) : [];
+      if (normalizeIdentifier(objectValues[0]) !== table || String(objectValues[1] || '').toUpperCase() !== 'BASE TABLE') {
+        throw guardError('schema_guard_required_table_missing', table);
+      }
+      discoveredTables.add(table);
       const [createRows] = await metadataQuery(`SHOW CREATE TABLE ${quoteIdentifier(table)}`);
       const createRow = Array.isArray(createRows) ? createRows[0] : null;
       const createSql = createRow?.['Create Table'] || (createRow ? Object.values(createRow)[1] : null);
@@ -732,6 +771,15 @@ function createLiveSchemaGuard({
           allowedValues: enumValues || checkAllowedValues.get(name) || null,
         });
       }
+      const [indexRows] = await metadataQuery(`SHOW INDEX FROM ${quoteIdentifier(table)}`);
+      const [constraintRows] = await metadataQuery(
+        'SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY CONSTRAINT_NAME',
+        [table]
+      );
+      const [constraintColumnRows] = await metadataQuery(
+        'SELECT CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME, ORDINAL_POSITION FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY CONSTRAINT_NAME, ORDINAL_POSITION',
+        [table]
+      );
       const hashPayload = JSON.stringify({
         createSql,
         columns: columnRows.map(columnRow => ({
@@ -743,12 +791,28 @@ function createLiveSchemaGuard({
           defaultValue: columnRow.Default,
           extra: columnRow.Extra,
         })),
+        indexes: indexRows,
+        constraints: constraintRows,
+        constraintColumns: constraintColumnRows,
       });
       schema.set(table, {
         columns,
         foreignKeys: parseForeignKeys(createSql),
         ddlHash: cryptoModule.createHash('sha256').update(hashPayload).digest('hex'),
+        indexesHash: cryptoModule.createHash('sha256').update(JSON.stringify(indexRows || [])).digest('hex'),
+        constraintsHash: cryptoModule.createHash('sha256').update(JSON.stringify({
+          constraints: constraintRows || [],
+          columns: constraintColumnRows || [],
+        })).digest('hex'),
       });
+    }
+    for (const forbidden of forbiddenColumns) {
+      if (!schema.has(forbidden.table)) {
+        throw guardError('schema_guard_absent_column_table_unverified', forbidden.table);
+      }
+      if (schema.get(forbidden.table).columns.has(forbidden.column)) {
+        throw guardError('schema_guard_forbidden_column_present', `${forbidden.table}.${forbidden.column}`);
+      }
     }
     preflightComplete = true;
     return evidence();
@@ -774,6 +838,8 @@ function createLiveSchemaGuard({
     return {
       identity: identity ? { ...identity } : null,
       ddlHashes: Object.fromEntries(Array.from(schema.entries()).map(([table, proof]) => [table, proof.ddlHash])),
+      indexHashes: Object.fromEntries(Array.from(schema.entries()).map(([table, proof]) => [table, proof.indexesHash])),
+      constraintHashes: Object.fromEntries(Array.from(schema.entries()).map(([table, proof]) => [table, proof.constraintsHash])),
       verifiedStatementCount,
       verifiedStatements: verifiedStatements.map(statement => ({ ...statement })),
       verifiedFunctions: Array.from(verifiedFunctions).sort(),
@@ -1587,7 +1653,6 @@ async function main() {
     password: randomPassword(),
     sub: null,
   };
-  let remoteKey = null;
   let remoteConfigKey = null;
   let instanceId = null;
   let instanceRoleExpectation = null;
@@ -1603,28 +1668,17 @@ async function main() {
     remoteAwsIdentityExpectation = discoverRemoteAwsIdentity(instanceId, options);
     console.log(`[two-step-smoke] Using ${instanceId}`);
 
-    remoteKey = `ssm-scripts/two-step-review-smoke-${stamp}.js`;
-    uploadRemoteScript(
-      `const createLiveSchemaGuard = ${createLiveSchemaGuard.toString()};\n` +
-      `const orderSelfReferencingVersionDeleteBatches = ${orderSelfReferencingVersionDeleteBatches.toString()};\n` +
-      `(${remoteRunner.toString()})();\n`,
-      remoteKey,
-      options
-    );
-
     const runRemote = ({ preflightOnly = false, cleanupOnly = false } = {}) => {
-      const remotePath = `/tmp/two-step-review-smoke-${stamp}${preflightOnly ? '-preflight' : ''}.js`;
       const remoteConfigPath = `/tmp/two-step-review-smoke-${stamp}.config.enc.json`;
       const remoteEvidenceKey = `smoke-evidence/two-step-review-smoke-${stamp}${preflightOnly ? '-preflight' : ''}.json`;
       remoteEvidenceKeys.add(remoteEvidenceKey);
       const commandLines = [
         'set -euo pipefail',
-        `aws s3 cp ${shellQuote(`s3://${options.bucket}/${remoteKey}`)} ${shellQuote(remotePath)} --region ${shellQuote(options.region)} --only-show-errors`,
         ...(preflightOnly || cleanupOnly ? [] : [
           `aws s3 cp ${shellQuote(`s3://${options.bucket}/${remoteConfigKey}`)} ${shellQuote(remoteConfigPath)} --region ${shellQuote(options.region)} --only-show-errors`,
           `chmod 600 ${shellQuote(remoteConfigPath)}`,
         ]),
-        `trap 'rm -f ${shellQuote(remotePath)} ${shellQuote(remoteConfigPath)}${preflightOnly ? '' : ` ${shellQuote(credentialKeyPath)}`}' EXIT`,
+        `trap 'rm -f ${shellQuote(remoteConfigPath)}${preflightOnly ? '' : ` ${shellQuote(credentialKeyPath)}`}' EXIT`,
         'cd /opt/nwac/admin-dashboard',
         [
           `FIXTURE_STAMP=${shellQuote(preflightOnly ? `${stamp}-preflight` : stamp)}`,
@@ -1637,6 +1691,7 @@ async function main() {
           `TWO_STEP_REVIEW_EXPECTED_DB_SERVER_HOSTNAME=${shellQuote(EXPECTED_TEST_DATABASE_HOSTNAME)}`,
           `TWO_STEP_REVIEW_EXPECTED_DB_PORT=${shellQuote(expectedDbPort)}`,
           `TWO_STEP_REVIEW_EXPECTED_DB_PRINCIPAL=${shellQuote(EXPECTED_TEST_DATABASE_PRINCIPAL)}`,
+          `TWO_STEP_REVIEW_EXPECTED_DB_VERSION=${shellQuote(EXPECTED_TEST_DATABASE_VERSION)}`,
           `TWO_STEP_REVIEW_EXPECTED_OBJECT_BUCKET=${shellQuote(expectedObjectBucket)}`,
           `TWO_STEP_REVIEW_AWS_ACCOUNT=${shellQuote(identity.Account)}`,
           `TWO_STEP_REVIEW_AWS_ARN=${shellQuote(identity.Arn || '')}`,
@@ -1657,9 +1712,8 @@ async function main() {
           ...(preflightOnly || cleanupOnly ? [] : [
             `TWO_STEP_REVIEW_CONFIG_ENVELOPE_FILE=${shellQuote(remoteConfigPath)}`,
           ]),
-          `node ${shellQuote(remotePath)}`,
+          `node ${shellQuote('/opt/nwac/admin-dashboard/scripts/two-step-review-test-smoke.js')} --remote-runner`,
         ].join(' '),
-        `rm -f ${shellQuote(remotePath)}`,
       ];
       const commandId = sendRemoteCommand(
         instanceId,
@@ -1763,12 +1817,6 @@ async function main() {
         verifiedTemporaryObjectCleanup.push(remoteConfigKey);
       } catch (error) { cleanupErrors.push(error); }
     }
-    if (remoteKey) {
-      try {
-        deleteRemoteScript(remoteKey, options);
-        verifiedTemporaryObjectCleanup.push(remoteKey);
-      } catch (error) { cleanupErrors.push(error); }
-    }
     for (const evidenceKey of Array.from(remoteEvidenceKeys).sort()) {
       try {
         deleteRemoteScript(evidenceKey, options, expectedObjectBucket);
@@ -1854,6 +1902,7 @@ function remoteRunner() {
     expectedDbServerHostname: requiredEnv('TWO_STEP_REVIEW_EXPECTED_DB_SERVER_HOSTNAME'),
     expectedDbPort: Number(requiredEnv('TWO_STEP_REVIEW_EXPECTED_DB_PORT')),
     expectedDbPrincipal: requiredEnv('TWO_STEP_REVIEW_EXPECTED_DB_PRINCIPAL'),
+    expectedDbVersion: requiredEnv('TWO_STEP_REVIEW_EXPECTED_DB_VERSION'),
     expectedObjectBucket: requiredEnv('TWO_STEP_REVIEW_EXPECTED_OBJECT_BUCKET'),
     awsAccount: requiredEnv('TWO_STEP_REVIEW_AWS_ACCOUNT'),
     awsArn: requiredEnv('TWO_STEP_REVIEW_AWS_ARN'),
@@ -2207,6 +2256,7 @@ function remoteRunner() {
       expectedDatabaseHostname: config.expectedDbServerHostname,
       expectedPort: config.expectedDbPort,
       expectedPrincipal: config.expectedDbPrincipal,
+      expectedVersion: config.expectedDbVersion,
       configuredDatabase: requiredEnv('DB_NAME'),
       configuredHost: requiredEnv('DB_HOST'),
       configuredUser: requiredEnv('DB_USER'),
@@ -5582,7 +5632,8 @@ function remoteRunner() {
         ? 'intervention_revision'
         : 'intervention_proposal';
       const [workflowRows] = await query(
-        `SELECT id, workflow_type, current_stage, current_owner_role, nwac_decision
+        `SELECT id, workflow_type, current_stage, current_owner_role,
+                submitted_by_staff_profile_id, nwac_decision
            FROM iset_review_workflow
           WHERE archived_at IS NULL
             AND workflow_type = ?
@@ -5605,7 +5656,37 @@ function remoteRunner() {
       workflow_type: workflowRow?.workflow_type || null,
       current_stage: workflowRow?.current_stage || null,
       current_owner_role: workflowRow?.current_owner_role || null,
+      submitted_by_staff_profile_id: workflowRow?.submitted_by_staff_profile_id || null,
       nwac_decision: workflowRow?.nwac_decision || null,
+    };
+  }
+
+  async function getInterventionSubmitterFactState(interventionId) {
+    const [[interventionRow]] = await query(
+      `SELECT id, intervention_code, status, delivery_status, start_date, end_date,
+              duration_days, budget_amount, approved_amount, intervention_cost,
+              related_noc, related_noc_version, notes, metadata_json,
+              esdc_intervention_json, created_by_staff_profile_id
+         FROM iset_case_intervention
+        WHERE id = ?
+        LIMIT 1`,
+      [interventionId]
+    );
+    const [proposalRows] = await query(
+      `SELECT id, proposal_kind, review_status, title, intervention_code,
+              start_date, end_date, proposed_cost, payload_json, metadata_json,
+              submitted_by_staff_profile_id, submitted_at
+         FROM iset_intervention_proposal
+        WHERE legacy_intervention_id = ?
+        ORDER BY id ASC`,
+      [interventionId]
+    );
+    if (proposalRows.length > 1) {
+      throw new Error(`Intervention ${interventionId} has multiple compatibility proposals.`);
+    }
+    return {
+      intervention: interventionRow || null,
+      proposal: proposalRows[0] || null,
     };
   }
 
@@ -5750,6 +5831,12 @@ function remoteRunner() {
     });
     state = await getApplicationState(applicationId);
     expect('application assessment: Decision Maker request changes returns to RM', state.current_stage === 'returned_to_rm', state);
+    await assertNoFinalAssessmentPacket({
+      caseId,
+      applicationId,
+      subjectKey: `application_assessment:application:${applicationId}`,
+      label: 'application assessment',
+    });
     await assertNotification('nwac_review_changes_requested', fixture.staff.manager.staffProfileId, { caseId, applicationId });
 
     await fetchJson(`/api/cases/${caseId}/assessment/review-workflow/action`, {
@@ -5793,6 +5880,46 @@ function remoteRunner() {
     state = await getApplicationState(applicationId);
     expect('application assessment: final decision recorded by Decision Maker', state.current_stage === 'final_decision_recorded' && state.decision_outcome === 'approved', state);
     await assertGeneratedDocuments({ caseId, applicationId, workflow: 'application_assessment', minCount: 2 });
+    await assertFinalAssessmentPacket({
+      caseId,
+      applicationId,
+      subjectKey: `application_assessment:application:${applicationId}`,
+      workflowType: 'application_assessment',
+      workflowId: fixture.workflows.application,
+      outcome: 'approved',
+      submitterStaffProfileId: fixture.staff.coordinator.staffProfileId,
+      regionalManagerStaffProfileId: fixture.staff.manager.staffProfileId,
+      decisionMakerStaffProfileId: fixture.staff.decisionMaker.staffProfileId,
+      rmReviewNote: 'Final RM sign-off.',
+      decisionNote: 'Approved by Decision Maker.',
+      label: 'application assessment approval',
+    });
+    const finalDecisionRetry = await fetchExpectingFailure(`/api/cases/${caseId}`, {
+      method: 'PUT',
+      headers: { ...authHeaders(auth.decisionMaker), 'Content-Type': 'application/json' },
+      body: json({
+        applicationId,
+        assessment_nwac_review_status: 'approve',
+        assessment_nwac_review: 'yes',
+        assessment_nwac_reason: 'Approved by Decision Maker.',
+        assessment_intervention_pot_id: String(config.budgetPotId),
+        postingContext: 'external',
+        applicationStatus: 'approved',
+        status: 'initiated',
+      }),
+    });
+    requireInvariant('application assessment: final decision retry is rejected before packet duplication', (
+      finalDecisionRetry.status === 409 &&
+      finalDecisionRetry.body?.error === 'review_workflow_not_ready_for_nwac'
+    ), finalDecisionRetry);
+    const finalRowsAfterRetry = await getFinalAssessmentPackets({
+      caseId,
+      applicationId,
+      subjectKey: `application_assessment:application:${applicationId}`,
+    });
+    requireInvariant('application assessment: final decision retry leaves exactly one active final packet', (
+      finalRowsAfterRetry.length === 1
+    ), { documentIds: finalRowsAfterRetry.map(row => row.id) });
   }
 
   async function runDualRoleApplicationAssessmentWorkflow(auth) {
@@ -6111,9 +6238,42 @@ function remoteRunner() {
       remindersBefore: fixture.reminderSentinels.dualRoleSibling || [],
       remindersAfter: unaffectedRemindersAfter,
     });
+
+    const denialNote = 'Denied after the corrected packet did not meet the final program criteria.';
+    await fetchJson(`/api/cases/${caseId}`, {
+      method: 'PUT',
+      headers: { ...authHeaders(auth.decisionMaker), 'Content-Type': 'application/json' },
+      body: json({
+        applicationId,
+        assessment_nwac_review_status: 'reject',
+        assessment_nwac_review: 'disagree',
+        assessment_nwac_reason: denialNote,
+        applicationStatus: 'rejected',
+      }),
+    });
+    state = await getApplicationState(applicationId);
+    requireInvariant('application assessment: Decision Maker denial records the final denied outcome', (
+      state?.current_stage === 'final_decision_recorded' &&
+      state?.decision_outcome === 'denied'
+    ), state || {});
+    await assertFinalAssessmentPacket({
+      caseId,
+      applicationId,
+      subjectKey: `application_assessment:application:${applicationId}`,
+      workflowType: 'application_assessment',
+      workflowId: fixture.workflows.dualRoleApplication,
+      outcome: 'denied',
+      submitterStaffProfileId: fixture.staff.manager.staffProfileId,
+      regionalManagerStaffProfileId: fixture.staff.manager.staffProfileId,
+      decisionMakerStaffProfileId: fixture.staff.decisionMaker.staffProfileId,
+      rmReviewNote: 'Corrected Financial Overview reviewed and ready for final decision.',
+      decisionNote: denialNote,
+      label: 'application assessment denial',
+    });
   }
 
   function interventionSubmitPayload(title, overrides = {}) {
+    const { decision = '', ...payloadOverrides } = overrides;
     return {
       code: '3',
       title,
@@ -6139,11 +6299,106 @@ function remoteRunner() {
             itpDetails: 'Synthetic plan.',
             costLines: [{ id: 'tuition', label: 'Tuition', paymentType: 'tuition', payeeType: 'institution', payeeName: 'Smoke College', amount: '100' }],
           },
+          {
+            id: `two-step-intervention-additional-${fixture.suffix}`,
+            code: '3',
+            startDate: smokeDates.proposalStart,
+            endDate: smokeDates.proposalEnd,
+            deliveryMode: 'partner',
+            institution: 'Smoke College',
+            programName: `${title} additional item`,
+            itpDetails: 'Synthetic additional intervention for atomic final-decision materialization.',
+            costLines: [{ id: 'books', label: 'Books', paymentType: 'books', payeeType: 'institution', payeeName: 'Smoke College', amount: '50' }],
+          },
         ],
-        review: { eiStatus: 'CRF', decision: '', decisionNotes: '' },
+        review: { eiStatus: 'CRF', decision, decisionNotes: '' },
       },
-      ...overrides,
+      ...payloadOverrides,
     };
+  }
+
+  async function assertReturnedInterventionRejectsDifferentSubmitter({
+    auth,
+    interventionId,
+    originalSubmitterStaffProfileId,
+    label,
+    resubmitPayload,
+  }) {
+    const stateBefore = await getInterventionState(interventionId);
+    const factsBefore = await getInterventionSubmitterFactState(interventionId);
+    requireInvariant(`${label}: returned packet retains the recorded original submitter`, (
+      stateBefore?.current_stage === 'returned_to_submitter' &&
+      stateBefore?.review_status === 'changes_requested' &&
+      Number(stateBefore?.submitted_by_staff_profile_id) === Number(originalSubmitterStaffProfileId)
+    ), stateBefore || {});
+
+    const wrongActorEdit = await fetchExpectingFailure(`/api/interventions/${interventionId}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(auth), 'Content-Type': 'application/json' },
+      body: json({ title: `${label} forged non-submitter edit` }),
+    });
+    requireInvariant(`${label}: case-authorized non-submitter Regional Manager cannot PATCH returned facts`, (
+      wrongActorEdit.status === 403 &&
+      wrongActorEdit.body?.error === 'intervention_submitter_actor_forbidden'
+    ), wrongActorEdit);
+
+    const wrongActorResubmit = await fetchExpectingFailure(`/api/interventions/${interventionId}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(auth), 'Content-Type': 'application/json' },
+      body: json(resubmitPayload),
+    });
+    requireInvariant(`${label}: case-authorized non-submitter Regional Manager cannot resubmit returned work`, (
+      wrongActorResubmit.status === 403 &&
+      wrongActorResubmit.body?.error === 'intervention_submitter_actor_forbidden'
+    ), wrongActorResubmit);
+
+    const stateAfter = await getInterventionState(interventionId);
+    const factsAfter = await getInterventionSubmitterFactState(interventionId);
+    requireInvariant(`${label}: rejected non-submitter writes leave workflow and submitter facts unchanged`, (
+      json(stateAfter) === json(stateBefore) &&
+      json(factsAfter) === json(factsBefore)
+    ), { stateBefore, stateAfter, factsBefore, factsAfter });
+  }
+
+  async function assertFinalInterventionCannotReopen({
+    auth,
+    interventionId,
+    expectedReviewStatus,
+    label,
+  }) {
+    const stateBefore = await getInterventionState(interventionId);
+    const factsBefore = await getInterventionSubmitterFactState(interventionId);
+    requireInvariant(`${label}: final-decision lock starts from the expected terminal state`, (
+      stateBefore?.current_stage === 'final_decision_recorded' &&
+      stateBefore?.review_status === expectedReviewStatus
+    ), stateBefore || {});
+
+    const editAttempt = await fetchExpectingFailure(`/api/interventions/${interventionId}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(auth), 'Content-Type': 'application/json' },
+      body: json({ title: `${label} forged post-decision edit` }),
+    });
+    requireInvariant(`${label}: ordinary PATCH cannot alter a final decision`, (
+      editAttempt.status === 409 &&
+      editAttempt.body?.error === 'intervention_final_decision_locked'
+    ), editAttempt);
+
+    const reopenAttempt = await fetchExpectingFailure(`/api/interventions/${interventionId}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(auth), 'Content-Type': 'application/json' },
+      body: json({ status: 'submitted' }),
+    });
+    requireInvariant(`${label}: ordinary resubmit cannot reopen a final decision`, (
+      reopenAttempt.status === 409 &&
+      reopenAttempt.body?.error === 'intervention_final_decision_locked'
+    ), reopenAttempt);
+
+    const stateAfter = await getInterventionState(interventionId);
+    const factsAfter = await getInterventionSubmitterFactState(interventionId);
+    requireInvariant(`${label}: denied final-row reopen attempts are side-effect free`, (
+      json(stateAfter) === json(stateBefore) &&
+      json(factsAfter) === json(factsBefore)
+    ), { stateBefore, stateAfter, factsBefore, factsAfter });
   }
 
   async function runInterventionProposalWorkflow(auth) {
@@ -6155,6 +6410,21 @@ function remoteRunner() {
       body: json(interventionSubmitPayload('NWAC forbidden proposal start')),
     });
     expect('intervention proposal: NWAC Administrator cannot start review', nwacStartAttempt.status === 403, nwacStartAttempt);
+
+    const directApprovedSynthesis = await fetchExpectingFailure(`/api/action-plans/${planId}/interventions`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.decisionMaker), 'Content-Type': 'application/json' },
+      body: json(interventionSubmitPayload('Forged direct approved proposal', {
+        status: 'approved',
+        decision: 'approved',
+        approvedAmount: '100',
+        potId: String(config.budgetPotId),
+      })),
+    });
+    requireInvariant('intervention proposal: direct approved synthesis requires trusted final-decision materialization context', (
+      directApprovedSynthesis.status === 409 &&
+      directApprovedSynthesis.body?.error === 'approved_intervention_review_context_required'
+    ), directApprovedSynthesis);
 
     const rmPlanId = fixture.actionPlans.rmProposal;
     const rmStart = await fetchJson(`/api/action-plans/${rmPlanId}/interventions`, {
@@ -6201,13 +6471,26 @@ function remoteRunner() {
     state = await getInterventionState(created.id);
     expect('intervention proposal: RM return moves to returned_to_submitter', state.current_stage === 'returned_to_submitter' && state.status === 'changes_requested', state);
 
+    await assertReturnedInterventionRejectsDifferentSubmitter({
+      auth: auth.manager,
+      interventionId: created.id,
+      originalSubmitterStaffProfileId: fixture.staff.coordinator.staffProfileId,
+      label: 'intervention proposal',
+      resubmitPayload: interventionSubmitPayload('Forged Regional Manager proposal resubmit', {
+        status: 'submitted',
+      }),
+    });
+
     await fetchJson(`/api/interventions/${created.id}`, {
       method: 'PATCH',
       headers: { ...authHeaders(auth.coordinator), 'Content-Type': 'application/json' },
       body: json(interventionSubmitPayload('Coordinator proposal smoke resubmitted', { status: 'submitted' })),
     });
     state = await getInterventionState(created.id);
-    expect('intervention proposal: resubmit returns to RM review', state.current_stage === 'rm_review', state);
+    expect('intervention proposal: recorded original submitter can edit and resubmit to RM review', (
+      state.current_stage === 'rm_review' &&
+      Number(state.submitted_by_staff_profile_id) === Number(fixture.staff.coordinator.staffProfileId)
+    ), state);
 
     await fetchJson(`/api/interventions/${created.id}/review-workflow/action`, {
       method: 'POST',
@@ -6221,17 +6504,23 @@ function remoteRunner() {
     const rmDecisionAttempt = await fetchExpectingFailure(`/api/interventions/${created.id}`, {
       method: 'PATCH',
       headers: { ...authHeaders(auth.manager), 'Content-Type': 'application/json' },
-      body: json({ status: 'approved', approvedAmount: '100', potId: String(config.budgetPotId), metadata: { review: { decisionNotes: 'RM must not approve.' } } }),
+      body: json({ status: 'approved', approvedAmount: '100', potId: String(config.budgetPotId), metadata: { review: { decision: 'approved', decisionNotes: 'RM must not approve.' } } }),
     });
     expect('intervention proposal: RM cannot record final decision', rmDecisionAttempt.status === 403, rmDecisionAttempt);
 
     await fetchJson(`/api/interventions/${created.id}`, {
       method: 'PATCH',
       headers: { ...authHeaders(auth.decisionMaker), 'Content-Type': 'application/json' },
-      body: json({ status: 'changes_requested', metadata: { review: { decisionNotes: 'Please add clearer need.' } } }),
+      body: json({ status: 'changes_requested', metadata: { review: { decision: 'changes_requested', decisionNotes: 'Please add clearer need.' } } }),
     });
     state = await getInterventionState(created.id);
     expect('intervention proposal: Decision Maker request changes returns to RM', state.current_stage === 'returned_to_rm', state);
+    await assertNoFinalAssessmentPacket({
+      caseId,
+      applicationId: fixture.applications.proposal,
+      subjectKey: `intervention_proposal:proposal:${fixture.proposals.proposal}`,
+      label: 'intervention proposal',
+    });
     await assertNotification('nwac_review_changes_requested', fixture.staff.manager.staffProfileId, { caseId, interventionId: created.id });
 
     await fetchJson(`/api/interventions/${created.id}/review-workflow/action`, {
@@ -6253,25 +6542,200 @@ function remoteRunner() {
       headers: { ...authHeaders(auth.manager), 'Content-Type': 'application/json' },
       body: json({ action: 'rm_submit_to_nwac', note: 'Final RM proposal sign-off.' }),
     });
-    await fetchJson(`/api/interventions/${created.id}`, {
+    const factsBeforeDecisionTamper = await getInterventionSubmitterFactState(created.id);
+    const stateBeforeDecisionTamper = await getInterventionState(created.id);
+    const decisionTamperAttempt = await fetchExpectingFailure(`/api/interventions/${created.id}`, {
       method: 'PATCH',
       headers: { ...authHeaders(auth.decisionMaker), 'Content-Type': 'application/json' },
       body: json({
         status: 'approved',
-        approvedAmount: '100',
+        title: 'Decision Maker must not rewrite the submitted proposal',
         potId: String(config.budgetPotId),
-        metadata: { review: { decisionNotes: 'Approved proposal.' } },
+        metadata: { review: { eiStatus: 'CRF', decision: 'approved', decisionNotes: 'Forged proposal facts.' } },
       }),
+    });
+    const factsAfterDecisionTamper = await getInterventionSubmitterFactState(created.id);
+    const stateAfterDecisionTamper = await getInterventionState(created.id);
+    requireInvariant('intervention proposal: Decision Maker payload cannot alter submitter-owned proposal facts', (
+      decisionTamperAttempt.status === 409 &&
+      decisionTamperAttempt.body?.error === 'intervention_submitted_packet_immutable' &&
+      json(factsAfterDecisionTamper) === json(factsBeforeDecisionTamper) &&
+      json(stateAfterDecisionTamper) === json(stateBeforeDecisionTamper)
+    ), {
+      attempt: decisionTamperAttempt,
+      factsBefore: factsBeforeDecisionTamper,
+      factsAfter: factsAfterDecisionTamper,
+      stateBefore: stateBeforeDecisionTamper,
+      stateAfter: stateAfterDecisionTamper,
+    });
+    const approvalResult = await fetchJson(`/api/interventions/${created.id}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(auth.decisionMaker), 'Content-Type': 'application/json' },
+      body: json({
+        status: 'approved',
+        potId: String(config.budgetPotId),
+        metadata: { review: { eiStatus: 'CRF', decision: 'approved', decisionNotes: 'Approved proposal.' } },
+      }),
+    });
+    const materializedInterventionIds = Array.isArray(approvalResult?.materializedInterventionIds)
+      ? approvalResult.materializedInterventionIds.map(Number).filter(Number.isSafeInteger)
+      : [];
+    requireInvariant('intervention proposal: final decision atomically materializes every additional frozen proposal item', (
+      materializedInterventionIds.length === 1 &&
+      Number.isSafeInteger(materializedInterventionIds[0]) &&
+      materializedInterventionIds[0] > 0
+    ), approvalResult || {});
+    fixture.interventions.proposalAdditional = materializedInterventionIds[0];
+    const additionalState = await getInterventionState(materializedInterventionIds[0]);
+    const additionalFacts = await getInterventionSubmitterFactState(materializedInterventionIds[0]);
+    const additionalMetadata = parseJsonObject(additionalFacts?.metadata_json);
+    const [[additionalProposal]] = await query(
+      `SELECT p.id, p.application_id, p.action_plan_id, p.review_status
+         FROM iset_intervention_proposal p
+        WHERE p.legacy_intervention_id = ?
+        LIMIT 1`,
+      [materializedInterventionIds[0]]
+    );
+    requireInvariant('intervention proposal: additional materialized item preserves exact application, plan, source key, and approved evidence', (
+      additionalState?.status === 'approved' &&
+      additionalState?.delivery_status === 'planned' &&
+      additionalState?.review_status === 'approved' &&
+      Number(additionalState?.case_id) === Number(caseId) &&
+      Number(additionalState?.action_plan_id) === Number(planId) &&
+      Number(additionalProposal?.application_id) === Number(fixture.applications.proposal) &&
+      Number(additionalProposal?.action_plan_id) === Number(planId) &&
+      additionalProposal?.review_status === 'approved' &&
+      Number(additionalMetadata?.approvalMaterialization?.sourceInterventionId) === Number(created.id) &&
+      additionalMetadata?.approvalMaterialization?.sourceItemId === `two-step-intervention-additional-${fixture.suffix}`
+    ), {
+      approvalResult,
+      additionalState,
+      additionalFacts,
+      additionalProposal,
     });
     state = await getInterventionState(created.id);
     expect('intervention proposal: final decision recorded by Decision Maker', state.current_stage === 'final_decision_recorded' && state.status === 'approved', state);
     await assertGeneratedDocuments({ caseId, interventionId: created.id, workflow: 'intervention_proposal', minCount: 2, requireInterventionLink: true });
+    await assertFinalAssessmentPacket({
+      caseId,
+      applicationId: fixture.applications.proposal,
+      subjectKey: `intervention_proposal:proposal:${fixture.proposals.proposal}`,
+      workflowType: 'intervention_proposal',
+      workflowId: fixture.workflows.proposal,
+      outcome: 'approved',
+      subjectIds: {
+        actionPlanId: planId,
+        interventionId: created.id,
+        proposalId: fixture.proposals.proposal,
+      },
+      submitterStaffProfileId: fixture.staff.coordinator.staffProfileId,
+      regionalManagerStaffProfileId: fixture.staff.manager.staffProfileId,
+      decisionMakerStaffProfileId: fixture.staff.decisionMaker.staffProfileId,
+      rmReviewNote: 'Final RM proposal sign-off.',
+      decisionNote: 'Approved proposal.',
+      expectedInterventionLinkIds: [created.id],
+      label: 'intervention proposal approval',
+    });
+    await assertFinalInterventionCannotReopen({
+      auth: auth.coordinator,
+      interventionId: created.id,
+      expectedReviewStatus: 'approved',
+      label: 'intervention proposal final approval',
+    });
+
+    const forgedPrimaryMaterialization = await fetchExpectingFailure(`/api/action-plans/${planId}/interventions`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.decisionMaker), 'Content-Type': 'application/json' },
+      body: json(interventionSubmitPayload('Forged primary-item materialization', {
+        status: 'approved',
+        decision: 'approved',
+        approvedAmount: '100',
+        potId: String(config.budgetPotId),
+        approvalSourceInterventionId: created.id,
+        approvalSourceItemId: `two-step-intervention-${fixture.suffix}`,
+      })),
+    });
+    requireInvariant('intervention proposal: trusted materialization contract rejects the already-materialized primary item', (
+      forgedPrimaryMaterialization.status === 409 &&
+      forgedPrimaryMaterialization.body?.error === 'approved_intervention_source_item_invalid'
+    ), forgedPrimaryMaterialization);
+
+    await fetchJson(`/api/interventions/${rmStart.id}/review-workflow/action`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.manager), 'Content-Type': 'application/json' },
+      body: json({ action: 'rm_submit_to_nwac', note: 'RM-owned proposal ready for rejection lock test.' }),
+    });
+    await fetchJson(`/api/interventions/${rmStart.id}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(auth.decisionMaker), 'Content-Type': 'application/json' },
+      body: json({
+        status: 'rejected',
+        metadata: { review: { decision: 'rejected', decisionNotes: 'Rejected for terminal-state lock verification.' } },
+      }),
+    });
+    const rejectedState = await getInterventionState(rmStart.id);
+    requireInvariant('intervention proposal: Decision Maker rejection records a final rejected row', (
+      rejectedState?.current_stage === 'final_decision_recorded' &&
+      rejectedState?.review_status === 'rejected'
+    ), rejectedState || {});
+    await assertFinalAssessmentPacket({
+      caseId: fixture.cases.rmProposal,
+      applicationId: fixture.applications.rmProposal,
+      subjectKey: `intervention_proposal:proposal:${fixture.proposals.rmProposal}`,
+      workflowType: 'intervention_proposal',
+      workflowId: fixture.workflows.rmProposal,
+      outcome: 'denied',
+      subjectIds: {
+        actionPlanId: rmPlanId,
+        interventionId: rmStart.id,
+        proposalId: fixture.proposals.rmProposal,
+      },
+      submitterStaffProfileId: fixture.staff.manager.staffProfileId,
+      regionalManagerStaffProfileId: fixture.staff.manager.staffProfileId,
+      decisionMakerStaffProfileId: fixture.staff.decisionMaker.staffProfileId,
+      rmReviewNote: 'RM-owned proposal ready for rejection lock test.',
+      decisionNote: 'Rejected for terminal-state lock verification.',
+      expectedInterventionLinkIds: [rmStart.id],
+      label: 'intervention proposal denial',
+    });
+    await assertFinalInterventionCannotReopen({
+      auth: auth.manager,
+      interventionId: rmStart.id,
+      expectedReviewStatus: 'rejected',
+      label: 'intervention proposal final rejection',
+    });
   }
 
   async function runInterventionRevisionWorkflow(auth) {
     const caseId = fixture.cases.revision;
     const planId = fixture.actionPlans.revision;
     const sourceId = fixture.interventions.revisionSource;
+    const revisionNotes = 'Synthetic revision packet notes.';
+    const revisionSubmitPayload = (title, overrides = {}) => ({
+      status: 'submitted',
+      code: '3',
+      title,
+      startDate: smokeDates.revisionStart,
+      endDate: smokeDates.revisionEnd,
+      durationDays: 31,
+      cost: '100',
+      notes: revisionNotes,
+      metadata: {
+        ...fixture.marker,
+        review: { eiStatus: 'CRF', decisionNotes: '' },
+        proposedInterventions: [
+          {
+            id: `two-step-revision-${fixture.suffix}`,
+            code: '3',
+            startDate: smokeDates.revisionStart,
+            endDate: smokeDates.revisionEnd,
+            programName: 'Revised smoke plan',
+            costLines: [{ id: 'tuition', label: 'Tuition', paymentType: 'tuition', payeeType: 'institution', payeeName: 'Smoke College', amount: '100' }],
+          },
+        ],
+      },
+      ...overrides,
+    });
     const draft = await fetchJson(`/api/interventions/${sourceId}/revise`, {
       method: 'POST',
       headers: { ...authHeaders(auth.coordinator), 'Content-Type': 'application/json' },
@@ -6289,28 +6753,7 @@ function remoteRunner() {
     await fetchJson(`/api/interventions/${draft.id}`, {
       method: 'PATCH',
       headers: { ...authHeaders(auth.coordinator), 'Content-Type': 'application/json' },
-      body: json({
-        status: 'submitted',
-        title: 'Coordinator revision smoke',
-        startDate: smokeDates.revisionStart,
-        endDate: smokeDates.revisionEnd,
-        durationDays: 31,
-        cost: '100',
-        metadata: {
-          ...fixture.marker,
-          review: { eiStatus: 'CRF', decisionNotes: '' },
-          proposedInterventions: [
-            {
-              id: `two-step-revision-${fixture.suffix}`,
-              code: '3',
-              startDate: smokeDates.revisionStart,
-              endDate: smokeDates.revisionEnd,
-              programName: 'Revised smoke plan',
-              costLines: [{ id: 'tuition', label: 'Tuition', paymentType: 'tuition', payeeType: 'institution', payeeName: 'Smoke College', amount: '100' }],
-            },
-          ],
-        },
-      }),
+      body: json(revisionSubmitPayload('Coordinator revision smoke')),
     });
     let state = await getInterventionState(draft.id);
     fixture.proposals.revision = state.proposal_id;
@@ -6327,22 +6770,226 @@ function remoteRunner() {
     await fetchJson(`/api/interventions/${draft.id}/review-workflow/action`, {
       method: 'POST',
       headers: { ...authHeaders(auth.manager), 'Content-Type': 'application/json' },
+      body: json({ action: 'rm_return_to_submitter', note: 'Please clarify the proposed revision.' }),
+    });
+    state = await getInterventionState(draft.id);
+    requireInvariant('intervention revision: RM return moves to the recorded submitter', (
+      state?.current_stage === 'returned_to_submitter' &&
+      state?.review_status === 'changes_requested' &&
+      Number(state?.submitted_by_staff_profile_id) === Number(fixture.staff.coordinator.staffProfileId)
+    ), state || {});
+
+    await assertReturnedInterventionRejectsDifferentSubmitter({
+      auth: auth.manager,
+      interventionId: draft.id,
+      originalSubmitterStaffProfileId: fixture.staff.coordinator.staffProfileId,
+      label: 'intervention revision',
+      resubmitPayload: revisionSubmitPayload('Forged Regional Manager revision resubmit'),
+    });
+
+    const correctedRevisionTitle = 'Coordinator revision smoke corrected';
+    await fetchJson(`/api/interventions/${draft.id}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(auth.coordinator), 'Content-Type': 'application/json' },
+      body: json(revisionSubmitPayload(correctedRevisionTitle)),
+    });
+    state = await getInterventionState(draft.id);
+    requireInvariant('intervention revision: recorded original submitter can edit and resubmit to RM review', (
+      state?.current_stage === 'rm_review' &&
+      state?.review_status === 'submitted' &&
+      Number(state?.submitted_by_staff_profile_id) === Number(fixture.staff.coordinator.staffProfileId)
+    ), state || {});
+
+    await fetchJson(`/api/interventions/${draft.id}/review-workflow/action`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.manager), 'Content-Type': 'application/json' },
       body: json({ action: 'rm_submit_to_nwac', note: 'RM sign-off for revision.' }),
     });
     state = await getInterventionState(draft.id);
     expect('intervention revision: RM submit moves to Decision Maker review', state.current_stage === 'nwac_review', state);
+
+    await fetchJson(`/api/interventions/${draft.id}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(auth.decisionMaker), 'Content-Type': 'application/json' },
+      body: json({
+        status: 'changes_requested',
+        metadata: { review: { decision: 'changes_requested', decisionNotes: 'Please clarify the revision outcome.' } },
+      }),
+    });
+    state = await getInterventionState(draft.id);
+    requireInvariant('intervention revision: Decision Maker request changes returns to RM without a final packet', (
+      state?.current_stage === 'returned_to_rm'
+    ), state || {});
+    await assertNoFinalAssessmentPacket({
+      caseId,
+      applicationId: fixture.applications.revision,
+      subjectKey: `intervention_revision:proposal:${fixture.proposals.revision}`,
+      label: 'intervention revision',
+    });
+
+    await fetchJson(`/api/interventions/${draft.id}/review-workflow/action`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.manager), 'Content-Type': 'application/json' },
+      body: json({ action: 'rm_forward_changes_to_submitter', note: 'Coordinator, please address the Decision Maker revision note.' }),
+    });
+    await fetchJson(`/api/interventions/${draft.id}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(auth.coordinator), 'Content-Type': 'application/json' },
+      body: json(revisionSubmitPayload(correctedRevisionTitle)),
+    });
+    await fetchJson(`/api/interventions/${draft.id}/review-workflow/action`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.manager), 'Content-Type': 'application/json' },
+      body: json({ action: 'rm_submit_to_nwac', note: 'Final RM sign-off for revision.' }),
+    });
+    state = await getInterventionState(draft.id);
+    expect('intervention revision: corrected packet returns to Decision Maker review', state.current_stage === 'nwac_review', state);
+
+    const sourceFactsBeforeDecisionTamper = await getInterventionSubmitterFactState(sourceId);
+    const revisionFactsBeforeDecisionTamper = await getInterventionSubmitterFactState(draft.id);
+    const revisionStateBeforeDecisionTamper = await getInterventionState(draft.id);
+    const revisionDecisionTamper = await fetchExpectingFailure(`/api/interventions/${sourceId}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(auth.decisionMaker), 'Content-Type': 'application/json' },
+      body: json({
+        revisionAppliedFromInterventionId: draft.id,
+        code: '3',
+        title: 'Decision Maker must not rewrite the approved revision title',
+        startDate: smokeDates.revisionStart,
+        endDate: smokeDates.revisionEnd,
+        durationDays: 31,
+        cost: '999',
+        notes: revisionNotes,
+        metadata: { review: { eiStatus: 'CRF', decision: 'approved', decisionNotes: 'Forged revision facts.' } },
+      }),
+    });
+    const sourceFactsAfterDecisionTamper = await getInterventionSubmitterFactState(sourceId);
+    const revisionFactsAfterDecisionTamper = await getInterventionSubmitterFactState(draft.id);
+    const revisionStateAfterDecisionTamper = await getInterventionState(draft.id);
+    requireInvariant('intervention revision: Decision Maker apply payload cannot alter submitter-owned revision facts', (
+      revisionDecisionTamper.status === 409 &&
+      revisionDecisionTamper.body?.error === 'approved_revision_packet_mismatch' &&
+      json(sourceFactsAfterDecisionTamper) === json(sourceFactsBeforeDecisionTamper) &&
+      json(revisionFactsAfterDecisionTamper) === json(revisionFactsBeforeDecisionTamper) &&
+      json(revisionStateAfterDecisionTamper) === json(revisionStateBeforeDecisionTamper)
+    ), {
+      attempt: revisionDecisionTamper,
+      sourceFactsBefore: sourceFactsBeforeDecisionTamper,
+      sourceFactsAfter: sourceFactsAfterDecisionTamper,
+      revisionFactsBefore: revisionFactsBeforeDecisionTamper,
+      revisionFactsAfter: revisionFactsAfterDecisionTamper,
+      revisionStateBefore: revisionStateBeforeDecisionTamper,
+      revisionStateAfter: revisionStateAfterDecisionTamper,
+    });
 
     await fetchJson(`/api/interventions/${sourceId}`, {
       method: 'PATCH',
       headers: { ...authHeaders(auth.decisionMaker), 'Content-Type': 'application/json' },
       body: json({
         revisionAppliedFromInterventionId: draft.id,
-        metadata: { review: { decisionNotes: 'Approved revision.' } },
+        code: '3',
+        title: correctedRevisionTitle,
+        startDate: smokeDates.revisionStart,
+        endDate: smokeDates.revisionEnd,
+        durationDays: 31,
+        cost: '100',
+        notes: revisionNotes,
+        metadata: { review: { eiStatus: 'CRF', decision: 'approved', decisionNotes: 'Approved revision.' } },
       }),
     });
     state = await getInterventionState(draft.id);
     expect('intervention revision: final decision recorded by Decision Maker', state.current_stage === 'final_decision_recorded', state);
     await assertGeneratedDocuments({ caseId, interventionId: sourceId, workflow: 'intervention_revision_final_source', minCount: 1, requireInterventionLink: true });
+    await assertFinalAssessmentPacket({
+      caseId,
+      applicationId: fixture.applications.revision,
+      subjectKey: `intervention_revision:proposal:${fixture.proposals.revision}`,
+      workflowType: 'intervention_revision',
+      workflowId: fixture.workflows.revision,
+      outcome: 'approved',
+      subjectIds: {
+        actionPlanId: planId,
+        interventionId: draft.id,
+        proposalId: fixture.proposals.revision,
+      },
+      submitterStaffProfileId: fixture.staff.coordinator.staffProfileId,
+      regionalManagerStaffProfileId: fixture.staff.manager.staffProfileId,
+      decisionMakerStaffProfileId: fixture.staff.decisionMaker.staffProfileId,
+      rmReviewNote: 'Final RM sign-off for revision.',
+      decisionNote: 'Approved revision.',
+      expectedInterventionLinkIds: [draft.id, sourceId],
+      label: 'intervention revision approval',
+    });
+    await assertFinalInterventionCannotReopen({
+      auth: auth.coordinator,
+      interventionId: draft.id,
+      expectedReviewStatus: 'approved',
+      label: 'intervention revision final approval',
+    });
+
+    const deniedDraft = await fetchJson(`/api/interventions/${sourceId}/revise`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.coordinator), 'Content-Type': 'application/json' },
+      body: json({}),
+    });
+    fixture.interventions.revisionDeniedDraft = deniedDraft.id;
+    await fetchJson(`/api/interventions/${deniedDraft.id}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(auth.coordinator), 'Content-Type': 'application/json' },
+      body: json(revisionSubmitPayload('Coordinator revision smoke for denial')),
+    });
+    const deniedSubmittedState = await getInterventionState(deniedDraft.id);
+    fixture.proposals.revisionDenied = deniedSubmittedState.proposal_id;
+    fixture.workflows.revisionDenied = deniedSubmittedState.workflow_id;
+    requireInvariant('intervention revision: denial fixture reaches exact RM review subject', (
+      deniedSubmittedState?.current_stage === 'rm_review' &&
+      deniedSubmittedState?.workflow_type === 'intervention_revision'
+    ), deniedSubmittedState || {});
+    await fetchJson(`/api/interventions/${deniedDraft.id}/review-workflow/action`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.manager), 'Content-Type': 'application/json' },
+      body: json({ action: 'rm_submit_to_nwac', note: 'RM sign-off for denied revision.' }),
+    });
+    const deniedRevisionNote = 'Denied because the revised outcome remains unsupported.';
+    await fetchJson(`/api/interventions/${deniedDraft.id}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders(auth.decisionMaker), 'Content-Type': 'application/json' },
+      body: json({
+        status: 'rejected',
+        metadata: { review: { decision: 'rejected', decisionNotes: deniedRevisionNote } },
+      }),
+    });
+    const deniedState = await getInterventionState(deniedDraft.id);
+    requireInvariant('intervention revision: Decision Maker denial remains on the exact revision subject', (
+      deniedState?.current_stage === 'final_decision_recorded' &&
+      deniedState?.review_status === 'rejected'
+    ), deniedState || {});
+    await assertFinalAssessmentPacket({
+      caseId,
+      applicationId: fixture.applications.revision,
+      subjectKey: `intervention_revision:proposal:${fixture.proposals.revisionDenied}`,
+      workflowType: 'intervention_revision',
+      workflowId: fixture.workflows.revisionDenied,
+      outcome: 'denied',
+      subjectIds: {
+        actionPlanId: planId,
+        interventionId: deniedDraft.id,
+        proposalId: fixture.proposals.revisionDenied,
+      },
+      submitterStaffProfileId: fixture.staff.coordinator.staffProfileId,
+      regionalManagerStaffProfileId: fixture.staff.manager.staffProfileId,
+      decisionMakerStaffProfileId: fixture.staff.decisionMaker.staffProfileId,
+      rmReviewNote: 'RM sign-off for denied revision.',
+      decisionNote: deniedRevisionNote,
+      expectedInterventionLinkIds: [deniedDraft.id],
+      label: 'intervention revision denial',
+    });
+    await assertFinalInterventionCannotReopen({
+      auth: auth.coordinator,
+      interventionId: deniedDraft.id,
+      expectedReviewStatus: 'rejected',
+      label: 'intervention revision final rejection',
+    });
   }
 
   async function assertNotification(eventKey, audienceStaffProfileId, {
@@ -6472,6 +7119,122 @@ function remoteRunner() {
       linkOk,
       documentIds: rows.map(row => row.id),
       categories: rows.map(row => row.document_category),
+    });
+  }
+
+  async function getFinalAssessmentPackets({ caseId, applicationId, subjectKey }) {
+    const [rows] = await query(
+      `SELECT id, file_name, file_path, label, document_category, metadata
+         FROM iset_document
+        WHERE case_id = ?
+          AND application_id = ?
+          AND source = 'system_generated'
+          AND status = 'active'
+          AND document_category = 'case_assessment_approved'
+          AND JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.assessment_subject_key')) = ?
+        ORDER BY id ASC`,
+      [caseId, applicationId, subjectKey]
+    );
+    rows.forEach(row => {
+      if (row.file_path) fixture.documents.push(row.file_path);
+    });
+    return rows;
+  }
+
+  async function assertNoFinalAssessmentPacket({ caseId, applicationId, subjectKey, label }) {
+    const rows = await getFinalAssessmentPackets({ caseId, applicationId, subjectKey });
+    requireInvariant(`${label}: request changes creates no final assessment packet`, rows.length === 0, {
+      caseId,
+      applicationId,
+      subjectKey,
+      documentIds: rows.map(row => row.id),
+    });
+  }
+
+  async function assertFinalAssessmentPacket({
+    caseId,
+    applicationId,
+    subjectKey,
+    workflowType,
+    workflowId,
+    outcome,
+    subjectIds = {},
+    submitterStaffProfileId,
+    regionalManagerStaffProfileId,
+    decisionMakerStaffProfileId,
+    rmReviewNote,
+    decisionNote,
+    expectedInterventionLinkIds = [],
+    label,
+  }) {
+    const rows = await getFinalAssessmentPackets({ caseId, applicationId, subjectKey });
+    const row = rows[0] || null;
+    const metadata = parseJsonObject(row?.metadata);
+    const evidence = metadata?.assessment_final_evidence || {};
+    const versionNumber = Number(metadata?.assessment_version_number);
+    const outcomeLabel = outcome === 'approved' ? 'Approved' : 'Denied';
+    const expectedSubject = {
+      key: subjectKey,
+      caseId: Number(caseId),
+      applicationId: Number(applicationId),
+      ...Object.fromEntries(
+        Object.entries(subjectIds)
+          .filter(([, value]) => Number.isSafeInteger(Number(value)) && Number(value) > 0)
+          .map(([key, value]) => [key, Number(value)])
+      ),
+    };
+    const expectedLinkIds = Array.from(new Set(
+      expectedInterventionLinkIds.map(Number).filter(Number.isSafeInteger)
+    )).sort((a, b) => a - b);
+    let actualLinkIds = [];
+    if (row?.id) {
+      const [linkRows] = await query(
+        `SELECT document_id, intervention_id
+           FROM iset_document_intervention
+          WHERE document_id = ?
+          ORDER BY intervention_id ASC`,
+        [row.id]
+      );
+      actualLinkIds = linkRows.map(link => Number(link.intervention_id)).filter(Number.isSafeInteger);
+    }
+    requireInvariant(`${label}: one exact-subject final assessment packet retains complete decision evidence`, (
+      rows.length === 1 &&
+      row?.document_category === 'case_assessment_approved' &&
+      Number.isSafeInteger(versionNumber) && versionNumber > 0 &&
+      typeof row?.file_name === 'string' && row.file_name.startsWith(`final-assessment-packet-v${versionNumber}-`) &&
+      row?.label === `Final assessment packet v${versionNumber} - ${outcomeLabel}` &&
+      metadata?.assessment_variant === 'final' &&
+      metadata?.assessment_final_outcome === outcome &&
+      metadata?.assessment_subject_key === subjectKey &&
+      metadata?.assessment_workflow_type === workflowType &&
+      evidence?.outcome === outcome &&
+      evidence?.subjectKey === subjectKey &&
+      evidence?.workflowType === workflowType &&
+      Number(evidence?.workflowId) === Number(workflowId) &&
+      json(evidence?.subject) === json(expectedSubject) &&
+      Number(evidence?.submitter?.staffProfileId) === Number(submitterStaffProfileId) &&
+      typeof evidence?.submitter?.name === 'string' && evidence.submitter.name.length > 0 &&
+      typeof evidence?.submitter?.signedAt === 'string' && evidence.submitter.signedAt.length > 0 &&
+      evidence?.submitter?.capacity === 'Submitter' &&
+      Number(evidence?.regionalManager?.staffProfileId) === Number(regionalManagerStaffProfileId) &&
+      typeof evidence?.regionalManager?.name === 'string' && evidence.regionalManager.name.length > 0 &&
+      typeof evidence?.regionalManager?.signedAt === 'string' && evidence.regionalManager.signedAt.length > 0 &&
+      evidence?.regionalManager?.capacity === 'Regional Manager' &&
+      evidence?.regionalManager?.note === rmReviewNote &&
+      Number(evidence?.decisionMaker?.staffProfileId) === Number(decisionMakerStaffProfileId) &&
+      typeof evidence?.decisionMaker?.name === 'string' && evidence.decisionMaker.name.length > 0 &&
+      typeof evidence?.decisionMaker?.signedAt === 'string' && evidence.decisionMaker.signedAt.length > 0 &&
+      evidence?.decisionMaker?.capacity === 'Decision Maker' &&
+      evidence?.decisionMaker?.note === decisionNote &&
+      json(actualLinkIds) === json(expectedLinkIds)
+    ), {
+      caseId,
+      applicationId,
+      subjectKey,
+      row,
+      metadata,
+      expectedLinkIds,
+      actualLinkIds,
     });
   }
 
@@ -7441,7 +8204,9 @@ function remoteRunner() {
   }
 }
 
-if (require.main === module) {
+if (require.main === module && process.argv.includes('--remote-runner')) {
+  remoteRunner();
+} else if (require.main === module) {
   main().catch(error => {
     console.error(error.stack || error.message || error);
     process.exit(1);

@@ -33,7 +33,7 @@ function createFailingPool() {
   const pool = {
     query: jest.fn(async (statement, params) => {
       const sql = String(statement);
-      if (/^\s*SELECT filename,/u.test(sql)) {
+      if (/^\s*SELECT `iset_migration`\.`filename`,/u.test(sql)) {
         return [[], []];
       }
       if (/^\s*INSERT INTO/u.test(sql)) {
@@ -45,6 +45,15 @@ function createFailingPool() {
   };
 
   return { pool, connection, trackingWrites, executedStatements };
+}
+
+function createReadOnlyPlanGuard(appliedRows) {
+  return {
+    preflight: jest.fn(async () => {}),
+    objectExists: jest.fn(() => true),
+    execute: jest.fn(async () => [appliedRows, []]),
+    evidence: jest.fn(() => ({ preflightComplete: true })),
+  };
 }
 
 describe('schema migration failure contract', () => {
@@ -128,16 +137,25 @@ describe('schema migration failure contract', () => {
     const checksum = crypto.createHash('sha256').update(original).digest('hex');
     fs.writeFileSync(path.join(migrationsDir, '001_applied.sql'), original);
     const applied = [{ filename: '001_applied.sql', checksum, success: 1 }];
-    const pool = { query: jest.fn(async sql => [/^\s*SELECT filename,/u.test(String(sql)) ? applied : [], []]) };
+    const pool = { query: jest.fn() };
     try {
-      await expect(planPendingSharedSchemaMigrations(pool, { migrationsDir })).resolves.toMatchObject({ pendingCount: 0 });
+      await expect(planPendingSharedSchemaMigrations(pool, {
+        migrationsDir,
+        schemaGuard: createReadOnlyPlanGuard(applied),
+      })).resolves.toMatchObject({ pendingCount: 0 });
       fs.writeFileSync(path.join(migrationsDir, '002_forward_fix.sql'), 'SELECT 2;\n');
-      await expect(planPendingSharedSchemaMigrations(pool, { migrationsDir })).resolves.toMatchObject({
+      await expect(planPendingSharedSchemaMigrations(pool, {
+        migrationsDir,
+        schemaGuard: createReadOnlyPlanGuard(applied),
+      })).resolves.toMatchObject({
         pendingCount: 1,
         pending: [expect.objectContaining({ file: '002_forward_fix.sql' })],
       });
       fs.writeFileSync(path.join(migrationsDir, '001_applied.sql'), 'SELECT 99;\n');
-      await expect(planPendingSharedSchemaMigrations(pool, { migrationsDir })).rejects.toMatchObject({
+      await expect(planPendingSharedSchemaMigrations(pool, {
+        migrationsDir,
+        schemaGuard: createReadOnlyPlanGuard(applied),
+      })).rejects.toMatchObject({
         code: 'schema_migration_checksum_drift',
       });
     } finally {

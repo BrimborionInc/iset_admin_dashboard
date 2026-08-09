@@ -2,9 +2,10 @@
 /*
  * Deterministic browser regression for existing-intervention Paid from state.
  *
- * Loads the compiled Case Workspace with an internal intervention under an
- * external action plan, then proves view, edit/save request, and reopen all
- * preserve the intervention's own posting context.
+ * Loads the compiled Case Workspace with an internal manual-backload
+ * intervention under an external action plan, then proves edit/save/reopen
+ * preserve the intervention's own posting context. It separately proves an
+ * exact finally decided review-workflow record remains read-only.
  */
 
 'use strict';
@@ -174,6 +175,9 @@ function buildCasePayload(intervention) {
       {
         id: ACTION_PLAN_ID,
         caseId: CASE_ID,
+        ...(intervention.applicationId
+          ? { applicationId: intervention.applicationId, application_id: intervention.applicationId }
+          : {}),
         name: 'Existing external action plan',
         status: 'active',
         effectiveDate: '2026-06-01',
@@ -438,6 +442,34 @@ async function clickByText(page, selector, label) {
   if (!clicked) throw new Error(`Could not click ${selector} with text "${label}"`);
 }
 
+async function assertFinalRecordReadOnly(page, stage) {
+  const state = await page.evaluate(() => {
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const enabledLabels = buttons
+      .filter(button => !button.disabled && button.getAttribute('aria-disabled') !== 'true')
+      .map(button => normalize(button.innerText || button.textContent))
+      .filter(Boolean);
+    const programNameInput = Array.from(document.querySelectorAll('input')).find(
+      input => input.value === 'Legal Paraprofessional Diploma'
+    );
+    return {
+      enabledLabels,
+      programNamePresent: Boolean(programNameInput),
+      programNameReadOnly: Boolean(
+        programNameInput &&
+        (programNameInput.readOnly || programNameInput.disabled || programNameInput.getAttribute('aria-readonly') === 'true')
+      ),
+    };
+  });
+  if (state.enabledLabels.includes('Edit') || state.enabledLabels.includes('Save changes')) {
+    throw new Error(`${stage} exposed an edit/save control for a final intervention: ${JSON.stringify(state.enabledLabels)}`);
+  }
+  if (!state.programNamePresent || !state.programNameReadOnly) {
+    throw new Error(`${stage} did not render the final intervention facts read-only: ${JSON.stringify(state)}`);
+  }
+}
+
 async function openIntervention(page) {
   const opened = await page.evaluate(() => {
     const link = Array.from(document.querySelectorAll('a')).find(
@@ -542,19 +574,51 @@ async function main() {
     );
 
     await clickByText(page, 'button', 'Save changes');
-    await waitUntil(() => state.savedPayloads.length === 1, 'intervention PATCH');
+    await waitUntil(() => state.savedPayloads.length === 1, 'manual-backload intervention PATCH');
     await page.waitForFunction(() => !Array.from(document.querySelectorAll('h2')).some(heading => {
       const label = (heading.innerText || '').trim();
       return label === 'View intervention' || label === 'Edit intervention';
     }));
     if (state.savedPayloads.length !== 1 || state.savedPayloads[0].postingContext !== 'internal') {
-      throw new Error(`Save request did not preserve internal postingContext: ${JSON.stringify(state.savedPayloads)}`);
+      throw new Error(`Manual-backload save did not preserve internal postingContext: ${JSON.stringify(state.savedPayloads)}`);
     }
 
     await page.waitForFunction(() => Boolean(document.querySelector('a[aria-label^="View intervention "]')));
     await openIntervention(page);
     assertInternalPaidFrom(await readPaidFromText(page), 'Reopened view');
     await clickByText(page, 'button', 'Cancel');
+
+    state.intervention = buildIntervention({
+      applicationId: APPLICATION_ID,
+      application_id: APPLICATION_ID,
+      title: 'Finally reviewed training intervention',
+      reviewWorkflow: {
+        id: 90,
+        workflowType: 'intervention_proposal',
+        currentStage: 'final_decision_recorded',
+        current_stage: 'final_decision_recorded',
+      },
+      metadata: {
+        source: 'intervention_proposal',
+        postingContext: 'internal',
+        deliveryMode: 'partner',
+        institution: 'Example College',
+        programName: 'Legal Paraprofessional Diploma',
+      },
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => {
+      const text = document.body?.innerText || '';
+      return text.includes('Interventions - Existing external action plan') &&
+        Boolean(document.querySelector('a[aria-label^="View intervention "]'));
+    });
+    await openIntervention(page);
+    assertInternalPaidFrom(await readPaidFromText(page), 'Final reviewed view');
+    await assertFinalRecordReadOnly(page, 'Final reviewed view');
+    await clickByText(page, 'button', 'Cancel');
+    if (state.savedPayloads.length !== 1) {
+      throw new Error(`Final reviewed intervention emitted an unexpected PATCH: ${JSON.stringify(state.savedPayloads)}`);
+    }
 
     const callsBeforeIdle = state.apiCalls.length;
     await delay(2000);
@@ -578,7 +642,9 @@ async function main() {
   const summary = {
     pass: state.failures.length === 0,
     screenshot,
-    savedPostingContexts: state.savedPayloads.map(payload => payload.postingContext),
+    savedPostingContexts: state.savedPayloads.slice(0, 1).map(payload => payload.postingContext),
+    finalRecordReadOnlyVerified: state.savedPayloads.length === 1,
+    unexpectedFinalPatchCount: Math.max(0, state.savedPayloads.length - 1),
     apiCallCount: state.apiCalls.length,
     apiCallCounts,
     failures: state.failures,

@@ -29,6 +29,20 @@ const PROPOSAL_ID = 101;
 const REVISION_ID = 102;
 const SOURCE_INTERVENTION_ID = 201;
 const SOURCE_TITLE = '3 - Employment counselling';
+const INTERVENTION_WIDGET_SELECTOR = '#intervention-assessment-widget';
+const NON_POLLING_REFERENCE_PATHS = [
+  '/api/reference/intervention-codes',
+  '/api/reference/noc-versions',
+];
+
+const STAFF_PROFILE_IDS = {
+  coordinatorSubmitter: 1,
+  regionalManagerSubmitter: 2,
+  decisionMaker: 3,
+  otherCoordinator: 4,
+  otherRegionalManager: 5,
+  systemAdministrator: 6,
+};
 
 const REVIEW_STAGES = {
   rmReview: 'rm_review',
@@ -49,19 +63,25 @@ const roleProfiles = {
     email: 'quebec.coordinator.1@awentech.ca',
     name: 'Quebec Coordinator',
     groups: ['ISET_Coordinator'],
-    staffProfileId: 1,
+    staffProfileId: STAFF_PROFILE_IDS.coordinatorSubmitter,
   },
   'Regional Manager': {
     email: 'quebec.manager@awentech.ca',
     name: 'Quebec Regional Manager',
     groups: ['Regional_Manager'],
-    staffProfileId: 2,
+    staffProfileId: STAFF_PROFILE_IDS.regionalManagerSubmitter,
   },
   'NWAC Administrator': {
     email: 'program.admin@awentech.ca',
     name: 'Program Admin',
     groups: ['NWAC_Administrator'],
-    staffProfileId: 3,
+    staffProfileId: STAFF_PROFILE_IDS.decisionMaker,
+  },
+  'System Administrator': {
+    email: 'system.admin@awentech.ca',
+    name: 'System Administrator',
+    groups: ['System_Administrator'],
+    staffProfileId: STAFF_PROFILE_IDS.systemAdministrator,
   },
 };
 
@@ -69,6 +89,12 @@ function parseArgs(argv) {
   const args = {
     frontendBase: process.env.INTERVENTION_ASSESSMENT_WORKFLOW_SMOKE_FRONTEND_BASE || DEFAULT_FRONTEND_BASE,
     screenshotDir: process.env.INTERVENTION_ASSESSMENT_WORKFLOW_SMOKE_SCREENSHOT_DIR || DEFAULT_SCREENSHOT_DIR,
+    scenarioNames: new Set(
+      String(process.env.INTERVENTION_ASSESSMENT_WORKFLOW_SMOKE_SCENARIOS || '')
+        .split(',')
+        .map(value => value.trim())
+        .filter(Boolean)
+    ),
   };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -78,6 +104,13 @@ function parseArgs(argv) {
     } else if (token === '--screenshot-dir') {
       args.screenshotDir = argv[index + 1] || args.screenshotDir;
       index += 1;
+    } else if (token === '--scenario') {
+      String(argv[index + 1] || '')
+        .split(',')
+        .map(value => value.trim())
+        .filter(Boolean)
+        .forEach(value => args.scenarioNames.add(value));
+      index += 1;
     } else if (token === '--help' || token === '-h') {
       console.log([
         'Usage: node scripts/intervention-assessment-workflow-browser-smoke.js [options]',
@@ -85,6 +118,7 @@ function parseArgs(argv) {
         'Options:',
         '  --frontend-base URL     React app origin. Default: http://localhost:3001',
         '  --screenshot-dir DIR    Directory for browser screenshots.',
+        '  --scenario NAMES        Comma-separated scenario names. Default: all.',
       ].join('\n'));
       process.exit(0);
     }
@@ -121,8 +155,8 @@ function base64UrlEncode(value) {
     .replace(/\//g, '_');
 }
 
-function fakeJwt(role) {
-  const profile = roleProfiles[role] || roleProfiles['ISET Coordinator'];
+function fakeJwt(role, profileOverride = null) {
+  const profile = profileOverride || roleProfiles[role] || roleProfiles['ISET Coordinator'];
   const issuedAt = Math.floor(Date.now() / 1000);
   return [
     base64UrlEncode({ alg: 'none', typ: 'JWT' }),
@@ -132,6 +166,8 @@ function fakeJwt(role) {
       name: profile.name,
       role,
       'cognito:groups': profile.groups,
+      staffProfileId: profile.staffProfileId,
+      staff_profile_id: profile.staffProfileId,
       iat: issuedAt,
       exp: issuedAt + 3600,
     }),
@@ -155,11 +191,39 @@ function delay(ms) {
 async function waitUntil(predicate, label, timeoutMs = 45_000, intervalMs = 100) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const result = predicate();
+    const result = await predicate();
     if (result) return result;
     await delay(intervalMs);
   }
   throw new Error(`Timed out waiting for ${label}`);
+}
+
+function countApiCallsByPath(state, paths) {
+  return Object.fromEntries(paths.map(pathname => [
+    pathname,
+    state.apiCalls.filter(call => call.path === pathname).length,
+  ]));
+}
+
+async function assertNonPollingReferenceCallsSettle(state, timeoutMs = 5_000, quietMs = 750) {
+  const startedAt = Date.now();
+  let lastCounts = countApiCallsByPath(state, NON_POLLING_REFERENCE_PATHS);
+  let unchangedSince = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    await delay(100);
+    const nextCounts = countApiCallsByPath(state, NON_POLLING_REFERENCE_PATHS);
+    if (JSON.stringify(nextCounts) !== JSON.stringify(lastCounts)) {
+      lastCounts = nextCounts;
+      unchangedSince = Date.now();
+      continue;
+    }
+    if (Date.now() - unchangedSince >= quietMs) return lastCounts;
+  }
+
+  throw new Error(
+    `Non-polling reference requests did not settle: ${JSON.stringify(lastCounts)}`
+  );
 }
 
 function buildCostLine(amount = 150) {
@@ -193,14 +257,25 @@ function buildProposedIntervention({ amount = 150 } = {}) {
 }
 
 function buildReviewWorkflow(stage, overrides = {}) {
+  const submittedByStaffProfileId = overrides.submittedByStaffProfileId || STAFF_PROFILE_IDS.coordinatorSubmitter;
+  const submittedByRole = overrides.submittedByRole || 'ISET Coordinator';
+  const currentOwnerRole = stage === REVIEW_STAGES.nwacReview
+    ? 'NWAC Administrator'
+    : stage === REVIEW_STAGES.returnedToSubmitter
+      ? submittedByRole
+      : 'Regional Manager';
   return {
     id: overrides.id || 501,
     workflowType: overrides.workflowType || 'intervention_proposal',
     workflow_type: overrides.workflowType || 'intervention_proposal',
     currentStage: stage,
     current_stage: stage,
-    currentOwnerRole: stage === REVIEW_STAGES.nwacReview ? 'NWAC Administrator' : 'Regional Manager',
-    current_owner_role: stage === REVIEW_STAGES.nwacReview ? 'NWAC Administrator' : 'Regional Manager',
+    currentOwnerRole,
+    current_owner_role: currentOwnerRole,
+    submittedByStaffProfileId,
+    submitted_by_staff_profile_id: submittedByStaffProfileId,
+    submittedByRole,
+    submitted_by_role: submittedByRole,
     rmReviewNote: overrides.rmReviewNote || '',
     rm_review_note: overrides.rmReviewNote || '',
     nwacDecisionNote: overrides.nwacDecisionNote || '',
@@ -256,6 +331,11 @@ function buildIntervention({
   nwacDecisionNote = '',
   approvalFollowUp = false,
   revisionFollowUp = false,
+  createdByStaffProfileId = STAFF_PROFILE_IDS.coordinatorSubmitter,
+  submittedByStaffProfileId = createdByStaffProfileId,
+  submittedByRole = createdByStaffProfileId === STAFF_PROFILE_IDS.regionalManagerSubmitter
+    ? 'Regional Manager'
+    : 'ISET Coordinator',
 } = {}) {
   const approved = status === 'approved';
   const lastAppliedRevision = revisionFollowUp
@@ -281,11 +361,15 @@ function buildIntervention({
           ? buildReviewWorkflow(REVIEW_STAGES.finalDecisionRecorded, {
               workflowType: isRevision || revisionFollowUp ? 'intervention_revision' : 'intervention_proposal',
               rmReviewNote: rmReviewNote || 'RM reviewed and supports this request.',
+              submittedByStaffProfileId,
+              submittedByRole,
             })
           : buildReviewWorkflow(stage, {
               workflowType: isRevision ? 'intervention_revision' : 'intervention_proposal',
               rmReviewNote,
               nwacDecisionNote,
+              submittedByStaffProfileId,
+              submittedByRole,
             })
       )
     : null;
@@ -318,6 +402,8 @@ function buildIntervention({
     institution: 'Example College',
     programName: 'Employment counselling',
     notes: 'Training aligns with the employment plan.',
+    createdByStaffProfileId,
+    created_by_staff_profile_id: createdByStaffProfileId,
     createdAt: '2026-06-19T15:00:00.000Z',
     updatedAt: '2026-06-19T16:00:00.000Z',
     metadata,
@@ -413,6 +499,8 @@ function buildCasePayload(intervention) {
       {
         id: ACTION_PLAN_ID,
         case_id: CASE_ID,
+        applicationId: APPLICATION_ID,
+        application_id: APPLICATION_ID,
         title: '2026 employment plan',
         name: '2026 employment plan',
         status: 'active',
@@ -479,6 +567,20 @@ function mutateReviewAction(state, action, note) {
     isRevision: state.isRevision,
     rmReviewNote,
     nwacDecisionNote,
+    createdByStaffProfileId:
+      current.createdByStaffProfileId ||
+      current.created_by_staff_profile_id ||
+      STAFF_PROFILE_IDS.coordinatorSubmitter,
+    submittedByStaffProfileId:
+      current.reviewWorkflow?.submittedByStaffProfileId ||
+      current.review_workflow?.submitted_by_staff_profile_id ||
+      current.createdByStaffProfileId ||
+      current.created_by_staff_profile_id ||
+      STAFF_PROFILE_IDS.coordinatorSubmitter,
+    submittedByRole:
+      current.reviewWorkflow?.submittedByRole ||
+      current.review_workflow?.submitted_by_role ||
+      'ISET Coordinator',
   });
   state.casePayload = buildCasePayload(state.intervention);
   return state.intervention;
@@ -516,7 +618,7 @@ async function installApiStubs(page, state) {
     const pathname = url.pathname;
     const method = request.method();
     if (pathname === '/api/auth/me') {
-      const profile = roleProfiles[state.role] || roleProfiles['ISET Coordinator'];
+      const profile = state.profile;
       request.respond(jsonResponse({
         auth: {
           sub: `smoke-${profile.staffProfileId}`,
@@ -566,28 +668,59 @@ async function installApiStubs(page, state) {
     if (pathname === `/api/interventions/${state.intervention.id}` && method === 'PATCH') {
       const body = request.postData() ? JSON.parse(request.postData()) : {};
       state.mutations.interventionUpdates.push({ body });
-      const workflowType = state.isRevision ? 'intervention_revision' : 'intervention_proposal';
-      const transition = getReviewTransition({
-        action: REVIEW_WORKFLOW_ACTIONS.SubmitForRmReview,
-        workflowType,
-        role: state.role,
-      });
-      if (!transition.allowed) {
+      const currentWorkflow = state.intervention.reviewWorkflow || state.intervention.review_workflow || null;
+      const currentStage = currentWorkflow?.currentStage || currentWorkflow?.current_stage || null;
+      const recordedSubmitterStaffProfileId =
+        currentWorkflow?.submittedByStaffProfileId ||
+        currentWorkflow?.submitted_by_staff_profile_id ||
+        state.intervention.createdByStaffProfileId ||
+        state.intervention.created_by_staff_profile_id ||
+        null;
+      const isReturnedSubmitterMutation = currentStage === REVIEW_STAGES.returnedToSubmitter;
+      const isSupportOverride = state.role === 'System Administrator';
+      if (
+        isReturnedSubmitterMutation &&
+        !isSupportOverride &&
+        Number(recordedSubmitterStaffProfileId) !== Number(state.profile.staffProfileId)
+      ) {
         request.respond(jsonResponse({
-          error: 'review_workflow_transition_forbidden',
-          message: 'Review workflow transition forbidden.',
+          error: 'intervention_submitter_mismatch',
+          message: 'Only the recorded submitter may update this returned intervention request.',
         }, 403));
         return;
       }
-      const reviewWorkflow = buildReviewWorkflow(transition.nextStage, {
-        workflowType,
-      });
+      const workflowType = state.isRevision ? 'intervention_revision' : 'intervention_proposal';
+      let reviewWorkflow = currentWorkflow;
+      if (String(body.status || '').trim().toLowerCase() === 'submitted') {
+        const transition = getReviewTransition({
+          action: REVIEW_WORKFLOW_ACTIONS.SubmitForRmReview,
+          currentStage,
+          workflowType,
+          role: state.role,
+        });
+        if (!transition.allowed) {
+          request.respond(jsonResponse({
+            error: 'review_workflow_transition_forbidden',
+            message: 'Review workflow transition forbidden.',
+          }, 403));
+          return;
+        }
+        reviewWorkflow = buildReviewWorkflow(transition.nextStage, {
+          workflowType,
+          submittedByStaffProfileId:
+            recordedSubmitterStaffProfileId || state.profile.staffProfileId,
+          submittedByRole:
+            currentWorkflow?.submittedByRole ||
+            currentWorkflow?.submitted_by_role ||
+            state.role,
+        });
+      }
       state.intervention = {
         ...state.intervention,
         ...body,
-        status: 'submitted',
-        reviewStatus: 'submitted',
-        review_status: 'submitted',
+        status: body.status || state.intervention.status,
+        reviewStatus: body.status || state.intervention.reviewStatus,
+        review_status: body.status || state.intervention.review_status,
         reviewWorkflow,
         review_workflow: reviewWorkflow,
         twoStepReviewEnabled: true,
@@ -727,10 +860,10 @@ async function installApiStubs(page, state) {
   });
 }
 
-async function installBrowserSession(page, frontendBase, role) {
+async function installBrowserSession(page, frontendBase, role, profile) {
   const session = {
-    idToken: fakeJwt(role),
-    accessToken: fakeJwt(role),
+    idToken: fakeJwt(role, profile),
+    accessToken: fakeJwt(role, profile),
     refreshToken: null,
     expiresAt: Math.floor(Date.now() / 1000) + 3300,
   };
@@ -741,8 +874,8 @@ async function installBrowserSession(page, frontendBase, role) {
   }, session, frontendBase);
 }
 
-async function visibleEnabledButtons(page, text) {
-  return page.evaluate(targetText => {
+async function visibleEnabledButtons(page, text, options = {}) {
+  return page.evaluate(({ targetText, scopeSelector }) => {
     const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
     const isVisible = element => {
       if (!element) return false;
@@ -753,16 +886,18 @@ async function visibleEnabledButtons(page, text) {
         style.visibility !== 'hidden' &&
         style.display !== 'none';
     };
-    return Array.from(document.querySelectorAll('button, [role="button"]'))
+    const scope = scopeSelector ? document.querySelector(scopeSelector) : document;
+    if (!scope) return [];
+    return Array.from(scope.querySelectorAll('button, [role="button"]'))
       .filter(button => isVisible(button))
       .filter(button => !button.disabled && button.getAttribute('aria-disabled') !== 'true')
       .map((button, index) => ({ index, text: normalize(button.innerText || button.textContent || '') }))
       .filter(button => button.text === targetText);
-  }, text);
+  }, { targetText: text, scopeSelector: options.scopeSelector || INTERVENTION_WIDGET_SELECTOR });
 }
 
-async function clickButtonByText(page, text, options = {}) {
-  const clicked = await page.evaluate(({ targetText, preferLast }) => {
+async function visibleButtonStates(page, text, options = {}) {
+  return page.evaluate(({ targetText, scopeSelector }) => {
     const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
     const isVisible = element => {
       if (!element) return false;
@@ -773,7 +908,34 @@ async function clickButtonByText(page, text, options = {}) {
         style.visibility !== 'hidden' &&
         style.display !== 'none';
     };
-    const buttons = Array.from(document.querySelectorAll('button, [role="button"]'))
+    const scope = scopeSelector ? document.querySelector(scopeSelector) : document;
+    if (!scope) return [];
+    return Array.from(scope.querySelectorAll('button, [role="button"]'))
+      .filter(isVisible)
+      .map((button, index) => ({
+        index,
+        text: normalize(button.innerText || button.textContent || ''),
+        disabled: Boolean(button.disabled || button.getAttribute('aria-disabled') === 'true'),
+      }))
+      .filter(button => button.text === targetText);
+  }, { targetText: text, scopeSelector: options.scopeSelector || INTERVENTION_WIDGET_SELECTOR });
+}
+
+async function clickButtonByText(page, text, options = {}) {
+  const clicked = await page.evaluate(({ targetText, preferLast, scopeSelector }) => {
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const isVisible = element => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.visibility !== 'hidden' &&
+        style.display !== 'none';
+    };
+    const scope = scopeSelector ? document.querySelector(scopeSelector) : document;
+    if (!scope) return false;
+    const buttons = Array.from(scope.querySelectorAll('button, [role="button"]'))
       .filter(button => isVisible(button))
       .filter(button => !button.disabled && button.getAttribute('aria-disabled') !== 'true');
     const matches = buttons.filter(button => normalize(button.innerText || button.textContent || '') === targetText);
@@ -782,15 +944,19 @@ async function clickButtonByText(page, text, options = {}) {
     target.scrollIntoView({ block: 'center', inline: 'center' });
     target.click();
     return true;
-  }, { targetText: text, preferLast: Boolean(options.preferLast) });
+  }, {
+    targetText: text,
+    preferLast: Boolean(options.preferLast),
+    scopeSelector: options.scopeSelector || INTERVENTION_WIDGET_SELECTOR,
+  });
   if (!clicked) {
-    const available = await visibleEnabledButtons(page, text);
+    const available = await visibleEnabledButtons(page, text, options);
     throw new Error(`Could not click button "${text}". Matching visible enabled buttons: ${JSON.stringify(available)}`);
   }
 }
 
-async function fillFirstVisibleTextarea(page, value) {
-  const filled = await page.evaluate(text => {
+async function fillFirstVisibleTextarea(page, value, options = {}) {
+  const filled = await page.evaluate(({ text, scopeSelector }) => {
     const isVisible = element => {
       if (!element) return false;
       const rect = element.getBoundingClientRect();
@@ -800,7 +966,9 @@ async function fillFirstVisibleTextarea(page, value) {
         style.visibility !== 'hidden' &&
         style.display !== 'none';
     };
-    const textarea = Array.from(document.querySelectorAll('textarea')).find(isVisible);
+    const scope = scopeSelector ? document.querySelector(scopeSelector) : document;
+    if (!scope) return false;
+    const textarea = Array.from(scope.querySelectorAll('textarea')).find(isVisible);
     if (!textarea) return false;
     textarea.scrollIntoView({ block: 'center', inline: 'center' });
     textarea.focus();
@@ -813,7 +981,7 @@ async function fillFirstVisibleTextarea(page, value) {
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
     textarea.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
-  }, value);
+  }, { text: value, scopeSelector: options.scopeSelector || INTERVENTION_WIDGET_SELECTOR });
   if (!filled) {
     throw new Error('Could not find a visible textarea to fill.');
   }
@@ -827,11 +995,6 @@ async function waitForText(page, text, timeout = 45_000) {
   );
 }
 
-async function assertTextPresent(page, text) {
-  const found = await page.evaluate(targetText => Boolean(document.body && document.body.innerText.includes(targetText)), text);
-  if (!found) throw new Error(`Expected text not found: ${text}`);
-}
-
 async function assertTextAbsent(page, text) {
   const found = await page.evaluate(targetText => Boolean(document.body && document.body.innerText.includes(targetText)), text);
   if (found) throw new Error(`Unexpected text found: ${text}`);
@@ -842,12 +1005,350 @@ async function assertButtonAbsent(page, text) {
   if (buttons.length) throw new Error(`Unexpected enabled button "${text}" was visible.`);
 }
 
+async function waitForEnabledButton(page, text, timeoutMs = 45_000) {
+  return waitUntil(async () => {
+    const buttons = await visibleEnabledButtons(page, text);
+    return buttons.length ? buttons : null;
+  }, `enabled button "${text}"`, timeoutMs);
+}
+
+async function getRationaleTextareaState(page) {
+  return page.evaluate(scopeSelector => {
+    const scope = document.querySelector(scopeSelector);
+    const textarea = scope?.querySelector(
+      'textarea[placeholder="Summarize why these interventions are needed and expected outcomes."]'
+    );
+    if (!textarea) return null;
+    const rect = textarea.getBoundingClientRect();
+    const style = window.getComputedStyle(textarea);
+    return {
+      disabled: Boolean(textarea.disabled),
+      readOnly: Boolean(textarea.readOnly),
+      value: textarea.value,
+      visible:
+        rect.width > 0 &&
+        rect.height > 0 &&
+        style.visibility !== 'hidden' &&
+        style.display !== 'none',
+    };
+  }, INTERVENTION_WIDGET_SELECTOR);
+}
+
+async function navigateToRationaleStep(page) {
+  for (let index = 0; index < 8; index += 1) {
+    const rationale = await getRationaleTextareaState(page);
+    if (rationale?.visible) return rationale;
+    const nextButtons = await visibleEnabledButtons(page, 'Next');
+    if (!nextButtons.length) break;
+    await clickButtonByText(page, 'Next');
+    await delay(300);
+  }
+
+  const debugState = await page.evaluate(scopeSelector => {
+    const scope = document.querySelector(scopeSelector);
+    if (!scope) return { widgetPresent: false };
+    const isVisible = element => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    return {
+      widgetPresent: true,
+      text: String(scope.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 1_000),
+      textareas: Array.from(scope.querySelectorAll('textarea'))
+        .filter(isVisible)
+        .map(element => ({
+          placeholder: element.getAttribute('placeholder') || '',
+          disabled: Boolean(element.disabled),
+          readOnly: Boolean(element.readOnly),
+        })),
+    };
+  }, INTERVENTION_WIDGET_SELECTOR);
+  throw new Error(`Could not reach intervention rationale step: ${JSON.stringify(debugState)}`);
+}
+
+async function getVisibleWizardContentSignature(page) {
+  return page.evaluate(scopeSelector => {
+    const scope = document.querySelector(scopeSelector);
+    if (!scope) return null;
+    const isVisible = element => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.visibility !== 'hidden' &&
+        style.display !== 'none';
+    };
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+    return Array.from(scope.querySelectorAll('h1, h2, h3, h4, legend, label, input, textarea, select'))
+      .filter(isVisible)
+      .map(element => [
+        element.tagName,
+        normalize(element.innerText || element.textContent || ''),
+        normalize(element.getAttribute('name') || ''),
+        normalize(element.getAttribute('placeholder') || ''),
+        normalize(element.value || ''),
+        Boolean(element.disabled),
+        Boolean(element.readOnly),
+      ].join('|'))
+      .join('\n');
+  }, INTERVENTION_WIDGET_SELECTOR);
+}
+
+async function assertReturnedBodyReadOnly(page, state) {
+  const rationale = await navigateToRationaleStep(page);
+  if (!rationale.disabled && !rationale.readOnly) {
+    throw new Error('Expected the returned intervention rationale to be read-only for a non-submitter.');
+  }
+  const readOnlyButtons = await navigateToReviewStep(page, {
+    expectedActionText: 'Read only',
+    expectedDisabled: null,
+  });
+  if (readOnlyButtons.some(button => !button.disabled)) {
+    await clickButtonByText(page, 'Read only');
+  }
+  await assertButtonAbsent(page, 'Save progress');
+  await assertButtonAbsent(page, 'Resubmit for review');
+  await delay(250);
+  if (state.mutations.interventionUpdates.length !== 0) {
+    throw new Error('A read-only returned intervention unexpectedly issued a PATCH request.');
+  }
+}
+
+async function editReturnedRationale(page, value) {
+  const rationale = await navigateToRationaleStep(page);
+  if (rationale.disabled || rationale.readOnly) {
+    throw new Error('Expected the recorded submitter to have an editable returned intervention rationale.');
+  }
+  const selector = `${INTERVENTION_WIDGET_SELECTOR} textarea[placeholder="Summarize why these interventions are needed and expected outcomes."]`;
+  await page.evaluate(targetSelector => {
+    document.querySelector(targetSelector)?.scrollIntoView({ block: 'center', inline: 'center' });
+  }, selector);
+  await page.click(selector);
+  await page.keyboard.down('Control');
+  await page.keyboard.press('A');
+  await page.keyboard.up('Control');
+  await page.keyboard.type(value);
+  await waitUntil(async () => {
+    const nextState = await getRationaleTextareaState(page);
+    return nextState?.value === value ? nextState : null;
+  }, 'edited intervention rationale value');
+  await delay(150);
+}
+
+async function navigateToReviewStep(
+  page,
+  { expectedActionText = 'Resubmit for review', expectedDisabled = false } = {}
+) {
+  for (let index = 0; index < 8; index += 1) {
+    const actionButtons = await visibleButtonStates(page, expectedActionText);
+    const expectedButtons = expectedDisabled === null
+      ? actionButtons
+      : actionButtons.filter(button => button.disabled === expectedDisabled);
+    if (expectedButtons.length) return expectedButtons;
+
+    const beforeSignature = await getVisibleWizardContentSignature(page);
+    await waitForEnabledButton(page, 'Next');
+    await clickButtonByText(page, 'Next');
+    await waitUntil(async () => {
+      const nextActionButtons = await visibleButtonStates(page, expectedActionText);
+      if (
+        expectedDisabled === null
+          ? nextActionButtons.length > 0
+          : nextActionButtons.some(button => button.disabled === expectedDisabled)
+      ) return true;
+      const afterSignature = await getVisibleWizardContentSignature(page);
+      return afterSignature && afterSignature !== beforeSignature;
+    }, 'intervention wizard step transition', 10_000);
+    await delay(100);
+  }
+
+  throw new Error(
+    `Could not reach intervention review action "${expectedActionText}" (disabled=${expectedDisabled}).`
+  );
+}
+
+async function assertReturnedSubmitterIdentity(intervention, expectedStaffProfileId) {
+  const createdByStaffProfileId =
+    intervention.createdByStaffProfileId || intervention.created_by_staff_profile_id || null;
+  const submittedByStaffProfileId =
+    intervention.reviewWorkflow?.submittedByStaffProfileId ||
+    intervention.review_workflow?.submitted_by_staff_profile_id ||
+    null;
+  if (Number(createdByStaffProfileId) !== Number(expectedStaffProfileId)) {
+    throw new Error(
+      `Expected createdByStaffProfileId ${expectedStaffProfileId}, got ${createdByStaffProfileId}`
+    );
+  }
+  if (Number(submittedByStaffProfileId) !== Number(expectedStaffProfileId)) {
+    throw new Error(
+      `Expected submittedByStaffProfileId ${expectedStaffProfileId}, got ${submittedByStaffProfileId}`
+    );
+  }
+}
+
+function requireSingleReturnedCorrectionAutosave(state, label) {
+  const correctionAutosaves = state.mutations.interventionUpdates.filter(
+    entry => String(entry.body.status || '').trim().toLowerCase() === 'changes_requested'
+  );
+  if (correctionAutosaves.length !== 1) {
+    throw new Error(
+      `Expected one ${label} autosave while traversing the returned wizard, got ${correctionAutosaves.length}.`
+    );
+  }
+  return correctionAutosaves[0];
+}
+
+async function assertRecordedSubmitterCanEditAndResubmit(
+  page,
+  state,
+  { rationale, completeSeparateRmSignoff = false } = {}
+) {
+  await assertReturnedSubmitterIdentity(state.intervention, state.profile.staffProfileId);
+  await waitForText(page, 'Changes requested');
+  await editReturnedRationale(page, rationale);
+  await navigateToReviewStep(page);
+
+  await waitUntil(
+    () => state.mutations.interventionUpdates.find(entry => entry.body.status === 'changes_requested'),
+    'returned intervention autosave'
+  );
+  const saveUpdate = requireSingleReturnedCorrectionAutosave(state, 'returned intervention correction');
+  if (saveUpdate.body.metadata?.rationale !== rationale) {
+    throw new Error(`Returned intervention autosave lost the edited rationale: ${saveUpdate.body.metadata?.rationale}`);
+  }
+  await assertButtonAbsent(page, 'Submit for final decision');
+  if (state.mutations.reviewActions.length !== 0) {
+    throw new Error('A returned submitter reached an RM review action before resubmitting.');
+  }
+
+  await clickButtonByText(page, 'Resubmit for review');
+  const submitUpdate = await waitUntil(
+    () => state.mutations.interventionUpdates.find(entry => entry.body.status === 'submitted'),
+    'returned intervention resubmit'
+  );
+  if (submitUpdate.body.metadata?.rationale !== rationale) {
+    throw new Error(`Returned intervention resubmit lost the edited rationale: ${submitUpdate.body.metadata?.rationale}`);
+  }
+  if (state.intervention.reviewWorkflow?.currentStage !== REVIEW_STAGES.rmReview) {
+    throw new Error(
+      `Expected returned intervention to re-enter RM review, got ${state.intervention.reviewWorkflow?.currentStage}`
+    );
+  }
+
+  const submittedSubject = state.isRevision ? 'Intervention change' : 'Intervention proposal';
+  await waitForText(page, `${submittedSubject} submitted to Regional Manager review.`);
+
+  if (!completeSeparateRmSignoff) {
+    await assertButtonAbsent(page, 'Submit for final decision');
+    return;
+  }
+
+  await navigateToReviewStep(page, {
+    expectedActionText: 'Submit for final decision',
+    expectedDisabled: false,
+  });
+  if (state.mutations.reviewActions.length !== 0) {
+    throw new Error('Regional Manager sign-off was not kept as a separate post-resubmission action.');
+  }
+  await clickButtonByText(page, 'Submit for final decision');
+  const reviewAction = await waitUntil(
+    () => state.mutations.reviewActions[0],
+    'separate Regional Manager sign-off'
+  );
+  if (reviewAction.body.action !== REVIEW_ACTIONS.rmSubmitToNwac) {
+    throw new Error(`Expected separate RM sign-off action, got ${reviewAction.body.action}`);
+  }
+  if (state.intervention.reviewWorkflow?.currentStage !== REVIEW_STAGES.nwacReview) {
+    throw new Error(
+      `Expected separate RM sign-off to enter final-decision review, got ${state.intervention.reviewWorkflow?.currentStage}`
+    );
+  }
+  await waitForText(page, 'Intervention request submitted for final decision.');
+}
+
+function buildReturnedReadOnlyScenario({ name, role, profile, isRevision = false }) {
+  return {
+    name,
+    role,
+    profile,
+    step: 'rationale',
+    intervention: {
+      id: isRevision ? REVISION_ID : PROPOSAL_ID,
+      status: 'changes_requested',
+      stage: REVIEW_STAGES.returnedToSubmitter,
+      amount: 150,
+      isRevision,
+      createdByStaffProfileId: STAFF_PROFILE_IDS.coordinatorSubmitter,
+      submittedByStaffProfileId: STAFF_PROFILE_IDS.coordinatorSubmitter,
+      submittedByRole: 'ISET Coordinator',
+      rmReviewNote: 'The original submitter must correct this request.',
+    },
+    assert: async (page, state) => {
+      await assertReturnedSubmitterIdentity(
+        state.intervention,
+        STAFF_PROFILE_IDS.coordinatorSubmitter
+      );
+      await assertReturnedBodyReadOnly(page, state);
+    },
+  };
+}
+
+function buildSystemAdministratorOverrideScenario({ name, isRevision = false }) {
+  const rationale = isRevision
+    ? 'System Administrator support correction for the returned intervention change.'
+    : 'System Administrator support correction for the returned intervention proposal.';
+  return {
+    name,
+    role: 'System Administrator',
+    step: 'rationale',
+    intervention: {
+      id: isRevision ? REVISION_ID : PROPOSAL_ID,
+      status: 'changes_requested',
+      stage: REVIEW_STAGES.returnedToSubmitter,
+      amount: 150,
+      isRevision,
+      createdByStaffProfileId: STAFF_PROFILE_IDS.coordinatorSubmitter,
+      submittedByStaffProfileId: STAFF_PROFILE_IDS.coordinatorSubmitter,
+      submittedByRole: 'ISET Coordinator',
+    },
+    assert: async (page, state) => {
+      await assertReturnedSubmitterIdentity(
+        state.intervention,
+        STAFF_PROFILE_IDS.coordinatorSubmitter
+      );
+      await editReturnedRationale(page, rationale);
+      await navigateToReviewStep(page);
+      await waitUntil(
+        () => state.mutations.interventionUpdates.find(entry => entry.body.status === 'changes_requested'),
+        'System Administrator support save'
+      );
+      const update = requireSingleReturnedCorrectionAutosave(
+        state,
+        'System Administrator support correction'
+      );
+      if (update.body.metadata?.rationale !== rationale) {
+        throw new Error(`System Administrator support save lost the edited rationale: ${update.body.metadata?.rationale}`);
+      }
+      if (state.mutations.reviewActions.length !== 0) {
+        throw new Error('System Administrator support edit unexpectedly performed a business review action.');
+      }
+    },
+  };
+}
+
 function buildScenarioState(scenario) {
   const role = scenario.role;
+  const defaultProfile = roleProfiles[role] || roleProfiles['ISET Coordinator'];
+  const profile = {
+    ...defaultProfile,
+    ...(scenario.profile || {}),
+  };
   const intervention = buildIntervention(scenario.intervention);
   return {
     name: scenario.name,
     role,
+    profile,
     isRevision: Boolean(scenario.intervention?.isRevision),
     amount: scenario.intervention?.amount || 150,
     intervention,
@@ -907,9 +1408,10 @@ async function runScenario(browser, args, scenario) {
   const screenshotPath = path.join(args.screenshotDir, `${scenario.name}.png`);
   try {
     await installApiStubs(page, state);
-    await installBrowserSession(page, args.frontendBase, state.role);
+    await installBrowserSession(page, args.frontendBase, state.role, state.profile);
     await page.goto(buildUrl(args.frontendBase, state.intervention.id, scenario.step), { waitUntil: 'domcontentloaded' });
     await scenario.assert(page, state);
+    await assertNonPollingReferenceCallsSettle(state);
     await delay(400);
     await page.screenshot({ path: screenshotPath, fullPage: true });
   } catch (error) {
@@ -942,6 +1444,7 @@ const scenarios = [
       amount: 150,
       isRevision: false,
       withReviewWorkflow: false,
+      createdByStaffProfileId: STAFF_PROFILE_IDS.regionalManagerSubmitter,
     },
     assert: async (page, state) => {
       await waitForText(page, 'Propose new intervention');
@@ -978,6 +1481,7 @@ const scenarios = [
       amount: 150,
       isRevision: true,
       withReviewWorkflow: false,
+      createdByStaffProfileId: STAFF_PROFILE_IDS.regionalManagerSubmitter,
     },
     assert: async (page, state) => {
       await waitForText(page, 'Draft a proposed change to');
@@ -1102,18 +1606,21 @@ const scenarios = [
     },
   },
   {
-    name: 'submitter-sees-returned-notes',
+    name: 'coordinator-submitter-edits-and-resubmits-returned-new-proposal',
     role: 'ISET Coordinator',
-    step: 'review',
+    step: 'rationale',
     intervention: {
       id: PROPOSAL_ID,
       status: 'changes_requested',
       stage: REVIEW_STAGES.returnedToSubmitter,
       amount: 25050,
+      createdByStaffProfileId: STAFF_PROFILE_IDS.coordinatorSubmitter,
+      submittedByStaffProfileId: STAFF_PROFILE_IDS.coordinatorSubmitter,
+      submittedByRole: 'ISET Coordinator',
       rmReviewNote: 'Drop it below 20K.',
       nwacDecisionNote: 'It is above the limit for my approval.',
     },
-    assert: async page => {
+    assert: async (page, state) => {
       await waitForText(page, 'Propose new intervention');
       await waitForText(page, 'Changes requested');
       await waitForText(page, 'Decision Maker note');
@@ -1122,6 +1629,132 @@ const scenarios = [
       await waitForText(page, 'Drop it below 20K.');
       await assertTextAbsent(page, 'Resubmit for approval');
       await assertTextAbsent(page, 'Madison/Shelley');
+      await assertRecordedSubmitterCanEditAndResubmit(page, state, {
+        rationale: 'Coordinator corrected the returned new intervention proposal.',
+      });
+    },
+  },
+  {
+    name: 'coordinator-submitter-edits-and-resubmits-returned-revision',
+    role: 'ISET Coordinator',
+    step: 'rationale',
+    intervention: {
+      id: REVISION_ID,
+      status: 'changes_requested',
+      stage: REVIEW_STAGES.returnedToSubmitter,
+      amount: 150,
+      isRevision: true,
+      createdByStaffProfileId: STAFF_PROFILE_IDS.coordinatorSubmitter,
+      submittedByStaffProfileId: STAFF_PROFILE_IDS.coordinatorSubmitter,
+      submittedByRole: 'ISET Coordinator',
+      rmReviewNote: 'Update the intervention change rationale.',
+      nwacDecisionNote: 'Clarify why this intervention change is needed.',
+    },
+    assert: async (page, state) => {
+      await waitForText(page, 'Draft a proposed change to');
+      await waitForText(page, 'Changes requested');
+      await assertRecordedSubmitterCanEditAndResubmit(page, state, {
+        rationale: 'Coordinator corrected the returned intervention change.',
+      });
+    },
+  },
+  buildReturnedReadOnlyScenario({
+    name: 'different-coordinator-cannot-edit-returned-new-proposal',
+    role: 'ISET Coordinator',
+    profile: {
+      email: 'quebec.coordinator.2@awentech.ca',
+      name: 'Different Quebec Coordinator',
+      staffProfileId: STAFF_PROFILE_IDS.otherCoordinator,
+    },
+  }),
+  buildReturnedReadOnlyScenario({
+    name: 'different-coordinator-cannot-edit-returned-revision',
+    role: 'ISET Coordinator',
+    profile: {
+      email: 'quebec.coordinator.2@awentech.ca',
+      name: 'Different Quebec Coordinator',
+      staffProfileId: STAFF_PROFILE_IDS.otherCoordinator,
+    },
+    isRevision: true,
+  }),
+  buildReturnedReadOnlyScenario({
+    name: 'different-regional-manager-cannot-edit-returned-new-proposal',
+    role: 'Regional Manager',
+    profile: {
+      email: 'quebec.manager.2@awentech.ca',
+      name: 'Different Quebec Regional Manager',
+      staffProfileId: STAFF_PROFILE_IDS.otherRegionalManager,
+    },
+  }),
+  buildReturnedReadOnlyScenario({
+    name: 'different-regional-manager-cannot-edit-returned-revision',
+    role: 'Regional Manager',
+    profile: {
+      email: 'quebec.manager.2@awentech.ca',
+      name: 'Different Quebec Regional Manager',
+      staffProfileId: STAFF_PROFILE_IDS.otherRegionalManager,
+    },
+    isRevision: true,
+  }),
+  buildReturnedReadOnlyScenario({
+    name: 'decision-maker-cannot-edit-returned-new-proposal',
+    role: 'NWAC Administrator',
+  }),
+  buildReturnedReadOnlyScenario({
+    name: 'decision-maker-cannot-edit-returned-revision',
+    role: 'NWAC Administrator',
+    isRevision: true,
+  }),
+  buildSystemAdministratorOverrideScenario({
+    name: 'system-administrator-support-override-returned-new-proposal',
+  }),
+  buildSystemAdministratorOverrideScenario({
+    name: 'system-administrator-support-override-returned-revision',
+    isRevision: true,
+  }),
+  {
+    name: 'same-regional-manager-resubmits-then-signs-off-new-proposal',
+    role: 'Regional Manager',
+    step: 'rationale',
+    intervention: {
+      id: PROPOSAL_ID,
+      status: 'changes_requested',
+      stage: REVIEW_STAGES.returnedToSubmitter,
+      amount: 150,
+      createdByStaffProfileId: STAFF_PROFILE_IDS.regionalManagerSubmitter,
+      submittedByStaffProfileId: STAFF_PROFILE_IDS.regionalManagerSubmitter,
+      submittedByRole: 'Regional Manager',
+      rmReviewNote: 'Correct the submitter-owned proposal before another RM sign-off.',
+      nwacDecisionNote: 'Decision Maker requested clearer proposal rationale.',
+    },
+    assert: async (page, state) => {
+      await assertRecordedSubmitterCanEditAndResubmit(page, state, {
+        rationale: 'Regional Manager corrected the proposal while acting as its recorded submitter.',
+        completeSeparateRmSignoff: true,
+      });
+    },
+  },
+  {
+    name: 'same-regional-manager-resubmits-then-signs-off-revision',
+    role: 'Regional Manager',
+    step: 'rationale',
+    intervention: {
+      id: REVISION_ID,
+      status: 'changes_requested',
+      stage: REVIEW_STAGES.returnedToSubmitter,
+      amount: 150,
+      isRevision: true,
+      createdByStaffProfileId: STAFF_PROFILE_IDS.regionalManagerSubmitter,
+      submittedByStaffProfileId: STAFF_PROFILE_IDS.regionalManagerSubmitter,
+      submittedByRole: 'Regional Manager',
+      rmReviewNote: 'Correct the submitter-owned change before another RM sign-off.',
+      nwacDecisionNote: 'Decision Maker requested clearer revision rationale.',
+    },
+    assert: async (page, state) => {
+      await assertRecordedSubmitterCanEditAndResubmit(page, state, {
+        rationale: 'Regional Manager corrected the revision while acting as its recorded submitter.',
+        completeSeparateRmSignoff: true,
+      });
     },
   },
   {
@@ -1203,9 +1836,21 @@ async function main() {
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   });
 
+  const selectedScenarios = args.scenarioNames.size
+    ? scenarios.filter(scenario => args.scenarioNames.has(scenario.name))
+    : scenarios;
+  const unknownScenarioNames = Array.from(args.scenarioNames)
+    .filter(name => !scenarios.some(scenario => scenario.name === name));
+  if (unknownScenarioNames.length) {
+    throw new Error(`Unknown intervention workflow smoke scenarios: ${unknownScenarioNames.join(', ')}`);
+  }
+  if (!selectedScenarios.length) {
+    throw new Error('No intervention workflow smoke scenarios selected.');
+  }
+
   const results = [];
   try {
-    for (const scenario of scenarios) {
+    for (const scenario of selectedScenarios) {
       results.push(await runScenario(browser, args, scenario));
     }
   } finally {

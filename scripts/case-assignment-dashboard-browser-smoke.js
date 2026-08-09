@@ -474,7 +474,12 @@ async function main() {
   page.on('console', message => {
     const text = message.text();
     if (/ReferenceError|TypeError|Unhandled|Failed to load|failed with status|CORS|ERR_FAILED|Unauthorized/i.test(text)) {
-      failures.push({ type: 'console', level: message.type(), text: text.slice(0, 500) });
+      failures.push({
+        type: 'console',
+        level: message.type(),
+        text: text.slice(0, 500),
+        location: message.location(),
+      });
     }
   });
   page.on('requestfailed', request => {
@@ -492,6 +497,13 @@ async function main() {
     const url = response.url();
     if (url.includes('/api/') && response.status() >= 400) {
       failures.push({ type: 'api', status: response.status(), url });
+    } else if (response.status() >= 400) {
+      failures.push({
+        type: 'resource',
+        status: response.status(),
+        url,
+        resourceType: response.request().resourceType(),
+      });
     }
   });
 

@@ -103,14 +103,9 @@ export const INTERVENTION_ACTIVATABLE_STATUSES = new Set(["approved"]);
 
 export const INTERVENTION_CLOSABLE_STATUSES = new Set(["in_progress", "suspended"]);
 
-export const INTERVENTION_DELETABLE_STATUSES = new Set([
-  "draft",
-  "submitted",
-  "in_review",
-  "changes_requested",
-  "approved",
-  "rejected",
-]);
+// Submitted and finally decided packets are evidence records. Only an
+// unsubmitted draft may be offered through the ordinary delete workflow.
+export const INTERVENTION_DELETABLE_STATUSES = new Set(["draft"]);
 
 export const normalizeInterventionStatus = (value, fallback = null) => {
   if (value === null || typeof value === "undefined") return fallback;
@@ -137,6 +132,15 @@ export const normalizeInterventionDeliveryStatus = (value, fallback = null) => {
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
   return CANONICAL_INTERVENTION_DELIVERY_STATUS_SET.has(normalized) ? normalized : fallback;
+};
+
+export const isInterventionFinalDecisionRecorded = record => {
+  if (!record || typeof record !== "object") return false;
+  const workflow = record.reviewWorkflow || record.review_workflow || null;
+  if (!workflow || typeof workflow !== "object") return false;
+  return normalizeWorkflowKey(
+    workflow.currentStage ?? workflow.current_stage ?? null
+  ) === "final_decision_recorded";
 };
 
 export const resolveInterventionStateFields = (record = {}, { fallbackStatus = null } = {}) => {
