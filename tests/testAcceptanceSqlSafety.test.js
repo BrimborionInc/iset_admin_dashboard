@@ -123,8 +123,11 @@ describe('TEST acceptance SQL safety wiring', () => {
     expect(postflight).toContain('node scripts/path-test-runtime-metrics.js');
     expect(postflight).toContain('node scripts/path-test-migration-ledger.js');
     expect(deploy).toContain("'lib/live-mysql-schema-guard.js'");
+    expect(deploy).toContain("'lib/test-instance-aws-identity.js'");
+    expect(deploy).toContain("'applicant-scope-guard-test-smoke.js'");
     expect(deploy).toContain("'path-test-migration-ledger.js'");
     expect(deploy).toContain("'path-test-runtime-metrics.js'");
+    expect(deploy).toContain("'r1-intake-completion-test-smoke.js'");
     expect(metrics).toContain("const { createLiveMysqlSchemaGuard } = require('./lib/live-mysql-schema-guard');");
     expect(ledger).toContain("const { createLiveMysqlSchemaGuard } = require('./lib/live-mysql-schema-guard');");
     expect(metrics.indexOf('await guard.preflight();')).toBeLessThan(
@@ -135,6 +138,8 @@ describe('TEST acceptance SQL safety wiring', () => {
     );
     expect(metrics).toContain("version: '8.0.42'");
     expect(ledger).toContain("version: '8.0.42'");
+    expect(ledger).toContain('summarizeMigrationLedger(result)');
+    expect(postflight).not.toContain('report.rows');
   });
 
   test('canonical guard validates the finished runtime metrics SQL before execution', async () => {

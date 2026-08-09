@@ -5,6 +5,11 @@ const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
 const { createLiveMysqlSchemaGuard } = require('./lib/live-mysql-schema-guard');
+const {
+  assertNoMigrationChecksumDrift,
+  classifyMigrationFailures,
+  getCanonicalMigrationFiles,
+} = require('../src/lib/sharedSchemaMigrationRunner');
 
 const EXPECTED_TEST_IDENTITY = Object.freeze({
   database: 'iset_intake',
@@ -95,10 +100,37 @@ async function readMigrationLedger({ envFile }) {
   }
 }
 
+function summarizeMigrationLedger(result) {
+  const migrations = getCanonicalMigrationFiles();
+  const rows = Array.isArray(result?.rows) ? result.rows : [];
+  assertNoMigrationChecksumDrift(migrations, rows);
+  const successful = new Set(
+    rows
+      .filter(row => Number(row.success) === 1)
+      .map(row => `${row.filename}|${row.checksum}`)
+  );
+  const pendingCount = migrations.filter(
+    migration => !successful.has(`${migration.file}|${migration.checksum}`)
+  ).length;
+  const failures = classifyMigrationFailures(migrations, rows);
+  return {
+    schemaVersion: result.schemaVersion,
+    status: result.status,
+    trackingTableExists: result.trackingTableExists,
+    canonicalCount: migrations.length,
+    ledgerRowCount: rows.length,
+    pendingCount,
+    failureCount: failures.unresolved.length,
+    historicalFailureCount: failures.historical.length,
+    schemaSafety: result.schemaSafety,
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const result = await readMigrationLedger(args);
-  console.log(args.json ? JSON.stringify(result) : JSON.stringify(result.rows));
+  const summary = summarizeMigrationLedger(result);
+  console.log(args.json ? JSON.stringify(summary) : JSON.stringify(summary));
 }
 
 if (require.main === module) {
@@ -114,4 +146,5 @@ module.exports = {
   createMigrationLedgerGuard,
   parseArgs,
   readEnv,
+  summarizeMigrationLedger,
 };

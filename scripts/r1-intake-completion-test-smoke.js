@@ -6,10 +6,10 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { createLiveSchemaGuard } = require('./two-step-review-test-smoke');
+const { discoverVerifiedTestInstanceAwsIdentity } = require('./lib/test-instance-aws-identity');
 
 const TEST_ACCOUNT_ID = '124355655255';
 const EXPECTED_AWS_ARN = 'arn:aws:iam::124355655255:user/CODEX_CLI_Admin';
-const EXPECTED_REMOTE_AWS_ARN = 'arn:aws:iam::124355655255:user/SES_backend';
 const DEFAULT_PROFILE = 'nwac-test';
 const DEFAULT_REGION = 'ca-central-1';
 const DEFAULT_BUCKET = 'nwac-test-artifacts';
@@ -332,12 +332,17 @@ async function main() {
 
   try {
     const instanceId = discoverInstanceId(options);
+    const remoteAwsIdentity = await discoverVerifiedTestInstanceAwsIdentity({
+      expectedAccountId: TEST_ACCOUNT_ID,
+      issueCommand: (commands, comment) => sendRemoteCommand(instanceId, commands, comment, options),
+      waitForCommand: commandId => waitForCommand(instanceId, commandId, options),
+    });
     console.log(`[r1-intake-test] TEST identity ${identity.Arn}`);
     console.log(`[r1-intake-test] Using ${instanceId}`);
     const runRemote = async ({ preflightOnly }) => {
       const commands = [
         'set -euo pipefail',
-        `test "$(aws sts get-caller-identity --query Arn --output text --region ${shellQuote(options.region)})" = ${shellQuote(EXPECTED_REMOTE_AWS_ARN)}`,
+        `test "$(aws sts get-caller-identity --query Arn --output text --region ${shellQuote(options.region)})" = ${shellQuote(remoteAwsIdentity.arn)}`,
         'cd /opt/nwac/portal',
         [
           `FIXTURE_STAMP=${shellQuote(preflightOnly ? `${stamp}-preflight` : stamp)}`,

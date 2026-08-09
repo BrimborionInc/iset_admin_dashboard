@@ -32,13 +32,16 @@ const ADMIN_SUPPORT_SCRIPT_FILES = [
   'application-assessment-backfill.js',
   'application-assessment-context-backfill.js',
   'application-assessment-option-b-smoke.js',
+  'applicant-scope-guard-test-smoke.js',
   'cfa-signing-schema-preflight.js',
   'lib/live-mysql-schema-guard.js',
+  'lib/test-instance-aws-identity.js',
   'path-test-migration-ledger.js',
   'path-test-runtime-metrics.js',
   'payments-workflow-smoke.js',
   'privacy-route-denial-smoke.js',
   'prod-repair-feedback-173.js',
+  'r1-intake-completion-test-smoke.js',
   'two-step-review-test-smoke.js',
 ];
 const RELEASE_QUALIFICATION_INVENTORY = path.join(REPO_ROOT, 'docs', 'testing', 'release-coverage-inventory.json');

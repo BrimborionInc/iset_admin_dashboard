@@ -11,10 +11,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
+const { discoverVerifiedTestInstanceAwsIdentity } = require('./lib/test-instance-aws-identity');
 
 const EXPECTED_AWS_ACCOUNT = '124355655255';
 const EXPECTED_AWS_ARN = 'arn:aws:iam::124355655255:user/CODEX_CLI_Admin';
-const EXPECTED_REMOTE_AWS_ARN = 'arn:aws:iam::124355655255:user/SES_backend';
 const DEFAULT_PROFILE = 'nwac-test';
 const DEFAULT_REGION = 'ca-central-1';
 const DEFAULT_BUCKET = 'nwac-test-artifacts';
@@ -194,12 +194,17 @@ async function main() {
   const remoteKey = `ssm-scripts/cfa-signing-smoke-${suffix}.js`;
   const remotePath = `/opt/nwac/portal/scripts/cfa-signing-smoke-${suffix}.js`;
   const instanceId = discoverInstanceId(options);
+  const remoteAwsIdentity = await discoverVerifiedTestInstanceAwsIdentity({
+    expectedAccountId: EXPECTED_AWS_ACCOUNT,
+    issueCommand: commands => sendCommand(instanceId, commands, options),
+    waitForCommand: commandId => waitForCommand(instanceId, commandId, options),
+  });
   let report = null;
   let scriptUploaded = false;
   try {
     const preflightCommandId = sendCommand(instanceId, [
       'set -euo pipefail',
-      `test "$(aws sts get-caller-identity --query Arn --output text --region ${shellQuote(options.region)})" = ${shellQuote(EXPECTED_REMOTE_AWS_ARN)}`,
+      `test "$(aws sts get-caller-identity --query Arn --output text --region ${shellQuote(options.region)})" = ${shellQuote(remoteAwsIdentity.arn)}`,
       [
         'node', shellQuote('/opt/nwac/admin-dashboard/scripts/cfa-signing-schema-preflight.js'),
         '--env-file', shellQuote('/opt/nwac/portal/.env.test'),
@@ -243,7 +248,7 @@ async function main() {
         '--expected-db-principal', shellQuote(EXPECTED_TEST_DB_PRINCIPAL),
         '--expected-db-version', shellQuote(EXPECTED_TEST_DB_VERSION),
         '--expected-aws-account', shellQuote(EXPECTED_AWS_ACCOUNT),
-        '--expected-aws-arn', shellQuote(EXPECTED_REMOTE_AWS_ARN),
+        '--expected-aws-arn', shellQuote(remoteAwsIdentity.arn),
         '--applicant-email', shellQuote(applicant.email),
         '--applicant-password', shellQuote(applicant.password),
         '--applicant-sub', shellQuote(applicant.sub),

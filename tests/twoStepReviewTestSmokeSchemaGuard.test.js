@@ -551,4 +551,16 @@ describe('two-step TEST smoke live-schema guard', () => {
     expect(source).not.toContain('DATE_ADD(UTC_TIMESTAMP()');
     expect(source).toContain('AS \\`submission_id\\`');
   });
+
+  test('application assessment smoke supplies required EI evidence before submission', () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '..', 'scripts', 'two-step-review-test-smoke.js'),
+      'utf8'
+    );
+    const evidenceUpload = source.indexOf("'ei_verification',\n        'EI verification'");
+    const submitChecklist = source.indexOf('await satisfySubmitChecklist(auth.coordinator);');
+
+    expect(evidenceUpload).toBeGreaterThan(-1);
+    expect(submitChecklist).toBeGreaterThan(evidenceUpload);
+  });
 });

@@ -2,11 +2,6 @@
 
 const path = require('path');
 const { spawnSync } = require('child_process');
-const {
-  assertNoMigrationChecksumDrift,
-  classifyMigrationFailures,
-  getCanonicalMigrationFiles,
-} = require('../src/lib/sharedSchemaMigrationRunner');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const EXPECTED_ACCOUNT_ID = '124355655255';
@@ -202,17 +197,11 @@ function runSchemaPlan(args, instanceId) {
   if (report.status !== 'passed' || !report.schemaSafety?.preflightComplete) {
     throw new Error(`TEST migration ledger schema proof was incomplete: ${JSON.stringify(report).slice(0, 1000)}`);
   }
-  const migrations = getCanonicalMigrationFiles();
-  const rows = Array.isArray(report.rows) ? report.rows : [];
-  assertNoMigrationChecksumDrift(migrations, rows);
-  const successful = new Set(
-    rows
-      .filter(row => Number(row.success) === 1)
-      .map(row => `${row.filename}|${row.checksum}`)
-  );
-  const pendingCount = migrations.filter(migration => !successful.has(`${migration.file}|${migration.checksum}`)).length;
-  const failures = classifyMigrationFailures(migrations, rows);
-  const failureCount = failures.unresolved.length;
+  const pendingCount = Number(report.pendingCount);
+  const failureCount = Number(report.failureCount);
+  if (!Number.isInteger(pendingCount) || !Number.isInteger(failureCount)) {
+    throw new Error('TEST migration ledger summary was incomplete.');
+  }
   if (pendingCount !== 0) throw new Error(`TEST has ${pendingCount} pending canonical migration(s)`);
   if (failureCount !== 0) throw new Error(`TEST migration ledger has ${failureCount} failed attempt(s)`);
   return {

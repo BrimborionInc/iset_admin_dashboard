@@ -5741,6 +5741,20 @@ function remoteRunner() {
   async function runApplicationAssessmentWorkflow(auth) {
     const caseId = fixture.cases.application;
     const applicationId = fixture.applications.application;
+    const eiEvidencePath = `/tmp/two-step-review-${config.stamp}-ei-verification.pdf`;
+    makePdf(eiEvidencePath, 'Two-step smoke EI verification');
+    try {
+      await uploadDocument(
+        auth.manager,
+        eiEvidencePath,
+        'ei_verification',
+        'EI verification',
+        caseId,
+        applicationId
+      );
+    } finally {
+      fs.rmSync(eiEvidencePath, { force: true });
+    }
     await satisfySubmitChecklist(auth.coordinator);
 
     let state = await getApplicationState(applicationId);
