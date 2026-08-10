@@ -1,7 +1,7 @@
 # RM two-step review assurance — future PROD rollout plan
 
 Purpose: carry the DEV-qualified 2026-08-09 assurance candidate into a separate, bounded future TEST/PROD release thread without relying on this large investigation thread.
-Status: active authorized release. Clean candidate r26 passed exact-source DEV qualification and deployed to TEST, but its complete TEST acceptance remained `NO-GO` under evidence `fb3037581c4f5a6c1220bce8d065334124a00bc24b5cac72e97a3792b74f4f9d`; preserve that artifact unchanged. Bill has now explicitly authorized autonomous TEST repair/qualification and PROD deployment once every gate returns `GO`. The five r26 acceptance-tool causes are repaired locally and focused regressions pass. A fresh clean candidate must still pass full DEV, deploy to TEST, and return complete TEST `GO` before PROD. The release remains application-only: no schema, data, runtime configuration, Case 76/Application 123, or feedback `#179` mutation is authorized.
+Status: active authorized release. Clean candidate r28 passed exact-source DEV qualification and deployed successfully to TEST, but its complete TEST acceptance remained `NO-GO` under evidence `29c88525a2acd1868cd2d8074208f784c9d9b35bb3b612cd4f0a3766666efa33`; preserve that artifact unchanged. Bill has explicitly authorized autonomous TEST repair/qualification and PROD deployment only once every gate returns `GO`. The complete r28 analysis found two remaining harness-only causes: a stale application-assessment button literal and nullable-enum `NULL` admission missing from the strict live-schema guard. Focused repairs pass locally. A fresh clean candidate must still pass full DEV, deploy to TEST, and return complete TEST `GO` before PROD. The release remains application-only: no schema, data, runtime configuration, Case 76/Application 123, or feedback `#179` mutation is authorized.
 
 ## Intended release boundary
 
@@ -9,7 +9,9 @@ Clean implementation-baseline release id: `20260809-two-step-review-assurance-r2
 
 Local combined-tree qualification id: `20260809-two-step-review-assurance-r23-local-hardening`. This is not the future deployment release id because its evidence records dirty primary worktrees.
 
-Most recent deployed TEST candidate: `20260809-two-step-review-assurance-r26`. Its DEV evidence is `GO` (`68a97f3bba7a90fe0d637d7b0cb3e093517ee7d4131df4d0595f7b03aa19e6fe`); its TEST evidence is immutable `NO-GO` (`fb3037581c4f5a6c1220bce8d065334124a00bc24b5cac72e97a3792b74f4f9d`). Do not reuse r26 for the repaired tree.
+Prior deployed TEST candidate: `20260809-two-step-review-assurance-r26`. Its DEV evidence is `GO` (`68a97f3bba7a90fe0d637d7b0cb3e093517ee7d4131df4d0595f7b03aa19e6fe`); its TEST evidence is immutable `NO-GO` (`fb3037581c4f5a6c1220bce8d065334124a00bc24b5cac72e97a3792b74f4f9d`). Do not reuse r26 for the repaired tree.
+
+Most recent deployed TEST candidate: `20260809-two-step-review-assurance-r28`. Its DEV evidence is `GO` (`9c8151bf3dcf78ac896f42be9ed2af13cd496014f6c77ea73a7954365373dca9`); its TEST evidence is immutable `NO-GO` (`29c88525a2acd1868cd2d8074208f784c9d9b35bb3b612cd4f0a3766666efa33`). Do not reuse r28 for the repaired tree. The TEST admin console remains normally forwarded and healthy; portal-only idle protection was restored after the failed gate. PROD remains untouched.
 
 Expected scope:
 

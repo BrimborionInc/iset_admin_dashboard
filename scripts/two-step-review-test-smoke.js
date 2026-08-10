@@ -392,7 +392,12 @@ function createLiveSchemaGuard({
   }
 
   function validateEnumValue(owner, value) {
-    const allowedValues = schema.get(owner.table)?.columns.get(owner.column)?.allowedValues;
+    const columnProof = schema.get(owner.table)?.columns.get(owner.column);
+    if (value === null) {
+      if (columnProof?.nullable) return;
+      throw guardError('schema_guard_enum_null_unverified', `${owner.table}.${owner.column}`);
+    }
+    const allowedValues = columnProof?.allowedValues;
     if (allowedValues && !allowedValues.has(String(value))) {
       throw guardError('schema_guard_enum_value_unverified', `${owner.table}.${owner.column}=${value}`);
     }
@@ -524,6 +529,8 @@ function createLiveSchemaGuard({
         let value;
         if (expression === '?') {
           value = params[questionIndexBefore(maskedSql, valuesOpen + 1 + values[index].offset)];
+        } else if (/^NULL$/i.test(expression)) {
+          value = null;
         } else if (/^'(?:''|\\'|[^'])*'$/.test(expression)) {
           value = expression.slice(1, -1).replace(/''/g, "'").replace(/\\'/g, "'");
         } else {
@@ -563,6 +570,8 @@ function createLiveSchemaGuard({
           let value;
           if (expression === '?') {
             value = params[questionIndexBefore(maskedSql, expressionOffset)];
+          } else if (/^NULL$/i.test(expression)) {
+            value = null;
           } else if (/^'(?:''|\\'|[^'])*'$/.test(expression)) {
             value = expression.slice(1, -1).replace(/''/g, "'").replace(/\\'/g, "'");
           } else {
@@ -598,6 +607,8 @@ function createLiveSchemaGuard({
       let value;
       if (expression === '?') {
         value = params[questionIndexBefore(maskedSql, expressionOffset)];
+      } else if (/^NULL$/i.test(expression)) {
+        value = null;
       } else if (/^'(?:''|\\'|[^'])*'$/.test(expression)) {
         value = expression.slice(1, -1).replace(/''/g, "'").replace(/\\'/g, "'");
       } else {
@@ -797,6 +808,7 @@ function createLiveSchemaGuard({
         columns.set(name, {
           type: String(columnRow.Type || ''),
           collation: columnRow.Collation || null,
+          nullable: String(columnRow.Null || '').toUpperCase() === 'YES',
           allowedValues: enumValues || checkAllowedValues.get(name) || null,
         });
       }
@@ -3127,7 +3139,7 @@ function remoteRunner() {
           .filter(Boolean);
       });
       requireInvariant('application assessment: returned-to-RM UI exposes forwarding but no final-decision escalation', (
-        visibleReviewActions.includes('Forward changes to Coordinator') &&
+        visibleReviewActions.includes('Forward changes to submitter') &&
         !visibleReviewActions.includes('Submit for final decision') &&
         !visibleReviewActions.includes('Return to Coordinator')
       ), { routePath, visibleReviewActions });
@@ -3143,7 +3155,7 @@ function remoteRunner() {
         response.request().method() === 'POST' &&
         response.url() === `${config.localBaseUrl}/api/cases/${caseId}/assessment/review-workflow/action`
       ), { timeout: 60_000 });
-      await clickVisibleButton(page, 'Forward changes to Coordinator');
+      await clickVisibleButton(page, 'Forward changes to submitter');
       const response = await responsePromise;
       const requestBody = JSON.parse(response.request().postData() || '{}');
       const responseText = await response.text().catch(() => '');

@@ -30,8 +30,13 @@ function createDriver({
 } = {}) {
   const tables = {
     alpha: {
-      ddl: 'CREATE TABLE `alpha` (`id` bigint NOT NULL, `name` varchar(255) NOT NULL, `status` enum(\'active\',\'inactive\') NOT NULL, PRIMARY KEY (`id`))',
-      columns: [column('id', 'bigint'), column('name'), column('status', "enum('active','inactive')")],
+      ddl: 'CREATE TABLE `alpha` (`id` bigint NOT NULL, `name` varchar(255) NOT NULL, `status` enum(\'active\',\'inactive\') NOT NULL, `prior_status` enum(\'active\',\'inactive\') NULL, PRIMARY KEY (`id`))',
+      columns: [
+        column('id', 'bigint'),
+        column('name'),
+        column('status', "enum('active','inactive')"),
+        column('prior_status', "enum('active','inactive')", { Null: 'YES' }),
+      ],
     },
     beta: {
       ddl: 'CREATE TABLE `beta` (`id` bigint NOT NULL, `alpha_id` bigint NOT NULL, `note` varchar(255) NOT NULL, PRIMARY KEY (`id`), CONSTRAINT `fk_beta_alpha` FOREIGN KEY (`alpha_id`) REFERENCES `alpha` (`id`))',
@@ -305,6 +310,27 @@ describe('two-step TEST smoke live-schema guard', () => {
     expect(connection.execute).not.toHaveBeenCalled();
   });
 
+  test('nullable live enum metadata admits SQL and bound NULL but non-nullable enums reject it', async () => {
+    const connection = createDriver();
+    const guard = makeGuard(connection);
+    await guard.preflight();
+
+    await guard.execute(
+      'INSERT INTO alpha (id, name, status, prior_status) VALUES (?, ?, ?, NULL)',
+      [1, 'literal-null', 'active']
+    );
+    await guard.execute(
+      'INSERT INTO alpha (id, name, status, prior_status) VALUES (?, ?, ?, ?)',
+      [2, 'bound-null', 'active', null]
+    );
+    await expect(guard.execute(
+      'INSERT INTO alpha (id, name, status) VALUES (?, ?, NULL)',
+      [3, 'invalid-null']
+    )).rejects.toMatchObject({ code: 'schema_guard_enum_null_unverified' });
+
+    expect(connection.execute).toHaveBeenCalledTimes(2);
+  });
+
   test('ON DUPLICATE KEY UPDATE is validated as an INSERT assignment, not a second table', async () => {
     const connection = createDriver();
     const guard = makeGuard(connection);
@@ -424,6 +450,9 @@ describe('two-step TEST smoke live-schema guard', () => {
     expect(source).toContain('for (const candidate of regionCandidates)');
     expect(source).toContain('const fundedCandidates = [];');
     expect(source).toContain('TEST has no verified region with an active chargeable CRF funding-stream budget pot');
+    expect(source).toContain("visibleReviewActions.includes('Forward changes to submitter')");
+    expect(source).toContain("await clickVisibleButton(page, 'Forward changes to submitter');");
+    expect(source).not.toContain("visibleReviewActions.includes('Forward changes to Coordinator')");
     const remoteRunnerSource = source.slice(source.indexOf('function remoteRunner()'));
     expect(remoteRunnerSource).not.toMatch(/\b(?:LEFT|RIGHT|INNER|OUTER)?\s*JOIN\s+[A-Za-z_]/i);
     expect(remoteRunnerSource.match(/\bfetch\(/g) || []).toHaveLength(1);
