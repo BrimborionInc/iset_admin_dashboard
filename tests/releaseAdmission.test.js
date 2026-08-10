@@ -10,6 +10,10 @@ const {
   validatePrebuiltBuild,
   writeBuildManifest,
 } = require('../scripts/lib/releaseAdmission');
+const {
+  assertArchiveContains,
+  createZipFromDirectory,
+} = require('../scripts/path-deploy');
 
 function makeRepo(buildInfo = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'path-release-admission-'));
@@ -85,6 +89,27 @@ describe('release admission', () => {
     expect(source).toContain('.path-release-provenance.json');
     expect(source).toContain('qualificationEvidenceId');
     expect(source).toContain("'privacy-route-denial-smoke.js'");
+  });
+
+  test('archive-content preflight verifies required runtime and smoke scripts before upload', async () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'path-archive-preflight-'));
+    const staging = path.join(temp, 'staging');
+    const archive = path.join(temp, 'artifact.zip');
+    fs.mkdirSync(path.join(staging, 'scripts', 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(staging, 'scripts', 'smoke.js'), 'smoke');
+    fs.writeFileSync(path.join(staging, 'scripts', 'lib', 'guard.js'), 'guard');
+    await createZipFromDirectory(staging, archive);
+
+    expect(assertArchiveContains(
+      archive,
+      ['scripts/smoke.js', 'scripts/lib/guard.js'],
+      'fixture'
+    )).toEqual(expect.objectContaining({ status: 'passed', component: 'fixture' }));
+    expect(() => assertArchiveContains(
+      archive,
+      ['scripts/missing-runtime.js'],
+      'fixture'
+    )).toThrow('missing required runtime/test content');
   });
 
   test('TEST portal preflight builds outside tracked portal output and cleans it after the run', () => {

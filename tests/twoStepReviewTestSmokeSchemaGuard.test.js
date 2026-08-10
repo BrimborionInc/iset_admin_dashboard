@@ -347,6 +347,29 @@ describe('two-step TEST smoke live-schema guard', () => {
     expect(connection.execute).toHaveBeenCalledTimes(1);
   });
 
+  test('strict callers prove aliases through live keyword metadata and reject unquoted aliases', async () => {
+    const connection = createDriver();
+    const guard = makeGuard(connection, ['alpha'], {
+      allowedTableAliases: ['a'],
+      allowedOutputAliases: ['safe_count'],
+    });
+    await guard.preflight();
+
+    expect(connection.query).toHaveBeenCalledWith(
+      'SELECT WORD, RESERVED FROM information_schema.KEYWORDS WHERE WORD = ?',
+      ['A']
+    );
+    expect(connection.query).toHaveBeenCalledWith(
+      'SELECT WORD, RESERVED FROM information_schema.KEYWORDS WHERE WORD = ?',
+      ['SAFE_COUNT']
+    );
+    await expect(guard.execute('SELECT a.id FROM alpha AS a')).rejects.toMatchObject({
+      code: 'schema_guard_table_alias_unquoted',
+    });
+    await guard.execute('SELECT COUNT(*) AS `safe_count` FROM alpha AS `a`');
+    expect(connection.execute).toHaveBeenCalledTimes(1);
+  });
+
   test.each([
     [
       'function name cannot masquerade as a verified table',
@@ -562,5 +585,15 @@ describe('two-step TEST smoke live-schema guard', () => {
 
     expect(evidenceUpload).toBeGreaterThan(-1);
     expect(submitChecklist).toBeGreaterThan(evidenceUpload);
+
+    const dualRoleStart = source.indexOf('async function runDualRoleApplicationAssessmentWorkflow(auth)');
+    const dualRoleEnd = source.indexOf('\n  async function ', dualRoleStart + 20);
+    const dualRoleSource = source.slice(dualRoleStart, dualRoleEnd);
+    const dualRoleUpload = dualRoleSource.indexOf("'ei_verification',\n        'EI verification'");
+    const dualRoleChecklist = dualRoleSource.indexOf("await satisfySubmitChecklist(auth.manager, 'dualRoleApplication');");
+
+    expect(dualRoleSource).toContain('auth.manager,\n        eiEvidencePath');
+    expect(dualRoleUpload).toBeGreaterThan(-1);
+    expect(dualRoleChecklist).toBeGreaterThan(dualRoleUpload);
   });
 });

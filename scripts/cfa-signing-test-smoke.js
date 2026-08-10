@@ -189,10 +189,7 @@ async function main() {
     password: randomPassword(),
     sub: null,
   };
-  const sourceScript = path.resolve(__dirname, '..', '..', 'ISET-intake', 'scripts', 'cfa-signing-smoke.js');
-  if (!fs.existsSync(sourceScript)) throw new Error(`CFA signing smoke source not found: ${sourceScript}`);
-  const remoteKey = `ssm-scripts/cfa-signing-smoke-${suffix}.js`;
-  const remotePath = `/opt/nwac/portal/scripts/cfa-signing-smoke-${suffix}.js`;
+  const remotePath = '/opt/nwac/portal/scripts/cfa-signing-smoke.js';
   const instanceId = discoverInstanceId(options);
   const remoteAwsIdentity = await discoverVerifiedTestInstanceAwsIdentity({
     expectedAccountId: EXPECTED_AWS_ACCOUNT,
@@ -200,11 +197,11 @@ async function main() {
     waitForCommand: commandId => waitForCommand(instanceId, commandId, options),
   });
   let report = null;
-  let scriptUploaded = false;
   try {
     const preflightCommandId = sendCommand(instanceId, [
       'set -euo pipefail',
       `test "$(aws sts get-caller-identity --query Arn --output text --region ${shellQuote(options.region)})" = ${shellQuote(remoteAwsIdentity.arn)}`,
+      `test -f ${shellQuote(remotePath)}`,
       [
         'node', shellQuote('/opt/nwac/admin-dashboard/scripts/cfa-signing-schema-preflight.js'),
         '--env-file', shellQuote('/opt/nwac/portal/.env.test'),
@@ -227,14 +224,34 @@ async function main() {
       throw new Error(`Remote TEST schema preflight did not fail closed: ${JSON.stringify(preflight).slice(0, 1000)}`);
     }
 
+    const portalIdentityCommandId = sendCommand(instanceId, [
+      'set -euo pipefail',
+      'cd /opt/nwac/portal',
+      [
+        'node', shellQuote(remotePath),
+        '--env-file', shellQuote('/opt/nwac/portal/.env.test'),
+        '--expected-aws-account', shellQuote(EXPECTED_AWS_ACCOUNT),
+        '--identity-only',
+        '--json',
+      ].join(' '),
+    ], options);
+    const portalIdentityInvocation = waitForCommand(instanceId, portalIdentityCommandId, options);
+    if (portalIdentityInvocation.Status !== 'Success') {
+      throw new Error(`Portal-context AWS identity discovery failed (${portalIdentityInvocation.Status}): ${String(portalIdentityInvocation.Stderr || portalIdentityInvocation.Stdout || '').slice(0, 4000)}`);
+    }
+    const portalIdentityReport = parseSmokeJson(portalIdentityInvocation.Stdout);
+    const portalAwsIdentity = portalIdentityReport?.identity?.aws;
+    if (
+      portalIdentityReport?.ok !== true ||
+      portalAwsIdentity?.account !== EXPECTED_AWS_ACCOUNT ||
+      !new RegExp(`^arn:aws:(?:iam|sts)::${EXPECTED_AWS_ACCOUNT}:`).test(String(portalAwsIdentity?.arn || ''))
+    ) {
+      throw new Error(`Portal-context AWS identity did not fail closed to TEST account ${EXPECTED_AWS_ACCOUNT}.`);
+    }
+
     applicant.sub = createApplicant({ ...applicant, poolId }, options);
-    aws(['s3', 'cp', sourceScript, `s3://${options.bucket}/${remoteKey}`, '--only-show-errors'], options);
-    scriptUploaded = true;
     const commands = [
       'set -euo pipefail',
-      'mkdir -p /opt/nwac/portal/scripts',
-      `aws s3 cp ${shellQuote(`s3://${options.bucket}/${remoteKey}`)} ${shellQuote(remotePath)} --region ${shellQuote(options.region)} --only-show-errors`,
-      `trap 'rm -f ${shellQuote(remotePath)}' EXIT`,
       'cd /opt/nwac/portal',
       [
         'node', shellQuote(remotePath),
@@ -248,7 +265,7 @@ async function main() {
         '--expected-db-principal', shellQuote(EXPECTED_TEST_DB_PRINCIPAL),
         '--expected-db-version', shellQuote(EXPECTED_TEST_DB_VERSION),
         '--expected-aws-account', shellQuote(EXPECTED_AWS_ACCOUNT),
-        '--expected-aws-arn', shellQuote(remoteAwsIdentity.arn),
+        '--expected-aws-arn', shellQuote(portalAwsIdentity.arn),
         '--applicant-email', shellQuote(applicant.email),
         '--applicant-password', shellQuote(applicant.password),
         '--applicant-sub', shellQuote(applicant.sub),
@@ -266,15 +283,13 @@ async function main() {
       instanceId,
       commandId,
       preflightCommandId,
+      portalIdentityCommandId,
       preflight,
       operatorArn: identity.Arn,
+      instanceRoleArn: remoteAwsIdentity.arn,
+      portalContextArn: portalAwsIdentity.arn,
     };
   } finally {
-    if (scriptUploaded) {
-      try {
-        aws(['s3', 'rm', `s3://${options.bucket}/${remoteKey}`, '--only-show-errors'], options);
-      } catch (_) {}
-    }
     if (applicant.sub) deleteApplicant(applicant.email, poolId, options);
   }
 

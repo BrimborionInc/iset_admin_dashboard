@@ -1,13 +1,15 @@
 # RM two-step review assurance — future PROD rollout plan
 
 Purpose: carry the DEV-qualified 2026-08-09 assurance candidate into a separate, bounded future TEST/PROD release thread without relying on this large investigation thread.
-Status: planning only. Exact-source DEV qualification is `GO` and validates for the clean r21 implementation baseline. The mandatory acceptance runners are now hardened locally and the combined dirty tree has a separate complete, validated r23 DEV `GO`. TEST qualification remains `NO-GO` until that combined source is frozen and requalified under a new clean release and Bill explicitly approves a rehearsal. No TEST deployment was attempted, and no PROD code, data, runtime configuration, feedback status, or case/application record change is authorized here.
+Status: active authorized release. Clean candidate r26 passed exact-source DEV qualification and deployed to TEST, but its complete TEST acceptance remained `NO-GO` under evidence `fb3037581c4f5a6c1220bce8d065334124a00bc24b5cac72e97a3792b74f4f9d`; preserve that artifact unchanged. Bill has now explicitly authorized autonomous TEST repair/qualification and PROD deployment once every gate returns `GO`. The five r26 acceptance-tool causes are repaired locally and focused regressions pass. A fresh clean candidate must still pass full DEV, deploy to TEST, and return complete TEST `GO` before PROD. The release remains application-only: no schema, data, runtime configuration, Case 76/Application 123, or feedback `#179` mutation is authorized.
 
 ## Intended release boundary
 
 Clean implementation-baseline release id: `20260809-two-step-review-assurance-r21`.
 
 Local combined-tree qualification id: `20260809-two-step-review-assurance-r23-local-hardening`. This is not the future deployment release id because its evidence records dirty primary worktrees.
+
+Most recent deployed TEST candidate: `20260809-two-step-review-assurance-r26`. Its DEV evidence is `GO` (`68a97f3bba7a90fe0d637d7b0cb3e093517ee7d4131df4d0595f7b03aa19e6fe`); its TEST evidence is immutable `NO-GO` (`fb3037581c4f5a6c1220bce8d065334124a00bc24b5cac72e97a3792b74f4f9d`). Do not reuse r26 for the repaired tree.
 
 Expected scope:
 

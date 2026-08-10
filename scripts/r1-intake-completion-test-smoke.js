@@ -20,6 +20,69 @@ const EXPECTED_TEST_DATABASE_HOSTNAME = 'ip-172-16-0-199';
 const EXPECTED_TEST_DATABASE_PORT = 3306;
 const EXPECTED_TEST_DATABASE_PRINCIPAL = 'app_admin@10.48.%';
 const EXPECTED_TEST_DATABASE_VERSION = '8.0.42';
+const R1_REMOTE_RESULT_MARKER = '@@R1_INTAKE_TEST_RESULT@@';
+const R1_SSM_OUTPUT_LIMIT_BYTES = 24_000;
+const R1_RESULT_MARKER_MAX_BYTES = 12_000;
+
+function sha256Json(value) {
+  return crypto.createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex');
+}
+
+function compactR1RemoteResult(result) {
+  const checks = (result?.checks || []).map(check => ({
+    status: check.status,
+    name: check.name,
+    ...(check.status === 'FAIL' ? {
+      failure: String(check?.details?.error || check?.details?.body?.error || check?.details?.status || 'failed').slice(0, 1200),
+    } : {}),
+  }));
+  const schema = result?.schemaSafety || {};
+  const statements = Array.isArray(schema.verifiedStatements) ? schema.verifiedStatements : [];
+  const sideEffects = result?.sideEffects || null;
+  return {
+    transportVersion: 1,
+    status: result?.status || 'failed',
+    startedAt: result?.startedAt || null,
+    finishedAt: result?.finishedAt || null,
+    checks,
+    checkCounts: checks.reduce((counts, check) => {
+      const key = check.status === 'PASS' ? 'passed' : check.status === 'SKIP' ? 'skipped' : 'failed';
+      counts[key] += 1;
+      return counts;
+    }, { passed: 0, failed: 0, skipped: 0 }),
+    fixtureIds: result?.fixtureIds || {},
+    publishedWorkflow: result?.publishedWorkflow || null,
+    workflowResult: sideEffects ? {
+      core: sideEffects.core || null,
+      documentCount: Number(sideEffects.documentCount || 0),
+      documentKeyHash: sha256Json(sideEffects.documentKeys || []),
+      eventCount: Array.isArray(sideEffects.events) ? sideEffects.events.length : 0,
+      eventHash: sha256Json(sideEffects.events || []),
+      notificationCount: Array.isArray(sideEffects.notifications) ? sideEffects.notifications.length : 0,
+      notificationHash: sha256Json(sideEffects.notifications || []),
+    } : null,
+    cleanup: result?.cleanup || null,
+    schemaSafety: {
+      preflightComplete: Boolean(schema.preflightComplete),
+      identity: schema.identity || null,
+      ddlHashes: schema.ddlHashes || {},
+      indexHashes: schema.indexHashes || {},
+      constraintHashes: schema.constraintHashes || {},
+      verifiedStatementCount: Number(schema.verifiedStatementCount || 0),
+      verifiedStatementsHash: sha256Json(statements),
+      verifiedFunctions: schema.verifiedFunctions || [],
+    },
+  };
+}
+
+function encodeR1RemoteResultMarker(result) {
+  const marker = `${R1_REMOTE_RESULT_MARKER}${JSON.stringify(compactR1RemoteResult(result))}`;
+  const bytes = Buffer.byteLength(marker, 'utf8');
+  if (bytes > R1_RESULT_MARKER_MAX_BYTES || bytes >= R1_SSM_OUTPUT_LIMIT_BYTES) {
+    throw new Error(`r1_remote_result_marker_too_large:${bytes}`);
+  }
+  return marker;
+}
 
 function parseArgs(argv) {
   const args = {
@@ -273,11 +336,14 @@ async function waitForCommand(instanceId, commandId, options) {
 }
 
 function parseRemoteResult(stdout) {
-  const marker = '@@R1_INTAKE_TEST_RESULT@@';
-  const index = String(stdout || '').lastIndexOf(marker);
+  const index = String(stdout || '').lastIndexOf(R1_REMOTE_RESULT_MARKER);
   if (index < 0) return null;
   try {
-    return JSON.parse(String(stdout).slice(index + marker.length).trim());
+    const jsonLine = String(stdout)
+      .slice(index + R1_REMOTE_RESULT_MARKER.length)
+      .split(/\r?\n/u, 1)[0]
+      .trim();
+    return JSON.parse(jsonLine);
   } catch (_) {
     return null;
   }
@@ -677,7 +743,7 @@ function remoteRunner() {
       if (connection) await connection.end().catch(() => {});
       result.status = result.checks.some(check => check.status === 'FAIL') || primaryError ? 'failed' : 'passed';
       result.finishedAt = new Date().toISOString();
-      console.log('@@R1_INTAKE_TEST_RESULT@@' + JSON.stringify(result));
+      console.log(encodeR1RemoteResultMarker(result));
       if (result.status !== 'passed') process.exitCode = 1;
     }
   }
@@ -1280,11 +1346,22 @@ function remoteRunner() {
   }
 }
 
-if (process.argv.includes('--remote-runner')) {
-  remoteRunner();
-} else {
-  main().catch(error => {
-    console.error('[r1-intake-test] Failed:', error?.message || error);
-    process.exitCode = 1;
-  });
+if (require.main === module) {
+  if (process.argv.includes('--remote-runner')) {
+    remoteRunner();
+  } else {
+    main().catch(error => {
+      console.error('[r1-intake-test] Failed:', error?.message || error);
+      process.exitCode = 1;
+    });
+  }
 }
+
+module.exports = {
+  R1_REMOTE_RESULT_MARKER,
+  R1_RESULT_MARKER_MAX_BYTES,
+  R1_SSM_OUTPUT_LIMIT_BYTES,
+  compactR1RemoteResult,
+  encodeR1RemoteResultMarker,
+  parseRemoteResult,
+};

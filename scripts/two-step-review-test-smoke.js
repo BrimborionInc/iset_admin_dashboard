@@ -57,6 +57,9 @@ function createLiveSchemaGuard({
   configuredPort,
   requiredTables,
   absentColumns = [],
+  allowedOutputAliases = [],
+  allowedTableAliases = [],
+  onBeforeStatementExecute = null,
   cryptoModule,
 }) {
   if (!connection || typeof connection.query !== 'function' || typeof connection.execute !== 'function') {
@@ -109,11 +112,20 @@ function createLiveSchemaGuard({
 
   const schema = new Map();
   const verifiedFunctions = new Set();
+  const liveVerifiedAliases = new Set();
   let discoveredTables = null;
   let identity = null;
   let preflightComplete = false;
   let verifiedStatementCount = 0;
   const verifiedStatements = [];
+  const strictAliasProof = allowedOutputAliases.length > 0 || allowedTableAliases.length > 0;
+
+  for (const alias of [...allowedOutputAliases, ...allowedTableAliases]) {
+    const normalized = String(alias || '').trim().toLowerCase();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(normalized)) {
+      throw new Error(`schema_guard_alias_expectation_invalid:${alias}`);
+    }
+  }
 
   function guardError(code, details = '') {
     const error = new Error(details ? `${code}: ${details}` : code);
@@ -260,9 +272,16 @@ function createLiveSchemaGuard({
         const parts = match[1].split('.').map(normalizeIdentifier);
         const database = parts.length === 2 ? parts[0] : null;
         const table = parts[parts.length - 1];
-        let alias = normalizeIdentifier(match[2] || table);
+        const rawAlias = match[2] || '';
+        let alias = normalizeIdentifier(rawAlias || table);
         if (TABLE_ALIAS_STOP_WORDS.has(alias)) alias = table;
-        refs.push({ database, table, alias });
+        refs.push({
+          database,
+          table,
+          alias,
+          aliasDeclared: Boolean(rawAlias) && alias !== table,
+          aliasQuoted: rawAlias.startsWith('`') && rawAlias.endsWith('`'),
+        });
       }
     }
     const unique = [];
@@ -605,7 +624,7 @@ function createLiveSchemaGuard({
     if (placeholderCount !== params.length) {
       throw guardError('schema_guard_parameter_count_mismatch', `${placeholderCount} placeholders / ${params.length} params`);
     }
-    const refs = extractTableRefs(masked);
+    const refs = extractTableRefs(maskedWithIdentifiers);
     if (!refs.length) throw guardError('schema_guard_statement_has_no_table');
     const aliasMap = new Map();
     const tables = [];
@@ -614,6 +633,12 @@ function createLiveSchemaGuard({
         throw guardError('schema_guard_cross_database_reference', `${ref.database}.${ref.table}`);
       }
       if (!schema.has(ref.table)) throw guardError('schema_guard_table_unverified', ref.table);
+      if (strictAliasProof && ref.aliasDeclared && !ref.aliasQuoted) {
+        throw guardError('schema_guard_table_alias_unquoted', ref.alias);
+      }
+      if (strictAliasProof && ref.aliasDeclared && !liveVerifiedAliases.has(ref.alias)) {
+        throw guardError('schema_guard_table_alias_unverified', ref.alias);
+      }
       aliasMap.set(ref.alias, ref.table);
       aliasMap.set(ref.table, ref.table);
       if (!tables.includes(ref.table)) tables.push(ref.table);
@@ -627,7 +652,11 @@ function createLiveSchemaGuard({
         if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
           throw guardError('schema_guard_output_alias_invalid', alias);
         }
-        outputAliases.add(normalizeIdentifier(alias));
+        const normalizedAlias = normalizeIdentifier(alias);
+        if (strictAliasProof && !liveVerifiedAliases.has(normalizedAlias)) {
+          throw guardError('schema_guard_output_alias_unverified', rawAlias);
+        }
+        outputAliases.add(normalizedAlias);
       } else if (!isVerifiedCastTypeReference(maskedWithIdentifiers, match.index, rawAlias)) {
         throw guardError('schema_guard_output_alias_unquoted', rawAlias);
       }
@@ -814,12 +843,33 @@ function createLiveSchemaGuard({
         throw guardError('schema_guard_forbidden_column_present', `${forbidden.table}.${forbidden.column}`);
       }
     }
+    for (const alias of new Set([...allowedOutputAliases, ...allowedTableAliases])) {
+      const normalized = normalizeIdentifier(alias);
+      const [rows] = await metadataQuery(
+        'SELECT WORD, RESERVED FROM information_schema.KEYWORDS WHERE WORD = ?',
+        [normalized.toUpperCase()]
+      );
+      const reserved = (rows || []).some(row => {
+        const value = row?.RESERVED ?? row?.reserved;
+        return value === 1 || ['1', 'YES', 'Y', 'TRUE'].includes(String(value ?? '').trim().toUpperCase());
+      });
+      if (reserved) throw guardError('schema_guard_alias_reserved', normalized);
+      liveVerifiedAliases.add(normalized);
+    }
     preflightComplete = true;
     return evidence();
   }
 
   async function execute(sql, params = []) {
     const proof = validateStatement(sql, params);
+    const statementType = String(sql || '').trim().split(/\s+/u)[0].toUpperCase();
+    if (onBeforeStatementExecute) {
+      onBeforeStatementExecute({
+        statementType,
+        mutating: ['INSERT', 'UPDATE', 'DELETE'].includes(statementType),
+        tables: proof?.tables || [],
+      });
+    }
     verifiedStatementCount += 1;
     verifiedStatements.push({
       sequence: verifiedStatementCount,
@@ -5940,6 +5990,20 @@ function remoteRunner() {
     const caseId = fixture.cases.dualRoleApplication;
     const applicationId = fixture.applications.dualRoleApplication;
     const unaffectedApplicationId = fixture.applications.dualRoleSibling;
+    const eiEvidencePath = `/tmp/two-step-review-${config.stamp}-dual-role-ei-verification.pdf`;
+    makePdf(eiEvidencePath, 'Two-step dual-role EI verification');
+    try {
+      await uploadDocument(
+        auth.manager,
+        eiEvidencePath,
+        'ei_verification',
+        'EI verification',
+        caseId,
+        applicationId
+      );
+    } finally {
+      fs.rmSync(eiEvidencePath, { force: true });
+    }
     await satisfySubmitChecklist(auth.manager, 'dualRoleApplication');
 
     let state = await getApplicationState(applicationId);

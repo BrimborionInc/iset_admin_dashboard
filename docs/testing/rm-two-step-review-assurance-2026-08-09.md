@@ -129,6 +129,12 @@ The hardened controls now proved locally are:
 - no `--keep-fixture` escape in the applicant-scope acceptance path;
 - regression tests proving ordering, identity, guard coverage, transaction controls, and absence of raw TEST SQL transport.
 
+### Deployed r26 TEST result and next-candidate repairs
+
+The clean combined candidate `20260809-two-step-review-assurance-r26` passed all 17 DEV gates under evidence `68a97f3bba7a90fe0d637d7b0cb3e093517ee7d4131df4d0595f7b03aa19e6fe`, deployed to TEST, and then correctly remained `NO-GO` under immutable TEST evidence `fb3037581c4f5a6c1220bce8d065334124a00bc24b5cac72e97a3792b74f4f9d`. Seven of twelve deployed checks passed. The five failed checks exposed independent acceptance-tool defects: the dual-role application fixture omitted its required EI document; the R1 result marker exceeded the bounded SSM output; the CFA launcher compared the environment-loaded portal credential to the EC2 instance role; and the two applicant-scope checks rejected the unquoted `msr` alias before an unbounded connection close obscured timely completion. These failures do not constitute TEST acceptance and do not authorize PROD.
+
+The next candidate repairs the complete causal set without changing product behavior. It uploads exact EI evidence before the dual-role checklist; validates and quotes declared table/output aliases against the live engine keyword metadata; records fixture mutation only after finished-statement admission and immediately before driver dispatch; bounds failed MySQL close and destroys a hung connection while preserving the primary error; compacts the R1 remote marker while retaining identity, DDL hashes, statement digest, workflow results, and cleanup evidence; discovers the portal credential after loading the deployed portal environment; and packages plus inspects the exact CFA support script inside both TEST and PROD portal archives before upload. Six focused suites pass with `55/55` tests. A new release ID, clean source freeze, complete DEV qualification, fresh TEST deployment, and complete deployed acceptance are still required.
+
 Prior deployed TEST evidence, retained only as the r19 baseline:
 
 - `tmp/two-step-review-test-smoke/two-step-1786279861994-e5dfca20d8-journey.json`;

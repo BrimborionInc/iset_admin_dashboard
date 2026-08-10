@@ -23,6 +23,36 @@ const EXPECTED_TEST_DATABASE_HOSTNAME = 'ip-172-16-0-199';
 const EXPECTED_TEST_DATABASE_PORT = 3306;
 const EXPECTED_TEST_DATABASE_PRINCIPAL = 'app_admin@10.48.%';
 const EXPECTED_TEST_DATABASE_VERSION = '8.0.42';
+const CONNECTION_CLOSE_TIMEOUT_MS = 1500;
+
+async function closeMysqlConnectionBounded(connection, timeoutMs = CONNECTION_CLOSE_TIMEOUT_MS) {
+  if (!connection) return { status: 'not_opened' };
+  let timer = null;
+  const closeAttempt = Promise.resolve()
+    .then(() => connection.end())
+    .then(
+      () => ({ status: 'closed' }),
+      error => ({ status: 'close_failed', error: error?.message || String(error) })
+    );
+  const timeout = new Promise(resolve => {
+    timer = setTimeout(() => {
+      let destroyError = null;
+      try {
+        connection.destroy();
+      } catch (error) {
+        destroyError = error?.message || String(error);
+      }
+      resolve({
+        status: destroyError ? 'destroy_failed_after_timeout' : 'destroyed_after_timeout',
+        timeoutMs,
+        ...(destroyError ? { error: destroyError } : {}),
+      });
+    }, timeoutMs);
+  });
+  const outcome = await Promise.race([closeAttempt, timeout]);
+  clearTimeout(timer);
+  return outcome;
+}
 
 function parseArgs(argv) {
   const args = {
@@ -607,6 +637,14 @@ function remoteRunner() {
     'staff_region',
     'user',
   ]);
+  const ALLOWED_TABLE_ALIASES = Object.freeze([
+    'c', 'ia', 'iadd', 'iaf', 'ias', 'ic', 'ici', 'idoc', 'ijs', 'm', 'mi',
+    'msr', 'pp', 'pu', 'sp', 'sr', 'u',
+  ]);
+  const ALLOWED_OUTPUT_ALIASES = Object.freeze([
+    'admin_document_rows', 'case_rows', 'payment_rows', 'portal_document_rows',
+    'staff_rows', 'user_rows',
+  ]);
 
   const fixture = {
     suffix: config.stamp.replace(/[^a-zA-Z0-9]+/g, '').slice(-12),
@@ -656,6 +694,11 @@ function remoteRunner() {
         configuredUser: requiredEnv('DB_USER'),
         configuredPort: Number(process.env.DB_PORT || 3306),
         requiredTables: REQUIRED_TABLES,
+        allowedTableAliases: ALLOWED_TABLE_ALIASES,
+        allowedOutputAliases: ALLOWED_OUTPUT_ALIASES,
+        onBeforeStatementExecute: ({ mutating }) => {
+          if (mutating) fixtureMutationStarted = true;
+        },
         cryptoModule: require('crypto'),
       });
       result.schemaSafety = await schemaGuard.preflight();
@@ -664,7 +707,6 @@ function remoteRunner() {
         ddlHashes: result.schemaSafety.ddlHashes,
       });
       if (config.preflightOnly) return;
-      fixtureMutationStarted = true;
       await seedFixture();
       seeded = true;
       progress('fixture seeded');
@@ -702,8 +744,12 @@ function remoteRunner() {
       }
       if (schemaGuard) result.schemaSafety = schemaGuard.evidence();
       if (connection) {
-        await connection.end();
-        progress('db connection closed');
+        const closeOutcome = await closeMysqlConnectionBounded(connection);
+        result.connectionClose = closeOutcome;
+        if (closeOutcome.status !== 'closed') {
+          fail('TEST DB connection closed cleanly', closeOutcome);
+        }
+        progress(`db connection ${closeOutcome.status}`);
       }
     }
   }
@@ -1031,12 +1077,12 @@ function remoteRunner() {
       const emailPlaceholders = allEmails.map(() => '?').join(',');
       const [residueRows] = await query(
         `SELECT
-           (SELECT COUNT(*) FROM user u WHERE u.email IN (${emailPlaceholders})) AS \`user_rows\`,
-           (SELECT COUNT(*) FROM staff_profiles sp WHERE sp.email IN (${emailPlaceholders})) AS \`staff_rows\`,
-           (SELECT COUNT(*) FROM iset_case ic WHERE ic.case_context_json IS NOT NULL AND CAST(ic.case_context_json AS CHAR) LIKE ?) AS \`case_rows\`,
-           (SELECT COUNT(*) FROM iset_application_file iaf WHERE iaf.file_path LIKE ?) AS \`portal_document_rows\`,
-           (SELECT COUNT(*) FROM iset_document idoc WHERE idoc.file_path LIKE ?) AS \`admin_document_rows\`,
-           (SELECT COUNT(*) FROM payment_packet pp WHERE CAST(COALESCE(pp.metadata, JSON_OBJECT()) AS CHAR) LIKE ?) AS \`payment_rows\``,
+           (SELECT COUNT(*) FROM user AS \`u\` WHERE \`u\`.email IN (${emailPlaceholders})) AS \`user_rows\`,
+           (SELECT COUNT(*) FROM staff_profiles AS \`sp\` WHERE \`sp\`.email IN (${emailPlaceholders})) AS \`staff_rows\`,
+           (SELECT COUNT(*) FROM iset_case AS \`ic\` WHERE \`ic\`.case_context_json IS NOT NULL AND CAST(\`ic\`.case_context_json AS CHAR) LIKE ?) AS \`case_rows\`,
+           (SELECT COUNT(*) FROM iset_application_file AS \`iaf\` WHERE \`iaf\`.file_path LIKE ?) AS \`portal_document_rows\`,
+           (SELECT COUNT(*) FROM iset_document AS \`idoc\` WHERE \`idoc\`.file_path LIKE ?) AS \`admin_document_rows\`,
+           (SELECT COUNT(*) FROM payment_packet AS \`pp\` WHERE CAST(COALESCE(\`pp\`.metadata, JSON_OBJECT()) AS CHAR) LIKE ?) AS \`payment_rows\``,
         [
           ...allEmails,
           ...allEmails,
@@ -1057,7 +1103,7 @@ function remoteRunner() {
       }
       progress('cleanup complete');
     } catch (error) {
-      if (transactionStarted) await query('ROLLBACK').catch(() => {});
+      if (transactionStarted && fixtureMutationStarted) await query('ROLLBACK').catch(() => {});
       if (!options.quiet) {
         fail('TEST synthetic fixture cleaned up', { error: error.message || String(error) });
       }
@@ -1142,47 +1188,47 @@ function remoteRunner() {
   async function cleanupByMarkerAndEmail({ emails, markerLike }) {
     const privacyEmails = config.privacyStaffUsers.map(user => user.email);
     progress('cleanup fallback signing links');
-    await query('DELETE FROM message_signing_request AS msr WHERE msr.signing_request_id IN (SELECT sr.id FROM signing_request AS sr WHERE sr.created_by_user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?)))', emails);
-    await query('DELETE FROM message_signing_request AS msr WHERE msr.message_id IN (SELECT m.id FROM messages AS m WHERE m.subject IN (?, ?))', [fixture.subjectA || '', fixture.subjectB || '']);
+    await query('DELETE FROM message_signing_request AS `msr` WHERE `msr`.signing_request_id IN (SELECT `sr`.id FROM signing_request AS `sr` WHERE `sr`.created_by_user_id IN (SELECT `u`.id FROM user AS `u` WHERE `u`.email IN (?, ?, ?)))', emails);
+    await query('DELETE FROM message_signing_request AS `msr` WHERE `msr`.message_id IN (SELECT `m`.id FROM messages AS `m` WHERE `m`.subject IN (?, ?))', [fixture.subjectA || '', fixture.subjectB || '']);
     progress('cleanup fallback signing requests');
-    await query('DELETE FROM signing_request AS sr WHERE sr.created_by_user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?)) OR sr.participant_user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?))', [...emails, ...emails]);
+    await query('DELETE FROM signing_request AS `sr` WHERE `sr`.created_by_user_id IN (SELECT `u`.id FROM user AS `u` WHERE `u`.email IN (?, ?, ?)) OR `sr`.participant_user_id IN (SELECT `u`.id FROM user AS `u` WHERE `u`.email IN (?, ?, ?))', [...emails, ...emails]);
     progress('cleanup fallback messages');
-    await query('DELETE FROM message_item AS mi WHERE mi.owner_user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?))', emails);
-    await query('DELETE FROM messages AS m WHERE m.subject IN (?, ?) OR m.sender_user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?)) OR m.recipient_user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?))', [
+    await query('DELETE FROM message_item AS `mi` WHERE `mi`.owner_user_id IN (SELECT `u`.id FROM user AS `u` WHERE `u`.email IN (?, ?, ?))', emails);
+    await query('DELETE FROM messages AS `m` WHERE `m`.subject IN (?, ?) OR `m`.sender_user_id IN (SELECT `u`.id FROM user AS `u` WHERE `u`.email IN (?, ?, ?)) OR `m`.recipient_user_id IN (SELECT `u`.id FROM user AS `u` WHERE `u`.email IN (?, ?, ?))', [
       fixture.subjectA || '',
       fixture.subjectB || '',
       ...emails,
       ...emails,
     ]);
     progress('cleanup fallback app/case rows');
-    await query("DELETE FROM payment_packet AS pp WHERE CAST(COALESCE(pp.metadata, JSON_OBJECT()) AS CHAR) LIKE ?", [markerLike]);
-    await query("DELETE FROM iset_document AS idoc WHERE CAST(COALESCE(idoc.metadata, JSON_OBJECT()) AS CHAR) LIKE ? OR idoc.file_path LIKE ?", [markerLike, `privacy-denial-test/${config.stamp}/%`]);
-    await query('DELETE FROM iset_application_file AS iaf WHERE iaf.file_path LIKE ?', [`privacy-denial-test/${config.stamp}/%`]);
-    await query('DELETE FROM iset_case_intervention AS ici WHERE CAST(ici.metadata_json AS CHAR) LIKE ?', [markerLike]);
-    await query('DELETE FROM iset_application AS ia WHERE CAST(ia.payload_json AS CHAR) LIKE ?', [markerLike]);
-    await query('DELETE FROM iset_application_submission AS ias WHERE CAST(ias.intake_payload AS CHAR) LIKE ?', [markerLike]);
-    await query('DELETE FROM iset_case AS ic WHERE ic.case_context_json IS NOT NULL AND CAST(ic.case_context_json AS CHAR) LIKE ?', [markerLike]);
+    await query("DELETE FROM payment_packet AS `pp` WHERE CAST(COALESCE(`pp`.metadata, JSON_OBJECT()) AS CHAR) LIKE ?", [markerLike]);
+    await query("DELETE FROM iset_document AS `idoc` WHERE CAST(COALESCE(`idoc`.metadata, JSON_OBJECT()) AS CHAR) LIKE ? OR `idoc`.file_path LIKE ?", [markerLike, `privacy-denial-test/${config.stamp}/%`]);
+    await query('DELETE FROM iset_application_file AS `iaf` WHERE `iaf`.file_path LIKE ?', [`privacy-denial-test/${config.stamp}/%`]);
+    await query('DELETE FROM iset_case_intervention AS `ici` WHERE CAST(`ici`.metadata_json AS CHAR) LIKE ?', [markerLike]);
+    await query('DELETE FROM iset_application AS `ia` WHERE CAST(`ia`.payload_json AS CHAR) LIKE ?', [markerLike]);
+    await query('DELETE FROM iset_application_submission AS `ias` WHERE CAST(`ias`.intake_payload AS CHAR) LIKE ?', [markerLike]);
+    await query('DELETE FROM iset_case AS `ic` WHERE `ic`.case_context_json IS NOT NULL AND CAST(`ic`.case_context_json AS CHAR) LIKE ?', [markerLike]);
     progress('cleanup fallback identity rows');
-    await query('DELETE FROM client AS c WHERE c.applicant_account_email IN (?, ?) OR c.applicant_cognito_sub IN (?, ?)', [
+    await query('DELETE FROM client AS `c` WHERE `c`.applicant_account_email IN (?, ?) OR `c`.applicant_cognito_sub IN (?, ?)', [
       config.applicantA.email,
       config.applicantB.email,
       config.applicantA.sub,
       config.applicantB.sub,
     ]);
-    await query('DELETE FROM staff_profiles AS sp WHERE sp.email = ? OR sp.cognito_sub = ?', [
+    await query('DELETE FROM staff_profiles AS `sp` WHERE `sp`.email = ? OR `sp`.cognito_sub = ?', [
       fixture.staffEmail || `codex.portal.scope.${fixture.suffix}.staff@example.com`,
       fixture.staffSub || `scope-staff-${fixture.suffix}`,
     ]);
     if (privacyEmails.length) {
       const placeholders = privacyEmails.map(() => '?').join(',');
-      await query(`DELETE FROM staff_region AS sr WHERE sr.staff_profile_id IN (SELECT sp.id FROM staff_profiles AS sp WHERE sp.email IN (${placeholders}))`, privacyEmails);
-      await query(`DELETE FROM staff_profiles AS sp WHERE sp.email IN (${placeholders})`, privacyEmails);
-      await query(`DELETE FROM user AS u WHERE u.email IN (${placeholders})`, privacyEmails);
+      await query(`DELETE FROM staff_region AS \`sr\` WHERE \`sr\`.staff_profile_id IN (SELECT \`sp\`.id FROM staff_profiles AS \`sp\` WHERE \`sp\`.email IN (${placeholders}))`, privacyEmails);
+      await query(`DELETE FROM staff_profiles AS \`sp\` WHERE \`sp\`.email IN (${placeholders})`, privacyEmails);
+      await query(`DELETE FROM user AS \`u\` WHERE \`u\`.email IN (${placeholders})`, privacyEmails);
     }
-    await query('DELETE FROM input_json_state AS ijs WHERE ijs.user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?))', emails);
-    await query('DELETE FROM iset_application_draft_dynamic AS iadd WHERE iadd.user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?))', emails);
-    await query('DELETE FROM pending_uploads AS pu WHERE pu.user_id IN (SELECT u.id FROM user AS u WHERE u.email IN (?, ?, ?))', emails);
-    await query('DELETE FROM user AS u WHERE u.email IN (?, ?, ?)', emails);
+    await query('DELETE FROM input_json_state AS `ijs` WHERE `ijs`.user_id IN (SELECT `u`.id FROM user AS `u` WHERE `u`.email IN (?, ?, ?))', emails);
+    await query('DELETE FROM iset_application_draft_dynamic AS `iadd` WHERE `iadd`.user_id IN (SELECT `u`.id FROM user AS `u` WHERE `u`.email IN (?, ?, ?))', emails);
+    await query('DELETE FROM pending_uploads AS `pu` WHERE `pu`.user_id IN (SELECT `u`.id FROM user AS `u` WHERE `u`.email IN (?, ?, ?))', emails);
+    await query('DELETE FROM user AS `u` WHERE `u`.email IN (?, ?, ?)', emails);
   }
 
   const responseTimeouts = new WeakMap();
@@ -1662,11 +1708,19 @@ function remoteRunner() {
   }
 }
 
-if (process.argv.includes('--remote-runner')) {
-  remoteRunner();
-} else {
-  main().catch(error => {
-    console.error('[applicant-scope-smoke] Failed:', error.message || error);
-    process.exitCode = 1;
-  });
+if (require.main === module) {
+  if (process.argv.includes('--remote-runner')) {
+    remoteRunner();
+  } else {
+    main().catch(error => {
+      console.error('[applicant-scope-smoke] Failed:', error.message || error);
+      process.exitCode = 1;
+    });
+  }
 }
+
+module.exports = {
+  CONNECTION_CLOSE_TIMEOUT_MS,
+  closeMysqlConnectionBounded,
+  parseRemoteResult,
+};

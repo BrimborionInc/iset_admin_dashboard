@@ -44,6 +44,9 @@ const ADMIN_SUPPORT_SCRIPT_FILES = [
   'r1-intake-completion-test-smoke.js',
   'two-step-review-test-smoke.js',
 ];
+const PORTAL_SUPPORT_SCRIPT_FILES = [
+  'cfa-signing-smoke.js',
+];
 const RELEASE_QUALIFICATION_INVENTORY = path.join(REPO_ROOT, 'docs', 'testing', 'release-coverage-inventory.json');
 
 const ENVIRONMENTS = {
@@ -844,6 +847,14 @@ function copyAdminSupportScripts(stagingPath) {
   return copied;
 }
 
+function copyPortalSupportScripts(stagingPath) {
+  const scriptsPath = path.join(stagingPath, 'scripts');
+  PORTAL_SUPPORT_SCRIPT_FILES.forEach(file => {
+    const copied = copyFileIfExists(path.join(PORTAL_ROOT, 'scripts', file), path.join(scriptsPath, file));
+    if (!copied) throw new Error(`Required portal support script not found: scripts/${file}`);
+  });
+}
+
 function writeStagingReleaseProvenance(stagingPath, { releaseId, environment, component, qualification }) {
   const provenance = {
     schemaVersion: 1,
@@ -879,6 +890,34 @@ function createZipFromDirectory(sourceDir, destinationZip) {
     archive.directory(sourceDir, false);
     archive.finalize();
   });
+}
+
+function assertArchiveContains(archivePath, requiredPaths, component) {
+  const listing = spawnSync('unzip', ['-Z1', archivePath], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 20 * 1024 * 1024,
+  });
+  if (listing.status !== 0) {
+    throw new Error(`Unable to inspect staged ${component} archive: ${String(listing.stderr || listing.error || '').trim()}`);
+  }
+  const entries = new Set(
+    String(listing.stdout || '')
+      .split(/\r?\n/u)
+      .map(value => value.replace(/^\.\//u, '').replace(/\\/gu, '/').replace(/\/$/u, ''))
+      .filter(Boolean)
+  );
+  const missing = requiredPaths.filter(requiredPath => !entries.has(requiredPath));
+  if (missing.length) {
+    throw new Error(`Staged ${component} archive is missing required runtime/test content: ${missing.join(', ')}`);
+  }
+  return {
+    component,
+    status: 'passed',
+    entryCount: entries.size,
+    requiredPaths: [...requiredPaths],
+  };
 }
 
 function sanitizeSsmOutput(value) {
@@ -1193,6 +1232,7 @@ function buildPortalTestRemoteCommands(bucket, s3Key, region) {
     'if [ -d "$TMPDIR/public" ]; then cp -r "$TMPDIR/public" /opt/nwac/portal/; fi',
     'if [ -d "$TMPDIR/src" ]; then cp -r "$TMPDIR/src" /opt/nwac/portal/; fi',
     'if [ -d "$TMPDIR/auth" ]; then rm -rf /opt/nwac/portal/auth && cp -r "$TMPDIR/auth" /opt/nwac/portal/; fi',
+    'if [ -d "$TMPDIR/scripts" ]; then rm -rf /opt/nwac/portal/scripts && cp -r "$TMPDIR/scripts" /opt/nwac/portal/; fi',
     'if [ -f "$TMPDIR/server.js" ]; then cp "$TMPDIR/server.js" /opt/nwac/portal/server.js; fi',
     'if [ -f "$TMPDIR/package.json" ]; then cp "$TMPDIR/package.json" /opt/nwac/portal/package.json; fi',
     'if [ -f "$TMPDIR/package-lock.json" ]; then cp "$TMPDIR/package-lock.json" /opt/nwac/portal/package-lock.json; fi',
@@ -1307,6 +1347,11 @@ async function deployAdminToTestNative(args, envConfig, releaseId, releaseContex
     const archiveName = `admin-dashboard-${timestamp}.zip`;
     const archivePath = path.join(tempRoot, archiveName);
     const archive = await createZipFromDirectory(stagingPath, archivePath);
+    const archiveContentPreflight = assertArchiveContains(
+      archivePath,
+      ADMIN_SUPPORT_SCRIPT_FILES.map(file => `scripts/${file}`),
+      'admin'
+    );
     const s3Key = joinS3Key(keyPrefix, archiveName);
     console.log(`Uploading admin artifact to s3://${bucket}/${s3Key}...`);
     uploadArtifactToS3(archivePath, bucket, s3Key, envConfig);
@@ -1335,6 +1380,7 @@ async function deployAdminToTestNative(args, envConfig, releaseId, releaseContex
       bootstrapCompatibilityArtifact: `s3://${bucket}/${bootstrapCompatibilityKey}`,
       rollbackArtifact,
       archiveBytes: archive.bytes,
+      archiveContentPreflight,
       instances: commandResults,
     };
   } finally {
@@ -1370,6 +1416,7 @@ async function deployPortalToTestNative(args, envConfig, releaseId, releaseConte
       copyDirectoryIfExists(path.join(PORTAL_ROOT, source), path.join(stagingPath, destination));
     });
     copyDirectoryIfExists(SHARED_ROOT, path.join(stagingPath, 'shared'));
+    copyPortalSupportScripts(stagingPath);
 
     [
       '.env.test',
@@ -1395,6 +1442,11 @@ async function deployPortalToTestNative(args, envConfig, releaseId, releaseConte
     const archiveName = `portal-${timestamp}.zip`;
     const archivePath = path.join(tempRoot, archiveName);
     const archive = await createZipFromDirectory(stagingPath, archivePath);
+    const archiveContentPreflight = assertArchiveContains(
+      archivePath,
+      PORTAL_SUPPORT_SCRIPT_FILES.map(file => `scripts/${file}`),
+      'portal'
+    );
     const s3Key = joinS3Key(keyPrefix, archiveName);
     console.log(`Uploading portal artifact to s3://${bucket}/${s3Key}...`);
     uploadArtifactToS3(archivePath, bucket, s3Key, envConfig);
@@ -1423,6 +1475,7 @@ async function deployPortalToTestNative(args, envConfig, releaseId, releaseConte
       bootstrapCompatibilityArtifact: `s3://${bucket}/${bootstrapCompatibilityKey}`,
       rollbackArtifact,
       archiveBytes: archive.bytes,
+      archiveContentPreflight,
       instances: commandResults,
     };
   } finally {
@@ -1510,15 +1563,23 @@ async function deployAdminToProdNative(args, envConfig, releaseId, releaseContex
 
     const archivePath = path.join(tempRoot, archiveName);
     await createZipFromDirectory(stagingPath, archivePath);
-    const s3Key = joinS3Key(keyPrefix, archiveName);
-    return uploadProdArtifactPair({
+    const archiveContentPreflight = assertArchiveContains(
       archivePath,
-      component: 'admin',
-      releaseId,
-      compatibilityKey: s3Key,
-      envConfig,
-      compatibilityOnly: args.compatibilityOnly,
-    });
+      ADMIN_SUPPORT_SCRIPT_FILES.map(file => `scripts/${file}`),
+      'admin'
+    );
+    const s3Key = joinS3Key(keyPrefix, archiveName);
+    return {
+      ...uploadProdArtifactPair({
+        archivePath,
+        component: 'admin',
+        releaseId,
+        compatibilityKey: s3Key,
+        envConfig,
+        compatibilityOnly: args.compatibilityOnly,
+      }),
+      archiveContentPreflight,
+    };
   } finally {
     if (tempRoot) {
       removePath(tempRoot);
@@ -1571,6 +1632,7 @@ async function deployPortalToProdNative(args, envConfig, releaseId, releaseConte
     ].forEach(file => {
       copyFileIfExists(path.join(PORTAL_ROOT, file), path.join(stagingPath, file));
     });
+    copyPortalSupportScripts(stagingPath);
     writeStagingReleaseProvenance(stagingPath, {
       releaseId,
       environment: envConfig.name,
@@ -1580,15 +1642,23 @@ async function deployPortalToProdNative(args, envConfig, releaseId, releaseConte
 
     const archivePath = path.join(tempRoot, archiveName);
     await createZipFromDirectory(stagingPath, archivePath);
-    const s3Key = joinS3Key(keyPrefix, archiveName);
-    return uploadProdArtifactPair({
+    const archiveContentPreflight = assertArchiveContains(
       archivePath,
-      component: 'portal',
-      releaseId,
-      compatibilityKey: s3Key,
-      envConfig,
-      compatibilityOnly: args.compatibilityOnly,
-    });
+      PORTAL_SUPPORT_SCRIPT_FILES.map(file => `scripts/${file}`),
+      'portal'
+    );
+    const s3Key = joinS3Key(keyPrefix, archiveName);
+    return {
+      ...uploadProdArtifactPair({
+        archivePath,
+        component: 'portal',
+        releaseId,
+        compatibilityKey: s3Key,
+        envConfig,
+        compatibilityOnly: args.compatibilityOnly,
+      }),
+      archiveContentPreflight,
+    };
   } finally {
     if (tempRoot) {
       removePath(tempRoot);
@@ -2382,7 +2452,16 @@ async function main() {
   await handleRun(args, envConfig, identity);
 }
 
-main().catch(error => {
-  console.error(`[path-deploy] ${error.message}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(error => {
+    console.error(`[path-deploy] ${error.message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  ADMIN_SUPPORT_SCRIPT_FILES,
+  PORTAL_SUPPORT_SCRIPT_FILES,
+  assertArchiveContains,
+  createZipFromDirectory,
+};

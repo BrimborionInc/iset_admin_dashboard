@@ -102,8 +102,10 @@ describe('TEST acceptance SQL safety wiring', () => {
       text.indexOf('applicantA.sub = createCognitoUser({ ...applicantA, poolId }, options);')
     );
     expect(text.indexOf('result.schemaSafety = await schemaGuard.preflight();')).toBeLessThan(
-      text.indexOf('fixtureMutationStarted = true;')
+      text.indexOf('await seedFixture();')
     );
+    expect(text).toContain('onBeforeStatementExecute: ({ mutating }) => {');
+    expect(text).toContain('if (mutating) fixtureMutationStarted = true;');
     expect(text).toContain('return schemaGuard.execute(sql, params);');
     expect(text).not.toMatch(/connection\.(?:query|execute|beginTransaction|commit|rollback)\(/u);
     expect(text).toContain("throw new Error('--keep-fixture is disabled: release smoke must prove zero TEST residue.');");
