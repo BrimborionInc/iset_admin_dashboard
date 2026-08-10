@@ -13386,6 +13386,9 @@ function stripApplicationAssessmentRootContext(context = {}) {
 
 const APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS = [
   'assessment_nwac_review_status',
+];
+
+const APPLICATION_ASSESSMENT_COMMUNICATION_CONTEXT_KEYS = [
   'decisionLetterDrafts',
   'decision_letter_drafts',
   'decisionLetter',
@@ -13403,15 +13406,20 @@ const APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS = [
   'fundingDecisionReasonExplanation'
 ];
 
-function applicationAssessmentCaseContextPatchTouchesDecision(context = {}, applicationId = null) {
+const APPLICATION_ASSESSMENT_REVIEW_CONTEXT_KEYS = [
+  ...APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS,
+  ...APPLICATION_ASSESSMENT_COMMUNICATION_CONTEXT_KEYS,
+];
+
+function applicationAssessmentCaseContextPatchTouchesReviewState(context = {}, applicationId = null) {
   if (!isPlainObject(context)) return false;
-  if (APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS.some(key => (
+  if (APPLICATION_ASSESSMENT_REVIEW_CONTEXT_KEYS.some(key => (
     Object.prototype.hasOwnProperty.call(context, key)
   ))) {
     return true;
   }
   const scopedContext = resolveApplicationAssessmentCaseContext(context, applicationId);
-  return APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS.some(key => (
+  return APPLICATION_ASSESSMENT_REVIEW_CONTEXT_KEYS.some(key => (
     Object.prototype.hasOwnProperty.call(scopedContext, key)
   ));
 }
@@ -13425,7 +13433,7 @@ function projectApplicationAssessmentCaseContextPatch(
   const scopedContext = scopeApplicationAssessmentCaseContextPatch(incomingContext, applicationId);
   const shouldRetireLegacyDecisionContext =
     hasApplicationAssessmentScopedContext(scopedContext, applicationId) &&
-    applicationAssessmentCaseContextPatchTouchesDecision(scopedContext, applicationId);
+    applicationAssessmentCaseContextPatchTouchesReviewState(scopedContext, applicationId);
   const baseContext = shouldRetireLegacyDecisionContext
     ? stripApplicationAssessmentRootContext(existingContext)
     : existingContext;
@@ -13456,27 +13464,41 @@ function applicationAssessmentCaseContextMutationKinds(
       ? canonicalizeCaseContextForComparison(rawContext)
       : rawContext;
     if (!isPlainObject(context)) {
-      return { content: context, decision: {} };
+      return { content: context, decision: {}, communication: {} };
     }
     const content = canonicalizeCaseContextForComparison(context);
     const decision = {};
-    APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS.forEach(key => {
-      if (Object.prototype.hasOwnProperty.call(content, key)) {
-        decision[key] = content[key];
-        delete content[key];
-      }
-    });
-    if (
+    const communication = {};
+    const hasScopedApplicationContext = Boolean(
       applicationKey &&
       isPlainObject(content[APPLICATION_ASSESSMENT_CONTEXT_KEY]) &&
       isPlainObject(content[APPLICATION_ASSESSMENT_CONTEXT_KEY][applicationKey])
-    ) {
+    );
+    APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS.forEach(key => {
+      if (Object.prototype.hasOwnProperty.call(content, key)) {
+        if (!hasScopedApplicationContext) decision[key] = content[key];
+        delete content[key];
+      }
+    });
+    APPLICATION_ASSESSMENT_COMMUNICATION_CONTEXT_KEYS.forEach(key => {
+      if (Object.prototype.hasOwnProperty.call(content, key)) {
+        if (!hasScopedApplicationContext) communication[key] = content[key];
+        delete content[key];
+      }
+    });
+    if (hasScopedApplicationContext) {
       const scopedContent = {
         ...content[APPLICATION_ASSESSMENT_CONTEXT_KEY][applicationKey],
       };
       APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS.forEach(key => {
         if (Object.prototype.hasOwnProperty.call(scopedContent, key)) {
           decision[key] = scopedContent[key];
+          delete scopedContent[key];
+        }
+      });
+      APPLICATION_ASSESSMENT_COMMUNICATION_CONTEXT_KEYS.forEach(key => {
+        if (Object.prototype.hasOwnProperty.call(scopedContent, key)) {
+          communication[key] = scopedContent[key];
           delete scopedContent[key];
         }
       });
@@ -13488,6 +13510,7 @@ function applicationAssessmentCaseContextMutationKinds(
     return {
       content: canonicalizeCaseContextForComparison(content),
       decision: canonicalizeCaseContextForComparison(decision),
+      communication: canonicalizeCaseContextForComparison(communication),
     };
   };
   const before = buildViews(existingContext);
@@ -13495,6 +13518,8 @@ function applicationAssessmentCaseContextMutationKinds(
   return {
     contentChanged: JSON.stringify(before.content) !== JSON.stringify(after.content),
     decisionChanged: JSON.stringify(before.decision) !== JSON.stringify(after.decision),
+    communicationChanged:
+      JSON.stringify(before.communication) !== JSON.stringify(after.communication),
   };
 }
 
@@ -13508,7 +13533,7 @@ function clearApplicationAssessmentDecisionContext(context = {}, applicationId =
     isPlainObject(nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY][applicationKey])
   ) {
     const scopedContext = { ...nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY][applicationKey] };
-    APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS.forEach(key => {
+    APPLICATION_ASSESSMENT_REVIEW_CONTEXT_KEYS.forEach(key => {
       delete scopedContext[key];
     });
     nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY] = {
@@ -14290,6 +14315,31 @@ function assertApplicationAssessmentMutationStageAllowed({
   throw error;
 }
 
+function assertApplicationAssessmentPostDecisionCommunicationAllowed({
+  reviewWorkflow,
+  communicationMutationRequested = false,
+  decisionOutcome = null,
+} = {}) {
+  if (!communicationMutationRequested) {
+    return { enforced: false, reason: 'no_post_decision_communication_mutation' };
+  }
+
+  if (reviewWorkflow) {
+    if (reviewWorkflow.current_stage === REVIEW_STAGES.FinalDecisionRecorded) {
+      return { enforced: true, reason: 'final_decision_workflow_recorded' };
+    }
+  } else if (normaliseApplicationDecisionOutcomeValue(decisionOutcome)) {
+    return { enforced: true, reason: 'legacy_final_decision_recorded' };
+  }
+
+  const error = new Error('assessment_communication_not_ready');
+  error.code = 'assessment_communication_not_ready';
+  error.status = 409;
+  error.publicMessage =
+    'Decision-letter drafts and sent status can be changed only after the final application decision is recorded.';
+  throw error;
+}
+
 const APPLICATION_ASSESSMENT_NWAC_DECISION_PAYLOAD_KEYS = new Set([
   'assessment_nwac_review_status',
   'assessment_nwac_review',
@@ -14333,10 +14383,13 @@ function classifyApplicationAssessmentMutationRequest({
         APPLICATION_ASSESSMENT_NWAC_AUXILIARY_PAYLOAD_KEYS.has(key)
       ))
     );
+  const assessmentCommunicationMutationRequested =
+    Boolean(caseContextMutationKinds?.communicationChanged);
   return {
     assessmentBodyPayloadKeysPresent,
     assessmentBodyMutationRequested,
     assessmentDecisionMutationRequested,
+    assessmentCommunicationMutationRequested,
     conflictDeclarationMutationRequested: Boolean(conflictSignatureRequested),
   };
 }
@@ -98394,7 +98447,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       projectedCaseContextPayload,
       applicationId
     )
-    : { contentChanged: false, decisionChanged: false };
+    : { contentChanged: false, decisionChanged: false, communicationChanged: false };
   eligibilityOnlyAssessmentPayload =
     assessmentPayloadKeysPresent.length === 1 &&
     assessmentPayloadKeysPresent[0] === 'assessment_esdc_eligibility';
@@ -98466,6 +98519,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     const {
       assessmentBodyMutationRequested,
       assessmentDecisionMutationRequested,
+      assessmentCommunicationMutationRequested,
     } = classifyApplicationAssessmentMutationRequest({
       assessmentPayloadKeysPresent,
       assessmentReviewStatusProvided,
@@ -98538,12 +98592,26 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           assessmentBodyMutationRequested ||
           assessmentSubmittedForWorkflow,
       });
+      assertApplicationAssessmentPostDecisionCommunicationAllowed({
+        reviewWorkflow: applicationAssessmentReviewWorkflow,
+        communicationMutationRequested: assessmentCommunicationMutationRequested,
+        decisionOutcome:
+          beforeApplicationDecisionOutcome ||
+          normaliseApplicationDecisionOutcomeValue(beforeApplicationStatus) ||
+          (beforeAssessmentReviewStatus === 'approve'
+            ? 'approved'
+            : beforeAssessmentReviewStatus === 'reject'
+              ? 'denied'
+              : null),
+      });
     } catch (error) {
       await conn.rollback();
       return res.status(Number(error?.status) || 403).json({
         success: false,
         error: error?.code || error?.message || 'assessment_returned_to_submitter_actor_forbidden',
-        message: error?.publicMessage || 'This returned assessment cannot be changed by the current staff member.',
+        message:
+          error?.publicMessage ||
+          'This returned assessment cannot be changed by the current staff member.',
         lock: lockCheck.lock || null,
       });
     }
@@ -98864,7 +98932,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         jsonValue = JSON.stringify(projectedCaseContextPayload);
       }
       await conn.query('UPDATE iset_case SET case_context_json = ? WHERE id = ?', [jsonValue, caseId]);
-      shouldMarkSubmissionNeedsReview = true;
+      if (assessmentBodyMutationRequested) {
+        shouldMarkSubmissionNeedsReview = true;
+      }
     }
 
     if (applicationAssessmentReviewWorkflowEnabled && assessmentSubmittedForWorkflow) {
@@ -102403,6 +102473,7 @@ const adminRepairExports = {
   projectApplicationAssessmentCaseContextPatch,
   assertApplicationAssessmentReviewOwnedStatusMutationAllowed,
   assertApplicationAssessmentMutationStageAllowed,
+  assertApplicationAssessmentPostDecisionCommunicationAllowed,
   assertApplicationAssessmentReturnedToSubmitterActor,
   assertInterventionReturnedToSubmitterActor,
   assertInterventionSubmitterOwnedMutationAllowed,

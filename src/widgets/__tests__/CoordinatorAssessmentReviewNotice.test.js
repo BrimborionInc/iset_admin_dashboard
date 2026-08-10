@@ -98,4 +98,33 @@ describe('application assessment reviewer-stage notice', () => {
     expect(saveBlock).not.toContain('includeDecisionFields: true');
     expect(decisionBlock).toContain('buildAssessmentPayload({ includeDecisionFields: true })');
   });
+
+  test('keeps legitimate post-decision letter work reachable and surfaces the server message', () => {
+    const source = readSource('src/widgets/CoordinatorAssessmentWidget.js');
+    const persistenceBlock = extractBetween(
+      source,
+      'const persistLetterContext = useCallback',
+      'const persistLetterDraft = useCallback'
+    );
+    const sendBlock = extractBetween(
+      source,
+      'const handleSendDecisionLetter = async () => {',
+      'const handleSave = async'
+    );
+    const draftSaveIndex = sendBlock.indexOf('await persistLetterDraft({');
+    const messageSendIndex = sendBlock.indexOf('apiFetch(`/api/cases/');
+
+    expect(source).toContain('const showCommunicationStep = isPostDecisionStatus;');
+    expect(source).toContain(
+      'const isLetterEditingDisabled = lockedByAnotherUser || isCompletedStatus || letterAlreadySent;'
+    );
+    expect(persistenceBlock).toContain('decisionLetterDrafts: effectiveLetterDrafts');
+    expect(persistenceBlock).toContain(
+      "content: result?.message || result?.error || 'Failed to save the letter draft.'"
+    );
+    expect(draftSaveIndex).toBeGreaterThanOrEqual(0);
+    expect(messageSendIndex).toBeGreaterThan(draftSaveIndex);
+    expect(sendBlock).toContain("if (!saved.ok) {");
+    expect(sendBlock).toContain("throw new Error('Save the letter draft before sending.');");
+  });
 });

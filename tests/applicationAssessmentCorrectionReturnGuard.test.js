@@ -28,6 +28,7 @@ describe('application assessment correction-return caller guard', () => {
   let projectApplicationAssessmentCaseContextPatch;
   let assertApplicationAssessmentReviewOwnedStatusMutationAllowed;
   let assertApplicationAssessmentMutationStageAllowed;
+  let assertApplicationAssessmentPostDecisionCommunicationAllowed;
   let assertApplicationAssessmentReturnedToSubmitterActor;
   let startApplicationAssessmentReviewWorkflow;
 
@@ -41,6 +42,7 @@ describe('application assessment correction-return caller guard', () => {
       projectApplicationAssessmentCaseContextPatch,
       assertApplicationAssessmentReviewOwnedStatusMutationAllowed,
       assertApplicationAssessmentMutationStageAllowed,
+      assertApplicationAssessmentPostDecisionCommunicationAllowed,
       assertApplicationAssessmentReturnedToSubmitterActor,
       startApplicationAssessmentReviewWorkflow,
     } = require('../isetadminserver'));
@@ -259,7 +261,7 @@ describe('application assessment correction-return caller guard', () => {
         'assessment_intervention_pot_id',
       ],
       assessmentReviewStatusProvided: true,
-      caseContextMutationKinds: { contentChanged: false, decisionChanged: false },
+      caseContextMutationKinds: { contentChanged: false, decisionChanged: false, communicationChanged: false },
     })).toMatchObject({
       assessmentBodyMutationRequested: false,
       assessmentDecisionMutationRequested: true,
@@ -271,7 +273,7 @@ describe('application assessment correction-return caller guard', () => {
         'assessment_employment_goals',
       ],
       assessmentReviewStatusProvided: true,
-      caseContextMutationKinds: { contentChanged: false, decisionChanged: false },
+      caseContextMutationKinds: { contentChanged: false, decisionChanged: false, communicationChanged: false },
     })).toMatchObject({
       assessmentBodyMutationRequested: true,
       assessmentDecisionMutationRequested: true,
@@ -287,7 +289,7 @@ describe('application assessment correction-return caller guard', () => {
       assessmentPayloadKeysPresent: [],
       assessmentReviewStatusProvided: false,
       conflictSignatureRequested: true,
-      caseContextMutationKinds: { contentChanged: false, decisionChanged: false },
+      caseContextMutationKinds: { contentChanged: false, decisionChanged: false, communicationChanged: false },
     });
 
     expect(declarationOnly).toMatchObject({
@@ -304,7 +306,7 @@ describe('application assessment correction-return caller guard', () => {
       assessmentPayloadKeysPresent: ['assessment_employment_goals'],
       assessmentReviewStatusProvided: false,
       conflictSignatureRequested: true,
-      caseContextMutationKinds: { contentChanged: false, decisionChanged: false },
+      caseContextMutationKinds: { contentChanged: false, decisionChanged: false, communicationChanged: false },
     });
     expect(declarationWithAssessmentEdit).toMatchObject({
       assessmentBodyMutationRequested: true,
@@ -316,7 +318,7 @@ describe('application assessment correction-return caller guard', () => {
     })).toThrow(expect.objectContaining({ code: 'assessment_submission_locked' }));
   });
 
-  test('case-context ownership distinguishes decision metadata from assessment content', () => {
+  test('case-context ownership separates post-decision communication from decision and assessment content', () => {
     const existing = {
       applicationAnswers: { goal: 'Existing goal' },
       applicationDecisionLetters: {
@@ -326,7 +328,7 @@ describe('application assessment correction-return caller guard', () => {
         },
       },
     };
-    const decisionOnly = {
+    const communicationOnly = {
       ...existing,
       applicationDecisionLetters: {
         123: {
@@ -335,9 +337,10 @@ describe('application assessment correction-return caller guard', () => {
         },
       },
     };
-    expect(applicationAssessmentCaseContextMutationKinds(existing, decisionOnly, 123)).toEqual({
+    expect(applicationAssessmentCaseContextMutationKinds(existing, communicationOnly, 123)).toEqual({
       contentChanged: false,
-      decisionChanged: true,
+      decisionChanged: false,
+      communicationChanged: true,
     });
 
     const contentOnly = {
@@ -352,20 +355,37 @@ describe('application assessment correction-return caller guard', () => {
     expect(applicationAssessmentCaseContextMutationKinds(existing, contentOnly, 123)).toEqual({
       contentChanged: true,
       decisionChanged: false,
+      communicationChanged: false,
     });
 
     const changedAssessment = {
-      ...decisionOnly,
+      ...communicationOnly,
       applicationDecisionLetters: {
         123: {
-          ...decisionOnly.applicationDecisionLetters[123],
+          ...communicationOnly.applicationDecisionLetters[123],
           assessmentOtherFunding: { involved: true },
         },
       },
     };
     expect(applicationAssessmentCaseContextMutationKinds(existing, changedAssessment, 123)).toEqual({
       contentChanged: true,
+      decisionChanged: false,
+      communicationChanged: true,
+    });
+
+    const reviewerDecision = {
+      ...existing,
+      applicationDecisionLetters: {
+        123: {
+          ...existing.applicationDecisionLetters[123],
+          assessment_nwac_review_status: 'approve',
+        },
+      },
+    };
+    expect(applicationAssessmentCaseContextMutationKinds(existing, reviewerDecision, 123)).toEqual({
+      contentChanged: false,
       decisionChanged: true,
+      communicationChanged: false,
     });
   });
 
@@ -395,10 +415,11 @@ describe('application assessment correction-return caller guard', () => {
     expect(applicationAssessmentCaseContextMutationKinds(existing, projected, 123)).toEqual({
       contentChanged: true,
       decisionChanged: false,
+      communicationChanged: false,
     });
   });
 
-  test('an explicit scoped reviewer patch remains classified as a reviewer mutation', () => {
+  test('an explicit scoped letter patch remains classified as post-decision communication', () => {
     const existing = {
       assessment_nwac_review_status: 'push_back',
       applicationDecisionLetters: {
@@ -415,7 +436,94 @@ describe('application assessment correction-return caller guard', () => {
     const projected = projectApplicationAssessmentCaseContextPatch(existing, incoming, 123);
 
     expect(projected).not.toHaveProperty('assessment_nwac_review_status');
-    expect(applicationAssessmentCaseContextMutationKinds(existing, projected, 123).decisionChanged).toBe(true);
+    expect(applicationAssessmentCaseContextMutationKinds(existing, projected, 123)).toMatchObject({
+      contentChanged: false,
+      decisionChanged: false,
+      communicationChanged: true,
+    });
+  });
+
+  test('post-decision communication is allowed only after the final decision boundary', () => {
+    expect(assertApplicationAssessmentPostDecisionCommunicationAllowed({
+      reviewWorkflow: { current_stage: 'final_decision_recorded' },
+      communicationMutationRequested: true,
+      decisionOutcome: 'approved',
+    })).toEqual({ enforced: true, reason: 'final_decision_workflow_recorded' });
+
+    expect(() => assertApplicationAssessmentPostDecisionCommunicationAllowed({
+      reviewWorkflow: { current_stage: 'nwac_review' },
+      communicationMutationRequested: true,
+      decisionOutcome: 'approved',
+    })).toThrow(expect.objectContaining({
+      code: 'assessment_communication_not_ready',
+      status: 409,
+    }));
+
+    expect(assertApplicationAssessmentPostDecisionCommunicationAllowed({
+      reviewWorkflow: null,
+      communicationMutationRequested: true,
+      decisionOutcome: 'denied',
+    })).toEqual({ enforced: true, reason: 'legacy_final_decision_recorded' });
+
+    expect(() => assertApplicationAssessmentPostDecisionCommunicationAllowed({
+      reviewWorkflow: null,
+      communicationMutationRequested: true,
+      decisionOutcome: null,
+    })).toThrow(expect.objectContaining({ code: 'assessment_communication_not_ready' }));
+  });
+
+  test('the generic PUT classifier does not send letter work through Decision Maker authorization', () => {
+    expect(classifyApplicationAssessmentMutationRequest({
+      assessmentPayloadKeysPresent: [],
+      assessmentReviewStatusProvided: false,
+      caseContextMutationKinds: {
+        contentChanged: false,
+        decisionChanged: false,
+        communicationChanged: true,
+      },
+    })).toMatchObject({
+      assessmentBodyMutationRequested: false,
+      assessmentDecisionMutationRequested: false,
+      assessmentCommunicationMutationRequested: true,
+    });
+  });
+
+  test.each([
+    'decisionLetterDrafts',
+    'decision_letter_drafts',
+    'decisionLetter',
+    'decision_letter',
+    'decisionLetterPackDrafts',
+    'decision_letter_pack_drafts',
+    'decisionLetterSent',
+    'decision_letter_sent',
+    'decisionLetterSentType',
+    'decision_letter_sent_type',
+    'decisionLetterSentAt',
+    'decision_letter_sent_at',
+    'fundingDecisionReasonCode',
+    'fundingDecisionReasonLabel',
+    'fundingDecisionReasonExplanation',
+  ])('%s remains post-decision communication rather than a Decision Maker field', key => {
+    const existing = {
+      applicationDecisionLetters: {
+        123: { assessment_nwac_review_status: 'reject' },
+      },
+    };
+    const projected = {
+      applicationDecisionLetters: {
+        123: {
+          assessment_nwac_review_status: 'reject',
+          [key]: { denial: 'updated' },
+        },
+      },
+    };
+
+    expect(applicationAssessmentCaseContextMutationKinds(existing, projected, 123)).toEqual({
+      contentChanged: false,
+      decisionChanged: false,
+      communicationChanged: true,
+    });
   });
 
   test('review-owned status transitions allow only the stage owner or explicit support path', () => {
@@ -474,7 +582,7 @@ describe('application assessment correction-return caller guard', () => {
     expect(classifyApplicationAssessmentMutationRequest({
       assessmentPayloadKeysPresent: ['assessment_esdc_eligibility'],
       assessmentReviewStatusProvided: false,
-      caseContextMutationKinds: { contentChanged: false, decisionChanged: false },
+      caseContextMutationKinds: { contentChanged: false, decisionChanged: false, communicationChanged: false },
     })).toMatchObject({
       assessmentBodyMutationRequested: false,
       assessmentDecisionMutationRequested: false,

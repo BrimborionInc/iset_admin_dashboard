@@ -7245,7 +7245,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         if (!silent) {
           setAlert({
             type: 'error',
-            content: result?.error || 'Failed to save the letter draft.',
+            content: result?.message || result?.error || 'Failed to save the letter draft.',
             dismissible: true,
             statusIconAriaLabel: 'Error'
           });
