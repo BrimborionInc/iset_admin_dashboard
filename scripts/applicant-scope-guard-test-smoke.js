@@ -24,6 +24,60 @@ const EXPECTED_TEST_DATABASE_PORT = 3306;
 const EXPECTED_TEST_DATABASE_PRINCIPAL = 'app_admin@10.48.%';
 const EXPECTED_TEST_DATABASE_VERSION = '8.0.42';
 const CONNECTION_CLOSE_TIMEOUT_MS = 1500;
+const APPLICANT_SCOPE_REMOTE_RESULT_MARKER = '@@APPLICANT_SCOPE_SMOKE_RESULT@@';
+const APPLICANT_SCOPE_RESULT_MARKER_MAX_BYTES = 12_000;
+
+function sha256Json(value) {
+  return crypto.createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex');
+}
+
+function compactApplicantScopeResult(result) {
+  const allChecks = (result?.checks || []).map(check => ({
+    status: check.status,
+    name: check.name,
+    ...(check.status === 'FAIL' ? {
+      failure: String(check?.details?.error || check?.details?.detail || check?.details?.status || 'failed').slice(0, 400),
+    } : {}),
+  }));
+  const checks = allChecks.filter(check => check.status !== 'PASS');
+  const schema = result?.schemaSafety || {};
+  const statements = Array.isArray(schema.verifiedStatements) ? schema.verifiedStatements : [];
+  return {
+    transportVersion: 1,
+    status: result?.status || 'failed',
+    startedAt: result?.startedAt || null,
+    finishedAt: result?.finishedAt || null,
+    checks,
+    checkCounts: allChecks.reduce((counts, check) => {
+      const key = check.status === 'PASS' ? 'passed' : check.status === 'SKIP' ? 'skipped' : 'failed';
+      counts[key] += 1;
+      return counts;
+    }, { passed: 0, failed: 0, skipped: 0 }),
+    passedChecksHash: sha256Json(allChecks.filter(check => check.status === 'PASS').map(check => check.name)),
+    fixtureIds: result?.fixtureIds || {},
+    cleanup: result?.cleanup || null,
+    connectionClose: result?.connectionClose || null,
+    schemaSafety: {
+      preflightComplete: Boolean(schema.preflightComplete),
+      identity: schema.identity || null,
+      ddlHashes: schema.ddlHashes || {},
+      indexHashes: schema.indexHashes || {},
+      constraintHashes: schema.constraintHashes || {},
+      verifiedStatementCount: Number(schema.verifiedStatementCount || 0),
+      verifiedStatementsHash: sha256Json(statements),
+      verifiedFunctions: schema.verifiedFunctions || [],
+    },
+  };
+}
+
+function encodeApplicantScopeResultMarker(result) {
+  const marker = `${APPLICANT_SCOPE_REMOTE_RESULT_MARKER}${JSON.stringify(compactApplicantScopeResult(result))}`;
+  const bytes = Buffer.byteLength(marker, 'utf8');
+  if (bytes > APPLICANT_SCOPE_RESULT_MARKER_MAX_BYTES) {
+    throw new Error(`applicant_scope_result_marker_too_large:${bytes}`);
+  }
+  return marker;
+}
 
 async function closeMysqlConnectionBounded(connection, timeoutMs = CONNECTION_CLOSE_TIMEOUT_MS) {
   if (!connection) return { status: 'not_opened' };
@@ -359,10 +413,9 @@ function waitForCommand(instanceId, commandId, options) {
 }
 
 function parseRemoteResult(stdout) {
-  const marker = '@@APPLICANT_SCOPE_SMOKE_RESULT@@';
-  const index = String(stdout || '').lastIndexOf(marker);
+  const index = String(stdout || '').lastIndexOf(APPLICANT_SCOPE_REMOTE_RESULT_MARKER);
   if (index < 0) return null;
-  const jsonText = String(stdout).slice(index + marker.length).trim();
+  const jsonText = String(stdout).slice(index + APPLICANT_SCOPE_REMOTE_RESULT_MARKER.length).trim();
   try {
     return JSON.parse(jsonText);
   } catch (_) {
@@ -673,7 +726,7 @@ function remoteRunner() {
     .then(() => {
       result.status = result.checks.some(check => check.status === 'FAIL') ? 'failed' : 'passed';
       result.finishedAt = new Date().toISOString();
-      console.log('@@APPLICANT_SCOPE_SMOKE_RESULT@@' + JSON.stringify(result));
+      console.log(encodeApplicantScopeResultMarker(result));
       if (result.status !== 'passed') process.exitCode = 1;
     })
     .catch(error => {
@@ -682,7 +735,7 @@ function remoteRunner() {
       });
       result.status = 'failed';
       result.finishedAt = new Date().toISOString();
-      console.log('@@APPLICANT_SCOPE_SMOKE_RESULT@@' + JSON.stringify(result));
+      console.log(encodeApplicantScopeResultMarker(result));
       process.exitCode = 1;
     });
 
@@ -1738,8 +1791,12 @@ if (require.main === module) {
 }
 
 module.exports = {
+  APPLICANT_SCOPE_REMOTE_RESULT_MARKER,
+  APPLICANT_SCOPE_RESULT_MARKER_MAX_BYTES,
   CONNECTION_CLOSE_TIMEOUT_MS,
   closeMysqlConnectionBounded,
+  compactApplicantScopeResult,
+  encodeApplicantScopeResultMarker,
   parseRemoteResult,
   runCleanupThenClose,
 };

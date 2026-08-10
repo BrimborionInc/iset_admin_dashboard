@@ -92,6 +92,8 @@ describe('release qualification contract', () => {
     expect(twoStepSmoke).toContain('attempt < config.notificationWaitAttempts');
     expect(twoStepSmoke).toContain('two-step-review-route-failure-');
     expect(twoStepSmoke).toContain('pageText');
+    expect(twoStepSmoke).toContain('parseJsonObject(additionalFacts?.intervention?.metadata_json)');
+    expect(twoStepSmoke).not.toContain('parseJsonObject(additionalFacts?.metadata_json)');
   });
 
   test('TEST runtime shell probes preserve their inline JavaScript quoting', () => {

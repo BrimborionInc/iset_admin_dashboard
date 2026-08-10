@@ -6678,7 +6678,7 @@ function remoteRunner() {
     fixture.interventions.proposalAdditional = materializedInterventionIds[0];
     const additionalState = await getInterventionState(materializedInterventionIds[0]);
     const additionalFacts = await getInterventionSubmitterFactState(materializedInterventionIds[0]);
-    const additionalMetadata = parseJsonObject(additionalFacts?.metadata_json);
+    const additionalMetadata = parseJsonObject(additionalFacts?.intervention?.metadata_json);
     const [[additionalProposal]] = await query(
       `SELECT p.id, p.application_id, p.action_plan_id, p.review_status
          FROM iset_intervention_proposal p
