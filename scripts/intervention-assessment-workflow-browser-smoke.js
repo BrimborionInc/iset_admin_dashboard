@@ -1222,6 +1222,7 @@ async function assertRecordedSubmitterCanEditAndResubmit(
     throw new Error('A returned submitter reached an RM review action before resubmitting.');
   }
 
+  const beforeResubmitSignature = await getVisibleWizardContentSignature(page);
   await clickButtonByText(page, 'Resubmit for review');
   const submitUpdate = await waitUntil(
     () => state.mutations.interventionUpdates.find(entry => entry.body.status === 'submitted'),
@@ -1238,6 +1239,13 @@ async function assertRecordedSubmitterCanEditAndResubmit(
 
   const submittedSubject = state.isRevision ? 'Intervention change' : 'Intervention proposal';
   await waitForText(page, `${submittedSubject} submitted to Regional Manager review.`);
+  await waitUntil(async () => {
+    const afterResubmitSignature = await getVisibleWizardContentSignature(page);
+    return (
+      afterResubmitSignature &&
+      afterResubmitSignature !== beforeResubmitSignature
+    ) ? afterResubmitSignature : null;
+  }, 'post-resubmit intervention wizard refresh', 10_000);
 
   if (!completeSeparateRmSignoff) {
     await assertButtonAbsent(page, 'Submit for final decision');

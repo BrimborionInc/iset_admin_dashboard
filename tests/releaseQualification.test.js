@@ -94,6 +94,16 @@ describe('release qualification contract', () => {
     expect(twoStepSmoke).toContain('pageText');
     expect(twoStepSmoke).toContain('parseJsonObject(additionalFacts?.intervention?.metadata_json)');
     expect(twoStepSmoke).not.toContain('parseJsonObject(additionalFacts?.metadata_json)');
+
+    const interventionBrowserSmoke = fs.readFileSync(
+      path.resolve(__dirname, '..', 'scripts', 'intervention-assessment-workflow-browser-smoke.js'),
+      'utf8'
+    );
+    expect(interventionBrowserSmoke).toContain('const beforeResubmitSignature = await getVisibleWizardContentSignature(page);');
+    expect(interventionBrowserSmoke).toContain("'post-resubmit intervention wizard refresh'");
+    expect(interventionBrowserSmoke.indexOf("'post-resubmit intervention wizard refresh'")).toBeLessThan(
+      interventionBrowserSmoke.indexOf("expectedActionText: 'Submit for final decision'")
+    );
   });
 
   test('TEST runtime shell probes preserve their inline JavaScript quoting', () => {
