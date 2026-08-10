@@ -3,6 +3,7 @@ const path = require('path');
 
 const {
   closeMysqlConnectionBounded,
+  runCleanupThenClose,
 } = require('../scripts/applicant-scope-guard-test-smoke');
 
 describe('applicant-scope TEST smoke harness', () => {
@@ -46,5 +47,32 @@ describe('applicant-scope TEST smoke harness', () => {
     expect(observed).toBe(primary);
     expect(connection.end).toHaveBeenCalledTimes(1);
     expect(connection.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test('a cleanup failure is retained while the mysql connection is still closed', async () => {
+    const primary = new Error('fixture_cleanup_fk_failure');
+    const cleanup = jest.fn(async () => { throw primary; });
+    const connection = {
+      end: jest.fn(async () => undefined),
+      destroy: jest.fn(),
+    };
+
+    const outcome = await runCleanupThenClose({ cleanup, connection, timeoutMs: 10 });
+
+    expect(outcome.cleanupError).toBe(primary);
+    expect(outcome.closeOutcome).toEqual({ status: 'closed' });
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(connection.end).toHaveBeenCalledTimes(1);
+    expect(connection.destroy).not.toHaveBeenCalled();
+  });
+
+  test('fixture marker cleanup is independent of mysql JSON whitespace rendering', () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '..', 'scripts', 'applicant-scope-guard-test-smoke.js'),
+      'utf8'
+    );
+
+    expect(source).toMatch(/const markerLike = `%\$\{config\.stamp\}%`;/u);
+    expect(source).not.toMatch(/const markerLike = `%"stamp":"\$\{config\.stamp\}"%`;/u);
   });
 });

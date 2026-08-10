@@ -54,6 +54,17 @@ async function closeMysqlConnectionBounded(connection, timeoutMs = CONNECTION_CL
   return outcome;
 }
 
+async function runCleanupThenClose({ cleanup, connection, timeoutMs = CONNECTION_CLOSE_TIMEOUT_MS }) {
+  let cleanupError = null;
+  try {
+    if (cleanup) await cleanup();
+  } catch (error) {
+    cleanupError = error;
+  }
+  const closeOutcome = await closeMysqlConnectionBounded(connection, timeoutMs);
+  return { cleanupError, closeOutcome };
+}
+
 function parseArgs(argv) {
   const args = {
     profile: process.env.AWS_PROFILE || DEFAULT_PROFILE,
@@ -736,21 +747,26 @@ function remoteRunner() {
         );
       throw error;
     } finally {
-      if (!config.keepFixture && fixtureMutationStarted && !cleanupSuppressedForSchemaSafety) {
-        await cleanupFixture();
-        progress('fixture cleaned up');
-      } else if (cleanupSuppressedForSchemaSafety) {
-        result.cleanup = 'suppressed_after_schema_safety_failure';
-      }
+      const cleanupRequired = !config.keepFixture && fixtureMutationStarted && !cleanupSuppressedForSchemaSafety;
+      if (cleanupSuppressedForSchemaSafety) result.cleanup = 'suppressed_after_schema_safety_failure';
+      const { cleanupError, closeOutcome } = await runCleanupThenClose({
+        cleanup: cleanupRequired
+          ? async () => {
+            await cleanupFixture();
+            progress('fixture cleaned up');
+          }
+          : null,
+        connection,
+      });
       if (schemaGuard) result.schemaSafety = schemaGuard.evidence();
       if (connection) {
-        const closeOutcome = await closeMysqlConnectionBounded(connection);
         result.connectionClose = closeOutcome;
         if (closeOutcome.status !== 'closed') {
           fail('TEST DB connection closed cleanly', closeOutcome);
         }
         progress(`db connection ${closeOutcome.status}`);
       }
+      if (cleanupError) throw cleanupError;
     }
   }
 
@@ -1064,7 +1080,9 @@ function remoteRunner() {
       config.applicantB.email,
       fixture.staffEmail || `codex.portal.scope.${fixture.suffix}.staff@example.com`,
     ];
-    const markerLike = `%"stamp":"${config.stamp}"%`;
+    // MySQL's canonical JSON text includes whitespace after separators. Match
+    // the unique random stamp itself so cleanup does not depend on formatting.
+    const markerLike = `%${config.stamp}%`;
     let transactionStarted = false;
     try {
       progress('cleanup starting');
@@ -1723,4 +1741,5 @@ module.exports = {
   CONNECTION_CLOSE_TIMEOUT_MS,
   closeMysqlConnectionBounded,
   parseRemoteResult,
+  runCleanupThenClose,
 };

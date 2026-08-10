@@ -74,7 +74,13 @@ describe('release qualification contract', () => {
       'utf8'
     );
     expect(applicantSmoke).toContain('Timed out reading HTTP response body');
-    expect(applicantSmoke).toMatch(/finally \{\s+if \(!config\.keepFixture && fixtureMutationStarted/u);
+    expect(applicantSmoke).toContain(
+      'const cleanupRequired = !config.keepFixture && fixtureMutationStarted && !cleanupSuppressedForSchemaSafety;'
+    );
+    expect(applicantSmoke).toContain('const { cleanupError, closeOutcome } = await runCleanupThenClose({');
+    expect(applicantSmoke.indexOf('result.connectionClose = closeOutcome;')).toBeLessThan(
+      applicantSmoke.indexOf('if (cleanupError) throw cleanupError;')
+    );
     expect(applicantSmoke).toContain("cookieToken(fixture.sessionA, 'iset_access')");
     expect(applicantSmoke).toContain("cookieToken(fixture.sessionB, 'iset_access')");
 
