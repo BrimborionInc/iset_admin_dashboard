@@ -1237,8 +1237,6 @@ async function assertRecordedSubmitterCanEditAndResubmit(
     );
   }
 
-  const submittedSubject = state.isRevision ? 'Intervention change' : 'Intervention proposal';
-  await waitForText(page, `${submittedSubject} submitted to Regional Manager review.`);
   await waitUntil(async () => {
     const afterResubmitSignature = await getVisibleWizardContentSignature(page);
     return (

@@ -13,7 +13,7 @@ A release is not qualified by a green unit suite, successful build, healthy targ
 1. `DEV GO`: local aggregates, lint, static privacy checks, both compiled bundles, the deterministic admin browser suite, real DEV MySQL schema/request/write contracts, privacy ERM, payment rollback, AI fixtures, and Intacct drift checks all passed.
 2. `TEST GO`: that DEV-qualified candidate was admitted by the TEST deployment manifest, deployed provenance matches, rollback artifacts exist, target health and on-instance readiness pass, configuration and worker state are safe, deployed role/applicant/cross-app journeys pass, strict denials have no skip, rollback fixtures leave no residue, and maintenance state is clear.
 
-Any failed, skipped, unavailable, expired, unmapped, source-drifted, or cleanup-incomplete required check is `NO-GO`. There is no skip or waiver flag. Fix the condition and generate new evidence.
+Any failed, skipped, unavailable, expired, unmapped, source-drifted, or cleanup-incomplete required check is `NO-GO`; it must never be relabelled `GO`. Normal releases have no skip or waiver flag. A separately recorded operator-authorized emergency PROD release may use the app-only pre-qualification deployment procedure described below without changing or falsifying the `NO-GO` evidence.
 
 `scripts/path-deploy.js run` enforces the evidence boundary:
 
@@ -276,6 +276,19 @@ npm run release:test:postflight -- --maintenance-only --json
 - user explicitly authorizes the exact PROD release in the current thread.
 
 Otherwise the decision is `NO-GO`. Health alone never changes it.
+
+### Explicit emergency PROD release
+
+When Bill explicitly orders deployment despite failed or unavailable qualification and identifies the qualification system itself as the blocker, the release may use the pre-qualification production procedure through `--emergency-release`. This is not a qualification waiver and must not produce or imply `TEST GO`. It requires a clean source tree, the known evidence artifact, a specific recorded authorization reason, `--skip-schema --skip-data`, and `--yes`. It remains subject to production builds, tests/lint/privacy preflight, immutable artifact staging, maintenance warning/fallback, ASG refresh, normal-routing smoke, and rollback readiness. It cannot apply schema, data, runtime configuration, SQL, TEST refresh, or external-provider operations.
+
+```bash
+npm run path:deploy -- --env prod --skip-schema --skip-data --release-id <release-id> \
+  --qualification-evidence <known-GO-or-NO-GO-evidence.json> \
+  --emergency-release --emergency-release-reason "<explicit operator authorization and rationale>" \
+  --skip-smoke --yes
+```
+
+The manifest and packaged provenance record `EMERGENCY-AUTHORIZED`, the supplied evidence ID/decision, the exact deployed source, the reason, and all qualification validation errors. Clear fallback, run the normal PROD smoke, and clear the warning only after smoke succeeds.
 
 After explicit PROD authorization, the mutating command must include the TEST evidence:
 

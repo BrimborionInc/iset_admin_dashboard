@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-08-08
+Last Updated: 2026-08-10
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -489,11 +489,18 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Returned Application Assessments now stay in the correct review queue while Financial Overview requests are completed, so Regional Managers can forward changes and the original submitter can correct and resubmit the assessment.
-- Client Funding Agreement signing now completes the signed file, document links, agreement version, and request state together, without leaving a partial completion if any step fails.
-- Review handoff notifications continue processing after a PATH restart.
+- Returned assessments and intervention requests can now be corrected only by their recorded submitter, then move through a separate Regional Manager review before reaching the Decision Maker.
+- Final approval and denial records now preserve the exact submitter, Regional Manager, Decision Maker, outcome, notes, application, and submitted version.
+- PATH help and AI guidance now explain the complete two-step review, EI evidence, funding-alignment, and post-approval agreement workflow.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260810-two-step-review-assurance-r34
+
+- Returned Application Assessments, new intervention proposals, and intervention revisions can be edited and resubmitted only by the staff member recorded as their submitter. A Regional Manager who submitted the work must resubmit it first, then complete a separate Regional Manager sign-off before it reaches the Decision Maker.
+- Final decisions now fail closed unless the exact workflow, application, submitter lineage, EI evidence, funding details, proposal items, and submitted facts agree. Approval and denial packets retain the Regional Manager and Decision Maker names, capacities, dates, outcome, and required notes.
+- Approved zero-funded work remains letter-only; funded application approvals use the exact application for Client Funding Agreement preparation and signing. Applied intervention revisions remain available as review evidence without appearing as duplicate operational interventions.
+- Updated PATH help panels and Ask the AI guidance explain returns, correction ownership, Regional Manager sign-off, Decision Maker review, EI/CRF alignment, and when funding agreements are produced.
 
 #### Release 20260807-assessment-correction-hotfix-r19
 
@@ -507,21 +514,24 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Fixed Client Funding Agreement signing so PATH carries the agreement's verified application link into the signed PDF, agreement version, document record, and case event.
 - Repeated submission of an already signed agreement remains safe and does not create duplicate documents or events.
 
-#### Release 20260801-returned-assessment-edit
-
-- Regional Managers can now edit an Application Assessment returned to them when they were the staff member who originally submitted it.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Les évaluations de demande retournées restent maintenant dans la bonne file de révision pendant le traitement des demandes d'aperçu financier. Les gestionnaires régionaux peuvent donc transmettre les changements et la personne ayant soumis l'évaluation peut la corriger et la soumettre de nouveau.
-- La signature d'une entente de financement du client finalise maintenant ensemble le fichier signé, les liens de document, la version de l'entente et l'état de la demande, sans laisser de traitement partiel en cas d'échec.
-- Les notifications de transfert de révision continuent d'être traitées après un redémarrage de PATH.
+- Les évaluations et demandes d'intervention retournées peuvent maintenant être corrigées uniquement par la personne enregistrée comme les ayant soumises, puis elles passent par une révision distincte du gestionnaire régional avant d'atteindre le décideur.
+- Les dossiers finaux d'approbation et de refus conservent maintenant la personne ayant soumis le dossier, le gestionnaire régional, le décideur, le résultat, les notes, la demande et la version soumise exacts.
+- L'aide de PATH et les conseils de l'IA expliquent maintenant la révision complète en deux étapes, les preuves d'assurance-emploi, l'harmonisation du financement et le processus d'entente après l'approbation.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260810-two-step-review-assurance-r34
+
+- Les évaluations de demande retournées, les nouvelles propositions d'intervention et les révisions d'intervention peuvent être modifiées et soumises de nouveau uniquement par la personne enregistrée comme les ayant soumises. Un gestionnaire régional qui a soumis le dossier doit d'abord le soumettre de nouveau, puis effectuer une approbation distincte comme gestionnaire régional avant son transfert au décideur.
+- Les décisions finales sont maintenant bloquées si le flux de travail, la demande, l'identité de la personne ayant soumis le dossier, la preuve d'assurance-emploi, les détails du financement, les éléments proposés et les faits soumis ne concordent pas exactement. Les dossiers d'approbation et de refus conservent les noms, fonctions et dates du gestionnaire régional et du décideur, ainsi que le résultat et les notes obligatoires.
+- Les dossiers approuvés sans financement demeurent limités aux lettres; les approbations financées utilisent la demande exacte pour préparer et signer l'entente de financement du client. Les révisions d'intervention appliquées demeurent disponibles comme preuve de révision sans apparaître comme interventions opérationnelles en double.
+- Les panneaux d'aide de PATH et les conseils de l'IA expliquent les retours, la responsabilité des corrections, l'approbation du gestionnaire régional, la révision du décideur, l'harmonisation AE/CRF et le moment où les ententes de financement sont produites.
 
 #### Release 20260807-assessment-correction-hotfix-r19
 
@@ -534,10 +544,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Correction de la signature des ententes de financement du client : PATH transmet maintenant le lien vérifié de la demande au PDF signé, à la version de l'entente, au document et à l'événement du dossier.
 - Une nouvelle soumission d'une entente déjà signée demeure sans danger et ne crée pas de documents ni d'événements en double.
-
-#### Release 20260801-returned-assessment-edit
-
-- Les gestionnaires régionaux peuvent maintenant modifier une évaluation de demande qui leur est retournée lorsqu'ils l'avaient initialement soumise.
 
 ### Problemes connus (brouillon - FR)
 

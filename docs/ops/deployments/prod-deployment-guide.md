@@ -35,6 +35,8 @@ This guide records the PROD safety sequence. The active app artifact rollout is 
 
 ## Full Prod Deploy
 
+If Bill explicitly orders an emergency app-only release because qualification itself is non-functional, use the documented `--emergency-release` path instead of fabricating a TEST `GO` or manually bypassing the orchestrator. Supply the preserved known evidence, `--skip-schema --skip-data`, and the exact authorization reason. This restores the pre-qualification procedure while retaining clean-source enforcement, builds, tests/lint/privacy preflight, immutable staging, maintenance, refresh, smoke, and rollback records. It does not authorize any schema, data, runtime-config, SQL, or provider mutation.
+
 Preflight from WSL:
 
 ```bash

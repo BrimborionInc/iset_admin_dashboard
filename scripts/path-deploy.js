@@ -86,6 +86,7 @@ function usage() {
     '  node scripts/path-deploy.js --env test --skip-data --release-id <release-id> --qualification-evidence <DEV-GO.json>',
     '  node scripts/path-deploy.js --env test --refresh-test-db --skip-data --release-id <release-id> --qualification-evidence <DEV-GO.json> --yes',
     '  node scripts/path-deploy.js run --env prod --skip-data --release-id <release-id> --qualification-evidence <TEST-GO.json> --yes',
+    '  node scripts/path-deploy.js run --env prod --skip-schema --skip-data --release-id <release-id> --qualification-evidence <KNOWN-EVIDENCE.json> --emergency-release --emergency-release-reason <reason> --yes',
     '  node scripts/path-deploy.js run --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --qualification-evidence <TEST-GO.json> --yes  # explicit runtime/config promotion only',
     '',
     'Options:',
@@ -109,6 +110,8 @@ function usage() {
     '  --allow-dirty          Permit a dirty PROD app source tree when paired with --dirty-reason',
     '  --dirty-reason TEXT    Required explanation when overriding the PROD dirty-source guard',
     '  --qualification-evidence PATH  Required GO evidence: DEV for TEST, TEST for PROD',
+    '  --emergency-release    PROD app-only override of qualification admission; preserves supplied evidence and normal preflight/smoke controls',
+    '  --emergency-release-reason TEXT  Required explicit operator reason for --emergency-release',
     '  --yes                  Required for prod run',
     '  --json                 Emit machine-readable JSON',
     '  --help                 Show this help',
@@ -145,6 +148,8 @@ function parseArgs(argv) {
     allowDirty: false,
     dirtyReason: null,
     qualificationEvidence: null,
+    emergencyRelease: false,
+    emergencyReleaseReason: null,
     yes: false,
     json: false,
   };
@@ -192,6 +197,10 @@ function parseArgs(argv) {
       args.dirtyReason = argv[++index];
     } else if (token === '--qualification-evidence') {
       args.qualificationEvidence = path.resolve(argv[++index] || '');
+    } else if (token === '--emergency-release') {
+      args.emergencyRelease = true;
+    } else if (token === '--emergency-release-reason') {
+      args.emergencyReleaseReason = argv[++index];
     } else if (token === '--yes') {
       args.yes = true;
     } else if (token === '--json') {
@@ -2052,6 +2061,39 @@ function admitReleaseQualification(args, envConfig, plan, repoState) {
   requiredQualificationOperations(args).forEach(operation => {
     if (!declaredOperations.has(operation)) errors.push(`qualification did not declare required operation ${operation}`);
   });
+  if (args.emergencyRelease) {
+    const reason = String(args.emergencyReleaseReason || '').trim();
+    if (envConfig.name !== 'prod') {
+      throw new Error('--emergency-release is available only for PROD');
+    }
+    if (!args.yes) {
+      throw new Error('--emergency-release requires --yes');
+    }
+    if (!args.skipSchema || !args.skipData || args.dataset || args.workflowId || args.refreshTestDb) {
+      throw new Error('--emergency-release is app-only and requires --skip-schema --skip-data with no dataset, workflow, or TEST DB refresh operation');
+    }
+    if (reason.length < 24) {
+      throw new Error('--emergency-release-reason must contain a specific operator authorization and rationale (at least 24 characters)');
+    }
+    return {
+      path: args.qualificationEvidence,
+      stage: evidence.stage || null,
+      decision: 'EMERGENCY-AUTHORIZED',
+      evidenceDecision: evidence.decision || null,
+      evidenceId: evidence.evidenceId || null,
+      evidenceReleaseId: evidence.releaseId || null,
+      releaseId: plan.releaseId,
+      emergencyRelease: true,
+      emergencyReleaseReason: reason,
+      validationErrors: errors,
+      domains: evidence.domains || [],
+      operations: [],
+      candidate: {
+        source: qualificationSourceFromRepoState(repoState),
+        schemaSha256: canonicalSchemaFingerprint(),
+      },
+    };
+  }
   if (errors.length) throw new Error(`Release qualification rejected: ${errors.join('; ')}`);
   return {
     path: args.qualificationEvidence,
