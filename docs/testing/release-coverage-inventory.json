@@ -311,7 +311,7 @@
       "id": "auth-identity",
       "description": "Cognito authentication, staff/applicant identity domains, role authorization and object scope.",
       "matches": {
-        "admin": ["^(src/(auth|middleware|routes/admin/users)|src/lib/(applicantAccount|identity)|scripts/(privacy|applicant-scope)|isetadminserver\\.js$)"],
+        "admin": ["^(src/(auth|middleware|routes/admin/users)|src/lib/(applicantAccount|identity)|scripts/(privacy|applicant-scope)|scripts/lib/test-instance-aws-identity\\.js$|tests/testInstanceAwsIdentity\\.test\\.js$|isetadminserver\\.js$)"],
         "portal": ["^(auth/|src/(context/Auth|components/Auth|__tests__/Auth)|routes/__tests__/applicant|server\\.js$)"],
         "shared": ["(actor|identity|notificationDispatcher)"]
       },
