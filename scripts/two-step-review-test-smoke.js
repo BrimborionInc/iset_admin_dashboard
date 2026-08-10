@@ -38,6 +38,18 @@ const REMOTE_COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
 const REMOTE_EVIDENCE_MARKER = '@@TWO_STEP_REVIEW_SMOKE_EVIDENCE@@';
 const REMOTE_EVIDENCE_TRANSPORT_VERSION = 1;
 
+function sameExactRecord(actual, expected) {
+  if (!actual || typeof actual !== 'object' || Array.isArray(actual)) return false;
+  if (!expected || typeof expected !== 'object' || Array.isArray(expected)) return false;
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  return (
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, index) => key === expectedKeys[index]) &&
+    expectedKeys.every(key => actual[key] === expected[key])
+  );
+}
+
 /*
  * This factory is intentionally self-contained. The local launcher serializes it
  * into the SSM runner, and focused local tests import the same implementation.
@@ -7301,7 +7313,7 @@ function remoteRunner() {
       evidence?.subjectKey === subjectKey &&
       evidence?.workflowType === workflowType &&
       Number(evidence?.workflowId) === Number(workflowId) &&
-      json(evidence?.subject) === json(expectedSubject) &&
+      sameExactRecord(evidence?.subject, expectedSubject) &&
       Number(evidence?.submitter?.staffProfileId) === Number(submitterStaffProfileId) &&
       typeof evidence?.submitter?.name === 'string' && evidence.submitter.name.length > 0 &&
       typeof evidence?.submitter?.signedAt === 'string' && evidence.submitter.signedAt.length > 0 &&
@@ -8307,4 +8319,5 @@ module.exports = {
   createEncryptedFixtureEnvelope,
   createLiveSchemaGuard,
   orderSelfReferencingVersionDeleteBatches,
+  sameExactRecord,
 };

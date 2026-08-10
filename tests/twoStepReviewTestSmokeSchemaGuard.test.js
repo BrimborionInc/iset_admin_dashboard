@@ -6,7 +6,40 @@ const {
   createEncryptedFixtureEnvelope,
   createLiveSchemaGuard,
   orderSelfReferencingVersionDeleteBatches,
+  sameExactRecord,
 } = require('../scripts/two-step-review-test-smoke');
+
+describe('two-step evidence record comparison', () => {
+  test('accepts the exact subject record regardless of JSON property insertion order', () => {
+    const expected = {
+      key: 'intervention_proposal:proposal:484',
+      caseId: 506,
+      applicationId: 612,
+      actionPlanId: 271,
+      interventionId: 394,
+      proposalId: 484,
+    };
+    const actual = {
+      key: 'intervention_proposal:proposal:484',
+      caseId: 506,
+      proposalId: 484,
+      actionPlanId: 271,
+      applicationId: 612,
+      interventionId: 394,
+    };
+
+    expect(JSON.stringify(actual)).not.toBe(JSON.stringify(expected));
+    expect(sameExactRecord(actual, expected)).toBe(true);
+  });
+
+  test('rejects missing, extra, or changed subject evidence', () => {
+    const expected = { key: 'subject:1', caseId: 1, applicationId: 2 };
+
+    expect(sameExactRecord({ key: 'subject:1', caseId: 1 }, expected)).toBe(false);
+    expect(sameExactRecord({ ...expected, proposalId: 3 }, expected)).toBe(false);
+    expect(sameExactRecord({ ...expected, applicationId: 4 }, expected)).toBe(false);
+  });
+});
 
 function column(Field, Type = 'varchar(255)', extra = {}) {
   return {
@@ -521,7 +554,8 @@ describe('two-step TEST smoke live-schema guard', () => {
     expect(source).toContain("metadata?.assessment_final_evidence");
     expect(source).toContain("metadata?.assessment_variant === 'final'");
     expect(source).toContain('Number(evidence?.workflowId) === Number(workflowId)');
-    expect(source).toContain('json(evidence?.subject) === json(expectedSubject)');
+    expect(source).toContain('sameExactRecord(evidence?.subject, expectedSubject)');
+    expect(source).not.toContain('json(evidence?.subject) === json(expectedSubject)');
     expect(source).toContain("row?.label === `Final assessment packet v${versionNumber} - ${outcomeLabel}`");
     expect(source).toContain("label: 'application assessment approval'");
     expect(source).toContain("label: 'application assessment denial'");
