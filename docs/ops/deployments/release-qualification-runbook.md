@@ -289,6 +289,43 @@ After `TEST GO`, rerun the maintenance-only check if any cleanup command was nee
 npm run release:test:postflight -- --maintenance-only --json
 ```
 
+## Advisory read-only TEST identity and provenance proof
+
+The lean-programme Phase 7 check is deliberately separate from the current
+release gate. It has `releaseAuthority: none`; a pass is not `TEST GO` and does
+not admit PROD. The current qualifier remains authoritative.
+
+The certified task-specific command is pinned to the retained r31 deployment
+manifest, `nwac-test`, account `124355655255`, region `ca-central-1`, the exact
+operator `CODEX_CLI_Admin`, the dynamically verified TEST ASG/SSM instance,
+both TEST target groups, four exact current/rollback artifact keys, and the two
+deployed provenance files:
+
+```bash
+node scripts/path-test-readonly-control-plane.js \
+  --manifest tmp/path-deploy/test/20260809-two-step-review-assurance-r31--2026-08-10T03-24-21-698Z.json \
+  --profile nwac-test --region ca-central-1 \
+  --attempt-id <fresh-attempt-id> \
+  --evidence-out tmp/release-qualification/test-control-plane/<fresh-attempt-id>/final.json \
+  --json
+```
+
+The command fails closed on an expired or changed manifest, identity/resource
+mismatch, missing rollback object, unhealthy or mismatched target, malformed or
+stale provenance, timeout/cancellation failure, missing terminal evidence, or
+local source drift. It performs profiled AWS reads plus one bounded SSM command
+per admitted instance. The remote command calls STS and reads/hashes only
+`.path-release-provenance.json` from the admin and portal roots. It must not
+read environment files, query a database, call product HTTP, invoke SES, send
+email, deploy, build or mutate application state. TEST's explicit `ses:Send*`
+deny remains required.
+
+Sprint `7B` certification passed 47 focused synthetic cases and three complete
+live attempts on 2026-08-12. The retained final-evidence paths and digests are
+recorded in the target-architecture Sprint `7B` completion checkpoint. SSM
+command history is an intentional control-plane record; terminal SSM evidence
+must prove the remote read process ended, and no local check process may remain.
+
 ## Hard PROD go/no-go
 
 `GO` means all of the following are true at the decision time:

@@ -9459,8 +9459,288 @@ and `599bcd24fbe1e29daaf6e5e73a0d4e255928ed66dbbef83073c4014290f6aaec`.
 Narrowed Phase 5 is complete. The deliberate-failure path, prospective
 replacement-interruption path and normal rollback-only path each have exact
 target/DDL admission, process-state evidence and independent 13-scope zero-
-residue proof. No cleanup SQL, credential substitution, TEST, PROD, Phase 6 or
-Phase 7 work occurred. Phase 6 and later work remain separately authorized.
+residue proof. No cleanup SQL, credential substitution, TEST or PROD work
+occurred. Phase 6 has no standalone work under the lean rebaseline; Phase 7
+and later environment work remain separately authorized.
+
+## Narrowed Phase 7 Sprint Design
+
+Bill accepted narrowed Phase 5 at clean pushed commit
+`9be6881c7ee6bd03caa00d9e7c3de4f3d6f2327e` and directed that there is no
+standalone Phase 6. Under the lean rebaseline, Phase 6 means only the ownership
+and dependency mapping added with an authorized Phase 4, 5, 7 or 8 check. It
+has no implementation programme, sprint, cohort or exit gate. Unknown or
+ambiguous scope continues to require the unchanged authoritative full gate.
+
+### Sprint 7A - Read-Only TEST Control-Plane Definition
+
+Sprint `7A` defines the smallest executable proof of TEST identity,
+provenance, rollback-artifact presence, target health and bounded transport.
+It inspected repository source, retained local manifests, documentation and
+local configuration shape only. It did not call AWS, access TEST, read a
+database, execute remotely, start a service, retain a secret, change IAM or
+configuration, or implement the check.
+
+The design does not reuse full `path-test-runtime-postflight.js`: that runner
+also invokes database, maintenance and runtime-metric paths and has incomplete
+SSM cancellation/evidence boundaries. Phase 7 needs only the smaller boundary
+identified by the Phase 0 audit (`current-state audit:347-360,470-495`). The
+future implementation is one task-specific script and focused test, not a
+generic adapter, pack, registry or admission layer.
+
+#### Exact Target and Inputs
+
+| Boundary | Exact Phase 7 contract | Evidence and limitation |
+| --- | --- | --- |
+| Local operator | Profile `nwac-test`; account `124355655255`; region `ca-central-1`; exact effective ARN `arn:aws:iam::124355655255:user/CODEX_CLI_Admin`. Fresh profiled STS must match before any resource call; no override is admitted. | `docs/AGENTS.md:22-29`; `scripts/path-deploy.js:52-64`; `docs/ops/agent-operational-access.md:120-132`. This remains repository evidence until Sprint `7B` freshly proves it. |
+| TEST compute | ASG `nwac-test-asg`; every target must be dynamically discovered, healthy, `InService` and SSM-online. No instance ID or fixed instance count. | `scripts/path-deploy.js:1309-1314,1402-1408`; `scripts/path-test-runtime-postflight.js:85-103`; `path-deploy-orchestrator.md:12-15`. |
+| Remote identity | Exact role resource `arn:aws:iam::124355655255:role/nwac-test-app-role`; the remote STS result must be in account `124355655255` with role segment exactly `nwac-test-app-role`. Retain the complete observed ARN/user ID. Reject a static user or different role. | `docs/dashboards/admin-home-system-admin-homepage.md:52`; `deploy-test-notes.md:45-47`; `scripts/lib/test-instance-aws-identity.js:1-42`. The session suffix is live evidence, not a value to guess. |
+| Target health | Names `nwac-test-admin-tg` and `nwac-test-portal-tg`; live account/region/name must match. Every admin target must be healthy on `5001`, every portal target healthy on `5000`, and every target must belong to the admitted ASG/SSM set. | `scripts/path-deploy.js:52-64,645-660,1940-1979`. Retained r31 historical ARNs end `.../nwac-test-admin-tg/9d1c6d554ee42db1` and `.../nwac-test-portal-tg/a87089611b7de4c0`; live discovery is authoritative. |
+| Manifest | Exact starting input `tmp/path-deploy/test/20260809-two-step-review-assurance-r31--2026-08-10T03-24-21-698Z.json`. Before AWS require parseable JSON, TEST/success status, exact operator, successful qualification/preflight/app/smoke, one release/evidence ID and consistent admin/portal/shared heads and fingerprints. Bind its SHA-256 into every attempt. | Local retained evidence; manifest/step production is at `scripts/path-deploy.js:502-535,689-712,2277-2370`. This is a candidate for live comparison, not proof that it remains deployed. A mismatch stops; the attempt may not select another manifest. |
+| Deployed provenance | Read only `/opt/nwac/admin-dashboard/.path-release-provenance.json` and `/opt/nwac/portal/.path-release-provenance.json`. Each must be regular/readable JSON matching component, environment, release ID, qualification evidence ID and all three candidate fingerprints. Retain raw digest and parsed non-secret fields. Do not read `.env`, logs, databases, package trees or product records. | Written/installed at `scripts/path-deploy.js:864-879,1349-1354,1444-1449`; existing comparison at `scripts/path-test-runtime-postflight.js:151-178`. |
+| Artifacts | Bucket `nwac-test-artifacts`. `HeadObject` must succeed for current admin `admin-dashboard/admin-dashboard-20260809-232714.zip`, current portal `portal/portal-20260809-232859.zip`, rollback admin `admin-dashboard/admin-dashboard-20260809-224917.zip` (19,826,416 bytes) and rollback portal `portal/portal-20260809-225102.zip` (6,338,589 bytes). Rollback size/time must match the manifest. | Rollback pointer creation: `scripts/path-deploy.js:943-958,1309-1315,1387-1393,1402-1408,1482-1488`. `HeadObject` proves presence/metadata, not archive usability or content identity because TEST manifests omit artifact hashes. Phase 7 must preserve that limitation. |
+| Transport | SSM document `arn:aws:ssm:ca-central-1::document/AWS-RunShellScript`, targeting only dynamically admitted instances. One command per instance may call STS and read/hash the two provenance files only. | Existing pattern: `scripts/path-test-runtime-postflight.js:105-145`. Sprint `7B` must add task-local connect/execution/idle/total bounds, one cancellation attempt on timeout and terminal command/process evidence. |
+| SES | TEST email remains disabled to prevent accidental delivery. `DenySesSendDuringProdDataRehearsal` explicitly denies `ses:Send*` for `SES_backend` and `nwac-test-app-role`. Phase 7 must not detach/change it, enable SES, call an SES send API or send email. | `docs/ops/deployments/deploy-test-notes.md:45-47`. Sprint `7A` did not query IAM and therefore records the operating invariant without claiming fresh live policy certification. |
+
+The r31 manifest is the newest locally retained successful TEST app-deployment
+manifest with complete identity, qualification, source, current-artifact,
+rollback-artifact and target-health fields. Its local ordering does not prove
+it is currently deployed. Phase 7 exists to prove or reject that proposition.
+
+#### Ordered Check, Effects and Evidence
+
+The proposed check identifier is `test-readonly-control-plane`; its operation
+class is `release-operation:test-readonly-provenance`. It is not a product test,
+pack or release decision. Sprint `7B` must use this fail-closed order:
+
+1. Validate/hash the exact local manifest and create a fresh attempt/evidence
+   root. Local failure performs no AWS call.
+2. Run the complete synthetic negative corpus. Live execution is not admitted
+   unless it passes.
+3. Prove the exact profiled STS identity. Wrong account, region or ARN stops.
+4. Discover healthy `InService` ASG members and intersect with SSM-online
+   instances. Empty, extra, unavailable or ambiguous scope stops.
+5. Discover both target groups; require exact identity, expected ports, all
+   targets healthy and exact membership in the admitted instance set.
+6. `HeadObject` the two current and two rollback keys. Missing objects,
+   bucket/prefix drift or rollback metadata mismatch stops.
+7. Send one bounded read-only SSM command per admitted instance. It proves
+   remote identity and reads/hashes only the two provenance files. It must not
+   load environment files or contact a product service.
+8. Compare every deployed provenance field with the manifest. Missing,
+   malformed, duplicated, stale or conflicting evidence stops.
+9. Retain every result incrementally, assemble a content-addressed attempt
+   index and prove local source stability. Record `releaseAuthority: none`.
+
+AWS describe, STS, S3 head and remote filesystem operations are read-only. SSM
+`SendCommand`, `GetCommandInvocation` and possible `CancelCommand` create AWS
+control-plane history and a temporary remote read process; this is the only
+declared external effect. There is no implicit retry. Timeout triggers one
+bounded cancellation attempt and a failed attempt. Cancellation failure is
+retained and stops.
+
+Evidence must retain, without secrets: script/source digest, manifest path/
+digest and accepted fields, commands, local/remote identity, ASG/SSM members,
+target ARNs/ports/health, S3 bucket/key/length/time/version ID where returned,
+SSM command/invocation IDs, process output/status/duration/truncation/
+cancellation, raw provenance digests and parsed fields, comparisons, source
+before/after identities, missing/partial evidence and final status. Environment
+values, credentials and tokens are forbidden.
+
+Synthetic cases must cover wrong profile/account/region/operator; failed,
+incomplete, stale, malformed or conflicting manifest; qualification/preflight/
+source disagreement; missing current/rollback object; wrong bucket/key/size/
+time; absent ASG; unhealthy/not-InService/SSM-offline instance; wrong target
+identity/port/membership/health; wrong remote account/role; missing/malformed/
+stale/conflicting provenance; missing/duplicate/late/truncated SSM result;
+command failure; timeout with successful and failed cancellation; unsupported
+AWS action; attempted `.env`, database, SES, product HTTP or filesystem-write
+operation; evidence corruption; and local source drift.
+
+After synthetic proof, run exactly three complete live attempts from one frozen
+source/manifest, each with a fresh ID. Apart from attempt/time/duration/SSM IDs,
+artifact digests and explicitly ephemeral transport fields, all three must
+agree on identities, manifest/provenance, resources, health and artifact
+metadata. Any denial, unexplained difference, timeout, cancellation failure,
+source drift or missing evidence stops without repair, permission workaround,
+manifest switch or rerun.
+
+#### IAM and Configuration Boundary
+
+Sprint `7A` justifies no IAM/configuration change because live permissions were
+not queried. Sprint `7B` needs these least-privilege actions. A denial must name
+the freshly verified principal, action, resource and AWS request evidence, then
+stop. Another profile/credential, role assumption or weakened check is
+forbidden.
+
+| Principal | Action | Exact resource boundary |
+| --- | --- | --- |
+| `arn:aws:iam::124355655255:user/CODEX_CLI_Admin` | `sts:GetCallerIdentity` | `*` |
+| same | `autoscaling:DescribeAutoScalingGroups` | `*`, request limited to `nwac-test-asg` |
+| same | `ssm:DescribeInstanceInformation` | `*`, only to intersect the verified ASG set |
+| same | `elasticloadbalancing:DescribeTargetGroups`, `elasticloadbalancing:DescribeTargetHealth` | `*`, requests limited to the two named groups/fresh ARNs |
+| same | `s3:GetObject` via `HeadObject` | Exactly the four object ARNs corresponding to the keys above in `nwac-test-artifacts` |
+| same | `ssm:SendCommand` | Exact `AWS-RunShellScript` document ARN and only `arn:aws:ec2:ca-central-1:124355655255:instance/<verified-id>` resources |
+| same | `ssm:GetCommandInvocation`; `ssm:CancelCommand` only on timeout | Attempt-returned command ID; where AWS requires `*`, enforce the ID locally |
+| `arn:aws:iam::124355655255:role/nwac-test-app-role` | `sts:GetCallerIdentity` | `*`; no other remote AWS action is required |
+
+If `nwac-test` is absent or resolves differently, Bill must restore/configure
+that named profile for the exact expected operator without exposing credentials.
+If the remote role lacks STS identity, Bill must decide the exact least-
+privilege grant. No other IAM/configuration change is anticipated, and the SES
+deny must remain.
+
+#### Incremental Ownership/Impact Mapping
+
+This is the complete merged Phase 6 mapping required by this proposed check:
+
+| Change/input | Owner | Required impact |
+| --- | --- | --- |
+| Proposed script/test | Admin release operations | Re-run synthetic certification and all three Phase 7 attempts; a script change changes evidence version, not product candidate. |
+| `scripts/path-deploy.js` TEST constants, manifest shape, rollback pointer or provenance writer/install path | Admin deployment control plane | Select `test-readonly-control-plane`; stale mapping/manifest fails closed. |
+| Release qualification/admission source or evidence identity | Admin qualification control plane | Select the check because deployed provenance consumes those identities. |
+| Admin/portal/shared build metadata, provenance generation or deployed layout | Owning product repository plus admin deploy control plane | Select the check and require cross-repository provenance agreement. |
+| TEST profile/account/region, ASG, target groups, bucket/prefix, SSM document/role or IAM capability | Infrastructure owner | Select as an operation-triggered safety gate; no product identity change unless source also changed. |
+| Unrelated documentation | Documentation owner | Does not select this check alone; uncertain release scope still uses the current full gate. |
+| Unknown/unmapped/conflicting file, operation or resource | Bill plus current gate | Fail closed to the unchanged authoritative full gate; never silently exclude or guess. |
+
+This mapping does not alter an executable selector, promote a pack or replace
+the current gate.
+
+### Phase 7 Sprint Breakdown
+
+| Sprint | Objective | Effects/files | Verification and stop |
+| --- | --- | --- | --- |
+| `7A` | **Completed definition.** Fix the exact TEST identity/resource/manifest/provenance/artifact/transport boundary and one ownership map. | Read repository, retained manifest, docs and configuration shape; edit only architecture and controlling plan. No AWS/TEST/network/database/service/secret access or implementation. | Source-referenced contract, IAM boundary and copy-ready `7B` authorization. Stop before TEST. |
+| `7B` | **Implement and execute the bounded read-only proof.** | Editable only: `scripts/path-test-readonly-control-plane.js`, `tests/pathTestReadonlyControlPlane.test.js`, `docs/ops/deployments/release-qualification-runbook.md`, architecture and controlling plan. Local tests/evidence plus declared AWS reads and SSM command history/remote reads only. | Syntax, synthetic negatives, dependency/import/static/whitespace, then exactly three stable live attempts. Any failure stops without repair/rerun. Stop for Bill's Phase 7 review; Phase 8 is not automatic. |
+
+Focused local gate:
+
+```bash
+node --check scripts/path-test-readonly-control-plane.js
+npm run test:backend -- --runTestsByPath tests/pathTestReadonlyControlPlane.test.js --runInBand --no-cache
+git diff --check
+```
+
+Live command, exactly three times after that gate:
+
+```bash
+node scripts/path-test-readonly-control-plane.js \
+  --manifest tmp/path-deploy/test/20260809-two-step-review-assurance-r31--2026-08-10T03-24-21-698Z.json \
+  --profile nwac-test --region ca-central-1 \
+  --attempt-id <fresh-attempt-id> \
+  --evidence-out tmp/release-qualification/test-control-plane/<fresh-attempt-id>/final.json \
+  --json
+```
+
+### Exact Proposed Authorization for Sprint 7B
+
+> Read and obey `docs/AGENTS.md`, the controlling rebuild plan and approved
+> target architecture.
+>
+> Bill accepts Sprint `7A` and authorizes Sprint `7B` only under the complete
+> narrowed Phase 7 contract recorded in the target architecture.
+>
+> Implement the single read-only TEST control-plane check in only:
+> `scripts/path-test-readonly-control-plane.js`,
+> `tests/pathTestReadonlyControlPlane.test.js`, the release-qualification
+> runbook, target-architecture checkpoint and controlling-plan checkpoint/
+> Sprint Ledger.
+>
+> Use only the exact retained r31 manifest and recorded local source inputs.
+> Run the complete synthetic identity, manifest, artifact, health, provenance,
+> permission, timeout, cancellation and evidence-negative corpus first. Do not
+> contact AWS/TEST unless it passes in full.
+>
+> If it passes, use only `nwac-test`, account `124355655255`, region
+> `ca-central-1`, exact operator
+> `arn:aws:iam::124355655255:user/CODEX_CLI_Admin`, recorded resources and
+> dynamically verified instances. Run exactly three complete attempts with
+> fresh IDs and content-addressed evidence. SSM history and remote read
+> processes are the only external effects.
+>
+> TEST SES remains disabled. Do not change IAM/configuration, call SES, send
+> email, read environment values, run SQL/databases/product HTTP, deploy,
+> build, mutate TEST, use PROD, change authority/admission, add a generic
+> adapter/pack or begin Phase 8.
+>
+> Any identity, resource, permission, manifest, provenance, artifact, health,
+> transport, cancellation, source or evidence failure stops without repair,
+> credential substitution, manifest switch or rerun. Report the verified
+> principal, denied action and exact resource for any permission gap.
+>
+> Stop after Sprint `7B` with three-run evidence and a Phase 7 completion
+> decision. Phase 8 requires separate Bill authorization.
+
+### Sprint 7B - Completion Checkpoint
+
+Sprint `7B` implemented only
+`scripts/path-test-readonly-control-plane.js`, its focused backend test and the
+three authorized documents. It did not add a qualification pack, registry,
+adapter platform or release-admission integration. The check is pinned to the
+exact r31 manifest and its recorded resources, records
+`releaseAuthority: none`, and leaves the current gate authoritative.
+
+Before live execution, one consolidated IAM admission review freshly proved
+`arn:aws:iam::124355655255:user/CODEX_CLI_Admin`. The user has no group, inline
+policy or permissions boundary and has the AWS-managed `AdministratorAccess`
+policy directly attached. Policy simulation returned `allowed` for every
+Phase 7 action and exact resource class, including all four S3 object ARNs and
+the SSM document/TEST-instance resource pair. `nwac-test-artifacts` has no
+bucket policy. Account `124355655255` is its Organizations management account,
+its parent is root `r-qima`, and neither the account nor root has an attached
+SCP. The remote role has no permission boundary, retains
+`AmazonSSMManagedInstanceCore`, `nwac-test-app-runtime`, and the explicit inline
+`DenySesSendDuringProdDataRehearsal` deny for `ses:Send*`. No IAM or
+configuration change was required or made. The remote role's simulator reports
+no identity-policy allow for `sts:GetCallerIdentity`; that API requires no
+allow and the three remote calls freshly returned the exact role identity.
+
+The final synthetic gate passed 47/47. It covers exact CLI/manifest/source
+binding; failed, stale, malformed and conflicting inputs; wrong local/remote
+identity; ASG/SSM/target/artifact/provenance failures; missing, duplicate,
+malformed and truncated remote results; undeclared operations; timeout with
+single cancellation and cancellation failure; command failure; source drift;
+digest corruption; terminal process evidence; cleanup and no-release-authority
+semantics. Node syntax and `git diff --check` also passed. Two pre-AWS test-only
+corrections were made: the synthetic total-time test now uses its injected
+clock, and the test decodes the admitted base64 remote program before checking
+its paths. No live attempt was consumed by either correction.
+
+All three authorized live attempts passed:
+
+| Attempt | Final evidence SHA-256 | SSM command | Result |
+| --- | --- | --- | --- |
+| `phase7b-live-1-dd943847-9902-49f4-8888-91d5076080e6` | `c1892c6d065bbb332c451c6419548a896ac46e608ba9d07d6c1602038e5b01e0` | `6d2da50c-ec39-44da-99bf-8f238de53941` | passed |
+| `phase7b-live-2-cf3f3efa-f815-41e1-aa89-92703c7efb9a` | `0663529c7caa98e80cde92a79831b00c1a08064819e99f0d28ae37084d746e4a` | `eb2e4c32-fb3f-45e7-ac8b-a878e4c9fdf7` | passed |
+| `phase7b-live-3-e4295b47-c2a7-4055-88c4-b1a1ca9cc64a` | `a4f93839effec01544ef3f135cc2906192116059b39b038b19d4a50efdc914be` | `e33a20ca-ef94-41f7-85bc-74d039cc917a` | passed |
+
+Each attempt retained `events.ndjson`, incremental `partial.json`, `final.json`
+and `final.json.sha256` below its attempt-owned
+`tmp/release-qualification/test-control-plane/` root. All three final digests
+recomputed correctly. After excluding only attempt/time/duration/process/SSM
+identifiers and output/artifact digests, the normalized evidence was identical
+with SHA-256
+`57123b6dda401d2a1bf0a31c77cbdd1d0e4ba8bfb4baad0f41c10c5bd4669cf1`.
+All had the same nine-event topology, admitted instance
+`i-0db0637d66d66de8c`, two target-group ARNs, four artifact metadata records,
+r31 candidate identity, and deployed provenance digests
+`6eb20ce3e5c69f179c9e4b5f75bf7daca0493017163434d8ab052e5da5aa7cf6`
+(admin) and
+`4dc0e665438d35149c5b329d4ad7ea2e380a42684b1f23a5305c6a5aaa7dfb63`
+(portal). Script SHA-256
+`5f63337e815c030a51831a11862cfd3015e9449d341e06b28c97d2043d4d8544`
+and manifest SHA-256
+`2f4d93539642479aa7d223f5b5f64b79467d6f49d29f0ec6a6517ecba5813a51`
+were stable before and after every attempt. Every AWS child exited zero, every
+SSM invocation reported `Success`/response `0`, all independent proofs passed,
+and a post-run local process check found no remaining control-plane process.
+
+The only external effects were three retained SSM command histories and their
+short-lived remote read processes. No database, product HTTP, SES, email,
+deployment, build, PROD, IAM/configuration or application-state operation
+occurred. TEST SES remained disabled. Narrowed Phase 7 is complete and ready
+for Bill's review. Phase 8 remains unauthorized.
 
 ## Exact Proposed Authorization for Sprint 4A
 
