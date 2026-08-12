@@ -7959,3 +7959,98 @@ control and verify identical selection/evidence/source stability; review the
 already certified deliberate failures, interruption and residue evidence; make
 no pack, source, adapter, authority or environment change; and stop for Bill's
 Phase 3 acceptance decision. Phase 4 remains unauthorized.
+
+## Phase 3 Exit-Gate Attempt Stop
+
+Bill accepted Sprint `3H` and admitted only the bounded Phase 3 exit gate from
+clean admin `HEAD` and local `origin/main`
+`80fe3af40833d20d62ba07dde7d74d60cee05001`. Both refs matched and the checkout
+was clean before execution. The active native cohort was frozen exactly as
+`ai-guidance-contract@1.0.1`, `privacy-route-static@1.0.2`,
+`admin-lint@1.0.2`, `portal-lint@1.0.1` and `admin-aggregate@1.0.2`; the active
+registry's canonical content digest was
+`c9208defdfec9b59e750eaa9a4c8b8bfcc23f4846b8b07c0203574696c8ed6ec`.
+The separate source-state contract was frozen as
+`candidate-source-stability@1.0.0` with canonical content digest
+`0562b5322ce0c1f03539083c7cd90669d887241ba80690078bdf172c487509ce`
+and source-role registry digest
+`faa72d9cdf23aafef52c8628583eda931d60eabaa2590a82117ff893b12832e8`.
+All are advisory and retain `releaseAuthority: none`.
+
+The sole authorized exit command, `node /tmp/rq-phase3-exit-gate.js`, opened
+cohort attempt
+`attempt:c625d696-f234-4892-86b8-a2ee21fe810c`. It completed the advisory
+`ai-guidance-contract` dispatch and opened fresh approved direct-control attempt
+`attempt:edae8deb-79e7-4797-a31e-7ef56af9f9b7`, then stopped before retaining a
+pack comparison or source-stability artifact. No second pack and no later cohort
+attempt ran. The content-addressed failure record is retained in the ignored
+attempt evidence tree at
+`tmp/release-qualification/phase3/exit-gate/working-96f2231e-14f1-4d0c-b300-3ca734355dcf/failure.json`;
+its digest is
+`51c8c440ee5357d6c26b7c71a5b2b4ac4f61030951288f2a79e8d67fcf5c0b04`
+and its terminal code is
+`ADVISORY_OR_COMPARISON_FAILED:1:ai-guidance-contract`.
+
+### Classification and Stop Basis
+
+This stop is an explained harness-operator failure, not a product failure or an
+environment/infrastructure failure. The certified bridge represents a read-only
+operation with cleanup status `unnecessary`, a completed/passed independent
+`not-applicable` proof, and residue decision `no-declared-write-effect`
+(`qualification/src/native-readonly-bridge.js:545-559`). The one-off exit
+operator incorrectly admitted only `zero-residue-proved` and
+`unnecessary-read-only`; that latter value is not emitted by the bridge. Its
+predicate therefore rejected the otherwise terminal read-only result before it
+could retain the comparison or proceed. Because the retained failure artifact
+does not contain the comparison object, this attempt does not prove either
+direct/advisory agreement or disagreement. It cannot count toward the exit
+cohort.
+
+The operator failure was not repaired or rerun. Independent post-stop checks
+found no qualifying native/exit child process and no attempt-owned AI/native
+temporary root. The only `/tmp` name matching the exit prefix is the non-running
+one-off operator source itself. Product/native inputs, pack/registry/role/source
+contracts, identities, current gate, maturity and release authority were not
+changed.
+
+### Retained Certification Review
+
+The previously accepted evidence remains sufficient for the exit gate's review
+component, but it does not substitute for the five missing cohort attempts:
+
+- AI guidance retains the native duplicate-ID failure, ten frozen advisory
+  passes, five direct/advisory pairs and forced whole-process-tree termination
+  (`:5180-5192`).
+- Privacy route static retains all 71 source tripwires and every native
+  guard-removal mutation, plus parity, identity, forced-termination and
+  no-residue coverage (`:5302-5330`, `:5721-5750`).
+- Admin and portal lint retain native deliberate `no-undef` failures, ten-run and
+  five-pair parity, identity, interruption and no-cache/no-source-residue proof
+  (`:5415-5436`, `:5457-5477`, `:5829-5870`, `:5894-5930`).
+- Admin aggregate retains both phase-specific deliberate failures, corrupt phase
+  evidence rejection, interruption, cleanup and independent zero residue
+  (`:6918-6934`).
+- Source inventory/stability retains deliberate product, harness, test-pack,
+  dirty-head, protected-path and detailed-drift cases, forced interruption and
+  attempt-owned teardown proof (`:7905-7934`).
+
+`portal-aggregate` remains outside the active advisory cohort. The current
+authoritative gate continues to own it, and RN02/RN04 remain explicit open
+no-loss obligations. No pack promotion, admission change, Sprint `3G` revival,
+environment access or Phase 4 work occurred.
+
+**Completion decision:** the bounded exit-gate sprint stopped correctly and is
+incomplete. Exactly zero of five required complete cohort attempts exist, so
+Phase 3 has not met its exit gate and must not be accepted as complete yet.
+
+**Exact next approval:** Bill separately authorizes a bounded Phase 3 exit-gate
+operator correction and fresh execution only. The correction may change only
+the non-product exit operator so its read-only residue predicate accepts the
+certified bridge value `no-declared-write-effect` while still requiring
+completed/passed independent proof. It must preserve the frozen pack/source
+contracts and identities, abandon rather than count the incomplete attempt, use
+one new evidence root, and run exactly five complete cohort attempts with fresh
+`attemptId` values. Any new failure or direct/advisory, selection, evidence-graph
+or source-stability disagreement requires an immediate stop without repair or
+rerun. Only the approved Phase 3 checkpoint documents may then change; Phase 4,
+promotion, admission and release-authority changes remain unauthorized.
