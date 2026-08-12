@@ -206,6 +206,34 @@ This package must not import or execute PATH application code, release checks,
 databases, AWS, browsers, HTTP services, builds, deployments, TEST, or PROD.
 The approved architecture remains normative; this file cannot broaden scope.
 
+## Sprint 3H Source State
+
+Sprint `3H` adds a separate advisory source-state boundary without changing the
+certified five-pack native registry or bridge. It inventories exact tracked and
+explicitly admitted qualification-owned untracked bytes from admin, portal and
+shared according to `registries/phase3-source-roles.registry.json`. Product,
+harness and test-pack role material produce separate digests; dependency,
+migration and generated roles contribute only to the product candidate. Global
+repository HEAD and tree values remain provenance facts and cannot by
+themselves conflate those identities.
+
+The standalone controls are:
+
+```sh
+node qualification/bin/rq-source-state.js inventory --registry qualification/registries/phase3-source-roles.registry.json
+node qualification/bin/rq-source-state.js verify --registry qualification/registries/phase3-source-roles.registry.json --baseline <content-addressed-baseline-ref>
+node --test qualification/test/source-inventory-and-stability.test.js
+```
+
+Inventory rejects unmapped or unadmitted untracked paths, missing files,
+symlinks, path escapes, stale registries, conflicting Git identities and partial
+or interrupted collection. The protected production-feedback filename pattern
+is excluded before byte access and from every identity/index/status digest. A
+stability result is advisory evidence only, reports exact changed paths and
+affected identities, and has `releaseAuthority: none`. It does not invoke the
+current qualification gate, promote a pack, close RN02/RN04, or perform the
+separately authorized Phase 3 exit cohort.
+
 Sprints 3A through 3D are certification lanes, not MC2 release selection. The Phase 2
 selector continues to admit only mandatory qualification packs; the Phase 3
 registry explicitly says `advisory-certification-only`. No selector, kernel,

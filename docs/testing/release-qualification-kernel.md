@@ -315,3 +315,36 @@ environment key is a pre-dispatch harness rejection. A timeout, cancellation,
 nonzero exit, missing/corrupt/stale/conflicting result, output limit, or failed
 termination proof remains explicit process evidence; Sprint `2D` does not
 reinterpret it as a product failure.
+
+## Sprint 3H Source Inventory and Stability
+
+Sprint `3H` implements the architecture's native-Git source boundary in
+`qualification/src/source-inventory.js`, the deterministic before/after
+decision in `qualification/src/source-stability.js`, and the standalone CLI in
+`qualification/bin/rq-source-state.js`. The versioned role registry covers only
+admin, portal and shared. It assigns each admitted path to exactly one of the
+product-candidate, harness or test-pack identity domains and records dependency,
+migration and generated subroles without including the removed Intacct tooling.
+
+The collector reads Git HEAD/ref/index/status facts and exact admitted file
+bytes. It never follows symlinks, accepts an arbitrary untracked path, or reads
+the protected `prod-feedback-180-181` SQL files. Those protected filenames are
+recognized and excluded before `lstat` or byte access, and are omitted from
+index, status and identity hashes. Git HEAD/tree values are retained as
+provenance, while canonical role/path/byte material determines the three source
+identity digests.
+
+`inventory` emits a strict content-addressed artifact. `verify` requires the
+exact admitted baseline ID and registry digest, independently recollects the
+current state, and emits detailed repository, file, dirty-role and affected-
+identity evidence. Missing, stale, conflicting, interrupted or partial evidence
+fails closed. No retry is implicit.
+
+The focused synthetic corpus proves ten frozen known-good inventories, five
+direct/advisory pairs, product/harness/pack identity separation, migration/
+generated/dependency treatment, deliberate drift, protected-path exclusion,
+dirty roles, missing/symlink/escape/unmapped/conflicting inputs, canonical JSON
+reordering, stale baselines and forced interruption. The source-state pack is
+advisory with no release authority. The certified five-pack native registry and
+bridge remain unchanged; portal aggregate stays deferred and RN02/RN04 remain
+open under the current authoritative gate.

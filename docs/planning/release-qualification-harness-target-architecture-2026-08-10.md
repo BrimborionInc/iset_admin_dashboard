@@ -7859,3 +7859,103 @@ then explicitly authorizes Sprint `3H` only under the objective, exact files,
 read-only Git/file inputs, protected-path boundary, effects, direct/advisory
 commands, verification and stopping point recorded in the approved Phase 3
 breakdown. Phase 4 and every release-authority change remain unauthorized.
+
+## Sprint 3H Implementation and Certification Checkpoint
+
+Bill admitted Sprint `3H` from clean admin `HEAD` and local `origin/main`
+`8822c0373fbdb4f4db0c423b6a6121c451a524a4`; the checkout was clean before any
+edit. The implementation creates a separate `phase3-source-roles` control
+boundary rather than changing the certified native-readonly registry, role
+manifest, bridge, adapter or five existing pack versions. This preserves the
+accepted five-pack control plane and avoids the cross-pack invalidation pattern
+that stopped Sprint `3G`.
+
+### Implemented Boundary
+
+- The strict registry accepts exactly admin, portal and shared, exactly the
+  three product-candidate/harness/test-pack identity domains, and a single
+  protected filename pattern. Missing/unknown fields, stale digests, conflicting
+  role ownership and any authority beyond advisory certification fail closed
+  (`qualification/src/source-inventory.js:120-204`).
+- The native boundary collects bounded Git HEAD/tree/ref/index/status facts and
+  exact admitted file bytes. Paths are canonical and repository-contained;
+  missing files, symlinks, resolved escapes, arbitrary untracked content,
+  conflicting expected HEAD and interruption fail before a complete artifact
+  exists (`qualification/src/source-inventory.js:207-374`).
+- Protected `sql/ops/prod-feedback-180-181-*20260810.sql` paths are recognized
+  and excluded before `lstat`, realpath or byte access. They are also excluded
+  from status, index and identity material; only the permitted filename is
+  reported as an exclusion (`qualification/src/source-inventory.js:332-402`).
+- Each repository retains Git provenance, but the three source identities are
+  computed from canonical repository/role/path/byte material rather than a
+  repository-wide HEAD. A harness-only or test-pack-only byte change therefore
+  cannot alter `productCandidateId` (`qualification/src/source-inventory.js:404-432`).
+- Before/after comparison independently validates both inventories and their
+  common registry, reports exact Git/file/dirty-role changes and affected
+  identities, rejects a stale baseline, and emits only `releaseAuthority: none`
+  (`qualification/src/source-stability.js:119-233`). The CLI exposes only strict
+  `inventory` and `verify` operations and creates no implicit retry
+  (`qualification/bin/rq-source-state.js:13-53`).
+- The pack contract keeps maturity `advisory`, current-gate authority unchanged,
+  Intacct outside the candidate, and RN02/RN04 explicitly open. It is not added
+  to `phase3-read-only.registry.json`; admission to the separately authorized
+  Phase 3 exit cohort remains a governance decision, not an implementation side
+  effect.
+
+### Certification Evidence
+
+The focused source-state test passed 8/8 named groups. It proved the strict pack,
+registry and five-pack-preservation boundary; ten byte-identical frozen
+inventories; five direct/advisory inventory and stable-comparison pairs; isolated
+product, harness and test-pack identity changes; migration/generated/dependency
+treatment; exact detailed drift; dirty-role evidence; missing, symlink, escape,
+unmapped, stale, conflicting-head, conflicting-role and protected-path cases;
+canonical reordered JSON; stale/partial/interrupted evidence; and five real
+synthetic-Git CLI/advisory matches plus standalone verify
+(`qualification/test/source-inventory-and-stability.test.js:132-332`). Every
+test-owned temporary tree has teardown and post-removal absence proof
+(`:68-77`).
+
+The exact pre-checkpoint real-repository `inventory` command produced a
+structurally valid artifact covering 2,445 admin, 388 portal and 20 shared
+files. It excluded the one
+currently Git-visible protected filename without reading its bytes and reported
+portal/shared clean plus 24 admitted admin dirty paths from the Sprint `3H`
+worktree. That dirty result was diagnostic inventory evidence, not an accepted
+candidate baseline or Phase 3 exit attempt.
+
+Deterministic cumulative qualification verification passed 254/254 assertions
+across 161 named subtests. It included the complete five-pack corpus, all
+existing negative/parity/identity/interruption/residue cases, the 28-case
+process-control suite and the eight new source-state groups. JavaScript syntax,
+strict registry/pack digest validation, dependency usability, import boundary
+and `git diff --check` passed. The active five-pack registry digest, role
+manifest `1.8.0`, adapter `2.0.0`, five pack versions, product/native commands,
+maturity and `releaseAuthority: none` remain unchanged.
+
+One initial direct inventory attempt was stopped before candidate-byte reads
+because the managed sandbox attached `EPERM` to a successful nested Git child.
+A minimal read-only diagnostic proved status `0` plus the false error marker;
+the authorized local-process execution then passed once. One cumulative npm
+invocation placed the Node concurrency option after the file glob, so no test
+started; the corrected direct Node command ran once and passed. Both deviations
+were deterministic tooling/invocation issues, not product, source-state,
+cleanup or unexplained failures. No environment, network, SQL content, current
+gate, admission, promotion, portal-aggregate repair, exit cohort or Phase 4 work
+occurred.
+
+**Completion decision:** Sprint `3H` is complete. Phase 3 remains incomplete
+until a separately authorized exit-gate run proves five frozen-identity cohort
+attempts, deliberate-failure coverage, zero direct/advisory disagreement,
+source stability and Bill review. `portal-aggregate` remains deferred; RN02 and
+RN04 remain open under the unchanged authoritative gate.
+
+**Exact next approval:** Bill reviews and accepts completed Sprint `3H`, then
+explicitly authorizes a bounded Phase 3 exit-gate sprint only: freeze the five
+active native-pack identities plus the certified source-state role/pack
+identities; run exactly five complete advisory cohort attempts with new
+`attemptId` values; compare every native result with its approved retained direct
+control and verify identical selection/evidence/source stability; review the
+already certified deliberate failures, interruption and residue evidence; make
+no pack, source, adapter, authority or environment change; and stop for Bill's
+Phase 3 acceptance decision. Phase 4 remains unauthorized.

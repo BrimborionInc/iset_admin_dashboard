@@ -1,0 +1,216 @@
+{
+  "schemaVersion": "1.0.0",
+  "registryId": "phase3-source-roles",
+  "contentDigest": {
+    "algorithm": "sha256",
+    "value": "faa72d9cdf23aafef52c8628583eda931d60eabaa2590a82117ff893b12832e8"
+  },
+  "authority": {
+    "selectionAuthority": "advisory-certification-only",
+    "releaseAuthority": "none",
+    "currentGateAuthority": "unchanged"
+  },
+  "protectedPaths": [
+    "sql/ops/prod-feedback-180-181-*20260810.sql"
+  ],
+  "repositories": [
+    {
+      "repositoryId": "admin",
+      "root": ".",
+      "rules": [
+        {
+          "roleId": "test-pack",
+          "identity": "testPackVersions",
+          "patterns": [
+            "qualification/packs/**",
+            "qualification/test/**",
+            "tests/**",
+            "scripts/**/*smoke*.js",
+            "scripts/**/*audit*.js"
+          ],
+          "allowUntracked": true
+        },
+        {
+          "roleId": "harness",
+          "identity": "harnessVersion",
+          "patterns": [
+            "qualification/**",
+            "docs/**",
+            "scripts/path-*.js",
+            "scripts/release-*.js",
+            "scripts/lib/test-instance-aws-identity.js"
+          ],
+          "allowUntracked": true
+        },
+        {
+          "roleId": "migration",
+          "identity": "productCandidateId",
+          "patterns": [
+            "sql/**"
+          ],
+          "allowUntracked": false
+        },
+        {
+          "roleId": "generated",
+          "identity": "productCandidateId",
+          "patterns": [
+            "src/generated/**"
+          ],
+          "allowUntracked": false
+        },
+        {
+          "roleId": "dependency",
+          "identity": "productCandidateId",
+          "patterns": [
+            "package.json",
+            "package-lock.json"
+          ],
+          "allowUntracked": false
+        },
+        {
+          "roleId": "product",
+          "identity": "productCandidateId",
+          "patterns": [
+            "**"
+          ],
+          "allowUntracked": false
+        }
+      ]
+    },
+    {
+      "repositoryId": "portal",
+      "root": "../ISET-intake",
+      "rules": [
+        {
+          "roleId": "test-pack",
+          "identity": "testPackVersions",
+          "patterns": [
+            "tests/**",
+            "**/__tests__/**",
+            "**/*.test.js",
+            "**/*.test.jsx",
+            "scripts/**/*smoke*.js",
+            "scripts/run-test-all.js"
+          ],
+          "allowUntracked": false
+        },
+        {
+          "roleId": "harness",
+          "identity": "harnessVersion",
+          "patterns": [
+            "docs/**"
+          ],
+          "allowUntracked": false
+        },
+        {
+          "roleId": "migration",
+          "identity": "productCandidateId",
+          "patterns": [
+            "migrations/**",
+            "sql/**"
+          ],
+          "allowUntracked": false
+        },
+        {
+          "roleId": "generated",
+          "identity": "productCandidateId",
+          "patterns": [
+            "src/generated/**"
+          ],
+          "allowUntracked": false
+        },
+        {
+          "roleId": "dependency",
+          "identity": "productCandidateId",
+          "patterns": [
+            "package.json",
+            "package-lock.json"
+          ],
+          "allowUntracked": false
+        },
+        {
+          "roleId": "product",
+          "identity": "productCandidateId",
+          "patterns": [
+            "**"
+          ],
+          "allowUntracked": false
+        }
+      ]
+    },
+    {
+      "repositoryId": "shared",
+      "root": "../shared",
+      "rules": [
+        {
+          "roleId": "test-pack",
+          "identity": "testPackVersions",
+          "patterns": [
+            "tests/**",
+            "**/__tests__/**",
+            "**/*.test.js",
+            "**/*.test.jsx"
+          ],
+          "allowUntracked": false
+        },
+        {
+          "roleId": "harness",
+          "identity": "harnessVersion",
+          "patterns": [
+            "docs/**"
+          ],
+          "allowUntracked": false
+        },
+        {
+          "roleId": "migration",
+          "identity": "productCandidateId",
+          "patterns": [
+            "migrations/**",
+            "sql/**"
+          ],
+          "allowUntracked": false
+        },
+        {
+          "roleId": "generated",
+          "identity": "productCandidateId",
+          "patterns": [
+            "generated/**",
+            "src/generated/**"
+          ],
+          "allowUntracked": false
+        },
+        {
+          "roleId": "dependency",
+          "identity": "productCandidateId",
+          "patterns": [
+            "package.json",
+            "package-lock.json"
+          ],
+          "allowUntracked": false
+        },
+        {
+          "roleId": "product",
+          "identity": "productCandidateId",
+          "patterns": [
+            "**"
+          ],
+          "allowUntracked": false
+        }
+      ]
+    }
+  ],
+  "identityRoleMap": {
+    "productCandidateId": [
+      "product",
+      "dependency",
+      "migration",
+      "generated"
+    ],
+    "harnessVersion": [
+      "harness"
+    ],
+    "testPackVersions": [
+      "test-pack"
+    ]
+  }
+}
