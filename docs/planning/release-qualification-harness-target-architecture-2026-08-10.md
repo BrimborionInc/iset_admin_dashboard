@@ -6945,3 +6945,352 @@ verification requirements and stopping point already recorded in the approved
 Phase 3 breakdown. Any prerequisite, ambient-input, cleanup, process-ownership
 or residue blocker requires a stop without repair. Promotion, current-gate
 changes, environment access and Phase 4 remain unauthorized.
+
+## Sprint 3G Editable-Scope Stop
+
+Bill accepted Sprint `3F` and authorized only the recorded Sprint `3G` portal
+aggregate scope. The pre-edit admission review proved that scope cannot produce
+the required cumulative result. Adding `portal-aggregate` changes the active
+graph from five packs/16 profiles to six packs/20 profiles, while six existing
+certification files independently assert the exact old graph:
+
+- `qualification/test/native-readonly-bridge-lifecycle.test.js`;
+- `qualification/test/admin-privacy-route-static-pack.test.js`;
+- `qualification/test/intacct-local-contract-pack.test.js`;
+- `qualification/test/admin-lint-pack.test.js`;
+- `qualification/test/portal-lint-pack.test.js`;
+- `qualification/test/admin-aggregate-pack.test.js`.
+
+None is in the recorded `3G` common-file ceiling or its three named portal-pack
+additions. Leaving them unchanged would knowingly fail the mandatory cumulative
+regression; bypassing or weakening them would violate the exact-set, no-loss and
+fail-closed architecture. No portal/native input defect is being inferred from
+this governance issue. The portal package alias and runner remain read-only; the
+runner declares CRACO frontend first and recursively sorted `node:test` discovery
+under `auth`, `notifications` and `routes`, but no native or advisory command was
+executed.
+
+**Complexity assessment:** the portal pack is not a leaf-only addition. Its
+recorded design requires shared validator, bridge, CLI, registry and role-manifest
+changes, which change `harnessVersion` and require cumulative recertification of
+all five existing active packs. That blast radius is explicit and finite for the
+six-pack/20-profile Phase 3 graph, but it demonstrates centralized certification
+coupling. Sprint `3G` must not disguise that cost as an isolated pack change or
+redesign the shared machinery without separate architecture authority.
+
+**Commit-readiness assessment:** before this review, admin `main` and
+`origin/main` were already aligned at `5d2ebb6`; portal and shared were also clean
+and aligned with their remotes. Qualification programme source, schemas, packs,
+tests, fixtures and planning documents are tracked in that admin commit. Root
+`.env` and root dependency installation remain ignored; their contents were not
+read. The existing commit also tracks 528 files below
+`qualification/node_modules/`, despite the package/lock being the intended
+dependency authority. Those vendored dependency bytes are a generated/dependency
+artifact concern requiring an explicit later keep-or-remove decision, not a
+Sprint `3G` repair. The protected SQL set was excluded from status, diff and
+content inspection and must remain a separate protected workstream. No other
+admin, portal or shared worktree change was present before these two checkpoint
+edits.
+
+Creating a commit without changing file bytes does not invalidate the current
+Phase 3 pack certifications: their product, harness and pack identities are
+content-bound rather than commit-message-bound. A later edit to any bound source,
+manifest, registry, role, bridge, validator or dependency material does invalidate
+the affected current certification and requires a new attempt. Sprint `3H` must
+bind whatever Git HEAD and source-state baseline exists when it is separately
+authorized; a commit before that sprint establishes its baseline rather than
+retroactively changing retained evidence.
+
+**Completion decision:** Sprint `3G` is incomplete and stopped before
+implementation. Only this checkpoint and the controlling checkpoint changed.
+No portal pack, fixture, shared harness source, package metadata, native source,
+qualification command, environment, promotion, current gate, Sprint `3H` or
+Phase 4 work changed or ran.
+
+**Exact next approval:** Bill authorizes bounded Sprint `3G-S1` only to add the
+six existing certification files listed above to the Sprint `3G` editable scope,
+solely for preserving their existing semantic assertions while updating their
+exact active graph from five packs/16 profiles to six packs/20 profiles. Bill
+reauthorizes Sprint `3G` under its already recorded objective, common files,
+portal pack/test/attempt-owned negative fixture files, read-only portal inputs,
+direct/advisory commands, effects, verification and stopping point. Any further
+scope, prerequisite, ambient-input, cleanup, process-ownership or residue defect
+requires an immediate stop without repair. Sprint `3H`, promotion, current-gate
+changes, environments and Phase 4 remain unauthorized.
+
+## Sprint 3G Convergence and Repository Review
+
+Bill confirmed that he created and pushed admin commit `5d2ebb6`; its human
+provenance and authorization are therefore resolved. Local Git independently
+records full commit `5d2ebb63e2bdc8e196dc9fca19377bda45b0e531`, author and
+committer `BrimborionInc <bill@sillery.co.uk>`, subject `Part way through testing
+project`, and both `main` and `origin/main` at that object. The remote-tracking
+reflog records `update by push`. The commit has no locally recorded cryptographic
+signature, so Git metadata alone authenticates neither the person nor the remote
+operation; Bill's explicit statement supplies the controlling provenance fact.
+
+### Registration Coupling and Architecture Assessment
+
+Two kinds of coupling must be distinguished.
+
+1. The Phase 3 registry and O1 role manifest must change for any active new pack.
+   They are the deterministic authorization, ownership and exact input-set
+   records (`qualification/src/pack-validator.js:673-765`; architecture
+   `:3371-3397`). Their digests properly change `harnessVersion`.
+2. The validator, bridge and CLI must change for `portal-aggregate` only because
+   the current implementation embeds a second pack catalog in code. The
+   validator hard-codes every pack version, manifest path, command, capability,
+   effect, input count and cleanup rule, then requires the registry to equal that
+   code-owned list (`qualification/src/pack-validator.js:101-242,563-708`). The
+   bridge hard-codes every pack/profile and contains pack-specific dispatch,
+   output and phase-evidence branches
+   (`qualification/src/native-readonly-bridge.js:22-89,379-498,625-779`). The CLI
+   separately hard-codes the pack-to-manifest map
+   (`qualification/bin/rq-native-readonly.js:18-47`). This duplication is not a
+   requirement of the modular-pack architecture; canonical manifests and an
+   independently validated registry are intended to own pack definition and
+   membership (`:3371-3397`).
+
+The duplication is avoidable, but removing it now would be a material design and
+implementation change rather than a local Sprint `3G` correction. It would not
+remove the accepted certification consequence: the registry, role manifest and
+control-plane bytes still change `harnessVersion`, and certification counts
+restart after a harness-affecting change (`:3490-3519`). Nor may the existing
+adapter implementation gain portal operations while continuing to call itself
+`native-readonly-bridge@2.0.0`: adapter manifests and implementations are
+immutable and plans bind their exact version (`:2474-2497`). If the recorded
+shared-adapter route is retained, a successor adapter version, successor bindings
+for all five active packs, and full affected certification are mandatory
+(`:3507-3513`).
+
+The viable choices are:
+
+- continue under the old six-file correction: rejected, because it would reuse
+  changed adapter bytes under `2.0.0`, leave five stale pack bindings, and omit a
+  further exact-version assertion;
+- first redesign registration/dispatch around independently versioned plug-ins:
+  architecturally possible and likely to reduce later code edits, but it changes
+  the accepted Phase 3 implementation approach, adds a new abstraction before
+  the last aggregate, and still changes the global harness identity and requires
+  compatibility/certification proof;
+- finish `3G` through one explicitly versioned shared-adapter extension and
+  complete recertification: finite, consistent with the recorded Phase 3 design,
+  and preferred over an unplanned architecture rewrite. This is CODEX's
+  recommendation after repository hygiene, provided the corrected scope is
+  separately authorized and any newly discovered closure or safety defect still
+  forces a stop.
+
+### Complete Predictable Sprint 3G Scope Corrections
+
+Merely adding the six files named in the earlier stop is insufficient. Before
+execution, a corrected `3G` authorization must also include:
+
+- all five active pack manifests, because each currently binds adapter `2.0.0`
+  and a changed binding requires a new immutable pack version;
+- `qualification/test/admin-ai-guidance-contract-pack.test.js`, because it also
+  asserts the exact adapter and pack version even though it does not assert the
+  whole registry set;
+- the previously named lifecycle, privacy, inactive-Intacct-scope, admin-lint,
+  portal-lint and admin-aggregate tests;
+- the successor adapter version, registry digests, role-manifest graph, package
+  metadata and the already recorded portal pack/test/negative-mirror files; and
+- the portal repository environment files actually read by the admitted native
+  phases: React Scripts loads `.env.test.local`, `.env.test` and `.env` when
+  `NODE_ENV=test` (`../ISET-intake/node_modules/react-scripts/config/env.js:25-49`),
+  while the backend server loads `.env` before its app-factory test boundary
+  (`../ISET-intake/server.js:4-7,115-120`). `.env`, `.env.test`, `.env.production`
+  and `.env.test.template` are tracked in the portal commit; `.env.test.local`
+  is absent and must be proved absent or explicitly admitted if it later appears.
+
+Bill explicitly permits those environment files to be read for this work and
+does not want secrets migration to block the qualification programme. They may
+therefore be treated as sensitive, digest-bound read-only native inputs; their
+values must not enter logs, retained evidence or reports. If exact negative-mirror
+semantics require local copies, those copies must be attempt-owned, excluded from
+evidence, removed, and covered by independent residue proof. Moving residual
+secrets to a managed store remains deferred operational work. Local Git also
+proves the four tracked files are in the locally recorded `origin/main` tree,
+and the files contain non-empty credential-class fields. Current
+credential validity, repository visibility and remote rotation state were not
+tested, so critical live exposure is unresolved rather than asserted. This is
+not made the next sprint and does not change the current release gate.
+
+The portal runner itself recursively discovers and sorts every `.test.js` below
+`auth`, `notifications` and `routes`, runs CRACO first, then one native
+`node --test` phase, and inherits the spawning process environment
+(`../ISET-intake/scripts/run-test-all.js:10-59`). The architecture already
+requires the discovered set, resolved dependencies, source inputs, and
+shared/admin references to be closed and identity-bound (`:5543-5587`). Those
+requirements remain a pre-dispatch enumeration obligation; this review did not
+execute the runner or claim that no additional source-closure file can be found.
+
+### Tracked Qualification Dependencies
+
+Commit `5d2ebb6` added all 528 tracked files below
+`qualification/node_modules/`; its parent contains none. They occupy about
+3.0 MiB in the worktree and 1,239,415 Git blob bytes and contain the installed
+Ajv package plus four transitive packages. The immediate mechanical cause is
+that root `.gitignore` ignores only `/node_modules`, not nested
+`qualification/node_modules/` (`.gitignore:3-6`). Git proves that the files were
+added in the commit, but not whether vendoring was intended or which command
+staged them.
+
+They were not necessary or authorized by the accepted package scope. The design
+specifies `qualification/package.json` and `qualification/package-lock.json` as
+the private dependency declaration and exact closure and says no other Phase 2
+file was proposed (`:4400-4417,4454-4465`). The lock pins Ajv `8.17.1` and every
+transitive integrity (`qualification/package-lock.json:1-73`). Keeping the
+installation can make an offline checkout immediately runnable, but duplicates
+lock authority, obscures reviews, permits generated npm/platform bytes to drift,
+and enlarges supply-chain, licence and security-scanning surface. No specific
+vulnerability was established. CODEX recommends removing the 528 paths from
+Git tracking and adding an exact nested ignore rule, while keeping the current
+working installation non-authoritative and retaining package/lock bytes.
+
+That cleanup does not require or justify history rewriting. It should leave the
+five current pack manifests, registry, role manifest, declared product inputs
+and dependency lock unchanged, so it should not alter their recorded identities;
+this must be recomputed and proved before the cleanup sprint closes. A later
+commit containing only this harness-repository hygiene remains a harness-only
+repository change and must not become a new product candidate.
+
+### Review Decision and Exact Next Authorization
+
+Sprint `3G` remains incomplete. No implementation, native/advisory command,
+certification, environment operation, promotion, release-authority change,
+Sprint `3H` or Phase 4 work occurred. The earlier `3G-S1` authorization proposal
+is superseded because six added tests would not close the adapter version,
+pack-binding and native-input graph.
+
+**CODEX recommendation:** perform the independent dependency-tree hygiene sprint
+first, then return for a corrected, separately authorized `3G` using the finite
+shared-adapter/version/rebind scope above. Do not combine repository cleanup and
+portal aggregate implementation in one sprint.
+
+**Exact next approval:** Bill authorizes bounded Sprint `3G-H1` only. Its sole
+objective is to remove the 528 generated `qualification/node_modules/**` paths
+from Git tracking and add `qualification/node_modules/` to root `.gitignore`
+without changing installed dependency bytes, `qualification/package.json`,
+`qualification/package-lock.json`, any qualification source/schema/manifest/
+registry/role/test file, product source, or retained evidence. Editable scope is
+limited to `.gitignore`, the Git index entries for
+`qualification/node_modules/**`, and the existing architecture and controlling
+checkpoints. Permitted effects are the exact ignore edit, index-only untracking,
+and pure-local read/static verification. Verify zero tracked nested dependency
+files, positive ignore matching, unchanged package/lock and installed Ajv bytes,
+unchanged active pack/registry/role digests and identities, the five pure-local
+Phase 2 focused suites, JavaScript syntax/import boundaries, and
+`git diff --check`. Do not install dependencies, use a network, run a native
+Phase 3 pack or current gate, alter Git history, commit or push, inspect protected
+SQL, access an environment, implement `3G`, begin `3H`, promote a pack, change
+release authority, or perform Phase 4 work. Any dependency, identity or scope
+drift requires an immediate stop. Stop after `3G-H1` so Bill can separately
+decide whether to authorize the corrected Sprint `3G` scope.
+
+## Sprint 3G-H1 Completion Checkpoint
+
+Bill confirmed the provenance of commit `5d2ebb6` and authorized only the
+dependency-tree hygiene sprint above. Root `.gitignore` now excludes exactly
+`/qualification/node_modules/`. Git's index contains exactly 528 staged
+deletions below that directory and no staged path outside it; the tracked count
+therefore changed from 528 to zero. `git rm --cached` preserved the working
+installation: it still contains 528 regular files and no symlinks.
+
+The installed-tree canonical tar digest remained
+`9d01642766ae9d57006649afb294839e982027756e8e814260a2ecf3c5181976`.
+`qualification/package.json` remained
+`87c639b5795c66c00ff0d70e3a539c68115c5b87286c732a3d91db5553cedbb9`
+and `qualification/package-lock.json` remained
+`8572e719ef58758cc530e269b0745eee7e485002717eafabadfae5b70210b881`.
+The aggregate of every non-installation qualification file remained
+`bb79573574ef2298241e4eb3e8b6b9f5df6331be6d59f325d0295da37a7521c4`.
+The five active pack manifests plus registry and role-manifest aggregate
+remained
+`012c43e6daae239e34fac5aa6c717003dc577bfb3ff9e4522b98cd9d1731dc0d`.
+No package metadata, lock, implementation, schema, pack, registry, role,
+fixture, test, product or identity byte changed.
+
+The unchanged installation resolved Ajv `8.17.1` from
+`qualification/node_modules/` and compiled a strict schema successfully. The
+five pure-local Phase 2 focused suites passed. `2A`, `2B` and `2C` each passed
+their focused wrapper; `2D` passed all 28 process-control cases; and `2E` passed
+all 15 integration/independent-validation cases. The first default-sandbox
+`2D` invocation produced the already documented nested-child suppression
+signature: no inner TAP frames and outer exit `1`. Before rerun, the installed
+digest remained exact and an independent process scan found zero synthetic
+fixture processes. The identical command then passed 28/28 under the bounded
+local-process permission already used for this recorded infrastructure limit.
+This was an execution-sandbox classification, not dependency, identity, scope,
+or test drift; no repair occurred.
+
+Static verification passed for 40 non-installation qualification JavaScript
+files, the source/bin import boundary, Ajv dependency usability, positive ignore
+matching, zero tracked nested dependencies, zero synthetic process residue and
+`git diff --check`. The initial index-only operation was denied by the workspace's
+read-only `.git` sandbox and the identical explicitly authorized escalated
+operation succeeded once. No dependency was installed, deleted or changed; no
+network, environment, native Phase 3 pack, current gate, protected SQL, Git
+history, commit, push, Sprint `3G`, `3H` or Phase 4 operation occurred.
+
+**Completion decision:** Sprint `3G-H1` is complete. The working installation is
+usable but non-authoritative and ignored; package/lock remains the dependency
+authority. The staged deletions and `.gitignore`/checkpoint edits remain
+uncommitted for Bill's review. This hygiene change does not alter a product
+candidate, current qualification identity, pack certification or release
+authority.
+
+**Exact next approval:** Bill reviews and accepts completed Sprint `3G-H1`, then
+separately authorizes corrected Sprint `3G` only. That authorization must retain
+the recorded portal-aggregate objective, direct/advisory commands, native
+authority, local-only effects and stop rules while explicitly adding the
+successor native-readonly adapter version, successor bindings and versions for
+all five active pack manifests, their complete recertification, the AI pack
+version-assertion test, the six previously identified lifecycle/scope tests, and
+the sensitive digest-bound portal environment inputs documented by the
+convergence review. Any additional input-closure, prerequisite, cleanup,
+process-ownership, residue, identity or architecture defect must stop without
+repair. Sprint `3H`, promotion, current-gate changes, environments and Phase 4
+remain unauthorized.
+
+## Sprint 3G Source-Baseline Admission Stop
+
+Bill accepted Sprint `3G-H1`, stated that its cleanup had been committed and
+pushed, and authorized corrected Sprint `3G`. The mandatory pre-edit source
+admission check contradicted that stated baseline in this checkout:
+
+- `HEAD` and the locally recorded `origin/main` both remain
+  `5d2ebb63e2bdc8e196dc9fca19377bda45b0e531`;
+- the latest local HEAD reflog remains `5d2ebb6 commit: Part way through testing
+  project`, and the latest remote-tracking reflog remains `5d2ebb6 update by
+  push`;
+- all 528 `qualification/node_modules/**` removals remain staged in the index,
+  with no staged path outside that prefix;
+- `.gitignore` and the two qualification planning/checkpoint documents remain
+  modified but unstaged; and
+- the installed ignored dependency tree still contains 528 files while the
+  index correctly contains zero tracked paths below it.
+
+The working bytes are consistent with the completed hygiene operation, but Git
+does not provide the clean committed/pushed source identity Bill described. A
+remote commit made from another checkout is possible, but cannot be established
+without a separately authorized fetch/reconciliation; it must not be guessed.
+Proceeding would bind the successor adapter and six-pack certification to an
+ambiguous dirty/index state and would violate the accepted identity and
+reproducibility rules (`:3371-3397,3490-3519,5543-5587`).
+
+**Stopping decision:** corrected Sprint `3G` did not begin. No portal environment
+file, native source graph, qualification implementation, pack, manifest,
+registry, role, fixture or test was read beyond the already authorized governing
+admission material or changed. No native, advisory, qualification, network,
+environment, AWS, database, email, external-service, commit or push operation
+ran. This is a deterministic source-identity prerequisite stop, not a product,
+adapter or portal-test failure, and no repair or rerun is authorized.
+
+**Exact next requirement:** Bill must first make this checkout and its locally
+recorded `origin/main` agree on one clean committed Sprint `3G-H1` source object,
+or separately authorize a bounded source-control reconciliation that preserves
+the current bytes and identifies the exact remote commit. Once `git status` is
+clean and `HEAD`/the approved source reference identify that exact object, Bill
+must again authorize corrected Sprint `3G` under its already recorded complete
+scope. Sprint `3H`, promotion, release-authority change, environment access and
+Phase 4 remain unauthorized.
