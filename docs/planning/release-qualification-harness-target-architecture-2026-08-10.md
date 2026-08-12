@@ -8252,3 +8252,104 @@ is authorized by this stop.
 **Completion decision:** the newly authorized elevated execution completed as a
 properly evidenced admission stop. Synthetic cases completed: zero. Cohort
 attempts completed: zero. Phase 3 remains incomplete.
+
+## Phase 3 Closeout and Programme Proportionality Review
+
+Bill ended the Phase 3 exit-operator effort. The coordinator must not be
+modified, rerun or replaced, and no further Phase 3 cohort execution is planned.
+This closeout changes no pack maturity, release influence, deploy admission or
+current-gate authority. Phase 4 remains unauthorized pending Bill's decision on
+this package.
+
+### Verified Position
+
+- Phases 0, 1 and 2 are complete and accepted. Phase 0 established the evidence
+  baseline; Phase 1 supplied the architecture; Phase 2 delivered and certified
+  the pure-local kernel, schemas, identities, selection mechanics, lifecycle,
+  process control and independent validation.
+- Phase 3 produced five certified advisory packs:
+  `ai-guidance-contract@1.0.1`, `privacy-route-static@1.0.2`,
+  `admin-lint@1.0.2`, `portal-lint@1.0.1` and
+  `admin-aggregate@1.0.2`. Their accepted five-pack recertification included
+  each existing ten-run, five-pair, negative, interruption and residue corpus
+  (`Sprint 3F-C1 Five-Pack Completion Checkpoint`).
+- Sprint `3H` separately certified strict role-aware source inventory and
+  before/after stability, including ten identical inventories, five pairs,
+  identity separation, deliberate drift, protected-path exclusion,
+  interruption and teardown (`Sprint 3H Implementation and Certification
+  Checkpoint`).
+- `portal-aggregate` remains deferred. The unchanged authoritative gate still
+  runs it. RN02 (controlled portal aggregate execution) and RN04 (retained
+  portal CRACO/native assertions) remain explicit open no-loss obligations;
+  neither is silently treated as covered.
+- The additional Phase 3 cohort exit requirement remains unmet at exactly zero
+  of five complete attempts. Earlier attempts reached partial native work but
+  none produced one complete admitted cohort attempt.
+- The bespoke exit-operator approach is ended after residue-vocabulary,
+  nullable-cancellation, design-boundary, sandbox-process and immutable-baseline
+  governance failures. Those stops do not invalidate the separately accepted
+  pack and source-state certifications, but they do prevent claiming the
+  additional cohort property.
+- All Phase 3 output remains advisory with `releaseAuthority: none`. The current
+  release gate remains authoritative. Phase 4 has not begun and remains
+  unauthorized.
+
+### Phase 3 Decision Package
+
+| Option | Formal treatment | Consequence | CODEX assessment |
+| --- | --- | --- | --- |
+| `P3-1` - accept with exception | Bill explicitly accepts Phase 3 while recording that its five-attempt cohort criterion was not met | Preserves all advisory/no-authority limitations, current gate, portal deferral and RN02/RN04; permits Bill to authorize a narrower later phase without pretending the missing property was proved | **Recommended.** Five packs and source-state machinery were independently certified far beyond a single pass. The repeated failures belong to the bespoke aggregation/operator boundary. More aggregation work is now lower value than testing real build, data and deployed-workflow risks. |
+| `P3-2` - close formally incomplete | Phase 3 remains incomplete permanently and no more Phase 3 work occurs | Most literal treatment of the original gate. Any later safety programme must be authorized as a new exception/rebaseline because the original Phase 4 prerequisite is not met | Safe but administratively awkward. It preserves truth but makes the remaining useful work depend on repeated exceptions to a phase gate Bill has deliberately stopped pursuing. |
+| `P3-3` - replace the exit evidence requirement | Bill replaces the five-cohort graph criterion with one command-level closure using only already certified commands | Requires one separately authorized execution from a clean checkpoint: capture a source inventory, run the existing cumulative `qualification` test command once, verify source stability against the baseline, require clean Git state and zero command failures, then review the retained outputs. No new coordinator, graph, schema, pack or code | Materially simpler and defensible if Bill wants an executed Phase 3 closure rather than an exception. It proves the maintained certification corpus and source stability, but deliberately does **not** claim five identical cohort graphs. It costs another long local run and is not necessary for the recommended `P3-1` decision. |
+
+`P3-1` is the proportionate choice. It is an explicit governance exception, not
+a retroactive test pass. It grants no release authority and cannot be cited as
+proof that the missing cohort property succeeded.
+
+### Essential Safety Versus Platform Ambition
+
+The practical objective is materially better evidence before PROD. The useful
+remaining path is therefore candidate-centred: compile and restore source,
+exercise one important UI workflow locally, prove database operations against
+live metadata with rollback, prove TEST identity/provenance, then exercise one
+owned deployed workflow with cleanup. A universal adapter estate, exhaustive
+pack migration, durable evidence platform, long observation programme and broad
+legacy retirement are not prerequisites for those gains.
+
+| Original phase | Recommendation | Capability gained and risk addressed | Cost | Dependency on unfinished Phase 3 work | Safety classification |
+| --- | --- | --- | --- | --- | --- |
+| Phase 4 - process/build, HTTP, browser | **Narrow** | Qualify exact product build/generated-file restoration and one high-risk local compiled-browser workflow using product-owned selectors and persistent state. Add only the loopback/process mechanics that workflow needs. This catches compile, source-residue and major UI-transition defects. | Medium implementation; medium maintenance. Avoid four generic adapter programmes and full browser-suite migration. | Uses certified Phase 2 process control and Phase 3 lessons, but not the missing cohort. Requires Bill to accept `P3-1` or separately rebaseline the prerequisite. | **Essential**, narrowly. |
+| Phase 5 - database adapter/local transactions | **Narrow** | Reuse and qualify the canonical live-schema guard, exact target/DDL proof and one rollback-only local transaction pack. This addresses the highest data-integrity risk: guessed identifiers, effects after failed preflight, failed rollback and residue. Do not build a universal SQL language/parser. | High care, medium code; bounded to one target and one pack. | No dependency on the Phase 3 cohort. Depends on bounded process control and exact task-specific live-schema authorization. | **Essential**. |
+| Phase 6 - impact selection and pack migration | **Merge** | Add a small owned change-to-domain map as each useful check is onboarded; unknown or ambiguous changes fall back to the unchanged full current gate. This reduces irrelevant work without risking omission. | Low-medium incremental cost. Avoid an up-front 88-unit migration and exhaustive replacement registry. | Reuses certified source roles and existing pack metadata; no cohort dependency. | **Useful efficiency/control**, not a release blocker. |
+| Phase 7 - read-only TEST control plane | **Retain** | Prove explicit TEST account/profile, exact deployed source/manifest provenance, target health and bounded transport before any stateful TEST work. This prevents wrong-target, stale-deploy and opaque transport failures. | Medium; mostly controlled identity/provenance and transport work. | No cohort dependency. Depends on separately authorized TEST access and the Phase 2 process/evidence core. | **Essential**. |
+| Phase 8 - first stateful TEST pack | **Retain** | One bounded, high-value deployed workflow with preflight, owned fixture, persistent assertions, cleanup and zero residue provides the strongest direct evidence before PROD. | High execution/safety cost, but one domain only. | No cohort dependency. Depends on the narrowed database work, read-only TEST proof and any mechanics actually required by the selected workflow. | **Essential**. |
+| Phase 9 - advisory parallel operation | **Merge** | If future promotion is desired, fold comparison into three ordinary release rehearsals spanning relevant change types, with one full regression and a disagreement log. Do not make a 30-day/10-candidate platform observation window a prerequisite for improving current testing. | Medium operational cost instead of a separate long programme. | Depends on whichever later checks Bill might promote, not on completing the Phase 3 cohort. | **Audit/cutover evidence only**; unnecessary while everything remains advisory. |
+| Phase 10 - promotion and legacy retirement | **Defer** | Promotion and retirement provide operational consolidation, not additional test coverage. Keep the current gate authoritative until the narrowed improvements demonstrate value and Bill actually wants replacement. | High governance, integration and rollback cost; high blast radius. | Would require explicit resolution of Phase 3 status, selected-pack evidence and merged rehearsal results. | **Not currently essential**. |
+| Phase 11 - deliberate complexity growth | **Remove as a programme phase** | Preserve broader journeys, signing, notifications, concurrency, privacy, payment and recovery as a product-risk backlog. Add one only when a change, incident or contractual risk justifies it, using the smallest appropriate test level. | Potentially unbounded build and maintenance cost. | None; future work is individually justified rather than inherited from this roadmap. | **Speculative unless tied to a current risk**. |
+
+### Proportional Roadmap Recommendation
+
+Subject to Bill choosing `P3-1`, replace automatic progression through Phases
+4-11 with four separately authorized safety outcomes:
+
+1. exact build restoration plus one local compiled-browser workflow;
+2. exact-schema local transaction/rollback safety;
+3. read-only TEST identity, provenance, health and bounded transport; and
+4. one stateful deployed TEST workflow with owned cleanup and zero residue.
+
+Minimal impact mapping is added only as those checks are introduced. After the
+fourth outcome, stop and assess whether release quality has materially improved.
+Parallel-operation, promotion, retention infrastructure, current-gate
+replacement and additional scenario packs require fresh evidence of need and
+separate Bill decisions. This proposal changes no current phase authority and
+does not itself authorize the first narrowed Phase 4 sprint.
+
+### Decisions Reserved for Bill
+
+1. Choose exactly one Phase 3 treatment: recommended `P3-1`, literal `P3-2`, or
+   command-level alternative `P3-3`.
+2. Approve, revise or reject the proportional dispositions for original Phases
+   4-11 and the four-outcome roadmap.
+3. Only after those decisions, separately authorize the exact first outcome and
+   its files, effects and verification. Until then Phase 4 and every environment
+   operation remain unauthorized.
