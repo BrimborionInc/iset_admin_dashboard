@@ -34,6 +34,7 @@ As of 2026-07-10, these are the main planning docs intentionally linked from `do
 - `staff-record-correction-controls-proposal-email.md`
 - `rm-two-step-review-workflow.md`
 - `rm-two-step-review-assurance-prod-rollout-2026-08-09.md`
+- `release-qualification-harness-rebuild-plan-2026-08-10.md`
 
 `client-case-application-cutover-dependency-inventory.md` is useful for dependency history, but `docs/AGENTS.md` currently says to use `client-case-application-target-model.md` for the live target model where they differ.
 

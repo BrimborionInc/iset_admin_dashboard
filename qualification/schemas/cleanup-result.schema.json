@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:path:release-qualification:cleanup-result:1.0.0-draft.1",
+  "title": "PATH qualification cleanup result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaName", "schemaVersion", "artifactId", "createdAt", "producer",
+    "lineageScope", "productCandidateId", "harnessVersion", "attemptId",
+    "testPackVersions", "parentArtifactRefs", "contentDigest",
+    "lifecycleState", "completeness", "sensitivity", "redaction",
+    "retentionPolicyRef", "planRef", "cleanupObligationId",
+    "checkInstanceId", "packId", "packVersion", "cleanupOwner", "status",
+    "cleanupReason", "affectedResources", "declaredResidueScope",
+    "residueAssertions", "residueDecision"
+  ],
+  "properties": {
+    "schemaName": { "const": "path.release-qualification.cleanup-result" },
+    "schemaVersion": { "const": "1.0.0-draft.1" },
+    "artifactId": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/opaqueId" },
+    "createdAt": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/canonicalTimestamp" },
+    "producer": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/producer" },
+    "lineageScope": { "const": "attempt" },
+    "productCandidateId": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/productCandidateIdentity" },
+    "harnessVersion": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/harnessIdentity" },
+    "attemptId": { "$ref": "#/$defs/attemptId" },
+    "environmentIdentityRef": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/artifactRef" },
+    "testPackVersions": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/testPackVersions" },
+    "parentArtifactRefs": { "$ref": "#/$defs/nonEmptyArtifactRefs" },
+    "relatedArtifactRefs": { "$ref": "#/$defs/relatedArtifactRefs" },
+    "contentDigest": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/digest" },
+    "lifecycleState": { "enum": ["CLEANUP_UNNECESSARY", "CLEANUP_REQUIRED", "CLEANUP_RUNNING", "CLEANUP_SUCCEEDED", "CLEANUP_FAILED", "CLEANUP_INTERRUPTED", "RESIDUE_PROOF_COMPLETED", "RESIDUE_PROOF_FAILED"] },
+    "completeness": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/completeness" },
+    "sensitivity": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/sensitivity" },
+    "redaction": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/redaction" },
+    "retentionPolicyRef": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/retentionPolicyRef" },
+    "planRef": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/artifactRef" },
+    "cleanupObligationId": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/opaqueId" },
+    "checkInstanceId": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/opaqueId" },
+    "packId": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/opaqueId" },
+    "packVersion": { "type": "string", "minLength": 1 },
+    "cleanupOwner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorityId", "contractRef", "version", "capabilityTokens", "effectTokens"],
+      "properties": {
+        "authorityId": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/opaqueId" },
+        "contractRef": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/artifactRef" },
+        "version": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/versionString" },
+        "capabilityTokens": { "$ref": "#/$defs/opaqueIdArray" },
+        "effectTokens": { "$ref": "#/$defs/opaqueIdArray" }
+      }
+    },
+    "status": { "enum": ["unnecessary", "required", "started", "completed", "failed", "interrupted"] },
+    "cleanupReason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "effectEvidenceRefs"],
+      "properties": {
+        "code": { "enum": ["declared-fixture", "observed-mutation", "may-have-mutated", "recovery-required", "proved-no-effect"] },
+        "effectEvidenceRefs": { "$ref": "#/$defs/artifactRefs" }
+      }
+    },
+    "executionTerminationProofRef": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/artifactRef" },
+    "environmentOrRecoveryIdentityRef": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/artifactRef" },
+    "affectedResources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["resourceId", "resourceType", "effectToken", "evidenceRefs", "sensitivity"],
+        "properties": {
+          "resourceId": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/opaqueId" },
+          "resourceType": { "enum": ["process", "filesystem", "socket", "database", "object", "identity", "remote-job", "temporary", "other"] },
+          "effectToken": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/opaqueId" },
+          "evidenceRefs": { "$ref": "#/$defs/nonEmptyArtifactRefs" },
+          "sensitivity": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/sensitivity" }
+        }
+      }
+    },
+    "declaredResidueScope": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scopeId", "resourceType", "expectedState"],
+        "properties": {
+          "scopeId": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/opaqueId" },
+          "resourceType": { "enum": ["process", "filesystem", "socket", "database", "object", "identity", "remote-job", "temporary", "other"] },
+          "expectedState": { "enum": ["absent", "zero", "restored", "terminated"] }
+        }
+      }
+    },
+    "cleanupActionRefs": { "$ref": "#/$defs/artifactRefs" },
+    "cleanupOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["terminalStatus", "completedActions", "failedActions", "unknownActions"],
+      "properties": {
+        "terminalStatus": { "enum": ["completed", "failed", "interrupted", "unknown"] },
+        "completedActions": { "$ref": "#/$defs/opaqueIdArray" },
+        "failedActions": { "$ref": "#/$defs/opaqueIdArray" },
+        "unknownActions": { "$ref": "#/$defs/opaqueIdArray" },
+        "terminalEventRef": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/artifactRef" }
+      }
+    },
+    "residueVerifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorityId", "contractRef", "independentFromCleanupOwner"],
+      "properties": {
+        "authorityId": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/opaqueId" },
+        "contractRef": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/artifactRef" },
+        "independentFromCleanupOwner": { "const": true }
+      }
+    },
+    "residueAssertions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["assertionId", "scopeId", "expected", "observed", "evidenceRefs"],
+        "properties": {
+          "assertionId": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/opaqueId" },
+          "scopeId": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/opaqueId" },
+          "expected": {},
+          "observed": {},
+          "evidenceRefs": { "$ref": "#/$defs/nonEmptyArtifactRefs" }
+        }
+      }
+    },
+    "residueDecision": { "enum": ["not-applicable", "zero-residue", "residue-found", "unknown"] },
+    "remainingResidue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["knownResources", "unknownScope", "safetyImpact", "escalationRef"],
+      "properties": {
+        "knownResources": { "$ref": "#/$defs/opaqueIdArray" },
+        "unknownScope": { "type": "boolean" },
+        "safetyImpact": { "enum": ["none", "low", "medium", "high", "critical", "unknown"] },
+        "escalationRef": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/artifactRef" }
+      }
+    },
+    "interruptionState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "lastTrustworthyEventRef", "unknownEffects"],
+      "properties": {
+        "phase": { "enum": ["execution", "termination", "cleanup", "residue-verification"] },
+        "lastTrustworthyEventRef": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/artifactRef" },
+        "unknownEffects": { "$ref": "#/$defs/opaqueIdArray" }
+      }
+    },
+    "escalation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mandatoryStop", "containmentEvidenceRefs", "nextSafeActionRef"],
+      "properties": {
+        "mandatoryStop": { "const": true },
+        "containmentEvidenceRefs": { "$ref": "#/$defs/artifactRefs" },
+        "nextSafeActionRef": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/artifactRef" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "unnecessary" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "lifecycleState": { "const": "CLEANUP_UNNECESSARY" },
+          "cleanupReason": { "properties": { "code": { "const": "proved-no-effect" } } },
+          "affectedResources": { "maxItems": 0 },
+          "declaredResidueScope": { "maxItems": 0 },
+          "residueAssertions": { "maxItems": 0 },
+          "residueDecision": { "const": "not-applicable" },
+          "cleanupActionRefs": false,
+          "cleanupOutcome": false,
+          "residueVerifier": false,
+          "remainingResidue": false,
+          "interruptionState": false,
+          "escalation": false
+        }
+      },
+      "else": { "properties": { "affectedResources": { "minItems": 1 }, "declaredResidueScope": { "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "status": { "enum": ["started", "completed", "failed", "interrupted"] } }, "required": ["status"] },
+      "then": { "required": ["executionTerminationProofRef", "cleanupActionRefs"], "properties": { "cleanupActionRefs": { "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "status": { "enum": ["completed", "failed", "interrupted"] } }, "required": ["status"] },
+      "then": { "required": ["cleanupOutcome"] }
+    },
+    {
+      "if": { "properties": { "status": { "enum": ["failed", "interrupted"] } }, "required": ["status"] },
+      "then": { "required": ["escalation"], "properties": { "residueDecision": { "enum": ["residue-found", "unknown"] } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "interrupted" } }, "required": ["status"] },
+      "then": { "required": ["interruptionState"] }
+    },
+    {
+      "if": { "properties": { "residueDecision": { "const": "zero-residue" } }, "required": ["residueDecision"] },
+      "then": { "required": ["residueVerifier"], "properties": { "residueAssertions": { "minItems": 1 } }, "not": { "required": ["remainingResidue"] } }
+    },
+    {
+      "if": { "properties": { "residueDecision": { "enum": ["residue-found", "unknown"] } }, "required": ["residueDecision"] },
+      "then": { "required": ["remainingResidue", "escalation"] }
+    }
+  ],
+  "$defs": {
+    "attemptId": { "type": "string", "pattern": "^attempt:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "artifactRefs": { "type": "array", "items": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/artifactRef" } },
+    "nonEmptyArtifactRefs": { "type": "array", "minItems": 1, "items": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/artifactRef" } },
+    "relatedArtifactRefs": { "type": "array", "items": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/relatedArtifactRef" } },
+    "opaqueIdArray": { "type": "array", "uniqueItems": true, "items": { "$ref": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2#/$defs/opaqueId" } }
+  }
+}

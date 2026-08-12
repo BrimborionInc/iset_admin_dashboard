@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "1.0.0",
+  "registryId": "phase3-read-only",
+  "contentDigest": {
+    "algorithm": "sha256",
+    "value": "c9208defdfec9b59e750eaa9a4c8b8bfcc23f4846b8b07c0203574696c8ed6ec"
+  },
+  "selectionAuthority": "advisory-certification-only",
+  "releaseAuthority": "none",
+  "packs": [
+    {
+      "packId": "ai-guidance-contract",
+      "packVersion": "1.0.1",
+      "manifestPath": "packs/admin-ai-guidance-contract.pack.json",
+      "manifestDigest": {
+        "algorithm": "sha256",
+        "value": "52b62cefe9e24b11b44dafbbff2f5bd5d7b058b5dbf40bdd255169109f851a80"
+      },
+      "maturity": "advisory",
+      "operatingStatus": "active"
+    },
+    {
+      "packId": "privacy-route-static",
+      "packVersion": "1.0.2",
+      "manifestPath": "packs/admin-privacy-route-static.pack.json",
+      "manifestDigest": {
+        "algorithm": "sha256",
+        "value": "6907e1d8a9df0eb33eb7379a89c1057facdb5efbe7354ea39fa1dd616213589b"
+      },
+      "maturity": "advisory",
+      "operatingStatus": "active"
+    },
+    {
+      "packId": "admin-lint",
+      "packVersion": "1.0.2",
+      "manifestPath": "packs/admin-lint.pack.json",
+      "manifestDigest": {
+        "algorithm": "sha256",
+        "value": "75ec8f01407358f231e86d5e9c6dade92d7421e9745b6f9ac54a696a47afa191"
+      },
+      "maturity": "advisory",
+      "operatingStatus": "active"
+    },
+    {
+      "packId": "portal-lint",
+      "packVersion": "1.0.1",
+      "manifestPath": "packs/portal-lint.pack.json",
+      "manifestDigest": {
+        "algorithm": "sha256",
+        "value": "e2cd0d5be3e0a9d53687e61e87bf80ce4516f7efa9f72a2a58bd14243b929475"
+      },
+      "maturity": "advisory",
+      "operatingStatus": "active"
+    },
+    {
+      "packId": "admin-aggregate",
+      "packVersion": "1.0.2",
+      "manifestPath": "packs/admin-aggregate.pack.json",
+      "manifestDigest": {
+        "algorithm": "sha256",
+        "value": "a08a9503ecf81184d444cc971adc024e7c6ba38ce83d6064a5eb76e678498c5c"
+      },
+      "maturity": "advisory",
+      "operatingStatus": "active"
+    }
+  ]
+}

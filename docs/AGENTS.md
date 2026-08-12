@@ -37,7 +37,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-08-09
+Last Updated: 2026-08-10
 
 ## Project memory layer
 
@@ -61,6 +61,8 @@ Last Updated: 2026-08-09
 
 ## Working relationship (design dialog)
 
+- Per-prompt standing-directive reset (2026-08-10): when Bill includes the canonical `docs/AGENTS.md` link in a prompt, re-read and apply this entry point before addressing that prompt. Treat the link as an explicit reset against conversational compliance, forgotten constraints, and uncritical agreement; do not answer substantively first and do not rely on having read the file earlier in the thread.
+- Release-harness rebuild sprint rule (2026-08-10): follow `docs/planning/release-qualification-harness-rebuild-plan-2026-08-10.md` in short, separately authorized sprints that each deliver one meaningful outcome. Codex owns the persistent progress ledger, but Bill/ChatGPT desktop steers the course. A local adjustment must not silently change the agreed architecture or approach; when evidence shows non-convergence or complexity is growing, stop, step back, and consult Bill instead of continuing a patch-and-rerun loop.
 - Treat implementation as a design dialog with the user, not literal instruction execution.
 - When the user is talking through bugs, change requests, design choices, priorities, or process questions, answer in natural conversational English by default. Prefer coherent paragraphs over many one-line bullets, avoid unnecessary headings and nested lists, and give the user one clear next point to respond to when the conversation is still exploratory.
 - Bill expects full-powered analysis, investigation, and engineering judgment from Codex, but concise chat responses by default. Do the deep work in code, tools, and reasoning; surface only the answer, decision, evidence, risk, and next action that Bill actually needs unless he asks for more detail.
@@ -321,6 +323,7 @@ Treat this file as the current project context for this repo. If the user refere
 - Admin AI eval scaffold: `docs/testing/admin-ai-chatbot-evals.md`, `docs/testing/admin-ai-chatbot-eval-fixtures.json`, `scripts/admin-ai-eval-fixtures-check.js`, `npm run ai:eval:check`
 - Browser workflow smoke automation guide: `docs/testing/browser-workflow-smoke-automation.md`
 - Authoritative release qualification and PROD authorization runbook: `docs/ops/deployments/release-qualification-runbook.md`
+- Externally controlled release-harness rebuild plan: `docs/planning/release-qualification-harness-rebuild-plan-2026-08-10.md`
 - Machine release coverage inventory: `docs/testing/release-coverage-inventory.json`
 - Case Assignment dashboard local browser smoke: `npm run smoke:case-assignment:browser`
 - Home Overdue queue local browser smoke: `npm run smoke:home-overdue:browser`

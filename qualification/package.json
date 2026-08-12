@@ -1,0 +1,30 @@
+{
+  "name": "@path/release-qualification-kernel",
+  "version": "0.0.0-phase3f",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "bin": {
+    "rq-kernel": "bin/rq-kernel.js",
+    "rq-native-readonly": "bin/rq-native-readonly.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:2a": "node --test test/identity-and-schema.test.js",
+    "test:2b": "node --test test/plan-and-selection.test.js",
+    "test:2c": "node --test test/lifecycle-and-evidence.test.js",
+    "test:2d": "node --test test/process-control.test.js",
+    "test:2e": "node --test test/independent-validation.test.js",
+    "test:3a": "node --test test/admin-ai-guidance-contract-pack.test.js",
+    "test:3b": "node --test test/admin-privacy-route-static-pack.test.js",
+    "test:3c": "node --test test/intacct-local-contract-pack.test.js",
+    "test:3d": "node --test test/admin-lint-pack.test.js",
+    "test:3e": "node --test test/portal-lint-pack.test.js",
+    "test:3f": "node --test test/admin-aggregate-pack.test.js"
+  },
+  "dependencies": {
+    "ajv": "8.17.1"
+  }
+}

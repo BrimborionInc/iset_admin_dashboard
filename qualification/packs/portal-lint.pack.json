@@ -1,0 +1,204 @@
+{
+  "schemaVersion": "1.0.0",
+  "packId": "portal-lint",
+  "packVersion": "1.0.1",
+  "contentDigest": {
+    "algorithm": "sha256",
+    "value": "e2cd0d5be3e0a9d53687e61e87bf80ce4516f7efa9f72a2a58bd14243b929475"
+  },
+  "purpose": "Preserve the portal-owned ESLint assertion over its exact src JavaScript and JSX scope as bounded read-only advisory evidence.",
+  "productDomain": "portal-static-quality",
+  "owner": {
+    "repositoryId": "ISET-intake",
+    "maintainers": [
+      "portal-frontend-owner",
+      "qualification-engineering"
+    ],
+    "escalationAuthority": "Bill"
+  },
+  "testLevel": "component/contract",
+  "maturity": "advisory",
+  "operatingStatus": "active",
+  "releaseInfluence": "none",
+  "nativeAuthority": {
+    "workingDirectory": "../ISET-intake",
+    "packageManifestPath": "../ISET-intake/package.json",
+    "packageScriptName": "lint",
+    "packageScriptValue": "eslint --ext .js,.jsx src",
+    "scriptPath": "../ISET-intake/node_modules/eslint/bin/eslint.js",
+    "defaultFixturePath": null,
+    "knownBadFixturePath": "qualification/test/fixtures/packs/portal-lint.invalid.js",
+    "directKnownGoodCommand": [
+      "npm",
+      "run",
+      "lint",
+      "--",
+      "--quiet",
+      "--no-cache"
+    ],
+    "directDeliberateFailureCommand": [
+      "node",
+      "node_modules/eslint/bin/eslint.js",
+      "--no-eslintrc",
+      "--config",
+      "package.json",
+      "--ext",
+      ".js,.jsx",
+      "--quiet",
+      "--no-cache",
+      "--no-ignore",
+      "../admin-dashboard/qualification/test/fixtures/packs/portal-lint.invalid.js"
+    ],
+    "semanticResultAuthority": "native-exit-status"
+  },
+  "contractRefs": [
+    "../ISET-intake/package.json#scripts.lint",
+    "../ISET-intake/package.json#eslintConfig",
+    "docs/planning/release-qualification-harness-current-state-audit-2026-08-10.md#RN05"
+  ],
+  "coveredSurfaces": [
+    "portal-src-javascript-eslint",
+    "portal-src-jsx-eslint"
+  ],
+  "requiredAdapter": {
+    "adapterId": "native-readonly-bridge",
+    "adapterVersion": "2.0.0",
+    "capabilities": [
+      "process.readonly.local"
+    ]
+  },
+  "supportedEnvironmentClasses": [
+    "local"
+  ],
+  "prerequisites": [
+    "exact-portal-package-and-lock-digests",
+    "exact-package-eslint-config-and-binary-digests",
+    "exact-resolved-eslint-package-byte-scope",
+    "exact-portal-src-javascript-jsx-byte-scope",
+    "bounded-process-controller",
+    "no-cache-no-fix-argument-admission"
+  ],
+  "declaredEffects": {
+    "effectClass": "read-only",
+    "readPaths": [
+      "../ISET-intake/package.json",
+      "../ISET-intake/package-lock.json",
+      "../ISET-intake/node_modules/eslint/bin/eslint.js",
+      "../ISET-intake/node_modules/{portal-eslint-runtime}",
+      "../ISET-intake/src/**/*.{js,jsx}",
+      "qualification/test/fixtures/packs/portal-lint.invalid.js",
+      "qualification/test/fixtures/commands/hang.js"
+    ],
+    "writePaths": [],
+    "externalEffects": []
+  },
+  "inputs": [
+    {
+      "inputId": "portal-package-script-and-eslint-config",
+      "role": "product-manifest",
+      "path": "../ISET-intake/package.json",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "62e6c7971ca3b83607163a6dd527847600a2287dd6f2ef623c820de44cbaa294"
+      }
+    },
+    {
+      "inputId": "portal-dependency-lock",
+      "role": "dependency-lock",
+      "path": "../ISET-intake/package-lock.json",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "b7f2f76e9ea216dc68bfe9c9c58cc4ad5500500c3ebafaec7c958e639f04f997"
+      }
+    },
+    {
+      "inputId": "portal-eslint-native-runner",
+      "role": "native-runner",
+      "path": "../ISET-intake/node_modules/eslint/bin/eslint.js",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "64736610331446b4310516aa5cadc69ab8c791a70388467c19dd711465046647"
+      }
+    },
+    {
+      "inputId": "portal-eslint-resolved-package-scope",
+      "role": "native-dependency-scope",
+      "path": "../ISET-intake/node_modules/{portal-eslint-runtime}",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "dced0e7c9ef34c3a65628fa96add0c86678beee42a08be904673106cbee0581b"
+      }
+    },
+    {
+      "inputId": "portal-lint-product-source-scope",
+      "role": "product-source-scope",
+      "path": "../ISET-intake/src/**/*.{js,jsx}",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "662940a8960a4fe8ab3c880f48dcc5852c01fbd77dca656bbfa180b93095ac30"
+      }
+    },
+    {
+      "inputId": "portal-lint-deliberate-error-fixture",
+      "role": "certification-fixture",
+      "path": "qualification/test/fixtures/packs/portal-lint.invalid.js",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "f5d4b91f3c39a7392746e36d7bf697fc0afe199869039f6a4d679ffdb54ec73e"
+      }
+    },
+    {
+      "inputId": "phase3e-forced-interruption-fixture",
+      "role": "certification-fixture",
+      "path": "qualification/test/fixtures/commands/hang.js",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "bd757bef3523c60ab549344f982cdbaea347d959aa126297fd334b1a0630d0ac"
+      }
+    }
+  ],
+  "timeouts": {
+    "startupMs": 10000,
+    "executionMs": 60000,
+    "idleMs": 60000,
+    "gracefulShutdownMs": 500,
+    "forcedTerminationMs": 2000,
+    "totalMs": 90000
+  },
+  "cleanup": {
+    "required": false,
+    "residueDecision": "unnecessary-read-only"
+  },
+  "evidenceOutputs": [
+    "native-command-binding",
+    "native-exit-status",
+    "bounded-stdout-and-stderr",
+    "termination-proof",
+    "portal-package-config-binary-lock-and-dependency-digests",
+    "exact-portal-source-scope-digest",
+    "direct-advisory-comparison"
+  ],
+  "failureClassificationInputs": [
+    "native-exit-status",
+    "portal-config-binary-dependency-and-source-digest-proof",
+    "bridge-process-evidence",
+    "comparison-differences"
+  ],
+  "certification": {
+    "status": "certified-advisory",
+    "knownGoodRuns": 10,
+    "directComparisonRuns": 5,
+    "knownBadProfiles": [
+      "deliberate-lint-error"
+    ],
+    "forcedInterruptionRequired": true
+  },
+  "dependencies": [],
+  "limitations": [
+    "The native portal lint scope is exactly src JavaScript and JSX files.",
+    "Portal server, auth, notifications, routes, tests, scripts, and files outside src are not covered by this pack.",
+    "Expanding native portal lint scope is a product-policy decision outside Sprint 3E.",
+    "Native stdout and stderr are retained but not reinterpreted as product semantics by the harness.",
+    "Advisory certification evidence has no release authority."
+  ]
+}

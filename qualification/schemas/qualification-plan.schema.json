@@ -1,0 +1,1168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:path:release-qualification:qualification-plan:1.0.0-draft.2",
+  "title": "PATH Release Qualification Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaName",
+    "schemaVersion",
+    "artifactId",
+    "createdAt",
+    "producer",
+    "lineageScope",
+    "parentArtifactRefs",
+    "contentDigest",
+    "lifecycleState",
+    "completeness",
+    "sensitivity",
+    "redaction",
+    "retentionPolicyRef",
+    "invocationRef",
+    "requestedTarget",
+    "requestedScope",
+    "scopeResolution",
+    "evidenceContract"
+  ],
+  "properties": {
+    "schemaName": {
+      "const": "path.release-qualification.qualification-plan"
+    },
+    "schemaVersion": {
+      "const": "1.0.0-draft.2"
+    },
+    "artifactId": {
+      "$ref": "#/$defs/opaqueId"
+    },
+    "createdAt": {
+      "$ref": "#/$defs/canonicalTimestamp"
+    },
+    "producer": {
+      "$ref": "#/$defs/producer"
+    },
+    "lineageScope": {
+      "const": "pre-attempt"
+    },
+    "productCandidateId": {
+      "$ref": "#/$defs/productCandidateIdentity"
+    },
+    "harnessVersion": {
+      "$ref": "#/$defs/harnessIdentity"
+    },
+    "testPackVersions": {
+      "$ref": "#/$defs/testPackVersions"
+    },
+    "parentArtifactRefs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactRef"
+      }
+    },
+    "relatedArtifactRefs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/relatedArtifactRef"
+      }
+    },
+    "contentDigest": {
+      "$ref": "#/$defs/digest"
+    },
+    "lifecycleState": {
+      "enum": [
+        "PLAN_LOADED",
+        "IDENTITIES_BOUND",
+        "PLAN_VALIDATED",
+        "SELECTION_RESOLVED",
+        "DEPENDENCIES_ORDERED",
+        "REJECTED_BEFORE_ATTEMPT"
+      ]
+    },
+    "completeness": {
+      "$ref": "#/$defs/completeness"
+    },
+    "sensitivity": {
+      "$ref": "#/$defs/sensitivity"
+    },
+    "redaction": {
+      "$ref": "#/$defs/redaction"
+    },
+    "retentionPolicyRef": {
+      "$ref": "#/$defs/retentionPolicyRef"
+    },
+    "invocationRef": {
+      "$ref": "#/$defs/artifactRef"
+    },
+    "requestedTarget": {
+      "$ref": "#/$defs/requestedTarget"
+    },
+    "requestedScope": {
+      "$ref": "#/$defs/requestedScope"
+    },
+    "identityBindings": {
+      "$ref": "#/$defs/identityBindings"
+    },
+    "selectionPolicyRef": {
+      "$ref": "#/$defs/artifactRef"
+    },
+    "packRegistryRef": {
+      "$ref": "#/$defs/artifactRef"
+    },
+    "selectedChecks": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/selectedCheck"
+      }
+    },
+    "scopeResolution": {
+      "$ref": "#/$defs/scopeResolution"
+    },
+    "dependencies": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/dependencyEdge"
+      }
+    },
+    "executionOrder": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/opaqueId"
+      }
+    },
+    "prerequisiteGates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/prerequisiteGate"
+      }
+    },
+    "environmentRequirements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/environmentRequirement"
+      }
+    },
+    "declaredEffects": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/effectDeclaration"
+      }
+    },
+    "adapterRequirements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/adapterRequirement"
+      }
+    },
+    "commandDeclarationRefs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactRef"
+      }
+    },
+    "budgets": {
+      "$ref": "#/$defs/budgets"
+    },
+    "cancellationPolicyRef": {
+      "$ref": "#/$defs/artifactRef"
+    },
+    "cleanupObligations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/cleanupObligation"
+      }
+    },
+    "evidenceContract": {
+      "$ref": "#/$defs/evidenceContract"
+    },
+    "validationReportRef": {
+      "$ref": "#/$defs/artifactRef"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "enum": [
+              "IDENTITIES_BOUND",
+              "PLAN_VALIDATED",
+              "SELECTION_RESOLVED",
+              "DEPENDENCIES_ORDERED"
+            ]
+          }
+        },
+        "required": [
+          "lifecycleState"
+        ]
+      },
+      "then": {
+        "required": [
+          "productCandidateId",
+          "harnessVersion",
+          "identityBindings"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "enum": [
+              "PLAN_VALIDATED",
+              "SELECTION_RESOLVED",
+              "DEPENDENCIES_ORDERED"
+            ]
+          }
+        },
+        "required": [
+          "lifecycleState"
+        ]
+      },
+      "then": {
+        "required": [
+          "selectionPolicyRef",
+          "packRegistryRef"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "enum": [
+              "SELECTION_RESOLVED",
+              "DEPENDENCIES_ORDERED"
+            ]
+          }
+        },
+        "required": [
+          "lifecycleState"
+        ]
+      },
+      "then": {
+        "required": [
+          "testPackVersions",
+          "selectedChecks",
+          "prerequisiteGates",
+          "environmentRequirements",
+          "declaredEffects",
+          "adapterRequirements",
+          "commandDeclarationRefs",
+          "budgets",
+          "cancellationPolicyRef",
+          "cleanupObligations"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycleState": {
+            "const": "DEPENDENCIES_ORDERED"
+          }
+        },
+        "required": [
+          "lifecycleState"
+        ]
+      },
+      "then": {
+        "required": [
+          "dependencies",
+          "executionOrder"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "opaqueId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "versionString": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-draft\\.[0-9]+)?$"
+    },
+    "canonicalTimestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$"
+    },
+    "timestamp": {
+      "$ref": "#/$defs/canonicalTimestamp"
+    },
+    "version": {
+      "$ref": "#/$defs/versionString"
+    },
+    "hexDigest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "value"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "sha256"
+        },
+        "value": {
+          "$ref": "#/$defs/hexDigest"
+        }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorityId",
+        "componentId",
+        "componentVersion",
+        "producerInstanceId"
+      ],
+      "properties": {
+        "authorityId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "componentId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "componentVersion": {
+          "$ref": "#/$defs/versionString"
+        },
+        "producerInstanceId": {
+          "$ref": "#/$defs/opaqueId"
+        }
+      }
+    },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaName",
+        "schemaVersion",
+        "artifactId",
+        "contentDigest"
+      ],
+      "properties": {
+        "schemaName": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        },
+        "schemaVersion": {
+          "$ref": "#/$defs/versionString"
+        },
+        "artifactId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "contentDigest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "relatedArtifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "purpose",
+        "artifactRef"
+      ],
+      "properties": {
+        "purpose": {
+          "enum": [
+            "rerun",
+            "validation",
+            "comparison",
+            "replacement",
+            "redacted-derivative"
+          ]
+        },
+        "artifactRef": {
+          "$ref": "#/$defs/artifactRef"
+        }
+      }
+    },
+    "identityRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identityKind",
+        "definitionVersion",
+        "canonicalizationProfile",
+        "digestAlgorithm",
+        "digest",
+        "manifestRefs"
+      ],
+      "properties": {
+        "identityKind": {
+          "enum": [
+            "productCandidateId",
+            "harnessVersion",
+            "environmentIdentity"
+          ]
+        },
+        "definitionVersion": {
+          "const": "1.0.0"
+        },
+        "canonicalizationProfile": {
+          "const": "RQ-C14N-1"
+        },
+        "digestAlgorithm": {
+          "const": "sha256"
+        },
+        "digest": {
+          "$ref": "#/$defs/hexDigest"
+        },
+        "manifestRefs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/artifactRef"
+          }
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "targetClass",
+            "targetName",
+            "configurationDigest",
+            "capabilities",
+            "proofRefs"
+          ],
+          "properties": {
+            "targetClass": {
+              "enum": [
+                "local",
+                "dev",
+                "test",
+                "prod"
+              ]
+            },
+            "targetName": {
+              "$ref": "#/$defs/opaqueId"
+            },
+            "configurationDigest": {
+              "$ref": "#/$defs/hexDigest"
+            },
+            "capabilities": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/opaqueId"
+              }
+            },
+            "proofRefs": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/artifactRef"
+              }
+            }
+          }
+        }
+      }
+    },
+    "productCandidateIdentity": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/identityRef"
+        },
+        {
+          "properties": {
+            "identityKind": {
+              "const": "productCandidateId"
+            }
+          }
+        }
+      ]
+    },
+    "harnessIdentity": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/identityRef"
+        },
+        {
+          "properties": {
+            "identityKind": {
+              "const": "harnessVersion"
+            }
+          }
+        }
+      ]
+    },
+    "testPackVersions": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "packVersion",
+          "digestAlgorithm",
+          "digest",
+          "manifestRefs"
+        ],
+        "properties": {
+          "packVersion": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$"
+          },
+          "digestAlgorithm": {
+            "const": "sha256"
+          },
+          "digest": {
+            "$ref": "#/$defs/hexDigest"
+          },
+          "manifestRefs": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/artifactRef"
+            }
+          }
+        }
+      }
+    },
+    "missingEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "artifactRef": {
+          "$ref": "#/$defs/artifactRef"
+        }
+      }
+    },
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "missingEvidence"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "complete",
+            "partial",
+            "interrupted"
+          ]
+        },
+        "missingEvidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/missingEvidence"
+          }
+        },
+        "lastTrustworthyEventRef": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "mutationState": {
+          "enum": [
+            "not-started",
+            "may-have-started",
+            "started",
+            "terminal"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "complete"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "missingEvidence": {
+                "maxItems": 0
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "missingEvidence": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "sensitivity": {
+      "enum": [
+        "public",
+        "internal",
+        "confidential",
+        "restricted"
+      ]
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "none-required",
+            "redacted-derivative",
+            "redaction-required"
+          ]
+        },
+        "profileVersion": {
+          "$ref": "#/$defs/versionString"
+        },
+        "originalRef": {
+          "$ref": "#/$defs/artifactRef"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "redacted-derivative"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "required": [
+              "profileVersion",
+              "originalRef"
+            ]
+          }
+        }
+      ]
+    },
+    "retentionPolicyRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "policyVersion",
+        "retentionClass"
+      ],
+      "properties": {
+        "policyId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "policyVersion": {
+          "$ref": "#/$defs/versionString"
+        },
+        "retentionClass": {
+          "enum": [
+            "release-core",
+            "attempt-diagnostic",
+            "sensitive-media",
+            "build-and-rollback",
+            "rejected-or-interrupted",
+            "ephemeral-cache"
+          ]
+        }
+      }
+    },
+    "requestedTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetClass",
+        "targetName",
+        "policyRef"
+      ],
+      "properties": {
+        "targetClass": {
+          "enum": [
+            "local",
+            "dev",
+            "test",
+            "prod"
+          ]
+        },
+        "targetName": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "policyRef": {
+          "$ref": "#/$defs/artifactRef"
+        }
+      }
+    },
+    "requestedScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "changeRefs",
+        "operations",
+        "requestedSuites",
+        "fullRegressionTriggers"
+      ],
+      "properties": {
+        "changeRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifactRef"
+          }
+        },
+        "operations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/opaqueId"
+          }
+        },
+        "requestedSuites": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/opaqueId"
+          }
+        },
+        "fullRegressionTriggers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/opaqueId"
+          }
+        }
+      }
+    },
+    "identityBindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "productCandidateId",
+        "harnessVersion",
+        "availablePackRegistryRef"
+      ],
+      "properties": {
+        "productCandidateId": {
+          "$ref": "#/$defs/productCandidateIdentity"
+        },
+        "harnessVersion": {
+          "$ref": "#/$defs/harnessIdentity"
+        },
+        "availablePackRegistryRef": {
+          "$ref": "#/$defs/artifactRef"
+        }
+      }
+    },
+    "selectedCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkInstanceId",
+        "checkDefinitionRef",
+        "packId",
+        "packVersion",
+        "nativeContractRef",
+        "adapterCapabilities",
+        "inclusionOrigins"
+      ],
+      "properties": {
+        "checkInstanceId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "checkDefinitionRef": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "packId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "packVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "nativeContractRef": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "adapterCapabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/opaqueId"
+          }
+        },
+        "inclusionOrigins": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "mandatory-core",
+              "impacted-domain",
+              "dependency",
+              "explicit-suite",
+              "scheduled-full",
+              "release-operation"
+            ]
+          }
+        }
+      }
+    },
+    "scopeResolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mappedInputs",
+        "rejectedInputs"
+      ],
+      "properties": {
+        "mappedInputs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/opaqueId"
+          }
+        },
+        "rejectedInputs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "inputId",
+              "reasonCode"
+            ],
+            "properties": {
+              "inputId": {
+                "$ref": "#/$defs/opaqueId"
+              },
+              "reasonCode": {
+                "$ref": "#/$defs/opaqueId"
+              }
+            }
+          }
+        }
+      }
+    },
+    "dependencyEdge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "predecessor",
+        "dependant",
+        "reason",
+        "relationship"
+      ],
+      "properties": {
+        "predecessor": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "dependant": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "reason": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "relationship": {
+          "enum": [
+            "dependency",
+            "prerequisite",
+            "effect-order"
+          ]
+        }
+      }
+    },
+    "prerequisiteGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gateId",
+        "checkInstanceId",
+        "proofType",
+        "freshnessPolicyRef",
+        "validatorRef",
+        "blockingClosure",
+        "metadataOnlyOnFailure"
+      ],
+      "properties": {
+        "gateId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "checkInstanceId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "proofType": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "freshnessPolicyRef": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "validatorRef": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "blockingClosure": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueId"
+          }
+        },
+        "metadataOnlyOnFailure": {
+          "type": "boolean"
+        }
+      }
+    },
+    "environmentRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkInstanceId",
+        "capability",
+        "proofPolicyRef"
+      ],
+      "properties": {
+        "checkInstanceId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "capability": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "proofPolicyRef": {
+          "$ref": "#/$defs/artifactRef"
+        }
+      }
+    },
+    "effectDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkInstanceId",
+        "effectClass",
+        "effectTokens",
+        "resourceScope",
+        "mutationBoundary",
+        "exclusive"
+      ],
+      "properties": {
+        "checkInstanceId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "effectClass": {
+          "enum": [
+            "read-only",
+            "stateful"
+          ]
+        },
+        "effectTokens": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/opaqueId"
+          }
+        },
+        "resourceScope": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueId"
+          }
+        },
+        "mutationBoundary": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "exclusive": {
+          "type": "boolean"
+        }
+      }
+    },
+    "adapterRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkInstanceId",
+        "adapterId",
+        "adapterVersion",
+        "capabilities"
+      ],
+      "properties": {
+        "checkInstanceId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "adapterId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "adapterVersion": {
+          "$ref": "#/$defs/versionString"
+        },
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/opaqueId"
+          }
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startupMs",
+        "executionMs",
+        "idleMs",
+        "gracefulTerminationMs",
+        "forcedTerminationMs",
+        "cleanupMs",
+        "finalizationMs",
+        "totalAttemptMs"
+      ],
+      "properties": {
+        "startupMs": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "executionMs": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "idleMs": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "gracefulTerminationMs": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "forcedTerminationMs": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "cleanupMs": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "finalizationMs": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "totalAttemptMs": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "cleanupObligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "obligationId",
+        "checkInstanceId",
+        "ownerRef",
+        "terminationRequired",
+        "residueVerifierRef",
+        "residueScope",
+        "budgetMs"
+      ],
+      "properties": {
+        "obligationId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "checkInstanceId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "ownerRef": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "terminationRequired": {
+          "const": true
+        },
+        "residueVerifierRef": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "residueScope": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/opaqueId"
+          }
+        },
+        "budgetMs": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "evidenceContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersions",
+        "canonicalizationProfile",
+        "digestAlgorithm",
+        "resultLimitBytes",
+        "logLimitBytes",
+        "retentionPolicyRef"
+      ],
+      "properties": {
+        "schemaVersions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "qualification-plan",
+            "execution-event",
+            "check-result",
+            "failure",
+            "cleanup-result",
+            "final-evidence"
+          ],
+          "properties": {
+            "qualification-plan": {
+              "const": "1.0.0-draft.2"
+            },
+            "execution-event": {
+              "const": "1.0.0-draft.1"
+            },
+            "check-result": {
+              "const": "1.0.0-draft.1"
+            },
+            "failure": {
+              "const": "1.0.0-draft.1"
+            },
+            "cleanup-result": {
+              "const": "1.0.0-draft.1"
+            },
+            "final-evidence": {
+              "const": "1.0.0-draft.2"
+            }
+          }
+        },
+        "canonicalizationProfile": {
+          "const": "RQ-C14N-1"
+        },
+        "digestAlgorithm": {
+          "const": "sha256"
+        },
+        "resultLimitBytes": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "logLimitBytes": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "retentionPolicyRef": {
+          "$ref": "#/$defs/retentionPolicyRef"
+        }
+      }
+    }
+  }
+}

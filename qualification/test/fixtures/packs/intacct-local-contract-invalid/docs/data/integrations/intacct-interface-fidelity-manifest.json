@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "lastUpdated": "2026-08-10",
+  "purpose": "Qualification-owned deliberate local source drift. This mirror is not Sage or deployed-service certification.",
+  "auditDoc": "not-applicable-qualification-negative",
+  "externalReferences": [],
+  "localContractChecks": [
+    {
+      "id": "mirror-admin-marker-present",
+      "file": "isetadminserver.js",
+      "mustContain": "INTACCT_REST_BASE_URL",
+      "severity": "pass-fail"
+    },
+    {
+      "id": "mirror-advisory-marker-absent",
+      "file": "intacct-mock-service/src/server.js",
+      "mustContain": "INTENTIONALLY_ABSENT_ADVISORY_MARKER",
+      "severity": "advisory"
+    },
+    {
+      "id": "mirror-required-marker-absent",
+      "file": "intacct-mock-service/src/server.js",
+      "mustContain": "INTENTIONALLY_ABSENT_REQUIRED_MARKER",
+      "severity": "pass-fail"
+    }
+  ],
+  "knownGaps": []
+}

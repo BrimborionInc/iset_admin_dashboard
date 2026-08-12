@@ -1,0 +1,258 @@
+{
+  "schemaVersion": "1.0.0",
+  "packId": "admin-aggregate",
+  "packVersion": "1.0.2",
+  "contentDigest": {
+    "algorithm": "sha256",
+    "value": "a08a9503ecf81184d444cc971adc024e7c6ba38ce83d6064a5eb76e678498c5c"
+  },
+  "purpose": "Preserve the native admin frontend-then-backend aggregate, phase ordering, assertions, and nonzero propagation as bounded advisory evidence.",
+  "productDomain": "admin-native-aggregate",
+  "owner": {
+    "repositoryId": "admin-dashboard",
+    "maintainers": [
+      "admin-product-test-owners",
+      "qualification-engineering"
+    ],
+    "escalationAuthority": "Bill"
+  },
+  "testLevel": "local system",
+  "maturity": "advisory",
+  "operatingStatus": "active",
+  "releaseInfluence": "none",
+  "nativeAuthority": {
+    "workingDirectory": ".",
+    "packageManifestPath": "package.json",
+    "packageScriptName": "test",
+    "packageScriptValue": "node scripts/run-test-all.js",
+    "scriptPath": "scripts/run-test-all.js",
+    "defaultFixturePath": null,
+    "knownBadFixturePath": "qualification/test/fixtures/packs/admin-aggregate-negative/frontend-failure.test.js",
+    "directKnownGoodCommand": [
+      "npm",
+      "test"
+    ],
+    "directDeliberateFailureCommand": [
+      "npm",
+      "test"
+    ],
+    "semanticResultAuthority": "native-exit-status"
+  },
+  "contractRefs": [
+    "package.json#scripts.test",
+    "scripts/run-test-all.js",
+    "tests/jest.config.js",
+    "tests/testAllContract.test.js",
+    "docs/planning/release-qualification-harness-current-state-audit-2026-08-10.md#RN01"
+  ],
+  "coveredSurfaces": [
+    "admin-frontend-native-test-aggregate",
+    "admin-backend-native-test-aggregate",
+    "frontend-before-backend-phase-order",
+    "native-phase-nonzero-propagation"
+  ],
+  "requiredAdapter": {
+    "adapterId": "native-readonly-bridge",
+    "adapterVersion": "2.0.0",
+    "capabilities": [
+      "process.readonly.local",
+      "filesystem.temporary.local-write",
+      "network.loopback.local"
+    ]
+  },
+  "supportedEnvironmentClasses": [
+    "local"
+  ],
+  "prerequisites": [
+    "exact-admin-package-lock-runner-and-config-digests",
+    "exact-admin-product-test-and-script-scope",
+    "exact-cross-repository-test-input-scope",
+    "exact-resolved-react-scripts-jest-runtime-scope",
+    "certified-r1-native-temp-teardown",
+    "certified-r2-synthetic-environment-boundary",
+    "bounded-process-controller",
+    "loopback-only-native-test-network"
+  ],
+  "declaredEffects": {
+    "effectClass": "local-write",
+    "readPaths": [
+      "package.json",
+      "package-lock.json",
+      "scripts/run-test-all.js",
+      "tests/jest.config.js",
+      "node_modules/react-scripts/scripts/test.js",
+      "node_modules/jest/bin/jest.js",
+      "admin-aggregate/{src,tests,scripts,server,declared-sql}",
+      "admin-aggregate/{portal,shared}-declared-inputs",
+      "node_modules/{admin-test-runtime}",
+      "qualification/test/fixtures/packs/admin-aggregate-negative/frontend-failure.test.js",
+      "qualification/test/fixtures/packs/admin-aggregate-negative/backend-failure.test.js",
+      "qualification/test/fixtures/commands/hang.js"
+    ],
+    "writePaths": [
+      "qualification-owned-attempt-mirror",
+      "native-test-owned-temporary-roots"
+    ],
+    "externalEffects": []
+  },
+  "inputs": [
+    {
+      "inputId": "admin-aggregate-package-alias",
+      "role": "product-manifest",
+      "path": "package.json",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "bd943f673bb28ed4ff63fa2f3609b221f9ceb808760d86ba072f8ab45a46572f"
+      }
+    },
+    {
+      "inputId": "admin-aggregate-dependency-lock",
+      "role": "dependency-lock",
+      "path": "package-lock.json",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "bf85387826a45acd1d437339c3258cbad2c1df3043d5578e90575e78119aaad8"
+      }
+    },
+    {
+      "inputId": "admin-aggregate-native-runner",
+      "role": "native-runner",
+      "path": "scripts/run-test-all.js",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "513087c3afc72a1d9669c245c08ad65a672c9fcf69eb9cde52e366854bb2f0a2"
+      }
+    },
+    {
+      "inputId": "admin-aggregate-backend-config",
+      "role": "native-config",
+      "path": "tests/jest.config.js",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "399fe9771ad3b724dee1e2c0f4394df197767b97aff6961474d0574085e267d1"
+      }
+    },
+    {
+      "inputId": "admin-aggregate-frontend-entry",
+      "role": "native-dependency",
+      "path": "node_modules/react-scripts/scripts/test.js",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "d68a87fa1fa65ce29152a1a6fb9fdf91b2ba4c4191d6eb43ced36b1404c3813d"
+      }
+    },
+    {
+      "inputId": "admin-aggregate-backend-entry",
+      "role": "native-dependency",
+      "path": "node_modules/jest/bin/jest.js",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "faec6662cffcf2961698bc054b7339e0d1a313e857eac066c0d3a9cda5b52c69"
+      }
+    },
+    {
+      "inputId": "admin-aggregate-product-scope",
+      "role": "product-source-scope",
+      "path": "admin-aggregate/{src,tests,scripts,server,declared-sql}",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "877c62b04154a566e5043e9f7898e28bd8b1787eadf46829424ffbb51cd1f370"
+      }
+    },
+    {
+      "inputId": "admin-aggregate-external-scope",
+      "role": "product-source-scope",
+      "path": "admin-aggregate/{portal,shared}-declared-inputs",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "f9c7bf6e0ca4dfd9a1fed440ba16d1a5550d88fd0de35ce7b3ae15a94820eb6d"
+      }
+    },
+    {
+      "inputId": "admin-aggregate-resolved-test-runtime",
+      "role": "native-dependency-scope",
+      "path": "node_modules/{admin-test-runtime}",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "47cba0ff310b9ec8bf5087f5ffce40e93fa1733cf15ebda9a2c55c40073752fd"
+      }
+    },
+    {
+      "inputId": "admin-aggregate-frontend-failure-sentinel",
+      "role": "certification-fixture",
+      "path": "qualification/test/fixtures/packs/admin-aggregate-negative/frontend-failure.test.js",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "cd4a61d2ac2b28bd226414cc67c45a47fbb786a0b6ebd9f6c2062e60c8c956c4"
+      }
+    },
+    {
+      "inputId": "admin-aggregate-backend-failure-sentinel",
+      "role": "certification-fixture",
+      "path": "qualification/test/fixtures/packs/admin-aggregate-negative/backend-failure.test.js",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "65dc82be70c34fe5e1d176dc34ca8167c366d744391fd363036f281d6046a1f3"
+      }
+    },
+    {
+      "inputId": "admin-aggregate-forced-interruption-fixture",
+      "role": "certification-fixture",
+      "path": "qualification/test/fixtures/commands/hang.js",
+      "contentDigest": {
+        "algorithm": "sha256",
+        "value": "bd757bef3523c60ab549344f982cdbaea347d959aa126297fd334b1a0630d0ac"
+      }
+    }
+  ],
+  "timeouts": {
+    "startupMs": 30000,
+    "executionMs": 180000,
+    "idleMs": 180000,
+    "gracefulShutdownMs": 1000,
+    "forcedTerminationMs": 3000,
+    "totalMs": 240000
+  },
+  "cleanup": {
+    "required": true,
+    "residueDecision": "independent-zero-residue-required"
+  },
+  "evidenceOutputs": [
+    "native-command-binding",
+    "native-aggregate-exit-status",
+    "content-bound-native-phase-order",
+    "separate-frontend-backend-lifecycle-status",
+    "bounded-stdout-and-stderr",
+    "termination-proof",
+    "synthetic-environment-proof",
+    "attempt-mirror-cleanup",
+    "independent-temporary-residue-proof",
+    "direct-advisory-comparison"
+  ],
+  "failureClassificationInputs": [
+    "native-aggregate-exit-status",
+    "content-bound-phase-marker-evidence",
+    "input-and-dependency-digest-proof",
+    "bridge-process-evidence",
+    "cleanup-and-residue-evidence",
+    "comparison-differences"
+  ],
+  "certification": {
+    "status": "certified-advisory",
+    "knownGoodRuns": 10,
+    "directComparisonRuns": 5,
+    "knownBadProfiles": [
+      "frontend-failure",
+      "backend-failure"
+    ],
+    "forcedInterruptionRequired": true
+  },
+  "dependencies": [],
+  "limitations": [
+    "The native aggregate remains the semantic authority for every product assertion and aggregate exit.",
+    "Phase evidence records only the exact content-bound native runner lifecycle markers and does not reinterpret test output.",
+    "Native tests may use loopback sockets; external network, deployed environments, databases, AWS, browsers, and product builds are not authorized.",
+    "The deliberate phase failures exist only in attempt-owned mirrors and never alter the product worktree.",
+    "Advisory certification evidence has no release authority."
+  ]
+}

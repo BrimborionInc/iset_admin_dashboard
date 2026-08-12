@@ -2,7 +2,7 @@
 
 Status: authoritative release gate for local DEV, real-MySQL qualification, TEST deployment, deployed TEST acceptance, and PROD authorization.
 
-Last reviewed: 2026-07-13 after the authenticated-admin outage demonstrated that the former unit/composition/health sequence did not qualify a release.
+Last reviewed: 2026-08-10 after the two-step review release exposed the need to separate universal qualification coverage from harness development and validation.
 
 This runbook supersedes any shorter deploy checklist when deciding whether a PATH release is admissible. The deployment guides still describe mechanics and maintenance handling, but they do not authorize a release by themselves.
 
@@ -14,6 +14,28 @@ A release is not qualified by a green unit suite, successful build, healthy targ
 2. `TEST GO`: that DEV-qualified candidate was admitted by the TEST deployment manifest, deployed provenance matches, rollback artifacts exist, target health and on-instance readiness pass, configuration and worker state are safe, deployed role/applicant/cross-app journeys pass, strict denials have no skip, rollback fixtures leave no residue, and maintenance state is clear.
 
 Any failed, skipped, unavailable, expired, unmapped, source-drifted, or cleanup-incomplete required check is `NO-GO`; it must never be relabelled `GO`. Normal releases have no skip or waiver flag. A separately recorded operator-authorized emergency PROD release may use the app-only pre-qualification deployment procedure described below without changing or falsifying the `NO-GO` evidence.
+
+## Harness design boundary
+
+A broad reusable qualification harness remains the objective. The 2026-08-07 through 2026-08-10 failure was not that acceptance covered more than one reported defect; the harness correctly exposed wider product weaknesses that warranted repair. The failure was deriving environment, UI, fixture, and workflow contracts by inference during the release loop, coupling harness-only corrections to new product release candidates, and allowing newly written harness behavior to become a mandatory gate before the harness itself was shown to be reliable.
+
+- Establish each test contract from observed or authoritative behavior before encoding it: deployed request/response traces, product-owned UI state, live target metadata, and explicit infrastructure capabilities.
+- Version the immutable product candidate, harness implementation, and execution attempt independently. A harness-only repair must not create a new product candidate or require redeployment when the deployed product artifacts are unchanged.
+- Qualify new or materially changed harness checks independently through repeatable known-good and deliberate known-bad trials before promoting them to mandatory release gates.
+- Classify a failure as product, harness, environment, or infrastructure before changing source or restarting qualification. An unclassified failure stops the loop for diagnosis.
+- Keep universal orchestration broad, but compose it from bounded domain checks with explicit prerequisites, effects, assertions, cleanup ownership, and evidence. Do not build one cross-domain simulated journey that makes unrelated systems prerequisites for one another.
+
+Develop the harness bottom-up. Do not begin a new harness generation with the most complex deployed journey. Each layer must first demonstrate repeatable known-good runs, detection of deliberate known-bad cases, bounded timeouts, intelligible evidence, and interruption-safe cleanup before the next layer depends on it:
+
+1. runner lifecycle and evidence format, with no application or environment effects;
+2. deterministic local process and HTTP checks;
+3. explicit metadata-only database and cloud identity adapters;
+4. transactional local fixtures and recovery tests;
+5. immutable TEST deployment, provenance, readiness, and rollback checks;
+6. one bounded deployed domain journey at a time;
+7. cross-domain concurrency and failure/recovery scenarios only after their component journeys are certified.
+
+Do not use ad hoc string parsing to infer JSON structure or SQL correctness. JSON evidence must be schema-validated and compared structurally. SQL-bearing checks must use explicit structured statement declarations or a proven parser/driver boundary, live metadata for the exact target, and the repository's per-statement admission rule. A new test pack starts as advisory and cannot block a product release until its harness behavior has completed this certification path independently of an urgent release.
 
 `scripts/path-deploy.js run` enforces the evidence boundary:
 
