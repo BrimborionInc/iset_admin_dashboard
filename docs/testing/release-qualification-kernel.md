@@ -348,3 +348,34 @@ reordering, stale baselines and forced interruption. The source-state pack is
 advisory with no release authority. The certified five-pack native registry and
 bridge remain unchanged; portal aggregate stays deferred and RN02/RN04 remain
 open under the current authoritative gate.
+
+## Sprint 4A Native Build Preservation
+
+Sprint `4A` keeps `scripts/release-build-contract.js` as the direct native build
+wrapper and extracts only its synchronous file-preservation boundary into
+`scripts/lib/release-build-preservation.js`. The helper owns a closed declaration
+of allowed repository roots, generated files and isolated output roots. It
+snapshots exact bytes or absence before dispatch, removes only declared output
+roots, restores every generated path after success or failure and returns exact
+restoration evidence. Missing, duplicate, escaping, overlapping or undeclared
+paths and restoration failures fail closed. It does not spawn a command or
+import PATH product or qualification code.
+
+The native command vectors, working directories, environment overlay and exit
+behavior are unchanged. The preservation inventory is exactly:
+
+- admin `src/generated/buildInfo.js`;
+- admin `src/generated/publicReleaseNotes.js`;
+- portal `src/generated/buildInfo.js`;
+- portal `src/generated/publicBuildInfo.js`;
+- admin `tmp/release-qualification/admin-build-contract`; and
+- portal `tmp/release-qualification/portal-build-contract`.
+
+`tests/releaseBuildContract.test.js` uses only attempt-owned OS-temporary admin
+and portal roots and injected in-process actions. Its 11 focused cases prove the
+exact native declarations, byte and absence restoration after success and child
+failure, unrelated-sentinel preservation, both output-root cleanup paths,
+declaration rejection, restoration-failure evidence, import boundaries and
+independent removal of every synthetic root. Sprint `4A` runs no admin or portal
+build and does not read an environment file. Direct build execution and source-
+stability proof remain separately authorized Sprint `4B` work.

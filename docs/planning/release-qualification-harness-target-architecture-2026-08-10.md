@@ -8439,8 +8439,8 @@ infrastructure from returning under a different name.
 
 - RN02/RN04 and `portal-aggregate` stay open under the current gate. Phase 4
   build work does not close aggregate execution or portal native-test coverage.
-- CP24's known portal `publicBuildInfo.js` restoration defect is assigned only
-  to `4B`; it is not silently treated as already fixed.
+- CP24's known portal `publicBuildInfo.js` restoration defect is assigned to
+  `4A`; `4B` must independently prove the repaired boundary during real builds.
 - RN16-RN19 and the 13-child browser ledger remain evidence. `4C-4D` assume only
   the `intervention-posting-context` child; the parent and other 12 children stay
   current-gate obligations and are not claimed as migrated.
@@ -8532,6 +8532,40 @@ No implicit retry is allowed. Any unexpected input, write, source overlap,
 restoration or residue failure stops without repair or rerun. Completion stops
 after `4A` evidence and documentation; actual builds wait for separately
 authorized `4B`.
+
+### Sprint 4A Implementation and Certification Checkpoint
+
+Sprint `4A` completed the approved synthetic preservation slice from clean
+baseline `ef5ee8c2f687effde7242c167c61baa6919e3f35`. The native wrapper now
+delegates only snapshot, exact restoration and isolated-output cleanup to
+`scripts/lib/release-build-preservation.js`; its admin and portal command
+vectors, arguments, working directories, build-output locations, environment
+overlay, sequential ordering and CLI success/failure behavior remain unchanged.
+The fixed inventory contains exactly admin `buildInfo.js` and
+`publicReleaseNotes.js`, portal `buildInfo.js` and `publicBuildInfo.js`, and the
+two existing isolated build roots. This closes the confirmed preservation-code
+gap for the second portal generated file without claiming a real-build proof.
+
+The helper admits only absolute, unique paths owned by exactly one declared
+repository root, rejects generated/output overlap and overlapping output roots,
+and exposes an exact-output-root assertion to injected child actions. It
+snapshots each generated file as exact bytes or absence, cleans only declared
+output roots, restores after injected success or failure and preserves the
+original child error when restoration succeeds. A restoration failure supersedes
+the child outcome with structured phase, path and underlying-error evidence.
+The helper is synchronous and has no child-process, product, qualification,
+environment or network dependency.
+
+The focused synthetic suite passed all 11 tests in one authorized invocation.
+It proves exact native declarations; pre-existing binary/text bytes and initial
+absence after success and child failure; both build-output roots absent on every
+completed path; an unrelated sentinel unchanged; missing, duplicate, escaping
+and undeclared paths rejected; restoration failure attributed; source/import
+boundaries; and independent teardown of every attempt-owned temporary root.
+All three JavaScript syntax checks passed. No build, environment file, product
+source, qualification machinery, external service or later sprint ran. The
+remaining authorized whitespace and exact-diff-scope checks complete the final
+repository checkpoint; Sprint `4B` remains separately authorized work.
 
 ### Sprint 4B - Direct Admin and Portal Build Proof
 

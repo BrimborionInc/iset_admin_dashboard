@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { runWithBuildPreservation } = require('./lib/release-build-preservation');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const PORTAL_ROOT = path.resolve(REPO_ROOT, '..', 'ISET-intake');
@@ -31,69 +31,103 @@ function run(command, args, options) {
   if (result.status !== 0) throw new Error(`${command} exited with ${result.status}`);
 }
 
-function snapshot(filename) {
-  return fs.existsSync(filename) ? fs.readFileSync(filename) : null;
+function createPreservationPlan({ repoRoot = REPO_ROOT, portalRoot = PORTAL_ROOT } = {}) {
+  return {
+    allowedRoots: [repoRoot, portalRoot],
+    generatedFiles: [
+      path.join(repoRoot, 'src', 'generated', 'buildInfo.js'),
+      path.join(repoRoot, 'src', 'generated', 'publicReleaseNotes.js'),
+      path.join(portalRoot, 'src', 'generated', 'buildInfo.js'),
+      path.join(portalRoot, 'src', 'generated', 'publicBuildInfo.js'),
+    ],
+    outputRoots: [
+      path.join(repoRoot, 'tmp', 'release-qualification', 'admin-build-contract'),
+      path.join(portalRoot, 'tmp', 'release-qualification', 'portal-build-contract'),
+    ],
+  };
 }
 
-function restore(filename, value) {
-  if (value === null) fs.rmSync(filename, { force: true });
-  else fs.writeFileSync(filename, value);
-}
+function createBuildSteps(selected, { repoRoot = REPO_ROOT, portalRoot = PORTAL_ROOT, baseEnv = process.env } = {}) {
+  const steps = [];
 
-function main() {
-  const selected = parseArgs(process.argv.slice(2));
-  const adminBuildInfo = path.join(REPO_ROOT, 'src', 'generated', 'buildInfo.js');
-  const adminReleaseNotes = path.join(REPO_ROOT, 'src', 'generated', 'publicReleaseNotes.js');
-  const portalBuildInfo = path.join(PORTAL_ROOT, 'src', 'generated', 'buildInfo.js');
-  const savedAdminInfo = snapshot(adminBuildInfo);
-  const savedAdminReleaseNotes = snapshot(adminReleaseNotes);
-  const savedPortalInfo = snapshot(portalBuildInfo);
-  const adminBuildPath = path.join(REPO_ROOT, 'tmp', 'release-qualification', 'admin-build-contract');
-  const portalBuildPath = path.join(REPO_ROOT, 'tmp', 'release-qualification', 'portal-build-contract');
-
-  try {
-    if (selected.has('admin')) {
-      fs.rmSync(adminBuildPath, { recursive: true, force: true });
-      run('npm', ['run', 'build:test'], {
-        cwd: REPO_ROOT,
+  if (selected.has('admin')) {
+    const outputRoot = path.join(repoRoot, 'tmp', 'release-qualification', 'admin-build-contract');
+    steps.push({
+      id: 'admin-build',
+      outputRoot,
+      command: 'npm',
+      args: ['run', 'build:test'],
+      options: {
+        cwd: repoRoot,
         env: {
-          ...process.env,
-          BUILD_PATH: adminBuildPath,
+          ...baseEnv,
+          BUILD_PATH: outputRoot,
           PATH_DEPLOY_ENV: 'test',
           PATH_RELEASE_ID: 'local-release-qualification',
         },
-      });
-    }
-    if (selected.has('portal')) {
-      fs.rmSync(portalBuildPath, { recursive: true, force: true });
-      run(process.execPath, [path.join(PORTAL_ROOT, 'scripts', 'write-build-info.js'), '--build-target', 'test'], {
-        cwd: PORTAL_ROOT,
-        env: { ...process.env, PATH_DEPLOY_ENV: 'test', PATH_RELEASE_ID: 'local-release-qualification' },
-      });
-      run('npx', ['env-cmd', '-f', '.env.test', 'craco', 'build'], {
-        cwd: PORTAL_ROOT,
-        env: {
-          ...process.env,
-          BUILD_PATH: portalBuildPath,
-          PATH_DEPLOY_ENV: 'test',
-          PATH_RELEASE_ID: 'local-release-qualification',
-        },
-      });
-    }
-  } finally {
-    fs.rmSync(adminBuildPath, { recursive: true, force: true });
-    fs.rmSync(portalBuildPath, { recursive: true, force: true });
-    restore(adminBuildInfo, savedAdminInfo);
-    restore(adminReleaseNotes, savedAdminReleaseNotes);
-    restore(portalBuildInfo, savedPortalInfo);
+      },
+    });
   }
+
+  if (selected.has('portal')) {
+    const outputRoot = path.join(portalRoot, 'tmp', 'release-qualification', 'portal-build-contract');
+    steps.push({
+      id: 'portal-build-info',
+      outputRoot: null,
+      command: process.execPath,
+      args: [path.join(portalRoot, 'scripts', 'write-build-info.js'), '--build-target', 'test'],
+      options: {
+        cwd: portalRoot,
+        env: { ...baseEnv, PATH_DEPLOY_ENV: 'test', PATH_RELEASE_ID: 'local-release-qualification' },
+      },
+    });
+    steps.push({
+      id: 'portal-build',
+      outputRoot,
+      command: 'npx',
+      args: ['env-cmd', '-f', '.env.test', 'craco', 'build'],
+      options: {
+        cwd: portalRoot,
+        env: {
+          ...baseEnv,
+          BUILD_PATH: outputRoot,
+          PATH_DEPLOY_ENV: 'test',
+          PATH_RELEASE_ID: 'local-release-qualification',
+        },
+      },
+    });
+  }
+
+  return steps;
+}
+
+function main(argv = process.argv.slice(2)) {
+  const selected = parseArgs(argv);
+  const preservationPlan = createPreservationPlan();
+  const steps = createBuildSteps(selected);
+
+  runWithBuildPreservation(preservationPlan, ({ assertOutputRoot }) => {
+    for (const step of steps) {
+      if (step.outputRoot) assertOutputRoot(step.outputRoot);
+      run(step.command, step.args, step.options);
+    }
+  });
 
   console.log(`Release build contract: PASS (${Array.from(selected).join(', ')})`);
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`Release build contract: FAIL (${error.message || error})`);
-  process.exitCode = 1;
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`Release build contract: FAIL (${error.message || error})`);
+    process.exitCode = 1;
+  }
 }
+
+module.exports = {
+  createBuildSteps,
+  createPreservationPlan,
+  main,
+  parseArgs,
+};
