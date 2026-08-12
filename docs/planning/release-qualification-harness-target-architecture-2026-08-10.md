@@ -8197,3 +8197,58 @@ the recommendation to close the rebuild at Phase 3 as stopped incomplete, or
 makes a separate explicit governance decision about the unmet exit criterion.
 No further exit execution, Phase 4 work, promotion, admission or release-
 authority change is authorized by this checkpoint.
+
+## Elevated Unchanged-Coordinator Admission Stop
+
+Bill superseded the preceding stopping recommendation and authorized one
+execution of the exact unchanged coordinator with narrowly elevated local-
+process permission. Before escalation, external admission proved admin `HEAD`
+and local `origin/main` both equalled the required clean checkpoint
+`df8e4d092862c17f6f5c7e8afef4667f618f6080`. The non-repository coordinator's
+SHA-256 digest remained exactly
+`fa98022814e9706bd0dde863263300c4e8c7f43d9e59262c2306895e07dfd312`,
+and JavaScript syntax remained valid.
+
+The requested process escalation was granted. The exact unchanged command ran
+once:
+
+```text
+node /tmp/rq-phase3-exit-gate.js --self-test
+```
+
+The earlier `spawnSync git EPERM` did not recur. The coordinator successfully
+spawned its internal read-only Git commands and proved current `HEAD`, local
+`origin/main` and clean status. It then exited `1` with this deterministic
+admission result:
+
+```json
+{"code":"BASELINE_CONFLICT","details":{"expected":"be56fc5cdda85851206a76e2b4a8bc8702dfcb23","head":"df8e4d092862c17f6f5c7e8afef4667f618f6080","originMain":"df8e4d092862c17f6f5c7e8afef4667f618f6080","status":""},"evidenceKind":"phase3-exit-coordinator-admission-failure","message":"HEAD, origin/main, or worktree differs from the authorized baseline","releaseAuthority":"none"}
+```
+
+This is an explained harness identity/admission conflict. The unchanged
+coordinator is content-bound to the pre-outcome-document checkpoint
+`be56fc5cdda85851206a76e2b4a8bc8702dfcb23`, while Bill required execution from
+the later clean checkpoint `df8e4d092862c17f6f5c7e8afef4667f618f6080`.
+Both facts were proved; neither was overridden. Per Bill's immediate-stop rule,
+there was no coordinator change, asserted-value substitution, workaround,
+second execution or cohort execution.
+
+The stop occurred before the first synthetic case, proof artifact, fresh
+evidence root, pack-bundle load, direct control, advisory command or cohort
+attempt. Completed cohort count remains zero. No new qualification process,
+mirror, aggregate temporary root or residue remained. The two historical exit
+failure roots remain unchanged. Repository implementation, packs, schemas,
+adapters, identities, authority, admission, `portal-aggregate` deferral and
+RN02/RN04 remain unchanged.
+
+**Completion recommendation:** Phase 3 still has not met its technical exit
+criterion and should not be represented as complete. The simultaneous
+requirements to execute the exact unchanged coordinator and to use checkpoint
+`df8e4d0` are mutually incompatible because that coordinator admits only
+`be56fc5`. Resolving that governance conflict, or explicitly changing the exit
+criterion, requires a new Bill decision; neither another execution nor Phase 4
+is authorized by this stop.
+
+**Completion decision:** the newly authorized elevated execution completed as a
+properly evidenced admission stop. Synthetic cases completed: zero. Cohort
+attempts completed: zero. Phase 3 remains incomplete.
