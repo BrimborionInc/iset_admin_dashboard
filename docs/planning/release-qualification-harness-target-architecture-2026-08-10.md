@@ -8122,3 +8122,78 @@ nullable contract, defines a synthetic pre-native proof for the complete graph,
 and returns one finite execution proposal. No qualification/native command,
 implementation change, pack change, authority change or Phase 4 work should be
 authorized by that review.
+
+## Final Phase 3 Exit-Gate Completion Stop
+
+Bill accepted the exit-operator design review and authorized one final finite
+approach: one minimal non-repository coordinator, a complete synthetic proof
+before any native command, and—only if that proof passed—five fresh five-pack
+cohort attempts. The repository admitted the sprint cleanly at admin `HEAD` and
+local `origin/main` `be56fc5cdda85851206a76e2b4a8bc8702dfcb23`.
+
+The disposable `/tmp/rq-phase3-exit-gate.js` was replaced outside the
+repository. Syntax passed and its frozen byte digest was
+`fa98022814e9706bd0dde863263300c4e8c7f43d9e59262c2306895e07dfd312`.
+The coordinator composed only the existing pack validator, native bridge,
+process-control result contract, advisory comparator, source inventory and
+stability producers, identity constructors and canonical hashing. Its graph
+definition included ordered pack/version/evidence-role topology plus terminal
+semantic facts, excluded attempt IDs, timestamps, durations and artifact
+digests, and explicitly limited direct/advisory parity to the comparator's
+declared fields. No repository implementation, schema, pack, adapter or
+authority changed.
+
+### Synthetic Admission Failure
+
+The one authorized synthetic command was:
+
+```text
+node /tmp/rq-phase3-exit-gate.js --self-test
+```
+
+It exited `1` before executing a synthetic case, creating a proof artifact or
+creating a cohort evidence root. The exact terminal evidence was:
+
+```json
+{"code":"GIT_PROOF_FAILED","details":{},"evidenceKind":"phase3-exit-coordinator-admission-failure","message":"spawnSync git EPERM","releaseAuthority":"none"}
+```
+
+The coordinator's first operation was its internal read-only Git baseline proof.
+The operating boundary denied the `git` child spawn with `EPERM`. Outer
+read-only Git commands immediately before and after the attempt continued to
+prove matching `HEAD`/`origin/main` and a clean checkout, but that does not
+authorize treating the coordinator's failed internal proof as passed. The
+evidence deterministically locates the stop at local process admission before
+pack-bundle loading or native dispatch; the deeper reason the operating boundary
+denied this particular nested child is not proved. This is an infrastructure/
+execution-permission stop, not product, pack, comparison, cleanup, source-state
+or environment-behaviour evidence.
+
+Per Bill's final stop rule, there was no permission escalation, correction,
+repair or rerun. Zero native command, direct control, advisory attempt or cohort
+attempt ran. No new attempt-owned mirror, aggregate temporary root, evidence
+root or qualification child process was created. The two retained earlier exit
+failure roots remain unchanged. The five active packs, certified source-state
+contracts, `portal-aggregate` deferral, RN02/RN04, current authoritative gate and
+`releaseAuthority: none` remain unchanged.
+
+### Phase 3 Stopping Recommendation
+
+The technical Phase 3 exit gate remains unmet: there are still zero complete
+five-pack cohort attempts, not the required five. CODEX recommends ending the
+Phase 3 exit-operator effort here and recording Phase 3 as **stopped incomplete**,
+not attempting a fourth operator execution and not representing the already
+accepted pack-level certifications as cohort evidence. Phase 4 must remain
+unauthorized unless Bill makes a separate governance decision that explicitly
+addresses the unmet Phase 3 exit gate; no implementation repair or permission
+work is the automatic next step.
+
+**Completion decision:** the final bounded exit sprint stopped correctly at its
+synthetic admission gate. The sprint is complete as a governed stop, but the
+Phase 3 exit gate did not pass and Phase 3 is not technically complete.
+
+**Exact next decision:** Bill reviews this final retained stop and either accepts
+the recommendation to close the rebuild at Phase 3 as stopped incomplete, or
+makes a separate explicit governance decision about the unmet exit criterion.
+No further exit execution, Phase 4 work, promotion, admission or release-
+authority change is authorized by this checkpoint.
