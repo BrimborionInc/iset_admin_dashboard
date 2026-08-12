@@ -8592,6 +8592,66 @@ process/temp/source residue. Any additional generated file, external connection,
 source drift, failure, restoration mismatch or residue stops immediately without
 repair or rerun. Stop after `4B`; `4C` is separate.
 
+### Sprint 4B Direct-Build Evidence Stop
+
+Sprint `4B` admitted clean admin source at
+`a309b7d466fdf905459848a6ddf7613667384789` / tree
+`ec67e49897da45a3cb7578cecf7e38661c083b49` and clean portal source at
+`71826af205c101f99dea35571a0181fe9496b250` / tree
+`6fb4007fdee56006802508c48d52c5a6984eb086`. Before the first admin
+command, both worktrees were clean, both isolated output roots and all relevant
+build processes were absent, and the exact generated-file baselines were:
+
+| Generated file | Bytes | SHA-256 |
+| --- | ---: | --- |
+| admin `src/generated/buildInfo.js` | 561 | `539ceb8f72ea8bea369ecce51b9c87c3439de30198008627270f8597ee6990db` |
+| admin `src/generated/publicReleaseNotes.js` | 4,929 | `bcc9e94ba3692d087561e7525de4bf3bb3503c15ee591a6b3a8531db19604cc1` |
+| portal `src/generated/buildInfo.js` | 322 | `0ff81d3d9941b3f20ec1a89f5564ebb778599e4f93f06374c2db2ed880218137` |
+| portal `src/generated/publicBuildInfo.js` | 90 | `9372ef0e5b4c76f7e415f72746934d4a616908a21c77269913cc3227990c6725` |
+
+The first authorized `node scripts/release-build-contract.js --admin`
+invocation reached the native optimized-build phase, but the local execution
+operator returned an ongoing-session result without retaining the session
+identifier. The underlying wrapper, `env-cmd` and `react-scripts` process chain
+was independently observed still running. It was allowed to finish naturally;
+no process was killed, no file was cleaned manually and no command was rerun.
+The process chain subsequently ended and the wrapper's cleanup completed, but
+its authoritative exit status could not be recovered. This is a confirmed
+local operator/evidence-collection failure, so the command is not counted as a
+successful direct-build proof.
+
+The after-state independently proves the same four byte counts and SHA-256
+digests, the same two HEAD/tree identities, clean admin and portal worktrees,
+both output roots absent, and no relevant wrapper, build or diagnostic process.
+No raw environment value was read or retained, and the restricted execution
+had no network capability. The second admin command and both portal commands
+were not started: completion is `0/4` because the sole invocation lacks
+authoritative exit evidence. Sprint `4B` stops incomplete under its no-rerun
+rule. No implementation, pack, admission, authority or Sprint `4C` work
+occurred.
+
+### Sprint 4B Resumed Direct-Build Completion
+
+Bill's amended continuous Phase 4 authorization superseded the earlier no-rerun
+stop and required fresh evidence. All four newly started commands completed with
+authoritative exit `0`: two admin invocations reported `PASS (admin)` and two
+portal invocations reported `PASS (portal)` after successful native compilation.
+The admin builds retained their existing source-map, Browserslist and React-hook
+warnings; the portal builds retained their existing Browserslist notice. None
+was a build failure.
+
+Before and after every command, admin remained at HEAD
+`a309b7d466fdf905459848a6ddf7613667384789` / tree
+`ec67e49897da45a3cb7578cecf7e38661c083b49` and portal remained at HEAD
+`71826af205c101f99dea35571a0181fe9496b250` / tree
+`6fb4007fdee56006802508c48d52c5a6984eb086`. The same four generated files
+retained the byte counts and SHA-256 values in the table above after every
+cleanup. Both declared build-output roots and every relevant build-wrapper,
+`env-cmd`, React/CRACO and diagnostic process were absent after each command.
+No environment value was retained or reported and the execution sandbox denied
+external network access. Sprint `4B` therefore completes at `4/4` without an
+implementation, pack, admission or authority change.
+
 ### Sprint 4C - One Product-Owned Browser Contract
 
 **Objective:** make the existing `intervention-posting-context` native runner's
@@ -8609,6 +8669,25 @@ source/component tests must detect boundary removal, selector ambiguity, stale
 state and revival of page-global/transient assertions. No build, HTTP server,
 browser or qualification pack runs. A semantic workflow change or need for
 another product component stops for Bill. Stop after `4C`; `4D` is separate.
+
+### Sprint 4C Implementation and Verification Checkpoint
+
+The modal now owns one `data-path-intervention-surface="modal"` boundary with
+stable lifecycle, posting-context, field and action attributes. The unchanged
+native workflow requires exactly one boundary and action, reads posting context
+and program state only inside that boundary, waits for explicit `viewing`,
+`editing` and `read-only` states, and still requires one PATCH whose
+`postingContext` is `internal`, a successful reopen and a final record with no
+edit/save action. Page-global body/button text, transient headings and the
+program-value selector are no longer assertion authority.
+
+The focused lifecycle contract passed all 16 assertions. Native-script syntax,
+test syntax, JSX parsing and whitespace validation passed. One initial backend
+Jest invocation selected no tests because that config admits only `tests/**`;
+it exited `1` without executing a test or changing source and was corrected
+under Bill's execution-command allowance by the direct focused Jest invocation.
+No browser, HTTP server, build, environment, product workflow, pack, admission
+or authority operation ran. Sprint `4C` is complete.
 
 ### Sprint 4D - One Compiled Browser Command
 
@@ -8638,6 +8717,139 @@ restoration and zero screenshot/temp/build/process/socket/source residue.
 Any synthetic or native failure, ambiguity, external request, source drift,
 cleanup failure or residue stops without repair or rerun. Stop after Bill reviews
 the complete Phase 4 evidence. Phase 5 requires a separate exact authorization.
+
+### Sprint 4D Synthetic-Control Stop
+
+Sprint `4D` produced a partial narrow parent/control implementation and its ten-
+case synthetic suite, then stopped on the first and only focused synthetic
+invocation. JavaScript syntax and whitespace checks passed. Seven cases passed:
+exact `--only` admission, structured selected-child attribution, malformed/
+truncated result rejection, exact generated/output restoration on success and
+failure, declared-residue detection, cancellation with process-group absence,
+and the no-shell/no-qualification import boundary.
+
+Three cases failed and were not repaired or rerun:
+
+- the sandbox rejected the authorized loopback fixture bind with `listen EPERM`
+  before a responder was started;
+- the new bounded-process helper returned exit `0` but lost the injected
+  child's `ok` stdout, proving its capture contract is not certified; and
+- the forced-termination result reported its process group absent, while the
+  independent per-descendant PID assertion still observed the descendant at
+  the assertion point, proving termination/residue evidence is inconsistent.
+
+The focused Jest command exited `1` with 7/10 tests passed and also reported an
+open-handle warning. The post-stop review found no matching live process and no
+`rq-browser-suite-control-*` temporary root. The ignored
+`tmp/release-qualification/admin-browser-build` directory predates this sprint
+(`2026-08-10`) and was neither created nor altered by the synthetic invocation.
+No product build, native browser command, screenshot, environment/network
+operation, pack, admission or authority change ran; native completion is `0/3`.
+Under the accepted immediate-stop rule, Sprint `4D` is incomplete and Phase 4
+is incomplete. The partial files remain uncommitted for Bill's review; another
+repair or execution requires separate authorization.
+
+### Sprint 4D Synthetic Repair and Native-Run Stop
+
+Bill authorized one bounded continuation to correct only successful-child
+output completion and descendant-absence evidence. The process helper now
+requires an actual spawn plus terminal stdout and stderr before assembling its
+result, cancels its terminal watchdog, fingerprints Linux process identities by
+PID and start time, and requires every captured process-group member to be
+absent or non-executable as well as the process group to be absent. This avoids
+both incomplete stream evidence and false active-residue claims for a terminated
+zombie awaiting system reaping.
+
+With the required bounded local-process/loopback elevation, the complete
+synthetic suite passed all 10 tests in 1.519 seconds. It proved exact selection,
+structured success/failure and malformed/truncated-result rejection, exact
+restoration, declared-residue detection, current/stale/wrong-host loopback
+identity, port release, successful/nonzero output capture, timeout with forced
+descendant termination, cancellation, and the narrow no-shell/no-qualification
+boundary. No synthetic temp or process residue remained.
+
+Source was then frozen at admin HEAD/tree
+`a309b7d466fdf905459848a6ddf7613667384789` /
+`ec67e49897da45a3cb7578cecf7e38661c083b49`, portal HEAD/tree
+`71826af205c101f99dea35571a0181fe9496b250` /
+`6fb4007fdee56006802508c48d52c5a6984eb086`, tracked-diff SHA-256
+`52064a7c2987c4ea2b6f6c75de4643cfdcfc0242ac0808f8cfe8f7723609dda4`,
+and untracked helper/test SHA-256 values `7eb6dde8...` and `f217f9eb...`.
+The same four generated hashes recorded by Sprint `4B` were present.
+
+The first exact native command built successfully and reached the selected
+browser child, but stopped with structured `BROWSER_CHILD_FAILED` evidence:
+child exit `1`, no signal, 67,201 ms, no truncation, process group absent, no
+active owned process and one scenario failure. The native scenario completed
+one PATCH whose retained posting context was `internal`, then timed out for
+60,000 ms at `waitForInterventionModalClosed` immediately after save. It did
+not reach reopen or final-record assertion. The emitted
+`finalRecordReadOnlyVerified: true` is therefore not accepted as proof: source
+sets it from `savedPayloads.length === 1`, independent of whether the final
+step ran. This is a confirmed result-evidence defect as well as the unresolved
+post-save modal-state failure.
+
+The suite restored all four generated hashes and the exact frozen source
+digests. Its suite root is absent; host-level checks found no matching Node or
+Chrome process and proved loopback port `45309` released. No external request,
+environment, pack, admission or authority effect was authorized or observed.
+Per Bill's substantive-failure rule, native completion stops at `0/3`; runs two
+and three did not start and no repair or rerun occurred. Sprint `4D` and Phase 4
+remain incomplete. The partial implementation and checkpoint changes remain
+uncommitted; Phase 5 is unauthorized.
+
+### Sprint 4D-R2 Repair and Phase 4 Completion
+
+Bill authorized a bounded diagnosis and repair of the post-save failure, followed
+by immediate completion of Sprint `4D` if the repaired gates passed. The admitted
+PATCH stub returned the updated intervention, `CaseWorkspaceContext` accepted and
+stored that result, and `InterventionsWidget.handleModalSubmit` set
+`formMode(null)` before its refresh. The product lifecycle therefore already
+closed the modal after a successful save. The native runner's close predicate was
+the defect: Cloudscape deliberately retains a modal's portaled DOM while its
+`visible` property is false and applies `display: none`, but the runner required
+the product-owned boundary to be removed from the DOM. No product-lifecycle or
+`InterventionsWidget.jsx` change was made.
+
+The runner now requires each open lifecycle state to have exactly one visibly
+rendered dialog and requires close to retain exactly one boundary whose owning
+dialog has `display: none` and no client rectangles. Missing or ambiguous
+boundaries still fail closed, and the timeout was not increased. The
+`finalRecordReadOnlyVerified` result now starts false and becomes true only after
+the final reopened `read-only` assertion returns successfully. The focused modal
+contract passed 16/16 and the elevated complete synthetic browser/process gate
+passed 10/10.
+
+The corrected source was frozen at admin HEAD/tree
+`a309b7d466fdf905459848a6ddf7613667384789` /
+`ec67e49897da45a3cb7578cecf7e38661c083b49`, portal HEAD/tree
+`71826af205c101f99dea35571a0181fe9496b250` /
+`6fb4007fdee56006802508c48d52c5a6984eb086`, and admin tracked-diff SHA-256
+`d4d3033543e3f4f8efd23597dc684cb5915251e63e31ba58a7dcdc104bf6062f`.
+The three fresh exact native executions all exited `0`:
+
+| Run | Suite identity | Port | Build ms | Child ms | Child stdout SHA-256 | Result |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| 1 | `browser-suite:bc339467-8b67-464e-8afc-3a797d244c6e` | 35003 | 121,103 | 5,963 | `6d522ceb3f3763191196dfad1131c84fa1bebdcaf6222d43c42b18f833b1e4f7` | pass |
+| 2 | `browser-suite:38de4927-60fe-4beb-8408-a2cd71b6703b` | 35421 | 121,319 | 5,492 | `6d522ceb3f3763191196dfad1131c84fa1bebdcaf6222d43c42b18f833b1e4f7` | pass |
+| 3 | `browser-suite:647f1b9f-af51-4bcb-a791-3c37c430a338` | 43603 | 118,310 | 6,162 | `6d522ceb3f3763191196dfad1131c84fa1bebdcaf6222d43c42b18f833b1e4f7` | pass |
+
+Every run selected only `intervention-posting-context`, used the same Chrome
+`7f5c687c...`, Puppeteer `24.29.0` and Node `v20.20.2` identities, made only
+verified loopback requests, completed exactly one internal-context PATCH,
+verified the final reopened record read-only, emitted zero unexpected final
+PATCHes and no browser warnings, and reported absent child/build process groups.
+After every run, all four generated-file hashes and the frozen source hashes
+matched, the attempt-owned suite root was absent, the independently checked port
+was released, and no matching Node or Chrome process remained. The pre-existing
+ignored `admin-browser-build` root retained its original metadata and was not an
+effect of these runs.
+
+Sprint `4D` completes at `3/3`; Sprints `4A` through `4D` have all passed, so
+narrowed Phase 4 is complete. The work remains one native browser workflow: no
+generic adapter, qualification pack, second browser child, environment access,
+promotion, admission or release-authority change was introduced. Phase 5 remains
+unauthorized and requires a separate bounded approval.
 
 ## Exact Proposed Authorization for Sprint 4A
 

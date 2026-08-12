@@ -138,6 +138,49 @@ describe("intervention and action plan modal lifecycle persistence", () => {
     );
   });
 
+  test("intervention modal publishes one stable workflow boundary", () => {
+    const modalSource = readRepoFile("src/pages/Caseworking/caseWorkspace/modals/InterventionModal.jsx");
+
+    expect(modalSource).toContain('data-path-intervention-surface="modal"');
+    expect(modalSource).toContain("data-path-intervention-state={modalLifecycleState}");
+    expect(modalSource).toContain('data-path-posting-context={form.postingContext || "external"}');
+    expect(modalSource).toContain('data-path-intervention-field="program-name"');
+    expect(modalSource).toContain('data-path-intervention-field="posting-context"');
+    expect(modalSource).toContain('data-path-intervention-action="cancel"');
+    expect(modalSource).toContain('data-path-intervention-action="edit"');
+    expect(modalSource).toContain('data-path-intervention-action="save"');
+    expect(modalSource).toContain('? "read-only"');
+    expect(modalSource).toContain('? "editing"');
+    expect(modalSource).toContain(': "viewing";');
+  });
+
+  test("posting-context browser contract uses modal-owned persistent state", () => {
+    const smokeSource = readRepoFile("scripts/intervention-posting-context-browser-smoke.js");
+
+    expect(smokeSource).toContain(
+      "const INTERVENTION_MODAL_SELECTOR = '[data-path-intervention-surface=\"modal\"]';"
+    );
+    expect(smokeSource).toContain("if (boundaries.length !== 1)");
+    expect(smokeSource).toContain("actionWrappers.length !== 1");
+    expect(smokeSource).toContain("dialog.getClientRects().length > 0");
+    expect(smokeSource).toContain("style.display === 'none' && dialog.getClientRects().length === 0");
+    expect(smokeSource).toContain("evidence.postingContext !== 'internal'");
+    expect(smokeSource).toContain("!evidence.dialogVisible");
+    expect(smokeSource).toContain("evidence.lifecycleState !== 'read-only'");
+    expect(smokeSource).toContain("await waitForInterventionModalState(page, 'editing');");
+    expect(smokeSource).toContain("await openIntervention(page, 'read-only');");
+    expect(smokeSource).toContain("state.savedPayloads[0].postingContext !== 'internal'");
+    expect(smokeSource).toContain("state.savedPayloads.length !== 1");
+    expect(smokeSource).toContain("state.finalRecordReadOnlyVerified = true;");
+    expect(smokeSource).toContain("finalRecordReadOnlyVerified: state.finalRecordReadOnlyVerified");
+    expect(smokeSource).not.toContain("finalRecordReadOnlyVerified: state.savedPayloads.length === 1");
+    expect(smokeSource).not.toContain("document.body");
+    expect(smokeSource).not.toContain("clickByText");
+    expect(smokeSource).not.toContain("innerText");
+    expect(smokeSource).not.toContain("textContent");
+    expect(smokeSource).not.toContain('input[value="Legal Paraprofessional Diploma"]');
+  });
+
   test("close intervention modal requires explicit outcome selection", () => {
     const modalSource = readRepoFile("src/pages/Caseworking/caseWorkspace/modals/InterventionModal.jsx");
 

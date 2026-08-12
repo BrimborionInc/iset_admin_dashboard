@@ -427,6 +427,61 @@ temporary-root absence. No product build, environment input, qualification
 control-plane change or later sprint occurred. Sprint `4B` remains unauthorized
 until Bill separately approves its exact direct-build boundary.
 
+Sprint `4B` began from the clean accepted `4A` checkpoint but stopped during
+the first of four direct-build proofs. The admin command reached its native
+optimized-build phase, while the local execution operator failed to retain the
+ongoing session identifier and therefore lost authoritative exit-status
+evidence. The existing process was allowed to finish naturally; exact before/
+after hashes prove all four generated files were restored, both source trees
+remain at their admitted clean HEAD/tree identities, both output roots are
+absent and no relevant process remains. The run is not counted as a pass, no
+command was rerun and the other three builds did not start. Sprint `4B` is
+incomplete at `0/4`; Sprint `4C` remains unauthorized.
+
+Bill then authorized the remaining Phase 4 sequence continuously and explicitly
+superseded the earlier no-rerun cadence for execution-tool mistakes. Fresh
+Sprint `4B` evidence completed two admin and two portal build proofs at `4/4`,
+with exact generated-byte restoration, frozen admin/portal source identities,
+absent output roots and zero relevant process residue. Sprint `4C` added one
+product-owned intervention modal boundary and scoped the existing native
+posting-context assertions to stable state/action/field attributes; its focused
+contract passed 16/16 with clean syntax, JSX parsing and whitespace checks.
+
+Sprint `4D` stopped on its first focused synthetic invocation. Seven of ten
+cases passed, but the sandbox denied the loopback bind, the new process helper
+lost stdout from an exit-0 child, and a forced descendant remained observable
+after the helper claimed group absence. No correction or rerun occurred. A
+post-stop review found no live matching process or attempt-owned temporary root;
+no product build or native browser command ran. Sprint `4D` and Phase 4 remain
+incomplete, and Phase 5 remains unauthorized.
+
+Bill authorized one continuous Sprint `4D` continuation. The two confirmed
+process defects were repaired within the same narrow helper/test boundary and
+the complete elevated synthetic gate passed 10/10. Frozen source and generated
+identities were recorded before the exact selected native command. Native run
+one reached the compiled browser workflow and preserved one internal-context
+PATCH, but exited `1` after waiting 60 seconds for the modal boundary to close
+after save. The run did not reach reopen or the final-record step, and its
+`finalRecordReadOnlyVerified` value is not accepted because the current summary
+derives it only from the saved-payload count. Exact source/generated restoration,
+suite-root absence, loopback-port release and host Node/Chrome absence passed.
+Runs two and three did not start; no native repair or rerun followed. Sprint
+`4D` remains incomplete at `0/3`, Phase 4 remains incomplete, and Phase 5 is
+unauthorized.
+
+Bill then authorized bounded Sprint `4D-R2`. Exact source tracing proved the
+successful PATCH response, context update and parent-owned `setFormMode(null)`
+close were correct; the native runner had incorrectly treated Cloudscape's
+deliberately retained, `display: none` modal DOM as open. The runner now proves
+visible open states and a non-rendered closed dialog without changing the
+timeout, and its final-read-only result becomes true only after the final
+assertion completes. Focused lifecycle verification passed 16/16 and the full
+elevated synthetic gate passed 10/10. Three fresh frozen-source native runs all
+passed with one internal-context PATCH, completed final read-only proof, no
+unexpected PATCH, loopback-only traffic, exact restoration and zero declared
+residue. Sprint `4D` completes at `3/3`, completing narrowed Phase 4. Phase 5
+remains unauthorized.
+
 ## Confirmed-Findings Register
 
 During every phase, record potential product weaknesses separately with:
@@ -486,7 +541,7 @@ Before issuing the next Codex prompt, confirm:
 ## Current Checkpoint
 
 - Plan created: 2026-08-10.
-- Current authorized phase/sprint: none. Bill selected `P3-1` and accepted Phase 3 with an explicit exception for the unmet `0/5` cohort property. The five certified advisory packs and Sprint `3H` source inventory/stability are accepted; `portal-aggregate` remains deferred; RN02/RN04 remain open; no pack is promoted; `releaseAuthority: none` and the unchanged current authoritative gate remain controlling. Bill approved the lean roadmap: Phase 4 narrow, Phase 5 narrow, Phase 6 merge, Phases 7-8 retain, Phase 9 merge only if future promotion is desired, Phase 10 defer, and Phase 11 remove as a programme phase. Phase 4 has not begun. The exact proposed Sprint `4A` authorization is recorded in the target architecture, but implementation, environment access, admission and release-authority change remain unauthorized until Bill issues that separate prompt.
+- Current authorized phase/sprint: none. Bill selected `P3-1` and accepted Phase 3 with an explicit exception for the unmet `0/5` cohort property. The five certified advisory packs and Sprint `3H` source inventory/stability are accepted; `portal-aggregate` remains deferred; RN02/RN04 remain open; no pack is promoted; `releaseAuthority: none` and the unchanged current authoritative gate remain controlling. Bill approved the lean roadmap: Phase 4 narrow, Phase 5 narrow, Phase 6 merge, Phases 7-8 retain, Phase 9 merge only if future promotion is desired, Phase 10 defer, and Phase 11 remove as a programme phase. Narrowed Phase 4 is complete: `4A` certified build preservation, `4B` passed direct builds at `4/4`, `4C` certified the one product-owned browser contract, and `4D-R2` corrected the runner's hidden-modal predicate and completed the selected native command at `3/3` after 16/16 focused and 10/10 synthetic gates. All native runs preserved source/generated bytes, used loopback only and left zero declared residue. Phase 5, environment access, admission and release-authority change remain unauthorized.
 - Phase 0 audit artifact: [release-qualification-harness-current-state-audit-2026-08-10.md](./release-qualification-harness-current-state-audit-2026-08-10.md) (`0A` inventory, `0B` dependency/effect map, `0C` retained-history classification, and `0D` component dispositions and synthesis). Bill reviewed and accepted the completed audit and explicitly authorized Phase 1/Sprint `1A`; the Phase 0 exit gate is satisfied.
 - Sprint `0B` severity correction: the project severity scale is now applied to all 13 confirmed findings: 0 critical, 0 high, 8 medium, and 5 low. No finding triggers the automatic-stop rule.
 - Sprint `0C` taxonomy: 56 identifiable failed qualification gates, counted once at the outer check or, for the two `r18` targeted attempts whose outer artifact is absent, once at the independently retained causal check: 7 `product`, 34 `harness`, 0 `environment`, 0 `infrastructure`, and 15 `unclassified`. Narrative/interrupted events with no named machine check remain separate. No Sprint `0C` finding is critical and no automatic stop applies.
@@ -581,3 +636,9 @@ Before issuing the next Codex prompt, confirm:
 | Elevated unchanged-coordinator exit | completed as deterministic admission stop; Phase 3 incomplete | [The elevated stop](./release-qualification-harness-target-architecture-2026-08-10.md#elevated-unchanged-coordinator-admission-stop) supersedes the earlier EPERM conclusion. External admission proved clean `df8e4d0`; the coordinator remained byte-identical at `fa980228...`; bounded process escalation was granted and its internal Git commands ran. The unchanged coordinator then correctly rejected `df8e4d0` because its immutable admitted baseline is `be56fc5`. No synthetic case, proof artifact, evidence root, bundle load, native/direct/advisory command or cohort attempt ran, and no repair/rerun followed. | Bill must resolve the proved baseline-governance conflict or explicitly change the exit criterion before any further execution; Phase 4 remains unauthorized |
 | Phase 3 closeout and programme rebaseline | completed - `P3-1` accepted | [The accepted rebaseline](./release-qualification-harness-target-architecture-2026-08-10.md#p3-1-acceptance-and-lean-programme-rebaseline) records Bill's explicit `0/5` cohort exception, accepts the five advisory packs and source-state controls without promotion, preserves `portal-aggregate`, RN02/RN04 and the current gate, disposes every original Phase 4-11 deliverable, and replaces automatic platform growth with four bounded safety outcomes. [The Phase 4 design](./release-qualification-harness-target-architecture-2026-08-10.md#narrowed-phase-4-sprint-design) defines `4A-4D` and the exact first authorization. No implementation, pack, authority, admission or environment state changed. | Bill separately authorizes Sprint `4A` using the exact copy-ready boundary in the target architecture; no Phase 4 work is automatic |
 | `4A` | completed - synthetic preservation certified | [The implementation checkpoint](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-4a-implementation-and-certification-checkpoint) records the exact four-generated-file/two-output-root helper, preserved native build command semantics, portal `publicBuildInfo.js` repair, structured fail-closed path/restoration evidence and 11/11 focused synthetic tests plus three clean syntax checks. No real build, environment input, qualification-control-plane change or later sprint ran. | Bill separately authorizes Sprint `4B` only under its recorded clean-source, sensitive-local-input, exact four-command, restoration/residue and immediate-stop boundary; `4B` is not automatic |
+| `4B` | incomplete - operator evidence stop at `0/4` | [The direct-build stop](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-4b-direct-build-evidence-stop) records the clean admin/portal HEAD and tree identities, exact four-file byte/hash baseline, the first admin build reaching native compilation, loss of its ongoing session identifier and therefore authoritative exit status, natural process completion, exact generated restoration, clean source and zero output/process residue. No rerun occurred and the second admin plus both portal commands did not start. | Bill reviews the stop and separately decides whether a newly bounded evidence-capture-only reauthorization of Sprint `4B` is warranted; Sprint `4C` is not authorized |
+| `4B` resumed | completed - direct builds `4/4` | [The resumed checkpoint](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-4b-resumed-direct-build-completion) records two successful admin and two successful portal native builds from frozen source, exact four-file restoration after every command, absent output roots and zero relevant process residue. | Completed under Bill's continuous Phase 4 authorization; Sprint `4C` proceeded only after this pass |
+| `4C` | completed - product-owned browser contract | [The implementation checkpoint](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-4c-implementation-and-verification-checkpoint) records the single modal boundary, stable lifecycle/posting/action/field hooks, scoped native assertions and 16/16 focused contract plus syntax/JSX/whitespace proof. | Completed under Bill's continuous Phase 4 authorization; Sprint `4D` proceeded only after this pass |
+| `4D` | incomplete - synthetic gate stop | [The governed stop](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-4d-synthetic-control-stop) records 7/10 passing synthetic cases, sandbox loopback `EPERM`, lost exit-0 stdout and conflicting descendant-absence proof. No repair/rerun or native browser command followed; post-stop temp/process absence was clean. | Bill reviews the partial implementation and separately authorizes any bounded repair; Phase 5 remains unauthorized |
+| `4D` continuation | incomplete - native run stop at `0/3` | [The repair and native stop](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-4d-synthetic-repair-and-native-run-stop) records the bounded two-defect repair, elevated 10/10 synthetic gate, frozen source identities, one exact native run, the post-save modal-close timeout and misleading final-record flag, plus exact generated/source, process, socket and suite-root restoration. | Bill reviews the substantive native failure and separately authorizes any bounded product/runner diagnosis or repair; Phase 5 remains unauthorized |
+| `4D-R2` and Phase 4 | completed - native browser proof `3/3` | [The completion checkpoint](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-4d-r2-repair-and-phase-4-completion) records the hidden-retained-modal diagnosis, narrow runner/evidence repair, focused 16/16 and synthetic 10/10 gates, three fresh exact native passes, stable semantic evidence and exact source/generated/process/socket/root restoration. | Bill reviews and accepts Phase 4, then separately authorizes a bounded Phase 5 sprint; no Phase 5 work is automatic |

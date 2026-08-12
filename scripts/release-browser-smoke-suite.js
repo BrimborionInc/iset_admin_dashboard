@@ -1,15 +1,27 @@
 #!/usr/bin/env node
 'use strict';
 
+const crypto = require('crypto');
 const fs = require('fs');
-const http = require('http');
 const path = require('path');
-const { spawn } = require('child_process');
+
+const {
+  BrowserSuiteControlError,
+  closeLoopbackServer,
+  parseStructuredChildResult,
+  resolveBrowserRuntimeIdentity,
+  runBoundedProcess,
+  runWithBrowserPreservation,
+  sha256Bytes,
+  startVerifiedLoopbackServer,
+} = require('./lib/release-browser-suite-control');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
+const SUITE_ROOT = path.join(REPO_ROOT, 'tmp', 'release-qualification', 'admin-browser-suite');
+const BUILD_PATH = path.join(SUITE_ROOT, 'build');
+const SCREENSHOT_ROOT = path.join(SUITE_ROOT, 'screenshots');
 const BUILD_INFO_PATH = path.join(REPO_ROOT, 'src', 'generated', 'buildInfo.js');
 const RELEASE_NOTES_PATH = path.join(REPO_ROOT, 'src', 'generated', 'publicReleaseNotes.js');
-const BUILD_PATH = path.join(REPO_ROOT, 'tmp', 'release-qualification', 'admin-browser-build');
 
 const SMOKES = Object.freeze([
   ['app-shell-navigation', 'app-shell-navigation-browser-smoke.js'],
@@ -33,19 +45,12 @@ function parseArgs(argv) {
     const token = argv[index];
     if (token === '--json') args.json = true;
     else if (token === '--only') {
-      args.only = new Set(String(argv[++index] || '').split(',').map(value => value.trim()).filter(Boolean));
+      const value = argv[++index];
+      if (!value) throw new Error('--only requires one or more browser smoke IDs');
+      args.only = new Set(String(value).split(',').map(item => item.trim()).filter(Boolean));
+      if (args.only.size === 0) throw new Error('--only requires one or more browser smoke IDs');
     } else if (token === '--help' || token === '-h') {
-      console.log([
-        'Usage: node scripts/release-browser-smoke-suite.js [options]',
-        '',
-        'Builds the current admin frontend once, serves it on an isolated local port,',
-        'runs the selected deterministic browser workflow smokes, and tears it down.',
-        '',
-        'Options:',
-        `  --only IDS    Comma-separated subset: ${SMOKES.map(([id]) => id).join(', ')}`,
-        '  --json        Emit JSON summary.',
-      ].join('\n'));
-      process.exit(0);
+      args.help = true;
     } else throw new Error(`Unknown option: ${token}`);
   }
   if (args.only) {
@@ -56,132 +61,226 @@ function parseArgs(argv) {
   return args;
 }
 
-function run(command, commandArgs, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, commandArgs, {
-      cwd: options.cwd || REPO_ROOT,
-      env: options.env || process.env,
-      stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+function selectSmokes(only) {
+  const selected = SMOKES.filter(([id]) => !only || only.has(id));
+  if (selected.length === 0) throw new Error('No browser smokes selected');
+  return selected;
+}
+
+function summarizeProcess(result) {
+  return Object.freeze({
+    command: result.command,
+    args: result.args,
+    cwd: result.cwd,
+    status: result.status,
+    exitCode: result.exitCode,
+    signal: result.signal,
+    durationMs: result.durationMs,
+    stdoutSha256: sha256Bytes(result.stdout),
+    stderrSha256: sha256Bytes(result.stderr),
+    stdoutBytes: Buffer.byteLength(result.stdout),
+    stderrBytes: Buffer.byteLength(result.stderr),
+    stdoutTruncated: result.stdoutTruncated,
+    stderrTruncated: result.stderrTruncated,
+    termination: result.termination,
+  });
+}
+
+function serializeFailure(error) {
+  return {
+    code: error?.code ? String(error.code) : null,
+    message: error?.message ? error.message : String(error),
+    evidence: error?.evidence || null,
+  };
+}
+
+function assertSelectedChildResult(id, processResult, childResult) {
+  if (processResult.status !== 'passed' || processResult.exitCode !== 0 || childResult.pass !== true) {
+    throw new BrowserSuiteControlError('BROWSER_CHILD_FAILED', `browser child ${id} failed`, {
+      id,
+      process: summarizeProcess(processResult),
+      childResult,
     });
-    const stdout = [];
-    const stderr = [];
-    child.stdout?.on('data', chunk => stdout.push(chunk));
-    child.stderr?.on('data', chunk => stderr.push(chunk));
-    child.on('error', reject);
-    child.on('close', code => {
-      const result = {
-        code: Number(code || 0),
-        stdout: Buffer.concat(stdout).toString('utf8'),
-        stderr: Buffer.concat(stderr).toString('utf8'),
-      };
-      if (code === 0) resolve(result);
-      else reject(Object.assign(new Error(`${command} exited with ${code}`), { result }));
+  }
+  if (
+    id === 'intervention-posting-context' &&
+    (
+      childResult.finalRecordReadOnlyVerified !== true ||
+      childResult.unexpectedFinalPatchCount !== 0 ||
+      childResult.savedPostingContexts?.length !== 1 ||
+      childResult.savedPostingContexts[0] !== 'internal' ||
+      childResult.failures.length !== 0
+    )
+  ) {
+    throw new BrowserSuiteControlError('BROWSER_CHILD_SEMANTIC_EVIDENCE_INVALID', 'posting-context child evidence is incomplete', {
+      id,
+      childResult,
     });
-  });
+  }
 }
 
-function contentType(filename) {
-  const extension = path.extname(filename).toLowerCase();
-  return ({
-    '.css': 'text/css; charset=utf-8',
-    '.html': 'text/html; charset=utf-8',
-    '.ico': 'image/x-icon',
-    '.js': 'application/javascript; charset=utf-8',
-    '.json': 'application/json; charset=utf-8',
-    '.png': 'image/png',
-    '.svg': 'image/svg+xml',
-  })[extension] || 'application/octet-stream';
+async function captureScreenshotEvidence(id, childResult) {
+  const expectedRoot = path.join(SCREENSHOT_ROOT, id);
+  const expectedFile = path.join(expectedRoot, 'intervention-posting-context.png');
+  if (id !== 'intervention-posting-context') return null;
+  if (path.normalize(childResult.screenshot || '') !== expectedFile || !fs.existsSync(expectedFile)) {
+    throw new BrowserSuiteControlError('BROWSER_SCREENSHOT_MISSING', 'selected child screenshot is missing or outside its declared root', {
+      id,
+      expectedFile,
+      observedFile: childResult.screenshot || null,
+    });
+  }
+  const bytes = fs.readFileSync(expectedFile);
+  return Object.freeze({ path: expectedFile, bytes: bytes.length, sha256: sha256Bytes(bytes) });
 }
 
-function safeBuildFile(urlPath) {
-  const pathname = decodeURIComponent(String(urlPath || '/').split('?')[0]);
-  const relative = pathname.replace(/^\/+/, '');
-  const candidate = path.resolve(BUILD_PATH, relative || 'index.html');
-  if (!candidate.startsWith(`${BUILD_PATH}${path.sep}`) && candidate !== path.join(BUILD_PATH, 'index.html')) return null;
-  if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
-  return path.join(BUILD_PATH, 'index.html');
-}
-
-function startServer() {
-  const server = http.createServer((req, res) => {
-    try {
-      const filename = safeBuildFile(req.url);
-      if (!filename || !fs.existsSync(filename)) {
-        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-        res.end('Not found');
-        return;
-      }
-      res.writeHead(200, { 'content-type': contentType(filename), 'cache-control': 'no-store' });
-      fs.createReadStream(filename).pipe(res);
-    } catch (error) {
-      res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
-      res.end(error.message || 'Server error');
-    }
-  });
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => resolve(server));
-  });
-}
-
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  const selected = SMOKES.filter(([id]) => !args.only || args.only.has(id));
-  if (!selected.length) throw new Error('No browser smokes selected');
-
-  const originalBuildInfo = fs.existsSync(BUILD_INFO_PATH) ? fs.readFileSync(BUILD_INFO_PATH) : null;
-  const originalReleaseNotes = fs.existsSync(RELEASE_NOTES_PATH) ? fs.readFileSync(RELEASE_NOTES_PATH) : null;
-  let server = null;
-  const results = [];
-  try {
-    fs.rmSync(BUILD_PATH, { recursive: true, force: true });
-    await run('npm', ['run', 'build:test'], {
+async function runSuite(args) {
+  const selected = selectSmokes(args.only);
+  const suiteIdentity = `browser-suite:${crypto.randomUUID()}`;
+  const plan = {
+    repoRoot: REPO_ROOT,
+    generatedFiles: [BUILD_INFO_PATH, RELEASE_NOTES_PATH],
+    residueRoots: [SUITE_ROOT],
+  };
+  const preserved = await runWithBrowserPreservation(plan, async () => {
+    const browserRuntime = await resolveBrowserRuntimeIdentity(REPO_ROOT);
+    const build = await runBoundedProcess('npm', ['run', 'build:test'], {
+      cwd: REPO_ROOT,
       env: {
         ...process.env,
         BUILD_PATH,
         PATH_DEPLOY_ENV: 'test',
         PATH_RELEASE_ID: 'local-release-qualification',
       },
+      timeoutMs: 600_000,
+      graceMs: 3_000,
+      terminationMs: 5_000,
     });
-
-    server = await startServer();
-    const address = server.address();
-    const frontendBase = `http://127.0.0.1:${address.port}`;
-
-    for (const [id, filename] of selected) {
-      const startedAt = new Date().toISOString();
-      try {
-        await run(process.execPath, [path.join(REPO_ROOT, 'scripts', filename), '--frontend-base', frontendBase]);
-        const finishedAt = new Date().toISOString();
-        results.push({ id, status: 'passed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt) });
-      } catch (error) {
-        const finishedAt = new Date().toISOString();
-        results.push({
-          id,
-          status: 'failed',
-          startedAt,
-          finishedAt,
-          durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
-          error: error.message || String(error),
-        });
-        throw error;
-      }
+    if (build.status !== 'passed' || build.exitCode !== 0) {
+      throw new BrowserSuiteControlError('BROWSER_BUILD_FAILED', 'admin browser build failed', {
+        build: summarizeProcess(build),
+      });
     }
-  } finally {
-    if (server) await new Promise(resolve => server.close(resolve));
-    fs.rmSync(BUILD_PATH, { recursive: true, force: true });
-    if (originalBuildInfo === null) fs.rmSync(BUILD_INFO_PATH, { force: true });
-    else fs.writeFileSync(BUILD_INFO_PATH, originalBuildInfo);
-    if (originalReleaseNotes === null) fs.rmSync(RELEASE_NOTES_PATH, { force: true });
-    else fs.writeFileSync(RELEASE_NOTES_PATH, originalReleaseNotes);
-  }
 
-  const summary = { schemaVersion: 1, status: 'passed', checks: results };
-  if (args.json) console.log(JSON.stringify(summary, null, 2));
-  else console.log(`Release browser suite: PASS (${results.length}/${selected.length})`);
+    let loopback = null;
+    let loopbackShutdown = null;
+    const results = [];
+    try {
+      loopback = await startVerifiedLoopbackServer({ buildRoot: BUILD_PATH, identity: suiteIdentity });
+      for (const [id, filename] of selected) {
+        const screenshotDir = path.join(SCREENSHOT_ROOT, id);
+        const processResult = await runBoundedProcess(
+          process.execPath,
+          [
+            path.join(REPO_ROOT, 'scripts', filename),
+            '--frontend-base',
+            loopback.baseUrl,
+            '--screenshot-dir',
+            screenshotDir,
+          ],
+          {
+            cwd: REPO_ROOT,
+            env: {
+              ...process.env,
+              PUPPETEER_EXECUTABLE_PATH: browserRuntime.executable,
+              NO_PROXY: '127.0.0.1,localhost',
+              no_proxy: '127.0.0.1,localhost',
+              HTTP_PROXY: 'http://127.0.0.1:9',
+              HTTPS_PROXY: 'http://127.0.0.1:9',
+              ALL_PROXY: 'http://127.0.0.1:9',
+            },
+            timeoutMs: 180_000,
+            graceMs: 2_000,
+            terminationMs: 5_000,
+          }
+        );
+        const childResult = parseStructuredChildResult(processResult);
+        assertSelectedChildResult(id, processResult, childResult);
+        results.push(Object.freeze({
+          id,
+          filename,
+          status: 'passed',
+          process: summarizeProcess(processResult),
+          childResult,
+          screenshot: await captureScreenshotEvidence(id, childResult),
+        }));
+      }
+    } finally {
+      if (loopback) loopbackShutdown = await closeLoopbackServer(loopback);
+    }
+    const observedRequests = loopback.requests.map(request => ({ ...request }));
+    const loopbackOnly = observedRequests.every(request =>
+      ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.remoteAddress) &&
+      request.host === `127.0.0.1:${loopback.port}`
+    );
+    if (!loopbackOnly || !loopbackShutdown?.portReleased) {
+      throw new BrowserSuiteControlError('BROWSER_LOOPBACK_PROOF_FAILED', 'loopback request or socket-release proof failed', {
+        observedRequests,
+        loopbackShutdown,
+      });
+    }
+    return Object.freeze({
+      schemaVersion: 2,
+      status: 'passed',
+      suiteIdentity,
+      selected: selected.map(([id]) => id),
+      build: summarizeProcess(build),
+      browserRuntime,
+      network: Object.freeze({
+        admittedOrigin: loopback.baseUrl,
+        identityProof: loopback.identityProof,
+        externalProxyPolicy: 'deny-via-unreachable-loopback-proxy',
+        loopbackOnly,
+        observedRequests,
+      }),
+      loopbackShutdown,
+      checks: results,
+    });
+  });
+  return Object.freeze({
+    ...preserved.actionResult,
+    preservation: preserved.evidence,
+  });
 }
 
-main().catch(error => {
-  console.error(`Release browser suite: FAIL (${error.message || error})`);
-  process.exitCode = 1;
-});
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    console.log([
+      'Usage: node scripts/release-browser-smoke-suite.js [options]',
+      '',
+      'Builds the current admin frontend once, serves it on a verified loopback port,',
+      'runs the selected deterministic browser workflow smokes, and tears it down.',
+      '',
+      'Options:',
+      `  --only IDS    Comma-separated subset: ${SMOKES.map(([id]) => id).join(', ')}`,
+      '  --json        Emit JSON summary.',
+    ].join('\n'));
+    return;
+  }
+  const summary = await runSuite(args);
+  if (args.json) console.log(JSON.stringify(summary, null, 2));
+  else console.log(`Release browser suite: PASS (${summary.checks.length}/${summary.selected.length})`);
+}
+
+if (require.main === module) {
+  main().catch(error => {
+    const summary = { schemaVersion: 2, status: 'failed', failure: serializeFailure(error) };
+    if (process.argv.includes('--json')) console.error(JSON.stringify(summary, null, 2));
+    else console.error(`Release browser suite: FAIL (${error.message || error})`);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  BUILD_PATH,
+  REPO_ROOT,
+  SCREENSHOT_ROOT,
+  SMOKES,
+  SUITE_ROOT,
+  assertSelectedChildResult,
+  parseArgs,
+  runSuite,
+  selectSmokes,
+  summarizeProcess,
+};

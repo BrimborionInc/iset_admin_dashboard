@@ -1,0 +1,273 @@
+'use strict';
+
+const fs = require('fs');
+const http = require('http');
+const os = require('os');
+const path = require('path');
+
+const {
+  BrowserSuiteControlError,
+  closeLoopbackServer,
+  parseStructuredChildResult,
+  processGroupExists,
+  runBoundedProcess,
+  runWithBrowserPreservation,
+  startVerifiedLoopbackServer,
+  validateBrowserPreservationPlan,
+  verifyLoopbackIdentity,
+} = require('../scripts/lib/release-browser-suite-control');
+const {
+  assertSelectedChildResult,
+  parseArgs,
+  selectSmokes,
+} = require('../scripts/release-browser-smoke-suite');
+
+jest.setTimeout(30_000);
+
+const temporaryRoots = [];
+
+function createTemporaryRoot() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rq-browser-suite-control-'));
+  temporaryRoots.push(root);
+  return root;
+}
+
+function write(filename, contents) {
+  fs.mkdirSync(path.dirname(filename), { recursive: true });
+  fs.writeFileSync(filename, contents);
+}
+
+function processResult(overrides = {}) {
+  return {
+    command: process.execPath,
+    args: ['synthetic'],
+    cwd: __dirname,
+    status: 'passed',
+    exitCode: 0,
+    signal: null,
+    durationMs: 1,
+    stdout: JSON.stringify({
+      pass: true,
+      screenshot: '/synthetic/screenshot.png',
+      savedPostingContexts: ['internal'],
+      finalRecordReadOnlyVerified: true,
+      unexpectedFinalPatchCount: 0,
+      failures: [],
+    }),
+    stderr: '',
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    termination: {
+      reason: null,
+      gracefulSent: false,
+      forcedSent: false,
+      groupAbsent: true,
+      failure: null,
+    },
+    ...overrides,
+  };
+}
+
+function requestWithHost(port, host) {
+  return new Promise((resolve, reject) => {
+    const request = http.get({ hostname: '127.0.0.1', port, path: '/', headers: { host } }, response => {
+      response.resume();
+      response.on('end', () => resolve(response.statusCode));
+    });
+    request.on('error', reject);
+  });
+}
+
+function isPidActive(pid) {
+  let stat;
+  try {
+    stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ESRCH') return false;
+    throw error;
+  }
+  const commandEnd = stat.lastIndexOf(') ');
+  expect(commandEnd).toBeGreaterThanOrEqual(0);
+  const state = stat.slice(commandEnd + 2).trim().split(/\s+/)[0];
+  return state !== 'Z' && state !== 'X';
+}
+
+afterEach(() => {
+  while (temporaryRoots.length > 0) {
+    const root = temporaryRoots.pop();
+    fs.rmSync(root, { recursive: true, force: true });
+    expect(fs.existsSync(root)).toBe(false);
+  }
+});
+
+describe('selected release browser suite control', () => {
+  test('admits an exact known --only set and rejects missing or unknown IDs', () => {
+    const args = parseArgs(['--only', 'intervention-posting-context', '--json']);
+    expect(args.json).toBe(true);
+    expect(Array.from(args.only)).toEqual(['intervention-posting-context']);
+    expect(selectSmokes(args.only)).toEqual([
+      ['intervention-posting-context', 'intervention-posting-context-browser-smoke.js'],
+    ]);
+    expect(() => parseArgs(['--only'])).toThrow('--only requires');
+    expect(() => parseArgs(['--only', 'not-a-check'])).toThrow('Unknown browser smoke IDs');
+  });
+
+  test('keeps selected-child success and failure attributable to structured native evidence', () => {
+    const passedProcess = processResult();
+    const passedChild = parseStructuredChildResult(passedProcess);
+    expect(() => assertSelectedChildResult('intervention-posting-context', passedProcess, passedChild)).not.toThrow();
+
+    const failedProcess = processResult({
+      status: 'failed',
+      exitCode: 1,
+      stdout: '',
+      stderr: JSON.stringify({ pass: false, failures: [{ type: 'scenario', message: 'synthetic failure' }] }),
+    });
+    const failedChild = parseStructuredChildResult(failedProcess);
+    expect(() => assertSelectedChildResult('intervention-posting-context', failedProcess, failedChild)).toThrow(
+      expect.objectContaining({ code: 'BROWSER_CHILD_FAILED' })
+    );
+  });
+
+  test('rejects missing, malformed, truncated and semantically incomplete child results', () => {
+    expect(() => parseStructuredChildResult(processResult({ stdout: '' }))).toThrow(
+      expect.objectContaining({ code: 'BROWSER_CHILD_RESULT_INVALID' })
+    );
+    expect(() => parseStructuredChildResult(processResult({ stdout: '{"pass":true', stdoutTruncated: true }))).toThrow(
+      expect.objectContaining({ code: 'BROWSER_CHILD_RESULT_INVALID' })
+    );
+    const incompleteProcess = processResult({ stdout: JSON.stringify({ pass: true, failures: [] }) });
+    expect(() =>
+      assertSelectedChildResult(
+        'intervention-posting-context',
+        incompleteProcess,
+        parseStructuredChildResult(incompleteProcess)
+      )
+    ).toThrow(expect.objectContaining({ code: 'BROWSER_CHILD_SEMANTIC_EVIDENCE_INVALID' }));
+  });
+
+  test('restores exact generated bytes and removes browser, screenshot and build roots after success and failure', async () => {
+    const root = createTemporaryRoot();
+    const repoRoot = path.join(root, 'repo');
+    const generated = path.join(repoRoot, 'src', 'generated', 'buildInfo.js');
+    const suiteRoot = path.join(repoRoot, 'tmp', 'release-qualification', 'browser');
+    write(generated, Buffer.from([0, 1, 255]));
+    const plan = validateBrowserPreservationPlan({ repoRoot, generatedFiles: [generated], residueRoots: [suiteRoot] });
+
+    const passed = await runWithBrowserPreservation(plan, async () => {
+      write(generated, 'changed');
+      write(path.join(suiteRoot, 'build', 'asset.js'), 'build');
+      write(path.join(suiteRoot, 'screenshots', 'shot.png'), 'shot');
+      return 'passed';
+    });
+    expect(passed.actionResult).toBe('passed');
+    expect(passed.evidence.restoration).toBe('passed');
+    expect(fs.readFileSync(generated)).toEqual(Buffer.from([0, 1, 255]));
+    expect(fs.existsSync(suiteRoot)).toBe(false);
+
+    await expect(runWithBrowserPreservation(plan, async () => {
+      write(generated, 'changed-again');
+      write(path.join(suiteRoot, 'screenshots', 'failed.png'), 'diagnostic');
+      throw new Error('synthetic child failure');
+    })).rejects.toThrow('synthetic child failure');
+    expect(fs.readFileSync(generated)).toEqual(Buffer.from([0, 1, 255]));
+    expect(fs.existsSync(suiteRoot)).toBe(false);
+  });
+
+  test('detects an unremovable declared residue boundary', async () => {
+    const root = createTemporaryRoot();
+    const repoRoot = path.join(root, 'repo');
+    const generated = path.join(repoRoot, 'src', 'generated', 'buildInfo.js');
+    const residueParent = path.join(repoRoot, 'tmp');
+    const residueRoot = path.join(residueParent, 'browser');
+    write(generated, 'before');
+
+    await expect(runWithBrowserPreservation(
+      { repoRoot, generatedFiles: [generated], residueRoots: [residueRoot] },
+      async () => {
+        fs.rmSync(residueParent, { recursive: true, force: true });
+        write(residueParent, 'blocks-declared-child-cleanup');
+      }
+    )).rejects.toThrow(expect.objectContaining({ code: 'BROWSER_PRESERVATION_FAILED' }));
+  });
+
+  test('proves responder identity, rejects stale identity and wrong host, then proves port release', async () => {
+    const root = createTemporaryRoot();
+    write(path.join(root, 'index.html'), '<!doctype html><title>synthetic</title>');
+    const control = await startVerifiedLoopbackServer({ buildRoot: root, identity: 'attempt:current' });
+    expect(control.identityProof).toEqual({ statusCode: 200, identity: 'attempt:current' });
+    await expect(verifyLoopbackIdentity(control.baseUrl, 'attempt:stale')).rejects.toThrow(
+      expect.objectContaining({ code: 'BROWSER_LOOPBACK_IDENTITY_MISMATCH' })
+    );
+    await expect(requestWithHost(control.port, 'wrong.invalid')).resolves.toBe(421);
+    await expect(closeLoopbackServer(control)).resolves.toEqual({ shutdown: 'passed', portReleased: true });
+  });
+
+  test('captures bounded successful and nonzero process results', async () => {
+    const passed = await runBoundedProcess(process.execPath, ['-e', "process.stdout.write('ok')"], {
+      timeoutMs: 2_000,
+    });
+    expect(passed).toMatchObject({ status: 'passed', exitCode: 0, stdout: 'ok' });
+    expect(passed.termination.groupAbsent).toBe(true);
+
+    const failed = await runBoundedProcess(process.execPath, ['-e', "process.stderr.write('bad');process.exit(7)"], {
+      timeoutMs: 2_000,
+    });
+    expect(failed).toMatchObject({ status: 'failed', exitCode: 7, stderr: 'bad' });
+    expect(failed.termination.groupAbsent).toBe(true);
+  });
+
+  test('times out and forcibly terminates an owned descendant process tree', async () => {
+    const source = [
+      "const {spawn}=require('child_process');",
+      "const child=spawn(process.execPath,['-e',\"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)\"],{stdio:'ignore'});",
+      "console.log(child.pid);",
+      "process.on('SIGTERM',()=>{});",
+      "setInterval(()=>{},1000);",
+    ].join('');
+    const result = await runBoundedProcess(process.execPath, ['-e', source], {
+      timeoutMs: 200,
+      graceMs: 100,
+      terminationMs: 2_000,
+    });
+    const descendantPid = Number(result.stdout.trim());
+    expect(result.status).toBe('timed-out');
+    expect(result.termination).toMatchObject({
+      gracefulSent: true,
+      forcedSent: true,
+      groupAbsent: true,
+      activeProcessIds: [],
+      failure: null,
+    });
+    expect(Number.isInteger(descendantPid)).toBe(true);
+    expect(result.termination.ownedProcessIds).toContain(descendantPid);
+    expect(isPidActive(descendantPid)).toBe(false);
+    expect(processGroupExists(result.termination.processGroupId)).toBe(false);
+  });
+
+  test('cancels a bounded process and proves its process group absent', async () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 100);
+    const result = await runBoundedProcess(
+      process.execPath,
+      ['-e', "process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},1000)"],
+      { timeoutMs: 5_000, graceMs: 500, terminationMs: 1_000, signal: controller.signal }
+    );
+    expect(result.status).toBe('cancelled');
+    expect(result.termination).toMatchObject({ reason: 'cancelled', gracefulSent: true, groupAbsent: true, failure: null });
+  });
+
+  test('keeps the control narrow, shell-free and outside qualification machinery', () => {
+    const helperSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'lib', 'release-browser-suite-control.js'), 'utf8');
+    const parentSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'release-browser-smoke-suite.js'), 'utf8');
+    const combined = `${helperSource}\n${parentSource}`;
+
+    expect(combined).not.toContain("require('../qualification");
+    expect(combined).not.toContain("require('../../qualification");
+    expect(combined).not.toContain('shell: true');
+    expect(parentSource).toContain("['intervention-posting-context', 'intervention-posting-context-browser-smoke.js']");
+    expect(parentSource).toContain("'--screenshot-dir'");
+    expect(parentSource).toContain("timeoutMs: 180_000");
+    expect(parentSource).toContain("externalProxyPolicy: 'deny-via-unreachable-loopback-proxy'");
+  });
+});
