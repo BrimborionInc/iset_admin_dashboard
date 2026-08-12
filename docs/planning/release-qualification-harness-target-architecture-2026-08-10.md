@@ -5623,9 +5623,10 @@ end-of-attempt drift check while preserving canonical file hashing and Git facts
 **Read-only inputs:** Git HEAD/ref/index metadata for admin, portal and shared;
 exact file bytes selected by approved product/harness/test-pack role manifests;
 package/dependency locks, migration and generated-artifact role inputs; and the
-Phase 3 registry/manifests. Non-Git Intacct inputs remain linked through the
-`3C` pack identity, not guessed as a repository. Unmapped files fail scope
-admission. The seven previously protected
+Phase 3 registry/manifests. Bill-removed Intacct tooling is outside the active
+PATH candidate and source-role inventory; it must not be read or guessed as a
+repository without separate authorization. Unmapped files fail scope admission.
+The seven previously protected
 `sql/ops/prod-feedback-180-181-*20260810.sql` files remain excluded from content
 reads and cannot enter a candidate without separate Bill authorization.
 
@@ -5662,15 +5663,15 @@ every admitted role is unchanged. Complete Phase 3 technically only after the
 consolidated exit gate below; then stop for Bill review. No pack promotion,
 deploy admission, legacy retirement or Phase 4 begins.
 
-**Separate approval:** Bill reviews completed `3G` and explicitly authorizes
+**Separate approval:** Bill reviews completed `3G-SR1` and explicitly authorizes
 only `3H`, including the role registry and explicit protected-path boundary.
 
 ### Phase 3 Exit-Gate Map
 
 | Original exit requirement | Required cumulative proof |
 | --- | --- |
-| Five consecutive identical advisory runs | Every `3B-3H` pack first satisfies the unchanged 10-run local certification baseline. Each then has five additional consecutive direct/advisory matches. After `3H`, five consecutive cohort attempts run the complete accepted Phase 3 advisory pack set under frozen product/harness/environment/pack identities and new attempt IDs; selection, native outcomes, evidence graphs and source-stability results must be identical. |
-| Deliberate failing-test detection | `3A` duplicate fixture already proves native failure; `3B` guard-removal mutations, `3C` missing literal, `3D/3E` lint violations, `3F/3G` separate frontend/backend failure sentinels and `3H` source mutations prove every later native/effect boundary. A wrapper failure remains separate from a native product/test failure. |
+| Five consecutive identical advisory runs | The accepted active cohort is `ai-guidance-contract`, `privacy-route-static`, `admin-lint`, `portal-lint`, and `admin-aggregate`; each retains its completed 10-run local certification and five direct/advisory matches. Bill removed the Intacct and portal-aggregate proposals from this cohort. After separately authorized `3H` is certified, five consecutive cohort attempts run the complete then-accepted Phase 3 advisory set under frozen product/harness/environment/pack identities and new attempt IDs; selection, native outcomes, evidence graphs and source-stability results must be identical. |
+| Deliberate failing-test detection | `3A` duplicate fixture proves native failure; `3B` guard-removal mutations, `3D/3E` lint violations, `3F` separate frontend/backend failure sentinels and `3H` source mutations cover the accepted native/effect boundaries. Retained `3C` and `3G` evidence is historical and not counted as active-cohort certification. A wrapper failure remains separate from a native product/test failure. |
 | No disagreement with direct commands | Each pack has five additional paired comparisons against its exact native direct command. Any identity, scope, runner, terminal result, output-completeness, effect, cleanup/residue or source-state disagreement is recorded and blocks the sprint/cohort; neither side is patched automatically. |
 | Bill review | Bill separately reviews every sprint before the next authorization, then reviews the complete `3H` cohort evidence and explicitly accepts or rejects Phase 3. Technical completion does not promote a pack, change admission, retire the current gate or authorize Phase 4. |
 
@@ -7294,3 +7295,567 @@ clean and `HEAD`/the approved source reference identify that exact object, Bill
 must again authorize corrected Sprint `3G` under its already recorded complete
 scope. Sprint `3H`, promotion, release-authority change, environment access and
 Phase 4 remain unauthorized.
+
+## Sprint 3G Corrected Implementation Stop
+
+Bill established the clean source baseline after the prior admission stop. The
+mandatory check passed before editing: admin `HEAD` and local `origin/main` were
+both `176419dd3cf93d8c6398d49196301b5075d72a09`, and `git status` was clean.
+
+The bounded implementation then advanced the immutable native-readonly adapter
+to proposed version `2.1.0`, rebound the five existing active packs, added the
+sixth `portal-aggregate` contract, recorded exact product/external/dependency/
+discovery scopes, and added attempt-owned temp/mirror, loopback guard, cleanup,
+residue and sensitive-output-redaction machinery. The discovered set is 17
+frontend and 17 backend test files. Portal `.env.test.local` is absent; `.env`
+and `.env.test` are present and bound only by SHA-256. No value is recorded in
+documentation or retained output.
+
+Pre-dispatch verification did not converge within the controlling failure
+allowance:
+
+1. The synthetic lifecycle plus inactive-Intacct scope invocation returned one
+   failed file. A single module-load diagnostic proved the exact cause: the
+   lifecycle test's synthetic resource omitted the existing
+   `synthetic-interruption-fixture` authority marker, so the new validator
+   correctly demanded the portal-native controlled environment. The test-only
+   resource was corrected and the same two synthetic files then passed.
+2. The next portal manifest/static-only gate ran for approximately 29 seconds
+   and exited `1`, but the outer Node test report exposed neither a named
+   subtest nor an underlying diagnostic. It is therefore `unclassified`.
+
+The second failure triggered the plan's design-review stop. No portal native
+aggregate, deliberate negative, direct/advisory pair, existing-pack
+recertification corpus or cumulative qualification suite ran. No portal
+environment value was emitted; no network, AWS, database, email, deployed
+environment, build, deployment, TEST or PROD operation ran. The partial
+implementation remains uncommitted and advisory; all registry and pack
+authority fields remain `none`.
+
+**Completion decision:** Sprint `3G` is incomplete. The unclassified failure
+must be diagnosed before any repair, rerun of the gate, native dispatch or
+certification continuation.
+
+**Exact next authorization:** Bill authorizes bounded read-only Sprint
+`3G-D1` only. Using the frozen partial Sprint `3G` working-tree bytes, reproduce
+the focused portal manifest/static process failure exactly once with diagnostic
+reporting sufficient to expose the pre-subtest load or named-subtest failure;
+retain its command, stdout, stderr, exit and duration evidence; and independently
+prove absence of `rq-portal-aggregate-*` temporary roots and related processes.
+No code, manifest, registry, test, assertion, input, timeout, adapter, pack,
+identity, documentation or authority change is authorized. Do not execute the
+portal native aggregate, deliberate mirror, another active pack, cumulative
+qualification, Sprint `3H` or Phase 4. Any repair or Sprint `3G` continuation
+requires a separate later authorization.
+
+## Sprint 3G-D1 Evidence and Design Review
+
+Bill accepted the bounded diagnostic. Under the frozen partial Sprint `3G`
+bytes, the one authorized command was:
+
+`node --test --test-name-pattern='pack, six-pack|product, external|validation rejects|registry, role' qualification/test/portal-aggregate-pack.test.js`
+
+It exited `1` after `13.132460664` seconds. Retained stdout is 553 bytes with
+SHA-256 `8c542909eb249d86db06be6f813e0e8c1873ceb6887cf3ba8d303f3d37ea2539`;
+stderr is empty with SHA-256
+`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+The stdout contains only Node's file-level TAP wrapper at
+`portal-aggregate-pack.test.js:1:1`, `ERR_TEST_FAILURE`, exit code `1`, no
+signal and no named subtest. Independent before/after checks found no
+`rq-portal-aggregate-*` root and no related process. D1 therefore confirms the
+pre-subtest boundary but does not classify the terminating cause.
+
+### Complete Load Path
+
+The test first loads Node built-ins and then:
+
+1. `advisory-comparator`, which loads `canonical-json` and `identities`;
+2. `identities`, which reuses `canonical-json`;
+3. `native-readonly-bridge`, which loads `canonical-json`, `identities`,
+   `process-control` and `pack-validator`;
+4. `process-control`, which reuses `canonical-json` and `identities`; and
+5. the test's direct `pack-validator` import, which reuses the already loaded
+   module (`qualification/test/portal-aggregate-pack.test.js:3-50`;
+   `qualification/src/advisory-comparator.js:3-4`;
+   `qualification/src/native-readonly-bridge.js:3-24`;
+   `qualification/src/process-control.js:3-9`;
+   `qualification/src/pack-validator.js:3-10`).
+
+Those imported modules perform no file read, spawn, exit or environment access
+during module loading. The bridge's only evaluated construction is immutable
+profile/operation data through the pure `defineOperationSpec` helper
+(`qualification/src/native-readonly-bridge.js:26-122,179-196`). No
+`process.exit`, `process.exitCode`, abort or process-level exception handler is
+present anywhere in this load graph.
+
+The portal test then performs all fallible work before its first `test(...)` at
+line 316:
+
+- `loadBundle()` resolves and strictly parses the pack, registry and role
+  manifest, validates them, verifies every declared input and checks the native
+  package-script binding (`qualification/test/portal-aggregate-pack.test.js:82-86`;
+  `qualification/src/pack-validator.js:974-981,983-1082,1084-1112`);
+- input verification computes product, external, discovered-test and full
+  installed-dependency scopes. The dependency scope breadth-first discovers
+  declared and transitive dependency packages, recursively reads and hashes
+  every file below each package, and canonicalizes the resulting material
+  (`qualification/src/pack-validator.js:617-742,1000-1028`);
+- the test immediately computes those same four scopes again and retains the
+  resulting objects, including the complete dependency file graph
+  (`qualification/test/portal-aggregate-pack.test.js:86-90`);
+- it synchronously reads and hashes the two admitted environment files, package
+  and lock files, four qualification sources and qualification lock file, then
+  constructs all five identity bindings
+  (`qualification/test/portal-aggregate-pack.test.js:91-189`).
+
+Only after that work does the first named subtest register
+(`qualification/test/portal-aggregate-pack.test.js:316-358`). Native dispatch
+is inside `runDirect` and later asynchronous subtests, while bridge dispatch is
+inside callable functions; neither was reachable in D1
+(`qualification/test/portal-aggregate-pack.test.js:226-300,450-499`;
+`qualification/src/native-readonly-bridge.js:1016-1098`).
+
+### Confirmed Facts and Remaining Hypotheses
+
+Confirmed:
+
+- the failure is before named-subtest registration and before any native or
+  advisory dispatch;
+- the test has no local catch or diagnostic boundary around its module-scope
+  validation, traversal, hashing and identity construction;
+- any ordinary filesystem, strict-JSON, fingerprint, scope, canonicalization or
+  identity error on that path is an uncaught module-initialization error;
+- the installed dependency closure is traversed twice before registration, and
+  the second complete result is retained at module scope;
+- no explicit exit path exists in the loaded qualification sources; and
+- D1 proves exit code `1`, no signal, empty stderr, generic parent TAP, and zero
+  portal attempt/process residue. It does not prove which statement terminated.
+
+Evidence-supported but unconfirmed mechanisms are: a synchronous filesystem or
+validation exception whose diagnostic was not transported by the Node test-file
+worker; resource exhaustion or another fatal runtime condition during the broad
+duplicated dependency traversal/canonicalization; or a Node test-file worker and
+parent reporting failure that lost or never received the inner diagnostic. A
+syntax/module-resolution failure is mechanically possible before registration,
+but the present sources exist, the imported shared modules were exercised by the
+preceding passing synthetic run, and no syntax/module diagnostic was retained.
+There is no evidence for a native portal failure, `.env`-driven external action,
+bridge dispatch defect, cleanup defect, or qualification process-controller
+failure. A normal top-level throw and a fatal/worker-reporting failure cannot be
+distinguished from the retained output alone.
+
+The empty streams are explained at the evidence boundary, not at the root-cause
+boundary: the test itself emits nothing before registration and does not catch
+module-scope errors; the parent received only an exit status and emitted its own
+generic file wrapper. The evidence cannot establish whether the child created a
+diagnostic that Node failed to transport or exited without creating one.
+
+### Conclusion and Revised Approach
+
+The confirmed defect is local to the new portal certification test's
+initialization structure. The portal-specific collectors live in a shared
+validator, but no shared validator defect is proved. The shared bridge and
+process controller were not invoked. A Node runner/worker interaction remains a
+possible contributing cause, not an evidenced primary defect.
+
+The convergent next step is one test-local simplification, not another adapter,
+compatibility layer or diagnostic rerun: register named tests before all
+fallible work; build one lazy certification context inside a named setup test;
+derive identities from the validated manifest's already verified scope digests;
+and remove the redundant retained dependency-closure collection while
+preserving exact scope, mutation, authority and native-semantic assertions.
+This creates attributable evidence and reduces peak retained work without
+changing the pack, registry, adapter, native commands, product inputs, product
+candidate, release authority or approved architecture.
+
+**Exact proposed authorization:** Bill authorizes bounded Sprint `3G-R1` only.
+Objective: simplify `qualification/test/portal-aggregate-pack.test.js` so every
+fallible portal manifest, scope, fingerprint and identity operation occurs
+inside a named Node subtest, each complete observed scope is retained no longer
+than its proof requires, and the validated manifest digests are reused rather
+than retaining a duplicate full dependency closure. Editable files are limited
+to `qualification/test/portal-aggregate-pack.test.js`, this architecture
+checkpoint and the controlling-plan checkpoint/Sprint Ledger. Preserve every
+pack, registry, role-manifest, adapter, native command, input digest, product
+assertion, negative profile, identity, timeout, cleanup/residue rule, maturity
+and `releaseAuthority: none`. Permitted effects are local source reads,
+digest-only reads of the already admitted portal environment inputs, JavaScript
+syntax/whitespace checks, and exactly one focused manifest/scope/static Node test
+invocation after the edit. Do not execute a portal native command, negative
+mirror, advisory process, another pack, cumulative qualification, environment,
+network, AWS, database, build, deployment, TEST, PROD, Sprint `3H` or Phase 4.
+Verification must prove named-subtest attribution, unchanged manifest/registry/
+role and identity inputs, exact scope and stale-scope rejection, no native
+dispatch, and zero `rq-portal-aggregate-*` or related process residue. If the
+focused invocation again terminates without a named diagnostic, or exposes any
+new input, identity, process, cleanup or architecture defect, stop immediately
+without repair or rerun. Stop after the focused proof; resuming Sprint `3G`
+requires separate approval.
+
+## Sprint 3G-R1 Stopping Checkpoint
+
+Bill accepted the design review and authorized only the recorded test-local
+simplification. `qualification/test/portal-aggregate-pack.test.js` now registers
+all named tests before calling a lazy certification-context initializer. The
+initializer reuses package, lock, environment and four scope digests from the
+pack manifest only after `validatePackBundle` has independently recomputed and
+accepted every declared input. The test no longer creates or retains a second
+complete portal dependency-closure object. The named scope proof retains the
+product, external and discovery assertions locally; stale-input verification
+retains one source-scope and one environment-fingerprint negative instead of
+repeating the complete closure for every scope.
+
+JavaScript syntax and `git diff --check` passed. The one and only authorized
+focused invocation was the unchanged D1 command:
+
+`node --test --test-name-pattern='pack, six-pack|product, external|validation rejects|registry, role' qualification/test/portal-aggregate-pack.test.js`
+
+It again exited `1` without a named diagnostic: Node emitted only the generic
+file-level `ERR_TEST_FAILURE` wrapper at line `1:1`, with no signal, after
+`21.027062028` seconds. No rerun or repair followed. The declared
+`rq-portal-aggregate-*` search was empty. The process search returned only the
+Codex sandbox wrapper and the checking shell whose own command lines contained
+the search terms; no test or portal-attempt process remained.
+
+This result disproves the narrow prediction that moving initialization beneath
+a named `test(...)` callback would itself make the terminating condition
+attributable. It does not invalidate the simplification: duplicate retained
+closure state is removed and the semantic contracts are unchanged. It does mean
+that the remaining failure lies within or below the still-required
+`validatePackBundle`/full installed-dependency traversal, fatal runtime handling,
+or Node test-file worker/reporting boundary. Those alternatives remain
+unclassified, and another tactical edit or execution is prohibited by the
+controlling convergence rule.
+
+No native portal command, mirror, advisory process, other pack, cumulative
+qualification, network, environment service, AWS, database, build, deployment,
+TEST, PROD, promotion or authority change ran. The partial Sprint `3G` and
+`3G-R1` edits remain uncommitted for the next design decision.
+
+**Completion decision:** Sprint `3G-R1` is incomplete as a resolution and Sprint
+`3G` remains incomplete. The authorized focused proof failed at the same opaque
+file boundary; no certification work may resume from this checkpoint.
+
+**Exact next approval required:** Bill authorizes bounded read-only Sprint
+`3G-DR2` only. Objective: determine, without execution, whether the portal full
+installed-dependency byte-closure requirement and its placement inside
+`validatePackBundle` are necessary to the accepted identity architecture or are
+an overbroad certification implementation, and compare one bounded replacement
+fingerprint boundary with retaining that closure outside the Node test-file
+worker. Inputs are limited to the frozen partial Sprint `3G`/`3G-R1` sources,
+pack/registry/role manifests, package and lock metadata without installed-byte
+execution, accepted architecture, and retained D1/R1 output. Only the
+architecture and controlling-plan checkpoints may change. Do not run tests,
+collectors, native/advisory commands or dependencies; do not read environment
+contents, repair code, broaden identities, access environments, resume Sprint
+`3G`, or begin `3H`/Phase 4. Stop with one architecture-consistent recommendation
+and the exact separately authorized implementation boundary.
+
+## Sprint 3G-DR2 Dependency and Test-Worker Review
+
+Bill accepted the R1 stop and authorized this read-only architecture review. No
+test, collector, native/advisory command, dependency, environment value or
+external operation was executed.
+
+### Confirmed Boundary
+
+R1 changed when initialization runs, not what the first selected test must do.
+The first callback still calls `getCertificationContext`, which calls
+`validatePackBundle`; bundle validation still invokes `verifyPackInputs`, and
+the portal `native-dependency-scope` still invokes the complete installed-tree
+collector before that callback can return
+(`qualification/test/portal-aggregate-pack.test.js:93-102,350-352`;
+`qualification/src/pack-validator.js:983-1046,1084-1112`). Therefore registering
+the test first cannot make a fatal child-process termination inside this work a
+completed named result.
+
+The locally installed Node documentation establishes the outer boundary:
+`--test-name-pattern` does not change which files execute, every selected test
+file executes in a separate child process, a nonzero child exit makes the file a
+failed test, and the file otherwise executes as a regular script
+(`/usr/share/doc/nodejs/api/test.html:673,763-771`). D1 and R1 both show exactly
+that parent fallback: one file-level `ERR_TEST_FAILURE`, exit `1`, no signal and
+no child diagnostic. Moving the callback beneath `test(...)` cannot force the
+child to transmit an event if the child terminates before it reports the named
+result. This explains how the failure remains file-level; it does not identify
+why the child exits.
+
+The dependency collector itself is a confirmed identity defect as well as a
+resource risk:
+
+1. It seeds from every portal production and development dependency, not the
+   packages actually resolved by the two admitted test phases
+   (`qualification/src/pack-validator.js:699-708`; portal package dependencies
+   at `../ISET-intake/package.json:5-46,101-104`).
+2. It deduplicates only by package name and resolves every name at the top-level
+   `node_modules/<name>` path (`qualification/src/pack-validator.js:709-731`).
+   The accepted lockfile records distinct nested installed package paths and
+   versions, for example nested Smithy packages and Babel's nested `debug`, `ms`
+   and `semver` (`../ISET-intake/package-lock.json:130-166,2278-2309`). Those
+   instances cannot be represented by the collector's one-name/one-root model.
+3. For each chosen top-level package it recursively reads every regular file,
+   creates a path/digest object for every file, retains all arrays, then
+   canonicalizes the complete object (`qualification/src/pack-validator.js:423-453,730-742`).
+
+The result is therefore neither the lockfile's exact installed-path closure nor
+the native test phases' exact loaded-module closure. The architecture requires
+an exact lockfile/dependency fingerprint and drift check, but does not prescribe
+this in-memory representation (`:2640-2666,3371-3404`). The recorded Sprint 3G
+input boundary requires the portal package/lock, CRACO configuration, resolved
+binaries, discovered tests and declared source inputs (`:5543-5564`). The pack
+already binds the complete lockfile, runner, CRACO configuration, CRACO entry
+and React Scripts entry separately
+(`qualification/packs/portal-aggregate.pack.json:100-135`). Removing the current
+collector without a replacement installed-tree proof would nevertheless leave
+local transitive-byte drift undetected and is not recommended.
+
+### Facts Versus Hypotheses
+
+Confirmed facts are: the two failures occur while the selected child must pass
+through full dependency verification; both produce the documented Node
+file-child fallback; the collector materializes all selected file records; its
+root-only package-name graph conflicts with nested installed paths in the lock;
+ordinary bridge/native/process-controller dispatch has not begun; and no signal,
+stderr diagnostic or residue identifies a cause.
+
+Resource exhaustion, a fatal Node/V8 condition, and a Node 18.19.1 test-child
+reporting defect remain hypotheses. An ordinary caught test assertion or thrown
+validation error is less consistent with the absence of a named failure, but is
+not excluded by retained evidence. The 13.132-second D1 and 21.027-second R1
+durations do not prove memory exhaustion. No evidence supports a portal product,
+native-runner, environment, cleanup or external-service failure.
+
+### Options and Recommendation
+
+**Bounded correction:** replace only the portal installed-dependency collector
+with a lock-path-driven, bounded-memory Merkle fingerprint. The lockfile's sorted
+`packages` paths define package instances, including nested instances; each
+present admitted package tree is walked in stable path order without descending
+into a separately listed nested package, and path plus regular-file digest is
+fed incrementally into a versioned hash instead of retained in one object.
+Symlinks, escapes, missing required instances, unexpected instance roots,
+unsupported entries and lock/installed version conflicts fail closed. Optional
+absence is governed only by the lock metadata. The result contains the profile,
+lock digest, package/file counts and root digest, not every file record. This
+preserves exact installed-byte drift detection, corrects nested resolution, and
+removes the evidenced peak-retention mechanism without a subprocess, cache,
+retry, compatibility layer or weaker identity.
+
+This correction is likely, but not guaranteed, to converge. It directly removes
+the only confirmed high-volume/factually incorrect operation on the failing
+path. It changes shared validator bytes, the portal pack contract/version,
+registry/role digests and `harnessVersion`; consequently the already planned
+five active-pack recertification remains required. Its risks are implementation
+errors in path/optional/symlink handling and the possibility that the opaque exit
+has a different cause. One focused proof is therefore the stopping point.
+
+**Defer `portal-aggregate`:** this is viable and preferable to another repair if
+the bounded correction fails. The certified `admin-aggregate` already provides
+the Phase 3 unit/component aggregate category (`:5230-5238`), and the unchanged
+current gate remains authoritative and continues to own portal aggregate
+coverage. Deferral would not retire RN02/RN04 or claim replacement coverage; the
+Phase 0 obligation to preserve CRACO and backend `node:test` discovery/exit
+semantics remains open (`release-qualification-harness-current-state-audit-2026-08-10.md:1101-1103`;
+this architecture `:3685-3690`). It would, however, require Bill to remove this
+pack from the active registry and Phase 3 exit cohort, restore the last certified
+five-pack control plane, preserve all retained 3G evidence, and explicitly carry
+the portal obligation forward. The current Phase 3 contract says every `3B-3H`
+pack and complete accepted cohort must pass, so Codex cannot infer that exception
+(`:5668-5679`).
+
+CODEX recommends the bounded streaming correction once, followed by its single
+focused static/manifest proof. This is not automatic preference for completion:
+it is selected because it repairs a confirmed architecture mismatch with less
+new machinery than moving the collector outside the Node test child. Moving the
+same materialized closure to another process would add transport, timeout,
+partial-result and evidence-lineage responsibilities while retaining the wrong
+root-only identity model. If the one correction fails or exposes another defect,
+the recommendation becomes immediate scope reconciliation and deferral, not
+`3G-R3`.
+
+**Exact proposed authorization:** Bill authorizes bounded Sprint `3G-R2` only.
+Objective: replace the portal-only installed-dependency collector with the
+versioned, lock-path-driven, bounded-memory Merkle fingerprint specified by the
+DR2 review, advance and rebind only the changed portal pack contract, and prove
+the focused manifest/scope/static boundary once. Editable scope is limited to
+`qualification/src/pack-validator.js`,
+`qualification/packs/portal-aggregate.pack.json`,
+`qualification/registries/phase3-read-only.registry.json`,
+`qualification/qualification-role-manifest.json`,
+`qualification/test/portal-aggregate-pack.test.js`, existing focused pack tests
+only where their exact cumulative registry assertion must reflect the portal
+version, and the architecture/controlling checkpoints. Preserve the successor
+adapter, all native commands and product assertions, the five existing pack
+contracts/versions, product candidate, effects, cleanup/residue rules, maturity
+and `releaseAuthority: none`. Permit local source/package/lock/installed-byte
+reads, digest-only admitted environment reads, syntax/whitespace checks, and
+exactly one focused portal manifest/scope/static Node invocation. Verification
+must cover nested lock paths, deterministic ordering, file mutation, missing and
+unexpected package instances, symlink/path escape, optional absence, stale lock
+and stale installed bytes, bounded result shape, unchanged non-portal pack
+contracts, no native/advisory dispatch, and zero portal temp/process residue.
+Do not run native portal commands, mirrors, other pack certification, cumulative
+qualification, environments, networks, Sprint `3H` or Phase 4. If any focused
+case or the sole invocation fails, stop without repair or rerun and request
+scope reconciliation to defer `portal-aggregate`. Stop after the focused proof;
+resuming full Sprint `3G` requires separate authorization.
+
+## Sprint 3G-R2 Final Corrective Attempt and Scope-Reconciliation Stop
+
+Bill authorized the DR2 lock-path correction as the final corrective attempt for
+the current Sprint `3G` approach. The bounded implementation replaced the
+portal-only package-name/materialized dependency collector with fingerprint
+profile `1.0.0`: npm lock `packages` paths identify all installed instances,
+including eight nested instances; one absent optional instance is admitted only
+from lock metadata; missing required, unexpected, linked, escaped, unsupported
+or version-conflicting instances fail closed; regular files are read in 64 KiB
+chunks and fed in stable path order into a versioned root digest. The retained
+summary contains only scope, profile, lock digest, package/optional/file/byte
+counts and root digest. The current installation produced 2,048 present package
+instances, one optional absence, 72,393 files, 426,255,139 bytes and root digest
+`6b7ba6ed0ac8d14bbf59d6bd2641ab442d845f066e410f552c9af4d650494118`.
+Only the proposed portal pack advanced, from `1.0.0` to `1.0.1`; the other five
+pack contracts and versions were not changed by R2.
+
+Two pre-proof metadata derivations exposed one deterministic representation
+boundary: the qualification evidence parser correctly rejects non-integer JSON
+numbers, while npm lock and installed package manifests legitimately contain
+them. R2 therefore uses ordinary JSON parsing only to enumerate npm-owned
+metadata; the raw lock and every installed regular file remain byte-digested,
+and the qualification evidence parser and canonical-hash rules are unchanged.
+This was not a portal/native dispatch or a product failure.
+
+JavaScript syntax and authorized whitespace checks passed. The sole authorized
+focused command was:
+
+`node --test --test-name-pattern='pack, six-pack|product, external|validation rejects|registry, role' qualification/test/portal-aggregate-pack.test.js`
+
+It again emitted only Node's file-level subtest failure: exit `1`, no signal, no
+named subtest or assertion diagnostic, and duration 33.580 seconds. No native or
+advisory portal command, mirror, other pack certification or cumulative suite
+ran. Independent post-stop inspection found no `rq-portal-aggregate-*` root and
+no related surviving process. The exact cause therefore remains
+`unclassified`; R2 disproves the materialized/root-only collector as a
+sufficient cause but does not establish a replacement cause. Under the explicit
+final-attempt rule, no R3, repair or rerun is permitted.
+
+### Required Phase 3 Scope Reconciliation
+
+CODEX recommends deferring `portal-aggregate` from the active Phase 3 advisory
+cohort. This does not retire or weaken the native portal aggregate: the current
+authoritative gate remains unchanged and continues to run it. It also does not
+claim replacement coverage. Phase 0 obligations RN02/RN04 remain open for CRACO
+plus recursive backend `node:test` discovery, ordering and exit propagation.
+The certified `admin-aggregate` supplies the Phase 3 unit/component aggregate
+category, while later Sprint `3H` and the Phase 3 exit decision remain separately
+authorized work.
+
+The reconciliation must first retain a content-addressed record of the partial
+3G diff and D1/R1/DR2/R2 command evidence. It must then restore the exact last
+certified five-pack control-plane bytes from commit
+`176419dd3cf93d8c6398d49196301b5075d72a09`, remove only the unadmitted partial
+portal pack/test/negative-fixture artifacts from active code, remove
+`portal-aggregate` from the registry and role bindings, and amend the Phase 3
+cohort/exit wording to name the accepted five active packs. Reconciliation must
+prove exact restored file digests, exact five-pack registry/role/adapter
+bindings, current input validity, no portal active binding, unchanged current
+gate, retained RN02/RN04, no release authority and a clean static boundary. It
+must not recertify, promote or alter the five packs, run native checks, begin
+`3H`, or enter Phase 4.
+
+**Exact proposed authorization:** Bill authorizes bounded Sprint `3G-SR1` only.
+Objective: retain the content-addressed Sprint `3G` attempt evidence, defer
+`portal-aggregate` from the active Phase 3 advisory cohort, restore the exact
+certified five-pack control plane from
+`176419dd3cf93d8c6398d49196301b5075d72a09`, and record RN02/RN04 as an open
+no-loss obligation while leaving the current authoritative gate unchanged.
+Editable scope is limited to the currently modified `qualification/` files and
+untracked portal pack/test/negative fixtures created by partial Sprint `3G`, an
+attempt-owned retained-evidence path under `tmp/release-qualification/`, and the
+existing qualification architecture, operator and controlling-plan documents.
+Permit only read-only source/digest comparison, content-addressed local evidence
+retention, exact restoration/removal of partial 3G bytes, five-pack bundle/input
+validation that dispatches no native command, JavaScript syntax, role/import
+boundary and whitespace checks, and residue inspection. Prohibit native or
+advisory pack execution, recertification, product/native changes, environments,
+networks, promotion, release-authority/current-gate changes, Sprint `3H` and
+Phase 4. Stop on any mismatch with the certified five-pack baseline or any
+evidence loss. Stop after scope reconciliation; Sprint `3H` requires a later
+separate approval.
+
+## Sprint 3G-SR1 Scope-Reconciliation Completion
+
+The mandatory pre-restore overlap audit proved that admin `HEAD` and local
+`origin/main` both identify certified commit
+`176419dd3cf93d8c6398d49196301b5075d72a09`. Every tracked qualification delta
+matched the recorded partial `3G` scope: successor adapter/CLI/catalog bytes,
+five pack rebindings, six-pack registry/role/package metadata, and exact
+cumulative assertions. The only four untracked qualification paths were the
+proposed portal pack, its focused test and its two negative sentinels. No
+unrelated or user-owned change overlapped the restore set.
+
+Before restoration, SR1 retained the partial qualification state at:
+
+`tmp/release-qualification/phase3/3g-sr1/sha256-816dd809d88844a2645cd9d5eafc2d603df17cf027ecf44b623e40482579c430/`
+
+The set address is the canonical SHA-256 digest of the ordered artifact names
+and hashes. Its three addressed artifacts are:
+
+- `attempt-evidence.json`:
+  `7a934af0e822028ac8d92f599c0f1352407fb990e6360966c74b248ca83cfe5d`;
+- `partial-qualification.patch`:
+  `a772fe6cb2056c965843268844cbeb0bb329e59c633f5b960992955b9609e6f2`;
+- `untracked-portal-artifacts.tar`:
+  `2c0a084c4fe354f28f1804b5d7764554c1b78777219ac0d3ddf32ec6c1f5f6e2`.
+
+The patch preserves all 19 tracked qualification deltas; the deterministic tar
+preserves the four untracked portal artifacts; and the attempt record preserves
+the D1/R1/R2 terminal evidence, dependency-fingerprint summary, residue result,
+authority boundary and RN02/RN04 status. Recomputed artifact hashes matched.
+No raw environment value is retained.
+
+SR1 restored these 19 tracked files exactly from the certified commit:
+
+- `qualification/bin/rq-native-readonly.js`, `qualification/package.json`, and
+  `qualification/package-lock.json`;
+- the five active manifests under `qualification/packs/`;
+- `qualification/qualification-role-manifest.json` and
+  `qualification/registries/phase3-read-only.registry.json`;
+- `qualification/src/native-readonly-bridge.js` and
+  `qualification/src/pack-validator.js`; and
+- the admin aggregate, AI, admin lint, privacy, retained inactive Intacct,
+  native-readonly lifecycle and portal lint focused tests.
+
+The unadmitted portal pack, focused test and two negative sentinel files were
+removed from active code only after the content-addressed archive was complete.
+`git diff --exit-code <certified-commit> -- qualification` is clean and there is
+no untracked qualification path.
+
+Independent non-dispatch bundle/input validation proves the restored identity:
+native-readonly adapter `2.0.0`; role manifest `1.8.0`, digest
+`230d372eee8eae259342bb60ef1ccf6c3279e4b3d1cdc5b22566b4baf4ad1d84`;
+five-pack registry digest
+`c9208defdfec9b59e750eaa9a4c8b8bfcc23f4846b8b07c0203574696c8ed6ec`;
+and active pack versions AI `1.0.1`, privacy `1.0.2`, admin lint `1.0.2`, portal
+lint `1.0.1`, and admin aggregate `1.0.2`. Every bundle is advisory, every pack
+and the registry retain release influence/authority `none`, and all current
+declared inputs validated. The complete qualification JavaScript syntax scan
+passed. No native/advisory command or recertification ran.
+
+The initial `git restore --worktree` operation made no change because the
+managed checkout exposes `.git/index.lock` read-only. Read-only `git archive`
+extraction then restored the same explicit audited file list without touching
+the index or history. This was an explained tooling constraint, not identity or
+scope drift.
+
+**Completion decision:** Sprint `3G-SR1` is complete. `portal-aggregate` is not
+an active Phase 3 advisory pack. The current authoritative release gate remains
+unchanged and continues to own portal aggregate execution. RN02/RN04 remain open
+no-loss obligations; no replacement coverage, promotion or retirement is
+claimed. Phase 3 remains incomplete and Sprint `3H` has not begun.
+
+**Exact next approval:** Bill reviews and accepts completed Sprint `3G-SR1`,
+then explicitly authorizes Sprint `3H` only under the objective, exact files,
+read-only Git/file inputs, protected-path boundary, effects, direct/advisory
+commands, verification and stopping point recorded in the approved Phase 3
+breakdown. Phase 4 and every release-authority change remain unauthorized.
