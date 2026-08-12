@@ -8294,7 +8294,7 @@ this package.
   release gate remains authoritative. Phase 4 has not begun and remains
   unauthorized.
 
-### Phase 3 Decision Package
+### Phase 3 Decision Package (Resolved by P3-1)
 
 | Option | Formal treatment | Consequence | CODEX assessment |
 | --- | --- | --- | --- |
@@ -8344,12 +8344,300 @@ replacement and additional scenario packs require fresh evidence of need and
 separate Bill decisions. This proposal changes no current phase authority and
 does not itself authorize the first narrowed Phase 4 sprint.
 
-### Decisions Reserved for Bill
+### Decision Resolution
 
-1. Choose exactly one Phase 3 treatment: recommended `P3-1`, literal `P3-2`, or
-   command-level alternative `P3-3`.
-2. Approve, revise or reject the proportional dispositions for original Phases
-   4-11 and the four-outcome roadmap.
-3. Only after those decisions, separately authorize the exact first outcome and
-   its files, effects and verification. Until then Phase 4 and every environment
-   operation remain unauthorized.
+Bill selected `P3-1` and approved the proportional dispositions and four-outcome
+roadmap. The only remaining next decision is whether to authorize the exact
+Sprint `4A` boundary recorded below. Phase 4 and every environment operation
+remain unauthorized until that separate prompt.
+
+## P3-1 Acceptance and Lean Programme Rebaseline
+
+Bill selected `P3-1` on 2026-08-12 and approved the proportional roadmap. This
+section is now controlling for work after Phase 3. The earlier Phase 4-10
+migration table and Phase 3 decision options remain historical design and
+decision evidence; they do not authorize the superseded programme.
+
+### Accepted Phase 3 Boundary
+
+- The five certified advisory packs are accepted:
+  `ai-guidance-contract@1.0.1`, `privacy-route-static@1.0.2`,
+  `admin-lint@1.0.2`, `portal-lint@1.0.1` and
+  `admin-aggregate@1.0.2`.
+- The certified Sprint `3H` role-aware source inventory and before/after source
+  stability controls are accepted.
+- The five-run cohort proof remains unmet at exactly `0/5`. `P3-1` is an
+  explicit exception to that requirement, not a retroactive pass or substitute
+  evidence.
+- `portal-aggregate` remains outside the advisory cohort and inside the
+  unchanged authoritative current gate. RN02 and RN04 remain open no-loss
+  obligations.
+- No pack is promoted. Every accepted pack remains advisory with
+  `releaseAuthority: none`. The current release gate remains authoritative.
+- The bespoke exit coordinator and every replacement cohort-operator approach
+  are ended. No later sprint may reintroduce graph aggregation, cohort
+  comparison or operator compatibility work as an implicit prerequisite.
+
+### Original-Deliverable Disposition
+
+This table disposes every original Phase 4-11 deliverable. `Retain` means keep
+the exact safety outcome; `merge` means perform it only inside the named useful
+work; `narrow` means reduce its breadth as stated; `defer` preserves the design
+without implementation authority; and `remove` ends the programme item without
+claiming its underlying product risk is covered.
+
+| Original deliverable | Disposition | Controlling treatment |
+| --- | --- | --- |
+| 4.1 process/build isolation and generated-file restoration | **Retain, narrow** | Sprints `4A-4B` harden and prove only the existing authoritative admin/portal native wrapper, exact declared outputs and byte-for-byte restoration. No new build adapter, pack, registry, CLI or process/build catalogue. |
+| 4.2 local HTTP readiness and shutdown adapter | **Merge, narrow** | Add only the loopback listener identity, readiness, shutdown and socket-residue proof required inside the existing selected browser command in `4D`; no standalone HTTP adapter or service framework. |
+| 4.3 browser boundary, stable selectors and persistent state | **Retain, narrow** | Sprint `4C` covers only `intervention-posting-context` and its case-workspace/intervention-modal boundary. Other browser selector obligations stay open under the current gate. |
+| 4.4 one deterministic compiled-browser pack | **Retain capability, narrow packaging** | Sprint `4D` proves only the existing direct `release-browser-smoke-suite --only intervention-posting-context --json` command. It does not create an advisory pack, and no second child follows automatically. |
+| 4 adapter ten-run certification baselines | **Narrow** | Focused synthetic/native contract tests retain negative and interruption cases. Expensive builds run twice each and the selected browser command runs three times from frozen source with source-stability and zero-residue proof. Ten-run repetition and direct/advisory duplication are removed as disproportionate. |
+| 5.1 target identity and one-object-at-a-time DDL discovery | **Retain** | Phase 5 exact-target metadata-only preflight; no ordinary statement before it passes. |
+| 5.2 structured statement declaration and per-statement admission | **Retain, narrow** | Cover the exact one rollback pack's statements and affected objects. Do not create a universal SQL parser or grammar programme. |
+| 5.3 read-only query support | **Narrow** | Admit only the metadata, prerequisite and independent residue reads needed by the selected transaction pack. |
+| 5.4 one rollback-only synthetic fixture | **Retain** | One exact local transactional pack with fixture ownership established before mutation. |
+| 5.5 forced-failure rollback and zero residue | **Retain** | Required before Phase 5 can complete; a pre-mutation failure closes without cleanup SQL. |
+| 6 small mandatory core plus dependency-expanded domains | **Merge** | MC2 remains the design rule, but mappings are added only for each check or pack introduced by Phases 4, 5, 7 and 8. The unchanged current gate remains the fallback. |
+| 6 broad migration of reliable tests by level/domain | **Remove from the programme** | No 88-unit migration project. The no-loss ledger remains evidence and unselected obligations remain visible under the current gate or risk backlog. |
+| 6 explicit/scheduled full regression | **Retain through current gate** | Full regression remains available and authoritative; no duplicate advisory full-regression platform is built. |
+| 6 inclusion, omission, unknown and unrelated-domain mutation proof | **Merge** | Each new mapping proves required inclusion, prohibited omission, dependency closure and unrelated exclusion. Unknown/ambiguous input fails closed to the full current gate. |
+| 6 requirement for no unmapped runtime source | **Narrow** | No source may be silently omitted from a claimed narrow pack. Source outside a proved mapping is explicitly unknown and requires the full current gate; exhaustive global mapping is not a prerequisite. |
+| 7 explicit TEST profile/account proof | **Retain** | Exact `nwac-test` profile, account, region, principal and resource binding remain mandatory under separate TEST authorization. |
+| 7 deployment manifest/provenance, rollback-artifact presence and target health | **Retain** | Phase 7 read-only control-plane evidence. Rollback presence remains an inspection claim, not recovery proof. |
+| 7 bounded remote transport and environment/infrastructure classification | **Retain** | Exact target, bounded dispatch/poll/cancel/termination and deterministic failure evidence; no TEST mutation. |
+| 7 three repeatable runs plus stale/mismatch/transport negatives | **Retain** | This is a focused environment-safety proof, not an audit-platform cohort. |
+| 8 environment/metadata preflight | **Retain** | Required before any fixture or identity effect. |
+| 8 fixture-plan validation and owned creation | **Retain** | One attempt-owned fixture plan and exact resource scope only. |
+| 8 one deployed workflow and persistent-state assertions | **Retain** | One critical domain selected only after local/database/TEST prerequisites pass. |
+| 8 transactional/owned cleanup and independent zero residue | **Retain** | Cleanup success alone is never residue proof; interruption recovery remains required. |
+| 8 three clean attempts, controlled product failure and harness-fixture failure | **Retain** | Required for the one selected pack, with exact failure classification and no tactical rerun. |
+| 9 advisory/current comparison across ordinary candidates | **Merge, conditional** | Only if Bill later considers promotion: three representative release rehearsals plus one current-gate full regression. It is not part of the four-outcome safety programme. |
+| 9 compare selection/results/duration/diagnostics/cleanup and investigate disagreement | **Retain, conditional** | Preserve a bounded disagreement record for any future rehearsal; no automatic change to either system. |
+| 9 standalone observation window and cutover recommendation | **Remove as a prerequisite** | The 30-day/10-candidate platform observation programme is ended. Any future promotion decision defines its evidence afresh. |
+| 10 pack promotion, deploy-admission integration and legacy retirement | **Defer in full** | Current gate remains authoritative. Promotion/retirement requires a future Bill decision after demonstrated safety value; no current phase works toward it automatically. |
+| 10 dual-run rollback, runbook and coverage-inventory cutover work | **Defer in full** | Preserve the design and evidence, but implement only if a named promotion cohort is later approved. |
+| 11 broader journeys, signing, notifications, concurrency, privacy, payments and recovery | **Remove as a programme phase** | Keep them as visible product-risk/no-loss backlog items. Add one only when a current change, incident or contract supports it and choose the smallest valid test level. |
+
+R4 immutable retention/catalog/cache direction remains accepted architecture,
+but provider, IAM, operations and retention implementation remain deferred unless
+a later concrete release-safety outcome proves it necessary. This prevents audit
+infrastructure from returning under a different name.
+
+### Lean Controlling Sequence
+
+| Sequence | Essential outcome | Authority and dependency boundary | Completion decision |
+| --- | --- | --- | --- |
+| Phase 4 - narrowed build/browser safety | Both existing authoritative product builds restore every generated/source output; one important compiled admin workflow proves stable selectors, persistent state, bounded loopback/process ownership and zero local residue | Pure local only; Phase 2/3 evidence informs assertions but their control plane remains frozen; no new adapter or pack | Bill reviews `4A-4D`; no automatic Phase 5 |
+| Phase 5 - narrowed database rollback safety | Exact live target/DDL, admitted statements, one rollback-only fixture, forced failure/interruption and independent zero residue | Requires separately authorized exact local DB target and current live metadata; no guessed SQL or broad pack migration | Bill reviews the one adapter/pack result; no automatic TEST work |
+| Phase 6 - merged incremental impact mapping | Only the mappings for checks actually introduced in Phases 4/5/7/8, with unknown input falling back to the current full gate | Documentation/registry work travels with the owning check or pack; no standalone phase execution | Each owning sprint proves its mapping; there is no Phase 6 exit sprint |
+| Phase 7 - retained read-only TEST identity/provenance | Exact TEST identity, deployed source/provenance, rollback-artifact presence, health and bounded transport | New explicit TEST read-only authorization; no deployment, SQL or fixtures | Three repeatable proofs plus negatives and Bill review |
+| Phase 8 - retained one stateful TEST workflow | One deployed contract with exact preflight, owned fixture, persistent outcome, cleanup and zero residue | Exact environment/effect/resources/duration authorization after Phase 5/7 prerequisites | Three clean attempts, deliberate failure classes, interruption recovery, zero residue and Bill review |
+| Mandatory programme review | Decide whether the four outcomes materially improve pre-PROD decisions | Current gate remains authoritative throughout | Stop; no Phase 9/10/11 continuation is implied |
+
+### Preserved Open Obligations
+
+- RN02/RN04 and `portal-aggregate` stay open under the current gate. Phase 4
+  build work does not close aggregate execution or portal native-test coverage.
+- CP24's known portal `publicBuildInfo.js` restoration defect is assigned only
+  to `4B`; it is not silently treated as already fixed.
+- RN16-RN19 and the 13-child browser ledger remain evidence. `4C-4D` assume only
+  the `intervention-posting-context` child; the parent and other 12 children stay
+  current-gate obligations and are not claimed as migrated.
+- The accepted 28-check and 88-unit no-loss matrices remain the historical
+  coverage ledger. Rebaseline is not retirement approval and does not turn an
+  unselected obligation into coverage.
+- All prior content-addressed evidence remains retained. No identity, pack
+  maturity or historical certification is rewritten by this decision.
+
+## Narrowed Phase 4 Sprint Design
+
+Phase 4 has four separately authorized sprints. Each owns one result and stops.
+A discovered prerequisite, input, effect, process, restoration, selector,
+network or residue defect stops the sprint; it is not repaired without a new
+bounded authorization.
+
+### Sprint 4A - Native Build Preservation Contract
+
+**Objective:** repair and certify the existing native admin/portal build
+preservation boundary with synthetic files and child actions, without running a
+product build or adding qualification control-plane machinery.
+
+**Exact proposed editable files:**
+
+- `scripts/release-build-contract.js`;
+- `scripts/lib/release-build-preservation.js` (new);
+- `tests/releaseBuildContract.test.js` (new);
+- `docs/testing/release-qualification-kernel.md`;
+- this target architecture and the controlling rebuild plan for checkpoint and
+  ledger updates.
+
+No qualification source, pack, registry, schema, identity, process controller,
+adapter, CLI, application source, build writer, package metadata, dependency or
+environment file is editable. The five accepted Phase 3 packs remain frozen and
+are neither rerun nor rebound.
+
+**Read-only inputs:** `scripts/write-build-info.js`, portal
+`../ISET-intake/scripts/write-build-info.js`, the four current generated-file
+paths named by those writers, `package.json`, `tests/jest.config.js` and the
+lock-bound Jest entry used for the one focused test. Environment files, product
+source and installed dependency trees beyond the exact test entry are not read.
+
+**Permitted effects:** focused local Jest execution; JavaScript syntax and
+whitespace checks; and attempt-owned OS-temporary trees containing only
+synthetic generated files and synthetic build-output directories. The helper
+may run injected in-process success/failure actions only. It must not spawn a
+product build.
+
+**Prohibited:** network or external service access; package installation;
+database/SQL, AWS/IAM, browsers, HTTP services, deployments, TEST/PROD;
+product build execution; current-gate execution; modification of a real
+generated file, product/native assertion, environment file or dependency; new
+qualification machinery or pack; pack promotion; admission or release-authority
+change; Phase `4B` or later work.
+
+**Required verification:**
+
+1. the native commands, argument selection, working directories, build-output
+   locations and normal success/failure exit behavior remain unchanged;
+2. the declared generated inventory is exactly admin `buildInfo.js` and
+   `publicReleaseNotes.js` plus portal `buildInfo.js` and `publicBuildInfo.js`;
+3. pre-existing bytes are restored after injected success and injected failure,
+   while initially absent files return to absence;
+4. both isolated build-output roots are absent after every path and an unrelated
+   sentinel is never changed or deleted;
+5. a missing/duplicate/escaping generated path, restoration failure or
+   undeclared output root fails closed with exact evidence;
+6. independent teardown proves every synthetic root absent after each test;
+7. the focused backend test, JavaScript syntax, source/import boundary and
+   whitespace checks pass, and the repository diff is limited to the authorized
+   files.
+
+The only verification commands are:
+
+```text
+node --check scripts/release-build-contract.js
+node --check scripts/lib/release-build-preservation.js
+node --check tests/releaseBuildContract.test.js
+node node_modules/jest/bin/jest.js --config tests/jest.config.js --runInBand --runTestsByPath tests/releaseBuildContract.test.js --no-cache
+git diff --check
+git status --short
+git diff --name-only
+```
+
+The focused test itself owns the import-boundary and independent temporary-root
+absence assertions. No broader admin aggregate or qualification suite is run.
+
+No implicit retry is allowed. Any unexpected input, write, source overlap,
+restoration or residue failure stops without repair or rerun. Completion stops
+after `4A` evidence and documentation; actual builds wait for separately
+authorized `4B`.
+
+### Sprint 4B - Direct Admin and Portal Build Proof
+
+**Objective:** prove the repaired native admin and portal build commands directly
+from one frozen clean source state; add no code, adapter or pack.
+
+Only the two checkpoint documents may be edited. Read-only inputs are the
+accepted `4A` files, admin and portal package/lock/build configuration,
+writers/generated files, `src/**`, `public/**`, lock-bound installed build
+dependencies, and each local `.env.test`. Raw environment values must never
+enter evidence, documentation, Git or reports; only approved digests may be
+retained.
+
+Permitted effects are exactly two executions each of
+`node scripts/release-build-contract.js --admin` and
+`node scripts/release-build-contract.js --portal`, their declared isolated
+build roots and temporary generated-file writes. No network or external service,
+package install, browser, HTTP service, database, AWS, environment or current
+qualification gate is authorized. Before each command and after its cleanup,
+record the exact four generated-file bytes, source-state identity, relevant
+process absence and output-root absence. All four executions must pass from the
+same product source, restore exact bytes, remove output roots and leave no
+process/temp/source residue. Any additional generated file, external connection,
+source drift, failure, restoration mismatch or residue stops immediately without
+repair or rerun. Stop after `4B`; `4C` is separate.
+
+### Sprint 4C - One Product-Owned Browser Contract
+
+**Objective:** make the existing `intervention-posting-context` native runner's
+selectors and persistent assertions conform to the accepted browser contract
+without executing a browser.
+
+The proposed editable scope is only
+`scripts/intervention-posting-context-browser-smoke.js`,
+`src/pages/Caseworking/caseWorkspace/modals/InterventionModal.jsx`,
+`src/lib/__tests__/interventionModalLifecycle.test.js`, and the two checkpoint
+documents. Preserve native PATCH `postingContext`, saved/reopened state and final
+record read-only assertions. Add or reuse one product-owned modal boundary and
+stable state/action attributes; scope every click and state read to it. Focused
+source/component tests must detect boundary removal, selector ambiguity, stale
+state and revival of page-global/transient assertions. No build, HTTP server,
+browser or qualification pack runs. A semantic workflow change or need for
+another product component stops for Bill. Stop after `4C`; `4D` is separate.
+
+### Sprint 4D - One Compiled Browser Command
+
+**Objective:** harden and prove only the existing authoritative command
+`node scripts/release-browser-smoke-suite.js --only intervention-posting-context --json`.
+
+The proposed editable scope is exactly
+`scripts/release-browser-smoke-suite.js`, a new narrow
+`scripts/lib/release-browser-suite-control.js`, a new focused
+`tests/releaseBrowserSmokeSuite.test.js`,
+`docs/testing/release-qualification-kernel.md`, and the two checkpoint
+documents. The `4C` child/product bytes are read-only semantic authority. No
+qualification adapter, pack, registry, CLI, generic HTTP service abstraction,
+browser action DSL, second child or screenshot platform is permitted.
+
+Focused synthetic tests must prove exact `--only` admission; selected-child
+attribution; structured success and failure output; bounded child timeout;
+graceful then forced descendant termination; wrong/stale loopback responder
+rejection; server shutdown and port release; exact build/generated restoration;
+and screenshot/temp/build/process/socket residue detection. They must not launch
+a real browser or product build. After that proof passes, freeze source and run
+the exact selected native command three times. Each run must prove browser
+runtime identity, loopback-only requests, external-network denial, `4C` scoped
+selector/persistent-state assertions, structured child result, exact generated
+restoration and zero screenshot/temp/build/process/socket/source residue.
+
+Any synthetic or native failure, ambiguity, external request, source drift,
+cleanup failure or residue stops without repair or rerun. Stop after Bill reviews
+the complete Phase 4 evidence. Phase 5 requires a separate exact authorization.
+
+## Exact Proposed Authorization for Sprint 4A
+
+> Bill authorizes Sprint `4A` only under the accepted `P3-1` lean programme.
+>
+> Objective: repair and certify the existing native admin/portal build-
+> preservation boundary with attempt-owned synthetic files and injected child
+> actions, including the confirmed portal `publicBuildInfo.js` restoration gap,
+> without running a product build or adding qualification control-plane
+> machinery.
+>
+> Editable files are limited exactly to:
+>
+> - `scripts/release-build-contract.js`
+> - `scripts/lib/release-build-preservation.js`
+> - `tests/releaseBuildContract.test.js`
+> - `docs/testing/release-qualification-kernel.md`
+> - the approved target-architecture checkpoint
+> - the controlling-plan checkpoint and Sprint Ledger
+>
+> Read-only inputs, temporary local effects, prohibitions and verification are
+> exactly those recorded under `Sprint 4A - Native Build Preservation Contract`
+> in the approved target architecture. Run only the exact seven verification
+> commands recorded there. Do not read an environment file or execute an admin
+> or portal build.
+>
+> Any unexpected input, source overlap, undeclared generated/output path,
+> restoration failure, unrelated-file change, cleanup failure, residue or
+> unexplained test failure requires an immediate stop without repair or rerun.
+> Do not modify qualification machinery, product source, build writers,
+> dependencies, environment files, pack status, release admission or authority;
+> do not run a product build, browser check, current qualification gate or begin
+> Sprint `4B`.
+>
+> Stop after Sprint `4A` and report its evidence, deviations, changed files,
+> worktree state and completion decision. Sprint `4B` requires separate Bill
+> authorization.

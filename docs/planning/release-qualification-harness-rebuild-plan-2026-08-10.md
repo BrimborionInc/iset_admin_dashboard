@@ -221,7 +221,11 @@ Scope:
 
 Prohibited: database, AWS, browser, deployed environment, and stateful fixture checks.
 
-Exit gate: five consecutive identical advisory runs, deliberate failing-test detection, no disagreement with direct commands, and Bill review.
+Original exit gate: five consecutive identical advisory runs, deliberate
+failing-test detection, no disagreement with direct commands, and Bill review.
+Bill accepted Phase 3 under decision `P3-1` on 2026-08-12 with an explicit
+exception for the five-run cohort property, which remains unmet at `0/5`. The
+exception is not a test pass and changes no pack maturity or release authority.
 
 Advisory remainder sequence, recorded after Bill accepted Sprint `3A` and
 subject to separate Bill authorization for every sprint:
@@ -247,11 +251,18 @@ regression scope and stopping point for each sprint are normative in
 [the target architecture](./release-qualification-harness-target-architecture-2026-08-10.md#phase-3-remaining-sprint-breakdown).
 An aggregate that cannot prove its known ambient prerequisites or zero residue
 stops for a separately authorized repair; later sprints do not continue around
-it. Every pack remains advisory. After `3H`, five frozen-identity cohort
-attempts must match every direct command with no unexplained disagreement, then
-Bill reviews Phase 3. Recording this sequence authorizes none of it.
+it. Every pack remains advisory. The original sequence required five
+frozen-identity cohort attempts after `3H`; Bill's accepted `P3-1` exception
+leaves that property explicitly unmet at `0/5`. Recording the historical
+sequence authorizes none of it.
 
-### Phase 4 - Local Process, Build, HTTP, and Browser Adapters
+The original Phase 4-11 definitions below are retained as the disposition
+baseline for the accepted programme rebaseline. They no longer authorize or
+control sequence, scope, certification counts, promotion, or retirement. The
+controlling lean sequence follows them under **Accepted Phase 3 Decision and
+Programme Rebaseline**.
+
+### Original Phase 4 - Local Process, Build, HTTP, and Browser Adapters
 
 This phase is issued as separate prompts in this order:
 
@@ -264,7 +275,7 @@ Each adapter must complete its own known-good, known-bad, timeout, and interrupt
 
 Exit gate: every adapter certified independently and the one browser pack repeatable without global text selectors, transient toast requirements, external services, or database effects.
 
-### Phase 5 - Database Adapter and Local Transaction Packs
+### Original Phase 5 - Database Adapter and Local Transaction Packs
 
 Scope order:
 
@@ -285,7 +296,7 @@ Non-negotiable controls:
 
 Exit gate: independently certified adapter, deliberate schema/statement rejection, successful rollback fixture, forced-interruption recovery, zero residue, and Bill review.
 
-### Phase 6 - Change-Impact Selection and Test-Pack Migration
+### Original Phase 6 - Change-Impact Selection and Test-Pack Migration
 
 Scope:
 
@@ -297,7 +308,7 @@ Scope:
 
 Exit gate: deliberate selection/omission mutation tests, documented coverage ownership, no unmapped runtime source, and Bill approval of the selection policy.
 
-### Phase 7 - Read-Only TEST Control Plane
+### Original Phase 7 - Read-Only TEST Control Plane
 
 Mode recommendation: `Extra High`.
 
@@ -312,7 +323,7 @@ Scope:
 
 Exit gate: three repeatable read-only TEST runs, deliberate stale/mismatched evidence rejection, bounded transport failure, and Bill review.
 
-### Phase 8 - First Stateful TEST Domain Pack
+### Original Phase 8 - First Stateful TEST Domain Pack
 
 Requires separate approval for the exact identities, relational/object fixtures, external effects, cleanup, maintenance state, and test duration.
 
@@ -330,7 +341,7 @@ Required sequence:
 
 Exit gate: three clean attempts, deliberate product-failure detection in a controlled candidate, deliberate harness-fixture failure classified correctly, interruption recovery, and zero residue.
 
-### Phase 9 - Advisory Parallel Operation
+### Original Phase 9 - Advisory Parallel Operation
 
 Scope:
 
@@ -341,7 +352,7 @@ Scope:
 
 Exit gate: an agreed observation window, no unexplained disagreement, stable evidence, and a reviewed cutover recommendation.
 
-### Phase 10 - Controlled Promotion and Legacy Retirement
+### Original Phase 10 - Controlled Promotion and Legacy Retirement
 
 Scope:
 
@@ -353,43 +364,57 @@ Scope:
 
 Exit gate: Bill explicitly authorizes cutover. PROD use remains a separate release decision.
 
-### Phase 11 - Deliberate Complexity Growth
+### Original Phase 11 - Deliberate Complexity Growth
 
 After the foundation is authoritative, add broader role journeys, cross-app signing, notifications, concurrency, privacy denials, payments, and recovery scenarios as separate packs. Each follows the same experimental-to-mandatory promotion path. The LLM may propose batches around shared invariants, but no batch bypasses component proof or pack certification.
 
-## Phase 3 Closeout and Proportionality Proposal
+## Accepted Phase 3 Decision and Programme Rebaseline
 
-Bill has ended the bespoke Phase 3 exit-operator effort. Phases 0-2 are complete.
-Phase 3 retains five certified advisory packs plus certified source inventory and
-stability; `portal-aggregate` remains in the unchanged authoritative gate;
-RN02/RN04 remain open; and the additional cohort requirement remains unmet at
-zero of five. No pack maturity, admission or release authority changed, and
-Phase 4 remains unauthorized.
+Bill selected `P3-1` on 2026-08-12. Phase 3 is accepted with an explicit
+exception for its unmet five-run cohort property. The accepted assets are the
+five certified advisory packs and certified role-aware source inventory and
+before/after stability controls. The five-run property remains `0/5` and must
+never be represented as proved. `portal-aggregate` remains deferred; RN02/RN04
+remain open; every pack remains unpromoted with `releaseAuthority: none`; and
+the unchanged current release gate remains authoritative.
 
-Bill's Phase 3 choices are recorded in the target architecture: `P3-1` accept
-with an explicit cohort-gate exception (**CODEX recommendation**); `P3-2` close
-formally incomplete; or `P3-3` replace the graph/coordinator gate with one
-separately authorized command-level cumulative certification plus before/after
-source-stability proof. None is silently selected by this document.
+The bespoke exit coordinator is closed and must not be revived under another
+name. The following lean sequence is now controlling:
 
-The proposed proportional treatment of the remaining roadmap is:
-
-| Phase | Proposed disposition | Practical boundary |
+| Sequence | Controlling treatment | Outcome and stopping rule |
 | --- | --- | --- |
-| 4 | narrow | Exact build restoration and one local compiled-browser workflow; only required process/loopback mechanics |
-| 5 | narrow | Existing live-schema guard plus one exact rollback-only local transaction pack; no universal SQL parser |
-| 6 | merge | Add minimal impact/dependency mapping as checks onboard; unknown changes use the full current gate |
-| 7 | retain | Read-only TEST identity, provenance, health and bounded transport |
-| 8 | retain | One owned, stateful deployed workflow with cleanup and zero residue |
-| 9 | merge | Only if promotion is desired, compare during three representative release rehearsals rather than a standalone long observation programme |
-| 10 | defer | Keep current gate authoritative; reconsider promotion/retirement only after demonstrated value |
-| 11 | remove as a programme phase | Add future scenarios individually from current product risk, incidents or contracts |
+| Phase 4 | **narrow** | Harden and prove the existing authoritative admin/portal build wrapper, then one selected compiled `intervention-posting-context` browser command. Reuse the native commands directly; do not add another adapter/pack/control-plane layer. Stop after Bill reviews the one-workflow result. |
+| Phase 5 | **narrow** | Certify exact target/DDL proof, per-statement admission and one rollback-only local transaction fixture with interruption recovery and independent zero residue. No universal SQL parser or broad DB pack migration. |
+| Phase 6 | **merge** | Add only the ownership/dependency mapping needed by each Phase 4, 5, 7 or 8 check or pack. Unknown or ambiguous change scope continues to require the unchanged full current gate. Phase 6 has no separate implementation programme or exit gate. |
+| Phase 7 | **retain** | Prove read-only TEST identity, deployment provenance, rollback-artifact presence, target health and bounded transport. It still requires explicit TEST authorization. |
+| Phase 8 | **retain** | Exercise one critical deployed workflow with owned fixtures, persistent assertions, cleanup and independent zero-residue proof. It still requires exact effect/environment authorization. |
+| After Phase 8 | mandatory programme review | Stop and decide whether these four outcomes materially improved pre-PROD evidence. No promotion, retirement or platform expansion follows automatically. |
 
-Essential release-safety work is the narrowed Phase 4/5 boundary and retained
-Phase 7/8 boundary. Exhaustive migration, durable audit infrastructure, long
-parallel observation, broad promotion/retirement and speculative scenario growth
-are not automatic prerequisites. Bill must approve the Phase 3 treatment and
-this rebaseline before any separately scoped implementation prompt.
+Original Phase 9 is **merged** only into a future promotion decision: if Bill
+later wants new evidence to influence admission, comparison occurs during three
+representative release rehearsals plus one full regression, with every
+disagreement retained. Original Phase 10 is **deferred** in full. Original Phase
+11 is **removed as a programme phase**; its scenarios remain a visible
+product-risk backlog and require individual evidence of need and authorization.
+The accepted R4 design remains a design record, not an automatically funded
+storage programme.
+
+### Narrowed Phase 4 Breakdown
+
+Every sprint requires separate Bill authorization. No sprint may broaden the
+five Phase 3 packs, repair `portal-aggregate`, migrate the other 12 browser
+children, access an external service, or change release authority.
+
+| Sprint | One objective | Boundary and verification | Stop |
+| --- | --- | --- | --- |
+| `4A` | Repair and certify the existing native build-preservation boundary without running a product build. | Extract only the wrapper's snapshot/restore/output-cleanup mechanics into a testable helper, add the known missing portal `publicBuildInfo.js` ownership, and use attempt-owned synthetic files/actions to prove success, child failure, absent/pre-existing files, exact byte restoration and zero residue. No qualification adapter, pack, registry or CLI is added. | Stop after focused synthetic restoration evidence. Any additional generated output or need to change native build semantics stops without repair. |
+| `4B` | Prove the repaired native admin and portal builds directly. | From one frozen clean source state, run each existing native build command exactly twice, using sensitive `.env.test` values locally without retaining raw values. Prove exit status, expected isolated output during execution, exact generated-file restoration, output/temp absence and before/after source stability. No advisory wrapper or new pack. | Stop after direct build evidence. Any external access, source drift, restoration failure or residue stops without repair or rerun. |
+| `4C` | Establish the product-owned selector and persistent-state contract for the one chosen browser workflow. | Scope `intervention-posting-context` actions/assertions to the exact case-workspace/intervention-modal boundary, preserve its PATCH posting-context and final-record-read-only product assertions, and prove deliberate selector ambiguity/stale-state rejection with focused native source/component tests. No build, server or browser runs in this sprint. | Stop after the selector contract. Any need to change workflow semantics or add another browser child requires Bill's decision. |
+| `4D` | Harden and prove the one selected compiled-browser command. | Keep native `node scripts/release-browser-smoke-suite.js --only intervention-posting-context --json` authoritative. Add only the parent timeout/termination, selected-child structured failure evidence and loopback/build/browser/temp/socket residue tests needed by this command, then run it three times from one frozen source state. No generic HTTP/browser adapter, advisory pack or second child. | Stop after Bill reviews the complete Phase 4 evidence. Do not onboard a second browser workflow automatically. |
+
+Phase 4 completion means these four bounded sprints passed and Bill reviewed the
+evidence. It does not promote their packs, close RN02/RN04, certify the other
+browser children, change admission or authorize Phase 5.
 
 ## Confirmed-Findings Register
 
@@ -450,7 +475,7 @@ Before issuing the next Codex prompt, confirm:
 ## Current Checkpoint
 
 - Plan created: 2026-08-10.
-- Current authorized phase/sprint: none. Bill ended the Phase 3 exit-operator effort. Phases 0-2 are complete; Phase 3 retains five certified advisory packs and certified source inventory/stability, while `portal-aggregate` remains deferred under the unchanged authoritative gate and RN02/RN04 remain open. The additional cohort exit requirement remains unmet at zero of five and no further operator/cohort execution is planned. The target architecture now presents `P3-1` explicit exception (recommended), `P3-2` formal incomplete close, and `P3-3` simpler command-level evidence as Bill's alternatives, plus a proportional rebaseline of Phases 4-11. Phase 4, environment access, pack promotion, admission and release-authority change remain unauthorized pending Bill's decisions.
+- Current authorized phase/sprint: none. Bill selected `P3-1` and accepted Phase 3 with an explicit exception for the unmet `0/5` cohort property. The five certified advisory packs and Sprint `3H` source inventory/stability are accepted; `portal-aggregate` remains deferred; RN02/RN04 remain open; no pack is promoted; `releaseAuthority: none` and the unchanged current authoritative gate remain controlling. Bill approved the lean roadmap: Phase 4 narrow, Phase 5 narrow, Phase 6 merge, Phases 7-8 retain, Phase 9 merge only if future promotion is desired, Phase 10 defer, and Phase 11 remove as a programme phase. Phase 4 has not begun. The exact proposed Sprint `4A` authorization is recorded in the target architecture, but implementation, environment access, admission and release-authority change remain unauthorized until Bill issues that separate prompt.
 - Phase 0 audit artifact: [release-qualification-harness-current-state-audit-2026-08-10.md](./release-qualification-harness-current-state-audit-2026-08-10.md) (`0A` inventory, `0B` dependency/effect map, `0C` retained-history classification, and `0D` component dispositions and synthesis). Bill reviewed and accepted the completed audit and explicitly authorized Phase 1/Sprint `1A`; the Phase 0 exit gate is satisfied.
 - Sprint `0B` severity correction: the project severity scale is now applied to all 13 confirmed findings: 0 critical, 0 high, 8 medium, and 5 low. No finding triggers the automatic-stop rule.
 - Sprint `0C` taxonomy: 56 identifiable failed qualification gates, counted once at the outer check or, for the two `r18` targeted attempts whose outer artifact is absent, once at the independently retained causal check: 7 `product`, 34 `harness`, 0 `environment`, 0 `infrastructure`, and 15 `unclassified`. Narrative/interrupted events with no named machine check remain separate. No Sprint `0C` finding is critical and no automatic stop applies.
@@ -543,4 +568,4 @@ Before issuing the next Codex prompt, confirm:
 | Corrected Phase 3 exit gate | incomplete - second operator stop | [The corrected stop](./release-qualification-harness-target-architecture-2026-08-10.md#corrected-phase-3-exit-gate-execution-stop) records the exact two-document checkpoint/push at `f6cc806`, clean frozen admission, the one permitted temporary predicate/baseline correction and one fresh execution. Attempt `attempt:df759c21-6128-4e96-8fbb-5074b59192a2` passed the AI result/comparison/cleanup gate in memory, then the operator dereferenced valid `cancellation: null` during graph projection. Failure evidence is retained; no complete attempt, repair or rerun followed and residue checks were clean. All qualification identities and authority boundaries remain unchanged. | Bill separately authorizes only a bounded read-only exit-operator design review mapping the complete graph projection to authoritative nullable schema/contracts and a synthetic pre-native proof; no further native execution, Phase 4 or authority change is automatic |
 | Final Phase 3 exit sprint | completed as governed stop; Phase 3 stopped incomplete | [The final exit stop](./release-qualification-harness-target-architecture-2026-08-10.md#final-phase-3-exit-gate-completion-stop) records clean admission at `be56fc5`, the temporary coordinator's frozen `fa980228...` byte digest and its complete pre-native proof boundary. The sole synthetic command stopped at its first internal read-only Git proof with `spawnSync git EPERM`, before a synthetic case, proof artifact, evidence root, bundle load, native/direct/advisory command or cohort attempt. No escalation, correction or rerun followed. Existing packs, source contracts, portal deferral, RN02/RN04, current gate and authority remain unchanged. | Bill reviews the final stop and either closes the rebuild at Phase 3 as stopped incomplete or makes a separate governance decision about the unmet exit criterion; no further exit execution or Phase 4 work is automatic |
 | Elevated unchanged-coordinator exit | completed as deterministic admission stop; Phase 3 incomplete | [The elevated stop](./release-qualification-harness-target-architecture-2026-08-10.md#elevated-unchanged-coordinator-admission-stop) supersedes the earlier EPERM conclusion. External admission proved clean `df8e4d0`; the coordinator remained byte-identical at `fa980228...`; bounded process escalation was granted and its internal Git commands ran. The unchanged coordinator then correctly rejected `df8e4d0` because its immutable admitted baseline is `be56fc5`. No synthetic case, proof artifact, evidence root, bundle load, native/direct/advisory command or cohort attempt ran, and no repair/rerun followed. | Bill must resolve the proved baseline-governance conflict or explicitly change the exit criterion before any further execution; Phase 4 remains unauthorized |
-| Phase 3 closeout and programme-proportionality review | completed - Bill decision pending | [The closeout review](./release-qualification-harness-target-architecture-2026-08-10.md#phase-3-closeout-and-programme-proportionality-review) ends the bespoke exit-operator/cohort effort, records Phases 0-2 complete, preserves five certified advisory packs plus certified source inventory/stability, and records the cohort gate unmet at 0/5 with `portal-aggregate` deferred and RN02/RN04 open. It recommends explicit exception `P3-1` and narrows the remaining programme to four material release-safety outcomes; no pack, authority, admission, environment or implementation state changed. | Bill chooses `P3-1`, `P3-2` or `P3-3`, approves/revises/rejects the proportional roadmap, and only then separately authorizes an exact next sprint; Phase 4 remains unauthorized |
+| Phase 3 closeout and programme rebaseline | completed - `P3-1` accepted | [The accepted rebaseline](./release-qualification-harness-target-architecture-2026-08-10.md#p3-1-acceptance-and-lean-programme-rebaseline) records Bill's explicit `0/5` cohort exception, accepts the five advisory packs and source-state controls without promotion, preserves `portal-aggregate`, RN02/RN04 and the current gate, disposes every original Phase 4-11 deliverable, and replaces automatic platform growth with four bounded safety outcomes. [The Phase 4 design](./release-qualification-harness-target-architecture-2026-08-10.md#narrowed-phase-4-sprint-design) defines `4A-4D` and the exact first authorization. No implementation, pack, authority, admission or environment state changed. | Bill separately authorizes Sprint `4A` using the exact copy-ready boundary in the target architecture; no Phase 4 work is automatic |
