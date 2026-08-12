@@ -8054,3 +8054,71 @@ one new evidence root, and run exactly five complete cohort attempts with fresh
 or source-stability disagreement requires an immediate stop without repair or
 rerun. Only the approved Phase 3 checkpoint documents may then change; Phase 4,
 promotion, admission and release-authority changes remain unauthorized.
+
+## Corrected Phase 3 Exit-Gate Execution Stop
+
+Bill authorized one bounded objective to checkpoint the first stop and complete
+the corrected exit gate. Admission proved that the two approved checkpoint
+documents were the repository's only changes. They were committed and pushed as
+`f6cc8066ce04763aba2525c52916470325fa62eb` with message
+`docs(qualification): record Phase 3 exit-gate stop`; local `HEAD`, local
+`origin/main` and the clean checkout agreed. The complete pushed range contained
+only those two documents and the repository had no GitHub workflow file. That
+commit became the fresh frozen exit baseline.
+
+Only the non-repository `/tmp/rq-phase3-exit-gate.js` operator changed: its
+read-only cleanup predicate now accepts `no-declared-write-effect` while still
+requiring completed/passed independent proof, and its baseline commit was
+updated to the verified checkpoint. Syntax passed; the active five-pack and
+Sprint `3H` source-state files and identities remained unchanged. The operator's
+random run key selected a new evidence root, leaving the first incomplete
+attempt untouched.
+
+The sole corrected command opened cohort attempt
+`attempt:df759c21-6128-4e96-8fbb-5074b59192a2` and direct-control attempt
+`attempt:36f58dc0-b92f-4bc1-ae60-6a123399ed70` for
+`ai-guidance-contract`. It then stopped with exit `1` and exact message
+`Cannot read properties of null (reading 'kind')`. The failure artifact is
+retained at
+`tmp/release-qualification/phase3/exit-gate/working-e36118dc-ddde-4322-9802-d63872b666b5/failure.json`
+with digest
+`17c651e223362534236c75e2d8f97d6d81f6e5c1dbffea38fc55aac3817b2658`.
+No second pack or second cohort attempt ran; there was no repair or rerun.
+
+### Deterministic Classification
+
+This is another local exit-operator defect, not a product, environment or
+infrastructure failure. The process controller deliberately emits
+`cancellation: null` when no cancellation occurred
+(`qualification/src/process-control.js:492-520`). After the operator had already
+required the advisory result to pass, direct/advisory comparison to match,
+termination to be proved, and cleanup/independent residue proof to pass, its
+graph projection unconditionally read
+`advisory.processEvidence.cancellation.kind`
+(`/tmp/rq-phase3-exit-gate.js:148-188,397-407`). A successful non-cancelled result
+therefore failed during evidence-graph projection. The source sequence proves
+the AI predicates and comparison matched in memory, but the failure handler
+retained only the operational failure record, not the pack comparison or graph.
+It therefore cannot count as a completed result.
+
+Independent post-stop checks found no qualifying native/exit child process and
+no attempt-owned AI/native/aggregate temporary root. The repository remained
+clean at the frozen checkpoint. The five-pack/source-state contracts, pack
+maturity, current gate, `portal-aggregate` deferral, RN02/RN04 and
+`releaseAuthority: none` did not change. The previously reviewed deliberate-
+failure, interruption, cleanup and zero-residue certification remains valid but
+still cannot replace the missing cohort.
+
+**Completion decision:** the corrected exit exercise stopped correctly and is
+incomplete. Exactly zero of five complete cohort attempts exist. Phase 3 has not
+met its exit gate and should not be accepted as complete.
+
+**Convergence recommendation:** do not authorize another predicate patch or
+native rerun. The two successive failures are both assumptions in a one-off
+operator about already certified bridge/process evidence shapes. Apply the
+controlling step-back rule through a bounded read-only exit-operator design
+review that maps every projected field to the authoritative schema and actual
+nullable contract, defines a synthetic pre-native proof for the complete graph,
+and returns one finite execution proposal. No qualification/native command,
+implementation change, pack change, authority change or Phase 4 work should be
+authorized by that review.
