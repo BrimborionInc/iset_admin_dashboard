@@ -26,6 +26,7 @@ function createDriver({
   wrongForeignKeyOwner = false,
   wrongForeignKeyType = false,
   noUniqueIndex = false,
+  alphaDdl = null,
 } = {}) {
   const objects = {
     alpha: {
@@ -81,6 +82,7 @@ function createDriver({
     },
   };
   if (forbiddenColumn) objects.alpha.columns.push(column('retired_field'));
+  if (alphaDdl) objects.alpha.ddl = alphaDdl;
   if (omitObject) delete objects[omitObject];
 
   const query = jest.fn(async (sql, params = []) => {
@@ -184,6 +186,19 @@ describe('reusable live MySQL schema guard', () => {
     }));
     expect(evidence.objects.alpha_view.type).toBe('view');
     expect(guard.objectExists('alpha_view', 'view')).toBe(true);
+    expect(guard.getObjectProof('alpha').rawDdl).toBe(
+      "CREATE TABLE `alpha` (`id` bigint NOT NULL, `name` varchar(255) NOT NULL, `status` enum('active','inactive') NOT NULL, PRIMARY KEY (`id`))"
+    );
+    expect(crypto.createHash('sha256').update(guard.getObjectProof('alpha').rawDdl).digest('hex'))
+      .toBe(guard.getObjectProof('alpha').ddlHash);
+    expect(guard.getObjectProof('alpha').rawDdlHash).toBe(guard.getObjectProof('alpha').ddlHash);
+    expect(guard.getObjectProof('alpha').structuralDdlHash).toBe(guard.getObjectProof('alpha').ddlHash);
+    expect(guard.getObjectProof('alpha').volatileDdlOptions).toEqual([]);
+    expect(guard.getObjectProof('alpha_view').rawDdl).toBe(
+      'CREATE ALGORITHM=UNDEFINED VIEW `alpha_view` AS select `alpha`.`id` AS `id`,`alpha`.`name` AS `name` from `alpha`'
+    );
+    expect(crypto.createHash('sha256').update(guard.getObjectProof('alpha_view').rawDdl).digest('hex'))
+      .toBe(guard.getObjectProof('alpha_view').ddlHash);
     expect(guard.getObjectProof('beta').constraints).toEqual(expect.arrayContaining([
       expect.objectContaining({
         name: 'fk_beta_alpha',
@@ -194,6 +209,49 @@ describe('reusable live MySQL schema guard', () => {
     ]));
     expect(guard.getObjectProof('alpha').uniqueIndexes).toEqual({ primary: ['id'] });
     expect(connection.execute).not.toHaveBeenCalled();
+  });
+
+  test('stable DDL identity excludes only the observed InnoDB AUTO_INCREMENT counter value', async () => {
+    const prefix = "CREATE TABLE `alpha` (`id` bigint NOT NULL AUTO_INCREMENT, `name` varchar(255) NOT NULL, `status` enum('active','inactive') NOT NULL, PRIMARY KEY (`id`))";
+    const first = createGuard(createDriver({
+      alphaDdl: `${prefix} ENGINE=InnoDB AUTO_INCREMENT=17 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+    }));
+    const second = createGuard(createDriver({
+      alphaDdl: `${prefix} ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+    }));
+    await first.preflight();
+    await second.preflight();
+
+    const firstProof = first.getObjectProof('alpha');
+    const secondProof = second.getObjectProof('alpha');
+    expect(firstProof.rawDdl).not.toBe(secondProof.rawDdl);
+    expect(firstProof.rawDdlHash).not.toBe(secondProof.rawDdlHash);
+    expect(firstProof.structuralDdlHash).toBe(secondProof.structuralDdlHash);
+    expect(firstProof.volatileDdlOptions).toEqual([{
+      name: 'AUTO_INCREMENT',
+      observedValue: '17',
+      source: 'SHOW CREATE TABLE',
+      scope: 'InnoDB table option between ENGINE and DEFAULT CHARSET',
+    }]);
+    expect(secondProof.volatileDdlOptions[0].observedValue).toBe('18');
+  });
+
+  test.each([
+    ['engine', 'ENGINE=MyISAM AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'],
+    ['charset', 'ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci'],
+    ['collation', 'ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci'],
+    ['option order', 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 AUTO_INCREMENT=18 COLLATE=utf8mb4_unicode_ci'],
+  ])('%s remains part of structural DDL identity', async (_label, options) => {
+    const prefix = "CREATE TABLE `alpha` (`id` bigint NOT NULL AUTO_INCREMENT, `name` varchar(255) NOT NULL, `status` enum('active','inactive') NOT NULL, PRIMARY KEY (`id`))";
+    const baseline = createGuard(createDriver({
+      alphaDdl: `${prefix} ENGINE=InnoDB AUTO_INCREMENT=17 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+    }));
+    const changed = createGuard(createDriver({ alphaDdl: `${prefix} ${options}` }));
+    await baseline.preflight();
+    await changed.preflight();
+
+    expect(changed.getObjectProof('alpha').structuralDdlHash)
+      .not.toBe(baseline.getObjectProof('alpha').structuralDdlHash);
   });
 
   test.each([

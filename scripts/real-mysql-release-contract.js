@@ -2,6 +2,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
 const mysql = require('mysql2/promise');
@@ -46,6 +47,122 @@ const REAL_CONTRACT_OBJECTS = Object.freeze(Array.from(new Set([
   'funding_overview_version_documents',
   'iset_document',
 ])));
+const ROLLBACK_FIXTURE_OBJECTS = Object.freeze([
+  'staff_profiles',
+  'client_file_import_run',
+  'client_file_import_identity_claim',
+  'iset_event_entry',
+  'iset_event_delivery',
+  'user',
+  'client',
+  'iset_case',
+  'iset_application',
+  'funding_overview_series',
+  'funding_overview_version',
+  'funding_overview_version_documents',
+  'iset_document',
+]);
+const ATTEMPT_RESIDUE_AUDITS = Object.freeze([
+  Object.freeze({
+    key: 'staffProfiles',
+    object: 'staff_profiles',
+    sql: 'SELECT COUNT(*) FROM staff_profiles WHERE cognito_sub = ?',
+    paramKeys: Object.freeze(['staffSubject']),
+  }),
+  Object.freeze({
+    key: 'importRuns',
+    object: 'client_file_import_run',
+    sql: 'SELECT COUNT(*) FROM client_file_import_run WHERE request_hash = ?',
+    paramKeys: Object.freeze(['importHash']),
+  }),
+  Object.freeze({
+    key: 'identityClaims',
+    object: 'client_file_import_identity_claim',
+    sql: 'SELECT COUNT(*) FROM client_file_import_identity_claim WHERE identity_key = ?',
+    paramKeys: Object.freeze(['identityKey']),
+  }),
+  Object.freeze({
+    key: 'events',
+    object: 'iset_event_entry',
+    sql: 'SELECT COUNT(*) FROM iset_event_entry WHERE id = ?',
+    paramKeys: Object.freeze(['eventId']),
+  }),
+  Object.freeze({
+    key: 'deliveries',
+    object: 'iset_event_delivery',
+    sql: 'SELECT COUNT(*) FROM iset_event_delivery WHERE event_id = ?',
+    paramKeys: Object.freeze(['eventId']),
+  }),
+  Object.freeze({
+    key: 'financialOverviewUsers',
+    object: 'user',
+    sql: 'SELECT COUNT(*) FROM user WHERE email = ?',
+    paramKeys: Object.freeze(['applicantEmail']),
+  }),
+  Object.freeze({
+    key: 'financialOverviewClients',
+    object: 'client',
+    sql: 'SELECT COUNT(*) FROM client WHERE applicant_account_email = ?',
+    paramKeys: Object.freeze(['applicantEmail']),
+  }),
+  Object.freeze({
+    key: 'financialOverviewCases',
+    object: 'iset_case',
+    sql: 'SELECT COUNT(*) FROM iset_case WHERE case_number = ?',
+    paramKeys: Object.freeze(['caseNumber']),
+  }),
+  Object.freeze({
+    key: 'financialOverviewApplications',
+    object: 'iset_application',
+    sql: `SELECT COUNT(*)
+            FROM \`iset_application\` AS \`d\`
+            JOIN \`client\` AS \`s\` ON \`s\`.\`id\` = \`d\`.\`client_id\`
+           WHERE \`s\`.\`applicant_account_email\` = ?`,
+    paramKeys: Object.freeze(['applicantEmail']),
+  }),
+  Object.freeze({
+    key: 'financialOverviewSeries',
+    object: 'funding_overview_series',
+    sql: `SELECT COUNT(*)
+            FROM \`funding_overview_series\` AS \`s\`
+            JOIN \`iset_case\` AS \`d\` ON \`d\`.\`id\` = \`s\`.\`case_id\`
+           WHERE \`d\`.\`case_number\` = ?`,
+    paramKeys: Object.freeze(['caseNumber']),
+  }),
+  Object.freeze({
+    key: 'financialOverviewVersions',
+    object: 'funding_overview_version',
+    sql: `SELECT COUNT(*)
+            FROM \`funding_overview_version\` AS \`v\`
+            JOIN \`funding_overview_series\` AS \`s\` ON \`s\`.\`id\` = \`v\`.\`series_id\`
+            JOIN \`iset_case\` AS \`d\` ON \`d\`.\`id\` = \`s\`.\`case_id\`
+           WHERE \`d\`.\`case_number\` = ?`,
+    paramKeys: Object.freeze(['caseNumber']),
+  }),
+  Object.freeze({
+    key: 'financialOverviewVersionDocuments',
+    object: 'funding_overview_version_documents',
+    sql: `SELECT COUNT(*)
+            FROM \`funding_overview_version_documents\` AS \`vd\`
+            JOIN \`funding_overview_version\` AS \`v\` ON \`v\`.\`id\` = \`vd\`.\`funding_overview_version_id\`
+            JOIN \`funding_overview_series\` AS \`s\` ON \`s\`.\`id\` = \`v\`.\`series_id\`
+            JOIN \`iset_case\` AS \`d\` ON \`d\`.\`id\` = \`s\`.\`case_id\`
+           WHERE \`d\`.\`case_number\` = ?`,
+    paramKeys: Object.freeze(['caseNumber']),
+  }),
+  Object.freeze({
+    key: 'financialOverviewDocuments',
+    object: 'iset_document',
+    sql: 'SELECT COUNT(*) FROM iset_document WHERE file_path IN (?, ?, ?, ?, ?)',
+    paramKeys: Object.freeze([
+      'protectedDocumentPath',
+      'replaceableDocumentPath',
+      'caseLevelApplicationFormPath',
+      'currentApplicationFormPath',
+      'metadataOnlyCurrentOverviewPath',
+    ]),
+  }),
+]);
 const RELEASE_CONTRACT_RESIDUE_AUDITS = Object.freeze([
   Object.freeze({
     key: 'staffProfilesByCognitoSubject',
@@ -94,10 +211,112 @@ const RELEASE_CONTRACT_RESIDUE_AUDITS = Object.freeze([
   }),
   Object.freeze({
     key: 'financialOverviewDocuments',
+    object: 'iset_document',
     sql: 'SELECT COUNT(*) FROM iset_document WHERE file_path LIKE ?',
     params: Object.freeze(['release-qualification/%']),
   }),
+  Object.freeze({
+    key: 'financialOverviewApplications',
+    object: 'iset_application',
+    sql: `SELECT COUNT(*)
+            FROM \`iset_application\` AS \`d\`
+            JOIN \`client\` AS \`s\` ON \`s\`.\`id\` = \`d\`.\`client_id\`
+           WHERE \`s\`.\`applicant_account_email\` LIKE ?`,
+    params: Object.freeze(['release-financial-overview-%@example.invalid']),
+  }),
+  Object.freeze({
+    key: 'financialOverviewSeries',
+    object: 'funding_overview_series',
+    sql: `SELECT COUNT(*)
+            FROM \`funding_overview_series\` AS \`s\`
+            JOIN \`iset_case\` AS \`d\` ON \`d\`.\`id\` = \`s\`.\`case_id\`
+           WHERE \`d\`.\`case_number\` LIKE ?`,
+    params: Object.freeze(['RQ-FO-%']),
+  }),
+  Object.freeze({
+    key: 'financialOverviewVersions',
+    object: 'funding_overview_version',
+    sql: `SELECT COUNT(*)
+            FROM \`funding_overview_version\` AS \`v\`
+            JOIN \`funding_overview_series\` AS \`s\` ON \`s\`.\`id\` = \`v\`.\`series_id\`
+            JOIN \`iset_case\` AS \`d\` ON \`d\`.\`id\` = \`s\`.\`case_id\`
+           WHERE \`d\`.\`case_number\` LIKE ?`,
+    params: Object.freeze(['RQ-FO-%']),
+  }),
+  Object.freeze({
+    key: 'financialOverviewVersionDocuments',
+    object: 'funding_overview_version_documents',
+    sql: `SELECT COUNT(*)
+            FROM \`funding_overview_version_documents\` AS \`vd\`
+            JOIN \`funding_overview_version\` AS \`v\` ON \`v\`.\`id\` = \`vd\`.\`funding_overview_version_id\`
+            JOIN \`funding_overview_series\` AS \`s\` ON \`s\`.\`id\` = \`v\`.\`series_id\`
+            JOIN \`iset_case\` AS \`d\` ON \`d\`.\`id\` = \`s\`.\`case_id\`
+           WHERE \`d\`.\`case_number\` LIKE ?`,
+    params: Object.freeze(['RQ-FO-%']),
+  }),
 ]);
+
+function normalizeAttemptId(value, { generate = true } = {}) {
+  if ((value === undefined || value === null || value === '') && generate) {
+    return `auto-${crypto.randomUUID()}`;
+  }
+  const attemptId = String(value || '').trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/u.test(attemptId)) {
+    throw new Error('release_contract_attempt_id_invalid');
+  }
+  return attemptId;
+}
+
+function createFixtureIdentity(attemptId) {
+  const normalizedAttemptId = normalizeAttemptId(attemptId, { generate: false });
+  const suffix = crypto.createHash('sha256').update(normalizedAttemptId).digest('hex').slice(0, 32);
+  return Object.freeze({
+    suffix,
+    staffSubject: `release-qualification-${suffix}`,
+    staffEmail: `release-qualification-${suffix}@example.invalid`,
+    importHash: crypto.createHash('sha256').update(`release-import-${suffix}`).digest('hex'),
+    identityKey: `rq:${crypto.createHash('sha256').update(suffix).digest('hex')}`,
+    eventId: `${suffix.slice(0, 8)}-${suffix.slice(8, 12)}-4${suffix.slice(13, 16)}-a${suffix.slice(17, 20)}-${suffix.slice(20)}`,
+    applicantEmail: `release-financial-overview-${suffix}@example.invalid`,
+    caseNumber: `RQ-FO-${suffix.slice(0, 20)}`,
+    protectedDocumentPath: `release-qualification/${suffix}/financial-overview-v1-signed.pdf`,
+    replaceableDocumentPath: `release-qualification/${suffix}/financial-overview-legacy.pdf`,
+    caseLevelApplicationFormPath: `release-qualification/${suffix}/case-level-application-form.pdf`,
+    currentApplicationFormPath: `release-qualification/${suffix}/current-application-form.pdf`,
+    metadataOnlyCurrentOverviewPath: `release-qualification/${suffix}/financial-overview-v2-metadata-only.pdf`,
+  });
+}
+
+function residueStatementCatalogue() {
+  return Object.freeze(ATTEMPT_RESIDUE_AUDITS.map(audit => Object.freeze({
+    key: audit.key,
+    object: audit.object,
+    sqlHash: crypto.createHash('sha256').update(audit.sql.trim()).digest('hex'),
+  })));
+}
+
+function createFixtureLedger(attemptId) {
+  const normalizedAttemptId = normalizeAttemptId(attemptId, { generate: false });
+  const fixture = createFixtureIdentity(normalizedAttemptId);
+  const residueStatements = residueStatementCatalogue();
+  const ledgerDigest = crypto.createHash('sha256').update(JSON.stringify({
+    attemptId: normalizedAttemptId,
+    fixture,
+    residueStatements,
+  })).digest('hex');
+  return Object.freeze({
+    schemaVersion: 1,
+    attemptId: normalizedAttemptId,
+    fixture,
+    objects: ROLLBACK_FIXTURE_OBJECTS,
+    residueStatements,
+    ledgerDigest,
+  });
+}
+
+function paramsForAttemptAudit(audit, fixture) {
+  return audit.paramKeys.map(key => fixture[key]);
+}
 
 function parseArgs(argv) {
   const args = {
@@ -105,6 +324,9 @@ function parseArgs(argv) {
     targetEnv: 'dev',
     schemaPreflightOnly: false,
     residueAuditOnly: false,
+    attemptId: null,
+    failAfterFirstMutation: false,
+    interruptAfterFirstMutation: false,
     json: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -113,6 +335,9 @@ function parseArgs(argv) {
     else if (token === '--target-env') args.targetEnv = String(argv[++index] || '').toLowerCase();
     else if (token === '--schema-preflight-only') args.schemaPreflightOnly = true;
     else if (token === '--residue-audit-only') args.residueAuditOnly = true;
+    else if (token === '--attempt-id') args.attemptId = normalizeAttemptId(argv[++index], { generate: false });
+    else if (token === '--fail-after-first-mutation') args.failAfterFirstMutation = true;
+    else if (token === '--interrupt-after-first-mutation') args.interruptAfterFirstMutation = true;
     else if (token === '--json') args.json = true;
     else if (token === '--help' || token === '-h') {
       console.log([
@@ -125,6 +350,9 @@ function parseArgs(argv) {
         '  --target-env dev   Must be dev; TEST/PROD use deployed acceptance tooling.',
         '  --schema-preflight-only  Prove exact DEV identity and structural metadata; no ordinary SQL.',
         '  --residue-audit-only  Preflight, then count release-contract residue; no mutation or cleanup.',
+        '  --attempt-id ID    Bind fixture markers and residue evidence to one validated attempt.',
+        '  --fail-after-first-mutation  Deliberate post-mutation rollback proof; requires --attempt-id.',
+        '  --interrupt-after-first-mutation  Deliberate abrupt interruption proof; requires --attempt-id.',
         '  --json             Emit JSON.',
       ].join('\n'));
       process.exit(0);
@@ -137,6 +365,15 @@ function parseArgs(argv) {
   }
   if (args.schemaPreflightOnly && args.residueAuditOnly) {
     throw new Error('--schema-preflight-only and --residue-audit-only are mutually exclusive.');
+  }
+  if (args.failAfterFirstMutation && args.interruptAfterFirstMutation) {
+    throw new Error('--fail-after-first-mutation and --interrupt-after-first-mutation are mutually exclusive.');
+  }
+  if ((args.failAfterFirstMutation || args.interruptAfterFirstMutation) && !args.attemptId) {
+    throw new Error('Deliberate failure/interruption controls require --attempt-id.');
+  }
+  if ((args.failAfterFirstMutation || args.interruptAfterFirstMutation) && (args.schemaPreflightOnly || args.residueAuditOnly)) {
+    throw new Error('Deliberate failure/interruption controls require the full rollback contract.');
   }
   return args;
 }
@@ -207,6 +444,10 @@ function serializeFailure(error, seen = new WeakSet()) {
     if (rollback) serialized.recovery.rollback = rollback;
     if (cleanupRecovery) serialized.recovery.cleanup = cleanupRecovery;
   }
+  if (typeof error.attemptId === 'string') serialized.attemptId = safeErrorText(error.attemptId);
+  if (error.fixtureLedger && typeof error.fixtureLedger === 'object') {
+    serialized.fixtureLedger = error.fixtureLedger;
+  }
   if (Array.isArray(error.errors) && error.errors.length) {
     serialized.errors = error.errors.map(nested => serializeFailure(nested, seen));
   }
@@ -223,10 +464,14 @@ function failureReport(error) {
   };
 }
 
-async function runResidueAudit(connection) {
+async function runResidueAudit(connection, { fixtureLedger = null } = {}) {
+  const audits = fixtureLedger ? ATTEMPT_RESIDUE_AUDITS : RELEASE_CONTRACT_RESIDUE_AUDITS;
   const counts = {};
-  for (const audit of RELEASE_CONTRACT_RESIDUE_AUDITS) {
-    counts[audit.key] = await queryScalar(connection, audit.sql, [...audit.params]);
+  for (const audit of audits) {
+    const params = fixtureLedger
+      ? paramsForAttemptAudit(audit, fixtureLedger.fixture)
+      : [...audit.params];
+    counts[audit.key] = await queryScalar(connection, audit.sql, params);
   }
   const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
   if (total !== 0) {
@@ -234,13 +479,17 @@ async function runResidueAudit(connection) {
     error.name = 'ReleaseContractResidueError';
     error.code = 'release_contract_residue_detected';
     error.cleanup = counts;
+    if (fixtureLedger) {
+      error.attemptId = fixtureLedger.attemptId;
+      error.fixtureLedger = fixtureLedger;
+    }
     error.recovery = {
       rollback: { attempted: 0, succeeded: 0, failed: 0 },
       cleanup: {
         planned: 0,
         attempted: 0,
         completed: 0,
-        auditChecks: RELEASE_CONTRACT_RESIDUE_AUDITS.length,
+        auditChecks: audits.length,
         nonzeroScopes: Object.values(counts).filter(count => count !== 0).length,
         totalResidue: total,
       },
@@ -251,31 +500,41 @@ async function runResidueAudit(connection) {
     counts,
     total,
     clean: true,
-    auditChecks: RELEASE_CONTRACT_RESIDUE_AUDITS.length,
+    auditChecks: audits.length,
   };
 }
 
-async function runRollbackContracts(connection, executionState = { mutationBegan: false }) {
-  const suffix = crypto.randomUUID().replace(/-/gu, '');
-  const staffSubject = `release-qualification-${suffix}`;
-  const staffEmail = `release-qualification-${suffix}@example.invalid`;
-  const importHash = crypto.createHash('sha256').update(`release-import-${suffix}`).digest('hex');
-  const identityKey = `rq:${crypto.createHash('sha256').update(suffix).digest('hex')}`;
-  const eventId = crypto.randomUUID();
-  const applicantEmail = `release-financial-overview-${suffix}@example.invalid`;
-  const caseNumber = `RQ-FO-${suffix.slice(0, 20)}`;
-  const protectedDocumentPath = `release-qualification/${suffix}/financial-overview-v1-signed.pdf`;
-  const replaceableDocumentPath = `release-qualification/${suffix}/financial-overview-legacy.pdf`;
-  const caseLevelApplicationFormPath = `release-qualification/${suffix}/case-level-application-form.pdf`;
-  const currentApplicationFormPath = `release-qualification/${suffix}/current-application-form.pdf`;
-  const metadataOnlyCurrentOverviewPath = `release-qualification/${suffix}/financial-overview-v2-metadata-only.pdf`;
+async function runRollbackContracts(
+  connection,
+  executionState = { mutationBegan: false },
+  { attemptId = null, afterFirstMutation = null } = {}
+) {
+  const resolvedAttemptId = normalizeAttemptId(attemptId);
+  const fixtureLedger = createFixtureLedger(resolvedAttemptId);
+  const {
+    suffix,
+    staffSubject,
+    staffEmail,
+    importHash,
+    identityKey,
+    eventId,
+    applicantEmail,
+    caseNumber,
+    protectedDocumentPath,
+    replaceableDocumentPath,
+    caseLevelApplicationFormPath,
+    currentApplicationFormPath,
+    metadataOnlyCurrentOverviewPath,
+  } = fixtureLedger.fixture;
+  executionState.attemptId = resolvedAttemptId;
+  executionState.fixtureLedger = fixtureLedger;
   let transactionStarted = false;
   let contractError = null;
   let rollbackError = null;
   const recovery = {
     rollback: { attempted: 0, succeeded: 0, failed: 0 },
     cleanup: {
-      planned: 8,
+      planned: ATTEMPT_RESIDUE_AUDITS.length,
       attempted: 0,
       completed: 0,
       nonzeroScopes: 0,
@@ -296,6 +555,12 @@ async function runRollbackContracts(connection, executionState = { mutationBegan
          region_id = COALESCE(VALUES(region_id), region_id)`,
       [staffSubject, staffEmail, 'System Administrator', null]
     );
+    if (afterFirstMutation) {
+      await afterFirstMutation({
+        attemptId: resolvedAttemptId,
+        fixtureLedger,
+      });
+    }
     const selectedColumns = STAFF_PROFILE_RUNTIME_COLUMNS.map(column => `\`${column}\``).join(', ');
     const [staffRows] = await connection.query(
       `SELECT ${selectedColumns} FROM staff_profiles WHERE cognito_sub = ? LIMIT 1`,
@@ -554,7 +819,11 @@ async function runRollbackContracts(connection, executionState = { mutationBegan
     transactionStarted = false;
   } catch (error) {
     contractError = error;
-    if (!executionState.mutationBegan) throw error;
+    if (!executionState.mutationBegan) {
+      error.attemptId = resolvedAttemptId;
+      error.fixtureLedger = fixtureLedger;
+      throw error;
+    }
     if (transactionStarted) {
       recovery.rollback.attempted += 1;
       try {
@@ -578,24 +847,13 @@ async function runRollbackContracts(connection, executionState = { mutationBegan
     return count;
   };
   try {
-    await auditResidue('staffProfiles', 'SELECT COUNT(*) FROM staff_profiles WHERE cognito_sub = ?', [staffSubject]);
-    await auditResidue('importRuns', 'SELECT COUNT(*) FROM client_file_import_run WHERE request_hash = ?', [importHash]);
-    await auditResidue('identityClaims', 'SELECT COUNT(*) FROM client_file_import_identity_claim WHERE identity_key = ?', [identityKey]);
-    await auditResidue('events', 'SELECT COUNT(*) FROM iset_event_entry WHERE id = ?', [eventId]);
-    await auditResidue('deliveries', 'SELECT COUNT(*) FROM iset_event_delivery WHERE event_id = ?', [eventId]);
-    await auditResidue('financialOverviewUsers', 'SELECT COUNT(*) FROM user WHERE email = ?', [applicantEmail]);
-    await auditResidue('financialOverviewCases', 'SELECT COUNT(*) FROM iset_case WHERE case_number = ?', [caseNumber]);
-    await auditResidue(
-      'financialOverviewDocuments',
-      'SELECT COUNT(*) FROM iset_document WHERE file_path IN (?, ?, ?, ?, ?)',
-      [
-        protectedDocumentPath,
-        replaceableDocumentPath,
-        caseLevelApplicationFormPath,
-        currentApplicationFormPath,
-        metadataOnlyCurrentOverviewPath,
-      ]
-    );
+    for (const audit of ATTEMPT_RESIDUE_AUDITS) {
+      await auditResidue(
+        audit.key,
+        audit.sql,
+        paramsForAttemptAudit(audit, fixtureLedger.fixture)
+      );
+    }
     recovery.cleanup.nonzeroScopes = Object.values(residue).filter(value => value !== 0).length;
     recovery.cleanup.totalResidue = Object.values(residue).reduce((sum, value) => sum + value, 0);
     if (recovery.cleanup.nonzeroScopes !== 0) {
@@ -611,6 +869,8 @@ async function runRollbackContracts(connection, executionState = { mutationBegan
     aggregate.code = residueError ? 'release_contract_cleanup_unproven' : 'release_contract_failed';
     aggregate.cleanup = residue;
     aggregate.recovery = recovery;
+    aggregate.attemptId = resolvedAttemptId;
+    aggregate.fixtureLedger = fixtureLedger;
     throw aggregate;
   }
   return residue;
@@ -621,6 +881,8 @@ async function runRealMysqlReleaseContract({
   config,
   schemaPreflightOnly = false,
   residueAuditOnly = false,
+  attemptId = null,
+  afterFirstMutation = null,
 }) {
   const executionState = { mutationBegan: false };
   const schemaGuard = createLiveMysqlSchemaGuard({
@@ -640,19 +902,25 @@ async function runRealMysqlReleaseContract({
   });
   const schemaSafety = await schemaGuard.preflight();
   if (schemaPreflightOnly) {
+    const objectProofs = Object.fromEntries(
+      REAL_CONTRACT_OBJECTS.map(name => [name, schemaGuard.getObjectProof(name)])
+    );
     return {
       schemaVersion: 2,
       status: 'passed',
       targetEnvironment: 'dev',
       mode: 'schema-preflight-only',
       schemaSafety,
+      objectProofs,
+      residueStatementCatalogue: residueStatementCatalogue(),
       ordinaryStatementCount: 0,
       mutationBegan: false,
     };
   }
   const guardedConnection = schemaGuard.createGuardedConnection();
   if (residueAuditOnly) {
-    const residue = await runResidueAudit(guardedConnection);
+    const fixtureLedger = attemptId ? createFixtureLedger(attemptId) : null;
+    const residue = await runResidueAudit(guardedConnection, { fixtureLedger });
     return {
       schemaVersion: 2,
       status: 'passed',
@@ -666,6 +934,8 @@ async function runRealMysqlReleaseContract({
         version: schemaSafety.identity.version,
       },
       residue,
+      attemptId: fixtureLedger?.attemptId || null,
+      fixtureLedger,
       mutationBegan: false,
       cleanupAttempted: false,
       schemaSafety: schemaGuard.evidence(),
@@ -673,7 +943,10 @@ async function runRealMysqlReleaseContract({
   }
   await assertAdminRuntimeSchemaReady(guardedConnection);
   await assertPortalRuntimeSchemaReady(guardedConnection);
-  const cleanup = await runRollbackContracts(guardedConnection, executionState);
+  const cleanup = await runRollbackContracts(guardedConnection, executionState, {
+    attemptId,
+    afterFirstMutation,
+  });
   return {
       schemaVersion: 2,
       status: 'passed',
@@ -700,9 +973,34 @@ async function runRealMysqlReleaseContract({
         admin: ADMIN_RUNTIME_SCHEMA_REQUIREMENTS.length,
         portal: PORTAL_RUNTIME_SCHEMA_REQUIREMENTS.length,
       },
+      attemptId: executionState.attemptId,
+      fixtureLedger: executionState.fixtureLedger,
       cleanup,
       schemaSafety: schemaGuard.evidence(),
   };
+}
+
+function mutationControlFromArgs(args) {
+  if (args.failAfterFirstMutation) {
+    return async ({ attemptId, fixtureLedger }) => {
+      const error = new Error('release_contract_injected_failure_after_first_mutation');
+      error.code = 'release_contract_injected_failure_after_first_mutation';
+      error.attemptId = attemptId;
+      error.fixtureLedger = fixtureLedger;
+      throw error;
+    };
+  }
+  if (args.interruptAfterFirstMutation) {
+    return async ({ attemptId, fixtureLedger }) => {
+      fs.writeSync(2, `${JSON.stringify({
+        event: 'release_contract_interrupt_after_first_mutation',
+        attemptId,
+        ledgerDigest: fixtureLedger.ledgerDigest,
+      })}\n`);
+      process.kill(process.pid, 'SIGKILL');
+    };
+  }
+  return null;
 }
 
 async function main() {
@@ -717,6 +1015,8 @@ async function main() {
       config,
       schemaPreflightOnly: args.schemaPreflightOnly,
       residueAuditOnly: args.residueAuditOnly,
+      attemptId: args.attemptId,
+      afterFirstMutation: mutationControlFromArgs(args),
     });
     if (args.json) console.log(JSON.stringify(result, null, 2));
     else if (args.schemaPreflightOnly) {
@@ -743,13 +1043,20 @@ if (require.main === module) {
 }
 
 module.exports = {
+  ATTEMPT_RESIDUE_AUDITS,
   EXPECTED_DEV_IDENTITY,
   RELEASE_CONTRACT_RESIDUE_AUDITS,
   REAL_CONTRACT_OBJECTS,
+  ROLLBACK_FIXTURE_OBJECTS,
+  createFixtureIdentity,
+  createFixtureLedger,
   databaseConfig,
   failureReport,
   main,
+  mutationControlFromArgs,
+  normalizeAttemptId,
   parseArgs,
+  residueStatementCatalogue,
   runRealMysqlReleaseContract,
   runResidueAudit,
   runRollbackContracts,

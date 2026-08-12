@@ -482,6 +482,58 @@ unexpected PATCH, loopback-only traffic, exact restoration and zero declared
 residue. Sprint `4D` completes at `3/3`, completing narrowed Phase 4. Phase 5
 remains unauthorized.
 
+### Narrowed Phase 5 Breakdown
+
+Bill accepted narrowed Phase 4 at clean pushed commit
+`3962846b6d3e39672bd9a34932451fb783b6fe9a` and authorized read-only Sprint
+`5A`. Sprint `5A` selected the existing local DEV `real-mysql-contract` and its
+canonical live-schema guard. The exact target declaration is configured
+`iset_intake` / `172.26.176.1:3306` / `root`, with required live server
+`DESKTOP-PDFA51K`, principal `root@172.26.%` and MySQL `8.0.40`. The local
+ignored admin configuration contains the required keys and its non-secret tuple
+matches that declaration, but no connection occurred and current live identity,
+DDL and permissions remain unproved.
+
+The selected pack is preferred to `payment-db-rollback` because it is already
+DEV-only, uses the canonical one-object metadata/finished-statement guard and
+owns a single rollback-only transaction; the payment runner currently admits
+both DEV and TEST identities. The pack preflights 25 exact objects and mutates
+13. Its current per-attempt zero-residue proof covers eight objects, omitting
+direct attempt-bound checks for `client`, `iset_application`,
+`funding_overview_series`, `funding_overview_version` and
+`funding_overview_version_documents`. This prevents certification but does not
+prove present residue.
+
+The original two-sprint preference is unsafe for this repository. The five
+missing statements cannot be written or authorized until current live DDL is
+captured, and mutation cannot share an approval with still-unknown SQL. The
+minimal sequence is:
+
+| Sprint | Objective, effects and stopping rule |
+| --- | --- |
+| `5A` | **Completed definition only.** Read repository/configuration shape and update the two controlling documents. No database connection, SQL, implementation or certification. Stop with the exact target/pack, existing statement/object catalogue, gap and later boundaries. |
+| `5B` | **Metadata and contract closure.** With separate approval, run one initial metadata-only exact-target/full-DDL preflight; if it passes, add only a validated attempt ID, immutable 13-object fixture/residue ledger, five current-DDL-proven residue statements and first-successful-mutation failure/interruption controls to the existing runner and focused tests; run source-only verification and one final metadata-only preflight. No ordinary read, count, transaction, fixture or cleanup SQL. Any mismatch, denied metadata operation, broader-file need or unproved statement stops without workaround. |
+| `5C` | **Conditional execution and certification.** With separate approval from a clean frozen `5B` checkpoint, re-prove exact identity/full DDL, prove a zero 13-scope baseline, then run exactly one forced post-first-mutation failure, one abrupt post-first-mutation interruption and one normal rollback-only contract. A fresh independent 13-scope verifier follows each. No cleanup SQL or implicit rerun; any nonzero/unproved residue, source drift, unexpected statement, external access or process residue stops Phase 5. |
+
+Detailed object/statement ownership, capabilities, fixture lifecycle, evidence,
+verification and copy-ready Sprint `5B` authorization are recorded in the
+[narrowed Phase 5 design](./release-qualification-harness-target-architecture-2026-08-10.md#narrowed-phase-5-sprint-design).
+
+Sprint `5B` completed the metadata and pack-contract closure. The corrected
+initial and final metadata-only preflights both proved the exact configured/live
+DEV identity, 25 complete object proofs and zero ordinary/verified statements;
+the live proof was stable across the implementation. The existing credential
+was sufficient for every required metadata operation and no permission was
+denied. The runner now binds an explicit or uniquely generated attempt ID to an
+immutable 13-object ledger, 13 attempt-bound statement hashes and complete
+residue evidence; the broad baseline has 14 counts because `staff_profiles` has
+two scopes. Exact live foreign keys support the four descendant checks. Focused
+real-contract/live-guard verification passed 36/36 with clean syntax,
+dependencies and whitespace. No readiness query, count, transaction, fixture,
+cleanup SQL or interruption occurred. The frozen catalogue SHA-256 is
+`c6913f3cc6fd71762dbbd4052cfdf328f952da0d10e24f877e671b8a16770562`.
+Sprint `5C` remains separately gated.
+
 ## Confirmed-Findings Register
 
 During every phase, record potential product weaknesses separately with:
@@ -541,7 +593,7 @@ Before issuing the next Codex prompt, confirm:
 ## Current Checkpoint
 
 - Plan created: 2026-08-10.
-- Current authorized phase/sprint: none. Bill selected `P3-1` and accepted Phase 3 with an explicit exception for the unmet `0/5` cohort property. The five certified advisory packs and Sprint `3H` source inventory/stability are accepted; `portal-aggregate` remains deferred; RN02/RN04 remain open; no pack is promoted; `releaseAuthority: none` and the unchanged current authoritative gate remain controlling. Bill approved the lean roadmap: Phase 4 narrow, Phase 5 narrow, Phase 6 merge, Phases 7-8 retain, Phase 9 merge only if future promotion is desired, Phase 10 defer, and Phase 11 remove as a programme phase. Narrowed Phase 4 is complete: `4A` certified build preservation, `4B` passed direct builds at `4/4`, `4C` certified the one product-owned browser contract, and `4D-R2` corrected the runner's hidden-modal predicate and completed the selected native command at `3/3` after 16/16 focused and 10/10 synthetic gates. All native runs preserved source/generated bytes, used loopback only and left zero declared residue. Phase 5, environment access, admission and release-authority change remain unauthorized.
+- Current authorized phase/sprint: none. Bill selected `P3-1` and accepted Phase 3 with an explicit exception for the unmet `0/5` cohort property. The five certified advisory packs and Sprint `3H` source inventory/stability are accepted; `portal-aggregate` remains deferred; RN02/RN04 remain open; no pack is promoted; `releaseAuthority: none` and the unchanged current authoritative gate remain controlling. Bill approved the lean roadmap: Phase 4 narrow, Phase 5 narrow, Phase 6 merge, Phases 7-8 retain, Phase 9 merge only if future promotion is desired, Phase 10 defer, and Phase 11 remove as a programme phase. Narrowed Phase 4 is complete at accepted clean pushed commit `3962846b6d3e39672bd9a34932451fb783b6fe9a`. Narrowed Phase 5 is also complete: the historical `staff_profiles` raw-DDL change remains unclassified because its prior bytes were not retained; a prospective baseline now retains exact raw `SHOW CREATE` bytes and separate structural identities for all 25 objects; the only excluded structural value is the specifically observed numeric InnoDB table-level `AUTO_INCREMENT` counter; and focused tests passed 41/41. The abandoned interruption attempt has a fresh 13/13 zero verifier. One fresh replacement interruption and one normal rollback-only attempt then passed exact target/DDL admission, frozen statement/source identity, exact process-absence checks and fresh independent 13/13 zero-residue verification. No cleanup SQL, credential substitution, TEST or PROD work occurred. Phase 6/7, admission and release-authority change remain unauthorized.
 - Phase 0 audit artifact: [release-qualification-harness-current-state-audit-2026-08-10.md](./release-qualification-harness-current-state-audit-2026-08-10.md) (`0A` inventory, `0B` dependency/effect map, `0C` retained-history classification, and `0D` component dispositions and synthesis). Bill reviewed and accepted the completed audit and explicitly authorized Phase 1/Sprint `1A`; the Phase 0 exit gate is satisfied.
 - Sprint `0B` severity correction: the project severity scale is now applied to all 13 confirmed findings: 0 critical, 0 high, 8 medium, and 5 low. No finding triggers the automatic-stop rule.
 - Sprint `0C` taxonomy: 56 identifiable failed qualification gates, counted once at the outer check or, for the two `r18` targeted attempts whose outer artifact is absent, once at the independently retained causal check: 7 `product`, 34 `harness`, 0 `environment`, 0 `infrastructure`, and 15 `unclassified`. Narrative/interrupted events with no named machine check remain separate. No Sprint `0C` finding is critical and no automatic stop applies.
@@ -642,3 +694,9 @@ Before issuing the next Codex prompt, confirm:
 | `4D` | incomplete - synthetic gate stop | [The governed stop](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-4d-synthetic-control-stop) records 7/10 passing synthetic cases, sandbox loopback `EPERM`, lost exit-0 stdout and conflicting descendant-absence proof. No repair/rerun or native browser command followed; post-stop temp/process absence was clean. | Bill reviews the partial implementation and separately authorizes any bounded repair; Phase 5 remains unauthorized |
 | `4D` continuation | incomplete - native run stop at `0/3` | [The repair and native stop](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-4d-synthetic-repair-and-native-run-stop) records the bounded two-defect repair, elevated 10/10 synthetic gate, frozen source identities, one exact native run, the post-save modal-close timeout and misleading final-record flag, plus exact generated/source, process, socket and suite-root restoration. | Bill reviews the substantive native failure and separately authorizes any bounded product/runner diagnosis or repair; Phase 5 remains unauthorized |
 | `4D-R2` and Phase 4 | completed - native browser proof `3/3` | [The completion checkpoint](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-4d-r2-repair-and-phase-4-completion) records the hidden-retained-modal diagnosis, narrow runner/evidence repair, focused 16/16 and synthetic 10/10 gates, three fresh exact native passes, stable semantic evidence and exact source/generated/process/socket/root restoration. | Bill reviews and accepts Phase 4, then separately authorizes a bounded Phase 5 sprint; no Phase 5 work is automatic |
+| `5A` | completed - read-only executable definition | [The narrowed Phase 5 design](./release-qualification-harness-target-architecture-2026-08-10.md#narrowed-phase-5-sprint-design) selects exact local DEV `real-mysql-contract`, enumerates its target, 25 preflight objects, exact statement classes, 13 mutation objects, fixture ownership and eight-of-13 attempt-bound residue coverage. No database connection, SQL, implementation or certification occurred. The documented three-sprint sequence is a justified deviation from the two-sprint preference because current live DDL must precede authoring and freezing the five missing residue statements. | Bill separately authorizes metadata-only Sprint `5B` using the exact copy-ready boundary; no ordinary SQL, transaction or Sprint `5C` work is automatic |
+| `5B` | completed - metadata and contract closure | [The completion checkpoint](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-5b---metadata-and-contract-closure-completion) records two stable exact-target/25-object preflights with zero ordinary statements, sufficient metadata permissions, one deterministic 13-object/13-statement attempt ledger, 14-count broad baseline, DDL-proven descendant joins, first-mutation negative controls, frozen catalogue `c6913f3c...0562`, and 36/36 focused tests. No count, transaction, fixture, cleanup SQL or interruption executed. | Bill separately authorizes Sprint `5C` using the exact frozen execution boundary; no database mutation, Phase 6 or Phase 7 work is automatic |
+| `5C` | incomplete - governed post-mutation evidence-reader stop | [The governed stop](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-5c---governed-post-mutation-evidence-stop) records exact frozen admission, fresh 25-object metadata proof, a 14/14 zero baseline, and the single deliberate failure attempt. That attempt produced the expected nested injected failure, successful rollback, 13 zero guarded counts and exact process absence. The post-run reader then made a shape assumption and exited nonzero; because mutation had begun, no correction, rerun, fresh verifier or later attempt followed. | Bill reviews the stop and separately authorizes any bounded continuation; Phase 5, Phase 6 and Phase 7 remain incomplete/unauthorized |
+| `5C` continuation | incomplete - post-interruption DDL-fingerprint stop | [The continuation stop](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-5c-continuation---post-interruption-ddl-fingerprint-stop) records immutable validation and a fresh 13/13 zero verifier completing the deliberate-failure path, then the one interruption marker/exit/process-absence proof. The required fresh preflight found only `staff_profiles.ddlHash` changed while all 25 structured proofs, identity and statement catalogue stayed stable. Raw prior DDL was not retained, so the changed field/value and cause are unresolved. The DDL-mismatch rule stopped all later SQL and the normal attempt. | Bill separately reviews the DDL-identity design issue and authorizes any bounded resolution; Phase 5, Phase 6 and Phase 7 remain incomplete/unauthorized |
+| `5C` DDL reconciliation | incomplete - exact prior DDL bytes unavailable | [The reconciliation stop](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-5c-ddl-identity-reconciliation---missing-prior-bytes-stop) records a scan of all 28 files in all seven retained Phase 5 evidence roots. None contains the exact pre-interruption `SHOW CREATE TABLE staff_profiles` bytes; only its hash and structured column/index/constraint evidence were retained. The auto-increment interpretation is withdrawn as unproved. Bill's prerequisite therefore blocked current discovery, implementation and all remaining SQL. | Bill separately authorizes any future evidence strategy; Phase 5, Phase 6 and Phase 7 remain incomplete/unauthorized |
+| `5C` prospective correction and Phase 5 | completed - interruption and rollback safety certified | [The completion checkpoint](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-5c-prospective-raw-ddl-correction-and-phase-5-completion) preserves the historical raw-DDL change as unclassified; records exact raw and separately stable structural DDL identities for all 25 objects; narrows the only excluded value to the live-observed numeric InnoDB table-level `AUTO_INCREMENT` counter; and records 41/41 focused tests. A fresh verifier proved the abandoned interruption attempt had 13/13 zero residue. One replacement interruption and one normal rollback-only attempt then passed exact admission, process absence, exact raw before/after comparison, stable structured identity and fresh independent 13/13 zero-residue verification. | Bill reviews and accepts narrowed Phase 5, then separately authorizes the next lean-programme sprint; Phase 6/7, TEST, PROD, admission and authority changes remain unauthorized |

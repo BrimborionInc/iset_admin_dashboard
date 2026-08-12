@@ -8851,6 +8851,617 @@ generic adapter, qualification pack, second browser child, environment access,
 promotion, admission or release-authority change was introduced. Phase 5 remains
 unauthorized and requires a separate bounded approval.
 
+## Narrowed Phase 5 Sprint Design
+
+### Sprint 5A - Executable Database-Rollback Definition
+
+Sprint `5A` is a read-only definition sprint. It used committed source,
+configuration shape, focused tests, the Phase 0 audit and operating instructions;
+it did not connect to MySQL, execute SQL, mutate a fixture or certify the pack.
+The locally available ignored admin `.env` has the required database and
+credential keys, and its non-secret host, port, user and database fields match
+the committed expected tuple. No secret value was retained or reported. That is
+configuration evidence only, not proof of the current live target, DDL or
+permissions.
+
+#### Selected target and native pack
+
+The one recommended target is the existing local DEV MySQL target declared by
+`EXPECTED_DEV_IDENTITY`: configured database `iset_intake`, host
+`172.26.176.1`, port `3306`, user `root`; required live server
+`DESKTOP-PDFA51K`, principal `root@172.26.%` and MySQL `8.0.40`. Sprint `5B`
+must prove every element freshly using native metadata labels before any
+ordinary statement. A mismatch is a stop, not permission to change the
+allowlist or local configuration. The declaration and DEV-only CLI restriction
+are at `scripts/real-mysql-release-contract.js:27-35,102-154`; exact configured
+and live checking is at `scripts/lib/live-mysql-schema-guard.js:1001-1042`.
+
+The selected pack is the existing `real-mysql-contract`, invoked by
+`node scripts/real-mysql-release-contract.js --target-env dev --json`. Its
+metadata-only form is the same runner with `--schema-preflight-only`. It is the
+smallest suitable existing release pack because it is already restricted to
+DEV, uses the canonical guard, keeps all fixture writes inside one transaction,
+rolls back on success and has no HTTP, AWS, browser, provider or object-store
+path (`scripts/real-mysql-release-contract.js:258-616,619-735`; Phase 0 audit
+`:304,306,392,1109-1111`). The alternative `payment-db-rollback` is not selected:
+it admits both DEV and TEST configured/live identities and has unresolved
+environment precedence and pre-first-insert rollback boundaries
+(`scripts/payments-workflow-smoke.js:21-25,38-71,214-264`; Phase 0 audit
+`:311,411-421,581-584,1113`). Repairing it would broaden this phase.
+
+#### Exact object and statement catalogue
+
+The source-authoritative preflight set is exactly these 25 objects:
+
+`staff_profiles`, `iset_runtime_config`, `iset_application_version`,
+`message_item`, `staff_tutorial_progress`, `admin_ai_guidance_entry`,
+`admin_ai_guidance_example`, `client_file_import_run`,
+`client_file_import_identity_claim`, `iset_event_entry`,
+`iset_event_delivery`, `iset_case_reminder`,
+`iset_reminder_lifecycle_event`, `ptma`, `payment_submission_attempt`,
+`esdc_participant_submission_history`, `input_json_state`, `user`, `client`,
+`iset_case`, `iset_application`, `funding_overview_series`,
+`funding_overview_version`, `funding_overview_version_documents` and
+`iset_document`. The set is derived, deduplicated and frozen at
+`scripts/real-mysql-release-contract.js:36-48`, from the admin and portal
+requirements at `src/lib/adminRuntimeSchemaContract.js:3-31` and
+`../ISET-intake/src/services/schemaReadiness.js:28-34`.
+
+The complete current statement surface is:
+
+| Stage | Exact admitted statements and objects | Source authority |
+| --- | --- | --- |
+| Identity and one-object metadata | One native-label identity query; for each of the 25 objects, object discovery, `SHOW CREATE`, full columns, indexes, table constraints and key-column usage; keyword metadata for declared aliases. These are metadata only. | `scripts/lib/live-mysql-schema-guard.js:68-99,201-249,822-895,1001-1042` |
+| Runtime prerequisites | Fifteen admin `SELECT <declared columns> FROM <one table> LIMIT 0` checks, one enum metadata check for `esdc_participant_submission_history.event_type = prepared`, and five portal `SELECT <declared columns> FROM <one table> LIMIT 0` checks. | `src/lib/adminRuntimeSchemaContract.js:11-39`; `src/lib/schemaReadiness.js:18-42`; `../ISET-intake/src/services/schemaReadiness.js:18-39` |
+| Transaction control | One `START TRANSACTION`; no `COMMIT`; one `ROLLBACK` on success or after a possibly dispatched mutation. | `scripts/real-mysql-release-contract.js:272-288,546-568`; guard dispatch at `scripts/lib/live-mysql-schema-guard.js:1045-1067,1115-1134` |
+| Staff/import/event fixture | Upsert and select `staff_profiles`; insert `client_file_import_run`; insert `client_file_import_identity_claim`; insert and select `iset_event_entry`/`iset_event_delivery`. | `scripts/real-mysql-release-contract.js:290-343` |
+| Financial fixture | Insert `user`, `client`, `iset_case`, two `iset_application` rows, one `funding_overview_series`, two `funding_overview_version` rows, one `funding_overview_version_documents` row and five `iset_document` rows. | `scripts/real-mysql-release-contract.js:346-425,444-466,476-514` |
+| Product-policy reads/update | Parameter-bound active-document reads; document/version-link/version-series reads; one scoped `iset_document` archive update with a `funding_overview_version_documents` `NOT EXISTS`; final two-document status read. | `src/lib/financialOverviewDocumentPolicy.js:11-38,72-149,177-200`; `scripts/real-mysql-release-contract.js:427-543` |
+| Current per-attempt residue | Eight guarded single-table counts keyed by exact attempt values: `staff_profiles`, `client_file_import_run`, `client_file_import_identity_claim`, `iset_event_entry`, `iset_event_delivery`, `user`, `iset_case` and `iset_document`. | `scripts/real-mysql-release-contract.js:571-615` |
+| Current pre-attempt residue | Ten guarded single-table counts: two `staff_profiles` scopes, then `client_file_import_run`, `client_file_import_identity_claim`, `iset_event_entry`, `iset_event_delivery`, `user`, `client`, `iset_case` and `iset_document`. It never cleans residue. | `scripts/real-mysql-release-contract.js:49-100,226-256` |
+
+Every ordinary query is parameter-bound or constructed from a frozen identifier
+allowlist, and the guard validates the finished statement immediately before
+driver execution and records its SHA-256 and object set
+(`scripts/lib/live-mysql-schema-guard.js:1045-1067,1137-1157`). This design does
+not copy those statements into a second execution language and does not extend
+the guard into a universal parser.
+
+The transaction mutates exactly 13 objects: `staff_profiles`,
+`client_file_import_run`, `client_file_import_identity_claim`,
+`iset_event_entry`, `iset_event_delivery`, `user`, `client`, `iset_case`,
+`iset_application`, `funding_overview_series`, `funding_overview_version`,
+`funding_overview_version_documents` and `iset_document`. The current
+per-attempt proof covers only eight. It omits direct attempt-bound checks for
+`client`, `iset_application`, `funding_overview_series`,
+`funding_overview_version` and `funding_overview_version_documents`; the broader
+pre-attempt audit covers `client` but still omits the other four. Rollback
+success is therefore not yet independent zero-residue proof for the complete
+mutation scope. This is a contract-closure gap, not evidence that current
+residue exists.
+
+#### Fixture, failure, interruption and cleanup ownership
+
+The pack owns a unique suffix plus its subject, email, hash, identity key,
+event ID, applicant email, case number and five document paths before starting
+the transaction (`scripts/real-mysql-release-contract.js:258-283`). Auto IDs are
+captured from inserted parents and used only within the same attempt. Sprint
+`5B` must make the caller supply a validated unique `attemptId`, bind every
+fixture marker and residue assertion to it, and publish one immutable 13-object
+fixture/residue ledger before mutation. Shared or unowned fixtures are
+prohibited.
+
+The existing catch path rolls back and runs residue checks only after a mutation
+may have been dispatched; pre-mutation failure performs neither rollback nor
+ordinary cleanup/residue SQL (`scripts/real-mysql-release-contract.js:555-615`;
+`tests/realMysqlReleaseContractSchemaGuard.test.js:166-197,262-343`). That rule
+is retained. Sprint `5B` must add two explicit, test-only/native-CLI controls at
+the first successfully completed fixture mutation: deterministic failure and
+deterministic abrupt interruption. The interruption control may terminate only
+the attempt-owned runner and must emit a synchronous, non-secret marker before
+termination. A fresh process must then repeat exact identity/full-DDL preflight
+and run all 13 independent count assertions. No `DELETE`, compensating update,
+cleanup SQL or implicit retry is permitted. Nonzero or unproved residue stops
+Phase 5 and is reported for a separate recovery decision.
+
+#### Why Phase 5 requires three sprints
+
+The lean roadmap preferred definition plus one conditionally gated execution
+sprint. Repository evidence makes that unsafe here: five exact independent
+residue statements do not exist, and their identifiers/relationships cannot be
+authored from source or memory. Current live DDL must first be obtained through
+metadata-only discovery; the resulting exact statement catalogue and source
+must then be frozen and reviewed before any transaction is authorized. Combining
+that discovery, statement design and mutation in one approval would authorize
+unknown future SQL and defeat the repository's fail-closed rule. The minimal
+safe sequence is therefore:
+
+| Sprint | One objective | Permitted effects and verification | Stopping point |
+| --- | --- | --- | --- |
+| `5A` | Select the exact target/pack and define its executable closure. | Read source, ignored configuration shape and documentation only; update the two controlling documents. No database connection or SQL. | Stop with this plan and separate authorization for metadata-only `5B`. |
+| `5B` | Capture current metadata and close the frozen pack contract without executing ordinary SQL. | First run exactly one metadata-only preflight against the declared local DEV target. If it passes, edit only `scripts/real-mysql-release-contract.js`, `tests/realMysqlReleaseContractSchemaGuard.test.js`, the release-qualification runbook and the two checkpoints to add the immutable attempt/13-object ledger, exact DDL-proven missing residue reads, first-mutation failure/interruption controls and focused synthetic tests. Re-run focused source-only tests and a final metadata-only preflight; run no readiness read, residue count, transaction or fixture. | Any target/DDL/permission mismatch, need to edit the shared guard/product policy, inability to prove all five missing statements, or unexplained failure stops without ordinary SQL. Stop with the exact frozen statement hashes and a copy-ready `5C` execution boundary. |
+| `5C` | Execute and certify the one frozen rollback-only DEV pack. | From a clean frozen checkpoint, freshly prove exact identity/full DDL; require zero baseline across all 13 scopes; run one deliberate post-first-mutation failure, one abrupt post-first-mutation interruption and one normal rollback-only contract, each with a fresh `attemptId` and a fresh independent 13-scope verifier. Use only the direct runner and attempt-owned local process/evidence effects. | Any mismatch, failed prerequisite, nonzero/unproved residue, unexpected statement, source drift, external access or process residue stops immediately without cleanup SQL, repair or rerun. Stop for Bill's Phase 5 review; Phase 6/7 do not begin automatically. |
+
+Phase 5 completes only if the frozen normal contract passes, both negative paths
+are detected, the interrupted connection is absent, every fresh verifier proves
+all 13 attempt scopes zero, every executed statement is present in the reviewed
+guard evidence, and source/configuration identity remains stable. The current
+release gate remains authoritative throughout.
+
+#### Bill decisions and required capabilities
+
+Sprint `5B` requires Bill to authorize a metadata-only connection using the
+existing ignored local admin `.env` credential against the exact declared DEV
+tuple. The credential must be able to prove database/host/port/principal/version
+and read one-object-at-a-time table/view definitions, columns, indexes,
+constraints and keyword/enum metadata. If it cannot, CODEX must report the exact
+denied operation and effective principal; Bill must either grant that bounded
+metadata capability or supply a different explicitly authorized local DEV
+credential and approve the corresponding identity-contract change. No fallback
+credential or broader account is permitted.
+
+Sprint `5C`, if later authorized, additionally requires the same identity to
+have only the pack's evidenced capabilities: declared readiness and residue
+`SELECT`; `INSERT` on the 13 fixture objects; `UPDATE` on `staff_profiles` and
+`iset_document`; and transaction start/rollback. It requires Bill's explicit
+approval for abrupt termination of the attempt-owned local runner. It does not
+require or authorize `DELETE`, `COMMIT`, DDL, grants, TEST/PROD, network services
+other than the exact local MySQL connection, or product-provider calls. Actual
+current permission sufficiency is unresolved because Sprint `5A` did not
+connect.
+
+The recommended next work is Sprint `5B`, not transaction execution.
+
+### Exact Proposed Authorization for Sprint 5B
+
+> Bill authorizes Sprint `5B` only under the accepted narrowed Phase 5 design.
+>
+> Objective: prove the exact current local DEV MySQL identity and one-object
+> live DDL using the existing metadata-only mode, then close and synthetically
+> verify the selected `real-mysql-contract` attempt/statement/residue contract
+> without executing any ordinary SQL or fixture.
+>
+> Editable files are limited exactly to:
+>
+> - `scripts/real-mysql-release-contract.js`
+> - `tests/realMysqlReleaseContractSchemaGuard.test.js`
+> - `docs/ops/deployments/release-qualification-runbook.md`
+> - `docs/planning/release-qualification-harness-target-architecture-2026-08-10.md`
+> - `docs/planning/release-qualification-harness-rebuild-plan-2026-08-10.md`
+>
+> Read-only source inputs are the existing live MySQL guard, admin/portal schema
+> readiness declarations, financial-overview policy, focused schema-guard tests,
+> package metadata/lock and the ignored local admin `.env`. Treat all credential
+> values as sensitive and never report or retain them.
+>
+> Run exactly one initial and, after a successful bounded implementation, one
+> final invocation of
+> `node scripts/real-mysql-release-contract.js --target-env dev --schema-preflight-only --json`.
+> These invocations may connect only to the configured target matching
+> `iset_intake` / `172.26.176.1:3306` / `root` and must prove the live
+> `DESKTOP-PDFA51K` / `root@172.26.%` / MySQL `8.0.40` tuple. They may execute
+> identity and one-object-at-a-time metadata discovery only. Retain redacted,
+> content-addressed identity/DDL evidence; do not retain credentials.
+>
+> If the initial preflight passes, make only the pack-local changes recorded for
+> Sprint `5B`: validated caller-supplied attempt identity, one immutable
+> 13-object fixture/residue ledger, exact current-DDL-proven independent residue
+> statements for the five uncovered objects, deterministic controls after the
+> first successful mutation for a later forced failure and interruption, and
+> focused synthetic tests. Preserve every native product assertion, DEV-only
+> boundary, canonical guard and rollback-only behavior. Do not modify the shared
+> guard or product policy, build a parser/adapter/platform, or add another pack.
+>
+> Run only the focused Jest files for the real-MySQL contract and live guard,
+> JavaScript syntax checks, dependency/import-boundary checks and
+> `git diff --check`. Do not run readiness queries, residue counts, a transaction,
+> a fixture, cleanup SQL, the full release gate or any TEST/PROD/environment
+> workflow.
+>
+> Any target, identity, DDL or permission mismatch; inability to prove the exact
+> missing statements; need for broader files; ordinary statement; source drift;
+> secret disclosure; or unexplained failure requires an immediate stop without
+> workaround, repair or rerun. Stop after Sprint `5B` with the exact frozen
+> statement catalogue, verification and separate proposed authorization for
+> `5C`. Do not begin `5C`, Phase 6 or Phase 7 automatically.
+
+### Sprint 5B - Metadata and Contract-Closure Completion
+
+Sprint `5B` completed from Phase 4/`5A` baseline
+`3962846b6d3e39672bd9a34932451fb783b6fe9a`. It used the existing ignored
+local DEV credential and no substitute. The first retained preflight lacked
+structured column/constraint bodies even though the guard had discovered them;
+it exited `0`, had empty stderr and reported zero ordinary statements. Under
+Bill's evidence-capture correction allowance, the runner's metadata-only result
+was extended to expose `getObjectProof()` for the already-discovered 25 objects,
+and a corrected initial preflight replaced that incomplete capture. No ordinary
+statement or database effect occurred in either invocation.
+
+The corrected initial preflight exited `0`, had empty stderr, proved configured
+`iset_intake` / `172.26.176.1:3306` / `root` and live
+`DESKTOP-PDFA51K` / `root@172.26.%` / MySQL `8.0.40`, retained 25 complete
+object proofs and reported `ordinaryStatementCount: 0`. Its stdout SHA-256 is
+`eba7f566272c97df9332743f9cdb1182637969eda411a69fe4cb82f3cb834d14`.
+Every required identity, table/view discovery, create-definition, full-column,
+index, constraint, key-column, keyword and enum metadata operation succeeded.
+No operation was denied, so the effective principal's metadata permissions are
+sufficient for the exact `5B` boundary; insert/update/transaction permissions
+remain deliberately untested and unresolved.
+
+The pack-local closure now provides:
+
+- validated explicit `attemptId` input, with a unique generated ID preserving
+  the current no-flag native command;
+- deterministic, non-secret attempt markers and one immutable fixture ledger
+  binding the attempt, all 13 mutated objects, 13 residue statements and a
+  ledger digest before mutation;
+- a 13-scope attempt verifier, plus a 14-statement broad baseline in which
+  `staff_profiles` has distinct subject/email scopes;
+- current-live-DDL-proven, fully qualified foreign-key joins from
+  `iset_application`, `funding_overview_series`, `funding_overview_version` and
+  `funding_overview_version_documents` to the attempt-owned client/case marker;
+- deterministic failure and abrupt self-interruption controls acting only after
+  the first insert returns successfully; the interruption marker contains only
+  attempt ID and ledger digest; and
+- structured attempt/ledger evidence on pre-mutation, post-mutation and residue
+  failures. Pre-mutation failure still performs no rollback or ordinary residue
+  query, while post-mutation failure retains rollback plus every 13-scope result.
+
+No product assertion, shared live guard, financial-overview policy, dependency,
+qualification platform, target identity, normal rollback semantics or release
+authority changed. The interruption path was mocked only; neither deliberate
+control, readiness query, residue count, transaction, fixture nor cleanup SQL
+was executed in Sprint `5B`.
+
+#### Frozen statement catalogue
+
+The frozen catalogue binds eight source/test inputs, the 13 fixture objects,
+13 attempt statements and 14 broad-baseline statements at catalogue SHA-256
+`c6913f3cc6fd71762dbbd4052cfdf328f952da0d10e24f877e671b8a16770562`.
+The eight byte digests freeze the existing readiness, fixture and product-policy
+statement sources without copying product SQL into a second language; Sprint
+`5C` must compare the canonical guard's per-execution hashes/object sets with
+those frozen source/effect boundaries. The explicit hashes below are the
+complete independent attempt-residue catalogue added by `5B`.
+The exact attempt-bound statement hashes are:
+
+| Evidence key | Object | Finished-statement SHA-256 |
+| --- | --- | --- |
+| `staffProfiles` | `staff_profiles` | `65d69bf2b7295fcf6e78fcd8926bffede48f2c8c456fab814d861904e7e2254d` |
+| `importRuns` | `client_file_import_run` | `f7fe3589c065747ec47f9f9027d21a8fafb7eadfe8e67b50c2eda515cfa13e52` |
+| `identityClaims` | `client_file_import_identity_claim` | `c10bc10ae957fdecc0c74a011b728576540c9543e3c56522ed1118d0621f40bf` |
+| `events` | `iset_event_entry` | `ae934af6c75df4299b3c4f77138d12f6b1a1506b70370162eb967aabd15f439b` |
+| `deliveries` | `iset_event_delivery` | `647488d6a8ee7f751ea6da59a499fa98114bfd992d301ea5a5a6159faa432070` |
+| `financialOverviewUsers` | `user` | `5684b99a92aa9671ab5b4be887e93e6edd6a5ecc5b3e571d7ac61bdc1f062a06` |
+| `financialOverviewClients` | `client` | `a5d7aeb334df6becdfad86f94fc1072df44443d3b1ef5fc9e81c4c59a95ab731` |
+| `financialOverviewCases` | `iset_case` | `c8dccc8b12a0e3ceda5bf3ecc461be1831d3322eb1a5a92da82ffb65e0fb6252` |
+| `financialOverviewApplications` | `iset_application` | `4e660402d4e7bd84ae41087632a17005014c64e7ef8fa10df2158907e7c4e528` |
+| `financialOverviewSeries` | `funding_overview_series` | `a176db74eee1b6866929fe85e850d59483e6217d6bfec461598ad097f6c81177` |
+| `financialOverviewVersions` | `funding_overview_version` | `0719796b7088417f2e3938cf362c34b268fe03d564f2c4ba323061bfef8daf12` |
+| `financialOverviewVersionDocuments` | `funding_overview_version_documents` | `d2a23782370560333fab92e228304e7914f008eae3f50237b319f6c26519efc7` |
+| `financialOverviewDocuments` | `iset_document` | `99eff597cbb6ebd394feded7f24f7a3ce3d7fc4306b85f8553bd7e5ccd3af142` |
+
+Focused Jest verification passed 36/36 assertions across the modified
+real-contract suite and unchanged live-guard suite. JavaScript syntax,
+dependency resolution and `git diff --check` passed. One first focused run
+failed because its synthetic metadata omitted the already live-proven
+`client_file_import_run.request_hash`; the test-only metadata was corrected and
+the complete focused boundary then passed twice. A later source-freeze command
+hit sandbox `spawnSync git EPERM`; it created no catalogue or source/database
+effect and was corrected by passing shell-obtained `HEAD` into the same hashing
+operation.
+
+The final metadata-only preflight exited `0`, had empty stderr and stdout
+SHA-256 `f2e71cdbf57d13db179d62f168a3958b09fbf649d818ced1a7d2f9d6b9be69fc`.
+It reproduced the exact identity, all 25 DDL/column/index/constraint hashes and
+all 13 frozen statement hashes; its eight source inputs matched the frozen
+catalogue and both ordinary and verified-statement counts were zero. Sprint
+`5B` is complete. Sprint `5C` remains unauthorized.
+
+### Exact Proposed Authorization for Sprint 5C
+
+> Bill authorizes Sprint `5C` only under the completed narrowed Phase 5 design
+> and frozen Sprint `5B` contract.
+>
+> Objective: execute and certify the one frozen local DEV
+> `real-mysql-contract` through a clean 13-scope baseline, one deliberate
+> post-first-mutation failure, one abrupt post-first-mutation interruption and
+> one normal rollback-only completion, with fresh independent zero-residue proof
+> after every attempt.
+>
+> Before execution, verify that only the five reported Sprint `5B` files differ
+> from clean baseline `3962846b6d3e39672bd9a34932451fb783b6fe9a`, that every
+> frozen source/test digest and catalogue SHA-256
+> `c6913f3cc6fd71762dbbd4052cfdf328f952da0d10e24f877e671b8a16770562`
+> matches, and that local `HEAD` and `origin/main` still agree. Any mismatch
+> stops before database access.
+>
+> Editable files are limited to the existing target-architecture and
+> controlling-plan checkpoints. No implementation, test, statement, target,
+> credential or configuration change is authorized.
+>
+> Use only the existing ignored local DEV credential. Treat values as sensitive
+> and never report or retain them. Bill authorizes the exact local MySQL
+> connection and the attempt-owned runner's explicit self-`SIGKILL` only. No
+> other network or process effect is authorized.
+>
+> Run a fresh metadata-only preflight. If and only if the exact configured/live
+> identity, all 25 object proofs, the 13 statement hashes and frozen source match,
+> run the broad residue-only audit. It must prove every one of its 14 guarded
+> counts zero before a fixture. A metadata/preflight failure authorizes no
+> ordinary SQL, residue query, transaction or cleanup.
+>
+> Then use three fresh explicit attempt IDs, serially and without implicit retry:
+>
+> 1. run the full contract with `--fail-after-first-mutation`; require the
+>    injected failure, successful rollback, all 13 guarded attempt counts zero
+>    and no process residue;
+> 2. run the full contract with `--interrupt-after-first-mutation`; require its
+>    synchronous attempt/ledger marker and abrupt exit, prove that exact process
+>    absent, then launch a fresh metadata/full-DDL preflight and
+>    `--residue-audit-only --attempt-id <same-id>` verifier proving all 13 counts
+>    zero; and
+> 3. run the normal full contract; require every native product assertion,
+>    successful rollback, all 13 guarded attempt counts zero and status passed.
+>
+> After each attempt, verify every executed ordinary statement through the
+> canonical guard, reconcile its hash/object set with the frozen source,
+> declared effect and object boundary, require every residue hash to match the
+> exact 13-statement catalogue, and verify source/configuration identity
+> unchanged. Retain redacted command, exit/signal, target/DDL, statement,
+> rollback, cleanup/residue and process-absence evidence. Run no compensating
+> `DELETE`, update or cleanup SQL and do not retry a failed attempt.
+>
+> Any target/identity/DDL/permission/source/statement mismatch, nonzero or
+> incomplete baseline/residue proof, failed rollback, missing interruption
+> marker, lingering connection/process, secret disclosure, external access or
+> unexplained failure requires an immediate stop without repair, cleanup SQL or
+> rerun. Report the exact effective principal and denied action if permission is
+> insufficient; do not substitute credentials or broaden access.
+>
+> Update only the two checkpoints after success or a properly evidenced stop.
+> Stop after Sprint `5C` with a Phase 5 completion recommendation for Bill. Do
+> not begin Phase 6, Phase 7, TEST, PROD, deployment, admission or release-
+> authority work.
+
+### Sprint 5C - Governed Post-Mutation Evidence Stop
+
+Sprint `5C` was admitted from the frozen Sprint `5B` source at
+`3962846b6d3e39672bd9a34932451fb783b6fe9a`. Local `HEAD` and
+`origin/main` agreed; exactly the five accepted Sprint `5B` files differed
+from that baseline; the frozen catalogue SHA-256 remained
+`c6913f3cc6fd71762dbbd4052cfdf328f952da0d10e24f877e671b8a16770562`;
+and all eight frozen source/test byte digests matched. The ignored DEV
+configuration fingerprint was captured without retaining or reporting any
+secret value and remained unchanged through the executed boundary.
+
+The single fresh metadata-only preflight exited `0` with empty stderr. It
+reproved configured and live database `iset_intake`, effective principal
+`root@172.26.%`, MySQL `8.0.40`, all 25 live object/DDL proofs, all 13 frozen
+attempt-verifier statement hashes, and `ordinaryStatementCount: 0` /
+`mutationBegan: false`. The retained stdout SHA-256 is
+`f2e71cdbf57d13db179d62f168a3958b09fbf649d818ced1a7d2f9d6b9be69fc`.
+The one authorized broad baseline then exited `0`; all 14 statements passed
+the canonical guard in the frozen order, all 14 counts were zero, no mutation
+began, and its retained stdout SHA-256 is
+`afc0a37d31015bc4cbd3d65fe66bbfbfa6d750b2662f42a89b57c2bf8992991b`.
+
+The deliberate post-first-mutation attempt used fresh attempt ID
+`phase5c-failure-b6886b4e-205d-4891-84b1-abfeb1e02bf4` and ran exactly once.
+It exited `1` as required and its exact process was absent after exit. The
+retained aggregate failure is `release_contract_failed`; its single
+contributing error is
+`release_contract_injected_failure_after_first_mutation`. The failure evidence
+records rollback attempted `1`, succeeded `1`, failed `0`; all 13 guarded
+attempt-scope counts are zero; and its fixture ledger contains the exact 13
+objects and 13 frozen residue hashes. The retained failure artifact SHA-256 is
+`de4ae31c0c8f00d4b647cf3bb7d11e51829e8031880603111f0282b1624d4a19`.
+
+Execution stopped immediately after mutation because the local post-run
+evidence reader incorrectly expected the injected error code on the aggregate
+error rather than on its single contributing error and therefore exited
+nonzero. The retained artifact was inspected only to classify that mistake;
+the reader was not corrected or rerun. Bill's authorization permits harmless
+evidence-reader correction only before mutation, so no fresh 13-scope
+verifier, interruption attempt, normal attempt, cleanup SQL, repair or retry
+followed. Two earlier pre-mutation reader-shape corrections were harmless and
+the retained preflight/baseline artifacts explicitly prove zero mutation for
+both.
+
+Sprint `5C` and narrowed Phase 5 remain incomplete. The failure attempt itself
+has positive rollback and zero-residue evidence, but the separately required
+fresh verifier and the interruption/normal paths are unmet. No Phase 5 changes
+are committed by this stop. Bill must separately review this evidence and
+authorize any bounded continuation; no Phase 6, Phase 7, TEST, PROD, admission
+or release-authority work follows automatically.
+
+### Sprint 5C Continuation - Post-Interruption DDL-Fingerprint Stop
+
+Bill accepted the preceding governed stop and authorized continuation without
+rerunning the completed deliberate-failure attempt. Re-admission reconfirmed
+the exact five-file worktree, matching local `HEAD` / `origin/main` at
+`3962846b6d3e39672bd9a34932451fb783b6fe9a`, all eight frozen source/test
+digests, catalogue SHA-256 `c6913f3c...0562` and the unchanged ignored DEV
+configuration fingerprint.
+
+The immutable deliberate-failure evidence was validated at its authoritative
+shape: aggregate code `release_contract_failed`, exactly one contributing
+error with code `release_contract_injected_failure_after_first_mutation`, the
+expected attempt and ledger digest, exit `1`, exact process absence, rollback
+attempted/succeeded `1/1`, and the exact 13-object/13-statement ledger with 13
+internal zero counts. It was not rerun. Its one fresh independent verifier then
+exited `0`, freshly proved the same exact target and 25 objects, admitted the
+13 frozen statements in order, and returned 13 zero counts under the same
+ledger. The verifier stdout SHA-256 is
+`73752a6fc0e0551c5e9efe3157cfabac0f3de1aad12c6c9c682e823e7d3b240b`.
+The deliberate-failure path is therefore complete.
+
+The one fresh interruption attempt used
+`phase5c-interruption-6c2ca29f-699d-443d-86bd-dd3ceb763aa5`. After the first
+mutation it emitted exactly one synchronous
+`release_contract_interrupt_after_first_mutation` marker with ledger digest
+`376557f70efa18fdd89236c930cee5153b0771125d9a3912c7c0c576a0cd781a`,
+then exited `137`; its exact PID was absent. The marker artifact SHA-256 is
+`18b201176b7e76d92cea90a7555b5d7734440753735d4c9fc9757d095c437d39`.
+
+The required fresh post-interruption metadata/full-DDL preflight exited `0`
+with empty stderr, the exact configured/live `iset_intake` identity, effective
+principal `root@172.26.%`, all 25 current proofs, the unchanged 13-statement
+catalogue, and zero ordinary statements/mutation. Comparison with the frozen
+pre-mutation proof nevertheless found one exact mismatch:
+`staff_profiles.ddlHash` changed from
+`13c9691297e38902799e5fe0b1b44f60f18a05d846b90ae28646eba73bc05d5e`
+to `863d228123de076e6c9dae8016cbe945951752f0168a81359207ff384f889d90`.
+Every structured column, index and constraint proof and every other object DDL
+hash remained equal. The post-interruption preflight stdout SHA-256 is
+`02b042a9f42773b99cea4d50116504ff869d88fcc5e6871db79cc398069d01a3`.
+
+Confirmed evidence establishes only a raw `SHOW CREATE TABLE staff_profiles`
+hash change; the canonical guard hashes those raw bytes. Neither retained
+preflight exposes the raw create statement, so the changed field/value and its
+cause are unresolved and must not be inferred. The frozen contract classifies
+any DDL mismatch as a substantive stop. Therefore no interruption residue
+verifier, normal attempt, cleanup SQL, repair or database rerun followed.
+Interruption residue remains unproved even though the exact runner process is
+absent. No operation was denied and no credential was substituted.
+
+Sprint `5C` and narrowed Phase 5 remain incomplete and are not committed.
+Resolving whether raw mutable table options belong in the frozen structural DDL
+identity requires a separate design/repair decision; it cannot be treated as a
+tactical evidence exception. Phase 6, Phase 7, TEST, PROD, admission and
+release-authority work remain unauthorized.
+
+### Sprint 5C DDL-Identity Reconciliation - Missing Prior Bytes Stop
+
+Bill authorized one bounded reconciliation, explicitly requiring the exact
+retained pre-interruption `SHOW CREATE TABLE staff_profiles` bytes before one
+new metadata-only current discovery or any implementation. Re-admission again
+proved the exact five-file worktree, matching `HEAD` / `origin/main`, all eight
+frozen source/test digests, catalogue SHA-256 `c6913f3c...0562` and unchanged
+ignored configuration fingerprint.
+
+All 28 files in all seven retained Phase 5 evidence roots were enumerated and
+content-scanned. None contains `SHOW CREATE TABLE staff_profiles` or
+`CREATE TABLE staff_profiles` query/result bytes. The Phase 5 preflight
+artifacts contain only the raw-DDL SHA-256 and the separately structured
+column, unique-index and constraint evidence. This matches the implemented
+evidence boundary: `live-mysql-schema-guard.js` hashes the native `Create
+Table` value, but `getObjectProof()` and `evidence()` return only `ddlHash` and
+structured/hashes, not the raw create statement.
+
+The exact prior bytes are therefore unavailable. The earlier auto-increment
+interpretation is withdrawn as unproved; the retained structured
+`extra: auto_increment` attribute proves only the existing column property and
+does not prove the changed raw DDL field or value. Under Bill's explicit gate,
+no current database discovery, SQL, implementation, test, interruption
+verifier, normal attempt or cleanup followed.
+
+Sprint `5C` and Phase 5 remain incomplete and uncommitted. A later continuation
+would first require a separately approved evidence strategy that can establish
+an exact before/after raw DDL comparison without inventing the missing prior
+bytes. Phase 6, Phase 7, TEST, PROD, admission and release-authority work remain
+unauthorized.
+
+### Sprint 5C Prospective Raw-DDL Correction and Phase 5 Completion
+
+Bill accepted that the historical `staff_profiles` DDL-hash change remains
+unclassified because its prior raw bytes do not exist in retained evidence. It
+is not retrospectively labelled as an auto-increment change. The final bounded
+continuation therefore established a new prospective baseline before any new
+mutation and retained the exact raw `SHOW CREATE` value for each of all 25
+admitted objects alongside its raw SHA-256, structured column/index/constraint
+proof and structural DDL SHA-256. The first baseline artifact is
+`/tmp/rq-phase5c-prospective-Rj5kzFpE/01-raw-ddl-baseline.stdout.json`, SHA-256
+`e9a42561574b7a0b72783e8dab237d9d6d4f285d6067ae79a6ecb89a02fb3cd6`.
+It exited `0`, emitted no stderr, proved the exact configured/live DEV identity,
+returned 25 table objects with 25 matching raw digests and executed zero
+ordinary statements or mutations.
+
+The live raw evidence showed one repeated, exact table-option form on 18
+objects: `ENGINE=InnoDB AUTO_INCREMENT=<positive integer> DEFAULT CHARSET=`.
+MySQL documents that generated InnoDB auto-increment values are not rolled back
+and that the counter persists, while `SHOW CREATE TABLE` presents the counter
+as an `AUTO_INCREMENT` table option
+([InnoDB auto-increment handling](https://dev.mysql.com/doc/refman/8.0/en/innodb-auto-increment-handling.html),
+[`SHOW CREATE TABLE`](https://dev.mysql.com/doc/refman/8.0/en/show-create-table.html)).
+The prospective stable boundary therefore replaces only that observed numeric
+counter with a fixed marker for the structural digest. It retains and hashes
+the complete raw bytes separately. It performs no general normalization: a
+missing or differently ordered option is not removed; multiple matches fail
+closed; and engine, charset, collation, option order and every other byte remain
+part of structural identity. Views and tables without the exact observed form
+use their raw digest as their structural digest.
+
+The shared guard now returns `rawDdl`, `rawDdlHash`, `structuralDdlHash` and an
+exact `volatileDdlOptions` observation for each object, while the existing
+`ddlHash` remains the raw-byte digest. Focused regressions prove raw retention,
+raw-hash recomputation, counter-only structural stability, and structural
+changes for engine, charset, collation and option-order changes. The combined
+guard/contract suite passed 41/41. JavaScript syntax, dependency, statement-
+catalogue and whitespace checks passed. This correction does not broaden the
+guard's SQL, target or authority.
+
+The prospective catalogue is
+`/tmp/rq-phase5c-prospective-Rj5kzFpE/prospective-statement-catalogue.json`,
+SHA-256
+`23b23fab5ee12a28b373c03c551e0e30a760152002f7af377275f1b66ad84f52`.
+All attempt and broad statements remained byte-identical to the accepted
+Sprint `5B` catalogue. The corrected metadata gate retained all 25 raw and
+structural proofs, matched the first baseline exactly, reproved all source and
+statement identities and executed zero ordinary statements or mutations; its
+artifact SHA-256 is
+`1074638a8f4597dbc546efced661cc7d0e3e1d7fc9b91421432de186f05c7a18`.
+Two pre-mutation local evidence-reader mistakes were explained and corrected
+without another database operation: one unmatched parenthesis and one expected
+count of 17 where the retained live evidence contained 18 exact option-form
+matches.
+
+Before another fixture, the fresh independent verifier for the abandoned
+historical interruption attempt
+`phase5c-interruption-6c2ca29f-699d-443d-86bd-dd3ceb763aa5` exited `0`,
+reproved the prospective identity and returned all 13 attempt scopes at zero.
+Its artifact SHA-256 is
+`948c4794898e5e9847a284009f0888b0d1856722444cc1b692f1ebb64c16b99b`.
+That historical attempt remains incomplete certification evidence and was not
+rerun.
+
+The one replacement interruption attempt used fresh attempt ID
+`phase5c-replacement-interruption-250dc04d-7a20-4c0d-991f-d617419a9f69`
+and ledger digest
+`5fd5ca4cfcd3230df9dabd3f9f29d50abc6dbcd3c3d716dffa9680152535e70d`.
+It emitted the exact synchronous first-mutation marker, exited `137` after 322
+milliseconds and left its PID absent. The exact post-attempt raw comparison
+found only `staff_profiles`' observed `AUTO_INCREMENT` table option changing
+from `83560` to `83561`; every other raw byte and all 25 structural,
+column/index/constraint proofs remained identical. The fresh independent
+verifier then returned all 13 scopes at zero. The retained postflight and
+verifier artifact SHA-256 values are respectively
+`d843cb3fd2319bfe7313a1b0e66dcc9d24bf96c64147eb8a10b93fc9e7d1bd3e`
+and `5df7a26df86db5de8cfc17db23ab01276403403b82ac0e3dbd7b4046e93ffb4b`.
+
+The one normal rollback-only attempt used fresh attempt ID
+`phase5c-normal-28e7d866-0781-477e-9957-0580d0ea885e` and ledger digest
+`274de07640c69800ee5fb511e75f7e498838a4e377cb4bf8f1655d2b923a9a4a`.
+It exited `0`, left its PID absent, passed all nine native contract assertions,
+admitted 67 guarded statements against the 25-object proof and returned all 13
+internal cleanup scopes at zero. Its artifact SHA-256 is
+`cff1ac4da0e1bdf4ba736b131c7bda830565c87c4027f610646b0b3abaa300d6`.
+The exact post-attempt raw comparison found counter-only changes on
+`staff_profiles`, `client_file_import_run`, `iset_event_delivery`, `user`,
+`client`, `iset_case`, `iset_application`, `funding_overview_series`,
+`funding_overview_version`, `funding_overview_version_documents` and
+`iset_document`; all 25 structural and structured proofs remained identical.
+The final fresh independent verifier returned all 13 scopes at zero. The
+retained postflight and verifier artifact SHA-256 values are respectively
+`9e14d653d49b56711b08f7bd5777a4a2f963492dc4ace4bdb2819269946a4afe`
+and `599bcd24fbe1e29daaf6e5e73a0d4e255928ed66dbbef83073c4014290f6aaec`.
+
+Narrowed Phase 5 is complete. The deliberate-failure path, prospective
+replacement-interruption path and normal rollback-only path each have exact
+target/DDL admission, process-state evidence and independent 13-scope zero-
+residue proof. No cleanup SQL, credential substitution, TEST, PROD, Phase 6 or
+Phase 7 work occurred. Phase 6 and later work remain separately authorized.
+
 ## Exact Proposed Authorization for Sprint 4A
 
 > Bill authorizes Sprint `4A` only under the accepted `P3-1` lean programme.

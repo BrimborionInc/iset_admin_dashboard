@@ -122,7 +122,7 @@ Known qualification-granularity gap (recorded 2026-07-20): the current evidence 
 
 ## Phase 1 — local DEV qualification
 
-Run the metadata-only DEV database gate first. It pins both configured and live native-label identity to the recorded 2026-08-09 target (`172.26.176.1` / `root` / `iset_intake` / `3306`; server `DESKTOP-PDFA51K`; principal `root@172.26.%`; MySQL `8.0.40`), discovers every declared object individually, and hashes its create definition, full columns, indexes, and constraints. It performs zero ordinary reads, transactions, fixtures, residue queries, or cleanup:
+Run the metadata-only DEV database gate first. It pins both configured and live native-label identity to the recorded 2026-08-09 target (`172.26.176.1` / `root` / `iset_intake` / `3306`; server `DESKTOP-PDFA51K`; principal `root@172.26.%`; MySQL `8.0.40`), discovers every declared object individually, and records the exact raw `SHOW CREATE` value and its SHA-256 alongside structured column/index/constraint proof, a structural DDL SHA-256 and the hashes of the 13 attempt-bound residue statements. The prospective structural identity excludes only the observed numeric InnoDB table-level `AUTO_INCREMENT` counter in the exact `ENGINE=InnoDB AUTO_INCREMENT=<positive integer> DEFAULT CHARSET=` form. The raw value remains retained and hashed; engine, charset, collation, table-option ordering and every other raw byte remain structural. MySQL documents that generated InnoDB auto-increment values are not rolled back and that `SHOW CREATE TABLE` exposes the current counter as a table option ([InnoDB auto-increment handling](https://dev.mysql.com/doc/refman/8.0/en/innodb-auto-increment-handling.html), [`SHOW CREATE TABLE`](https://dev.mysql.com/doc/refman/8.0/en/show-create-table.html)). Any absent, different or repeated option form is not normalized. The gate performs zero ordinary reads, transactions, fixtures, residue queries, or cleanup:
 
 ```bash
 node scripts/real-mysql-release-contract.js --target-env dev --schema-preflight-only --json
@@ -134,7 +134,11 @@ If a prior rollback fixture failed after mutation began, do not assume rollback 
 node scripts/real-mysql-release-contract.js --target-env dev --residue-audit-only --json
 ```
 
-This mode performs ten single-table, finished-statement-guarded native `COUNT(*)` checks for the release fixture scopes. It performs no fixture mutation, rollback, or cleanup. Any nonzero count or metadata/statement admission failure is `NO-GO` and must be investigated before another ordinary fixture run.
+This mode performs 14 finished-statement-guarded native `COUNT(*)` checks covering all 13 mutated objects; `staff_profiles` has separate subject and email scopes. The four descendant checks use only current-live-DDL-proven, fully qualified foreign-key joins back to the attempt-owned client or case marker. It performs no fixture mutation, rollback, or cleanup. Any nonzero count or metadata/statement admission failure is `NO-GO` and must be investigated before another ordinary fixture run.
+
+The same mode accepts `--attempt-id <id>` to bind one immutable fixture ledger and exactly one independent count to each of the 13 mutated objects. The full runner records that attempt ID, its derived non-secret fixture markers, the object list, each residue-statement SHA-256 and the ledger digest before mutation. The no-flag release command remains compatible by generating its own unique attempt ID.
+
+The explicit `--fail-after-first-mutation` and `--interrupt-after-first-mutation` controls require a caller-supplied `--attempt-id`, are mutually exclusive and are valid only for the full rollback contract. They act only after the first fixture insert has returned successfully. Their presence does not authorize their execution: run either only inside the separately approved Phase 5 certification boundary, followed by a fresh exact-identity/full-DDL preflight and attempt-bound 13-scope residue verifier. The interrupt control synchronously emits only the attempt ID and ledger digest before signalling its own process. It never runs cleanup SQL.
 
 Then run the resolved mandatory suite. The machine inventory repeats this gate as `real-mysql-schema-preflight` before the schema plan and full real-MySQL contract. This uses local resources and real DEV MySQL only. It must not use TEST or PROD credentials.
 
