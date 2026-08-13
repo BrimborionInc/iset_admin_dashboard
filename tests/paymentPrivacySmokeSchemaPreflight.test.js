@@ -172,6 +172,14 @@ function exactDbConfig() {
   };
 }
 
+function exactTestDbConfig() {
+  return {
+    ...EXPECTED_TEST_DATABASE_IDENTITY.configured,
+    password: '',
+    multipleStatements: false,
+  };
+}
+
 function fakePreflightConnection({ database = 'iset_intake', objectPresent = false } = {}) {
   const query = jest.fn(async (sql, params = []) => {
     if (sql === 'SELECT DATABASE(), @@hostname, @@port, CURRENT_USER(), VERSION()') {
@@ -208,15 +216,32 @@ function assertNoOrdinaryOrCleanup(connection) {
 }
 
 describe('payment and privacy smoke schema admission', () => {
-  test('payment configured-target admission is a closed DEV/TEST allowlist with no PROD fallback', () => {
-    expect(resolveAuthorizedPaymentDatabaseIdentity(EXPECTED_DEV_DATABASE_IDENTITY.configured)).toBe(EXPECTED_DEV_DATABASE_IDENTITY);
-    expect(resolveAuthorizedPaymentDatabaseIdentity(EXPECTED_TEST_DATABASE_IDENTITY.configured)).toBe(EXPECTED_TEST_DATABASE_IDENTITY);
+  test('payment configured-target admission requires an explicit matching DEV or TEST identity', () => {
+    expect(parsePaymentArgs(['--target-env', 'dev']).targetEnv).toBe('dev');
+    expect(parsePaymentArgs(['--target-env', 'test']).targetEnv).toBe('test');
+    expect(() => parsePaymentArgs([])).toThrow('--target-env must be explicitly set to dev or test');
+    expect(resolveAuthorizedPaymentDatabaseIdentity(EXPECTED_DEV_DATABASE_IDENTITY.configured, 'dev')).toBe(EXPECTED_DEV_DATABASE_IDENTITY);
+    expect(resolveAuthorizedPaymentDatabaseIdentity(EXPECTED_TEST_DATABASE_IDENTITY.configured, 'test')).toBe(EXPECTED_TEST_DATABASE_IDENTITY);
+    expect(() => resolveAuthorizedPaymentDatabaseIdentity(EXPECTED_TEST_DATABASE_IDENTITY.configured, 'dev'))
+      .toThrow('payments_smoke_configured_database_target_not_authorized:dev');
+    expect(() => resolveAuthorizedPaymentDatabaseIdentity(EXPECTED_DEV_DATABASE_IDENTITY.configured, 'test'))
+      .toThrow('payments_smoke_configured_database_target_not_authorized:test');
     expect(() => resolveAuthorizedPaymentDatabaseIdentity({
       host: 'nwac-prod-db.example.invalid',
       port: 3306,
       user: 'app_admin',
       database: 'iset_intake',
-    })).toThrow('payments_smoke_configured_database_target_not_authorized');
+    }, 'test')).toThrow('payments_smoke_configured_database_target_not_authorized:test');
+    expect(() => resolveAuthorizedPaymentDatabaseIdentity(EXPECTED_DEV_DATABASE_IDENTITY.configured, 'prod'))
+      .toThrow('payments_smoke_target_environment_not_authorized');
+
+    const guardFactory = jest.fn(options => options);
+    createPaymentsSchemaGuard({}, exactDbConfig(), 'dev', guardFactory);
+    createPaymentsSchemaGuard({}, exactTestDbConfig(), 'test', guardFactory);
+    expect(guardFactory.mock.calls.map(call => call[0].expectedIdentity.configuredHost)).toEqual([
+      EXPECTED_DEV_DATABASE_IDENTITY.configured.host,
+      EXPECTED_TEST_DATABASE_IDENTITY.configured.host,
+    ]);
   });
 
   test('privacy structural expectations cover every named FK and CHECK exactly once', () => {
@@ -240,7 +265,7 @@ describe('payment and privacy smoke schema admission', () => {
 
     await expect(runPaymentsWorkflowSmoke({
       connection,
-      args: parsePaymentArgs([]),
+      args: parsePaymentArgs(['--target-env', 'dev']),
       dbConfig: exactDbConfig(),
     })).rejects.toMatchObject({ code: 'schema_guard_wrong_database' });
 
@@ -253,7 +278,7 @@ describe('payment and privacy smoke schema admission', () => {
 
     await expect(runPaymentsWorkflowSmoke({
       connection,
-      args: parsePaymentArgs([]),
+      args: parsePaymentArgs(['--target-env', 'dev']),
       dbConfig: exactDbConfig(),
     })).rejects.toMatchObject({ code: 'schema_guard_required_object_missing' });
 
@@ -268,7 +293,7 @@ describe('payment and privacy smoke schema admission', () => {
 
     await expect(runPaymentsWorkflowSmoke({
       connection,
-      args: parsePaymentArgs([]),
+      args: parsePaymentArgs(['--target-env', 'dev']),
       dbConfig: exactDbConfig(),
     })).rejects.toMatchObject({ code: 'schema_guard_column_wrong_owner' });
 
@@ -319,7 +344,7 @@ describe('payment and privacy smoke schema admission', () => {
   });
 
   test.each([
-    ['payment', runPaymentsWorkflowSmoke, parsePaymentArgs(['--schema-preflight-only'])],
+    ['payment', runPaymentsWorkflowSmoke, parsePaymentArgs(['--target-env', 'dev', '--schema-preflight-only'])],
     ['privacy', runPrivacyErmSmoke, parsePrivacyArgs(['node', 'privacy-erm-smoke.js', '--schema-preflight-only'])],
   ])('%s schema-preflight-only mode does not create an ordinary connection facade', async (_name, runner, args) => {
     const connection = { query: jest.fn(), execute: jest.fn() };
@@ -423,7 +448,7 @@ describe('payment and privacy smoke schema admission', () => {
 
     const result = await runPaymentsWorkflowSmoke({
       connection,
-      args: parsePaymentArgs([]),
+      args: parsePaymentArgs(['--target-env', 'dev']),
       dbConfig: exactDbConfig(),
     });
 
@@ -455,7 +480,7 @@ describe('payment and privacy smoke schema admission', () => {
       }
       throw new Error(`unexpected guarded cleanup statement: ${sql}`);
     });
-    const guard = createPaymentsSchemaGuard(connection, exactDbConfig());
+    const guard = createPaymentsSchemaGuard(connection, exactDbConfig(), 'dev');
     await guard.preflight();
 
     const counts = await cleanupFixture(guard.createGuardedConnection(), {
@@ -485,7 +510,7 @@ describe('payment and privacy smoke schema admission', () => {
       if (/^INSERT\b/i.test(sql.trim())) return [{ insertId: 701 }, []];
       throw new Error(`unexpected guarded post-send statement: ${sql}`);
     });
-    const guard = createPaymentsSchemaGuard(connection, exactDbConfig());
+    const guard = createPaymentsSchemaGuard(connection, exactDbConfig(), 'dev');
     await guard.preflight();
 
     await forceSubmittedForFollowUp(guard.createGuardedConnection(), {

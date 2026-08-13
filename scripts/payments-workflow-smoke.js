@@ -2,7 +2,7 @@
 'use strict';
 
 /**
- * DEV payments workflow smoke.
+ * Explicit-target DEV/TEST payments workflow smoke.
  *
  * Default mode creates a synthetic payment workflow inside a DB transaction,
  * checks the payment/evidence/follow-up invariants, and rolls it back.
@@ -65,10 +65,10 @@ const EXPECTED_TEST_DATABASE_IDENTITY = Object.freeze({
     version: '8.0.42',
   }),
 });
-const AUTHORIZED_PAYMENT_DATABASE_IDENTITIES = [
-  EXPECTED_DEV_DATABASE_IDENTITY,
-  EXPECTED_TEST_DATABASE_IDENTITY,
-];
+const PAYMENT_DATABASE_IDENTITIES = Object.freeze({
+  dev: EXPECTED_DEV_DATABASE_IDENTITY,
+  test: EXPECTED_TEST_DATABASE_IDENTITY,
+});
 const PAYMENT_SCHEMA_OBJECTS = [
   'budget_pot',
   'client',
@@ -131,6 +131,7 @@ function parseArgs(argv) {
     json: false,
     help: false,
     allowEmailSubmit: false,
+    targetEnv: null,
     adminBase: process.env.PAYMENTS_SMOKE_ADMIN_BASE_URL || process.env.ADMIN_API_BASE_URL || DEFAULT_ADMIN_BASE_URL,
     frontendBase: process.env.PAYMENTS_SMOKE_FRONTEND_BASE_URL || DEFAULT_FRONTEND_BASE_URL,
     rewriteApiOrigins: (process.env.PAYMENTS_SMOKE_REWRITE_API_ORIGINS || '')
@@ -157,6 +158,8 @@ function parseArgs(argv) {
       args.json = true;
     } else if (token === '--allow-email-submit') {
       args.allowEmailSubmit = true;
+    } else if (token === '--target-env') {
+      args.targetEnv = String(argv[++index] || '').toLowerCase();
     } else if (token === '--admin-base') {
       args.adminBase = argv[++index];
     } else if (token === '--frontend-base') {
@@ -171,6 +174,9 @@ function parseArgs(argv) {
       throw new Error(`Unknown argument: ${token}`);
     }
   }
+  if (!args.help && !Object.hasOwn(PAYMENT_DATABASE_IDENTITIES, args.targetEnv)) {
+    throw new Error('--target-env must be explicitly set to dev or test');
+  }
   return args;
 }
 
@@ -181,6 +187,7 @@ function usage() {
     'Default mode is a rollback DB fixture smoke.',
     '',
     'Options:',
+    '  --target-env dev|test Explicit authorized database target (required).',
     '  --api                  Run authenticated API smoke against local/admin backend.',
     '  --browser              Run API smoke and then Puppeteer UI smoke.',
     '  --keep-fixture         Commit and keep the synthetic fixture after API/browser mode.',
@@ -199,9 +206,9 @@ function usage() {
     '  PAYMENTS_SMOKE_ACCESS_TOKEN or SMOKE_ACCESS_TOKEN (optional)',
     '',
     'Examples:',
-    '  DB_HOST=172.26.176.1 npm run payments:workflow:smoke',
-    '  PAYMENTS_SMOKE_ID_TOKEN=... npm run payments:workflow:smoke:api',
-    '  PAYMENTS_SMOKE_ID_TOKEN=... npm run payments:workflow:smoke:browser -- --frontend-base http://localhost:3001',
+    '  DB_HOST=172.26.176.1 npm run payments:workflow:smoke -- --target-env dev',
+    '  PAYMENTS_SMOKE_ID_TOKEN=... npm run payments:workflow:smoke:api -- --target-env dev',
+    '  PAYMENTS_SMOKE_ID_TOKEN=... npm run payments:workflow:smoke:browser -- --target-env dev --frontend-base http://localhost:3001',
   ].join('\n');
 }
 
@@ -226,25 +233,27 @@ function getDbConfig() {
   return config;
 }
 
-function resolveAuthorizedPaymentDatabaseIdentity(dbConfig) {
+function resolveAuthorizedPaymentDatabaseIdentity(dbConfig, targetEnv) {
+  const expected = PAYMENT_DATABASE_IDENTITIES[targetEnv];
+  if (!expected) throw new Error('payments_smoke_target_environment_not_authorized');
   const configured = {
     host: String(dbConfig?.host || '').trim(),
     port: Number(dbConfig?.port),
     user: String(dbConfig?.user || '').trim(),
     database: String(dbConfig?.database || '').trim(),
   };
-  const expected = AUTHORIZED_PAYMENT_DATABASE_IDENTITIES.find(candidate => (
-    candidate.configured.host === configured.host
-    && candidate.configured.port === configured.port
-    && candidate.configured.user === configured.user
-    && candidate.configured.database === configured.database
-  ));
-  if (!expected) throw new Error('payments_smoke_configured_database_target_not_authorized');
+  const matches = (
+    expected.configured.host === configured.host
+    && expected.configured.port === configured.port
+    && expected.configured.user === configured.user
+    && expected.configured.database === configured.database
+  );
+  if (!matches) throw new Error(`payments_smoke_configured_database_target_not_authorized:${targetEnv}`);
   return expected;
 }
 
-function createPaymentsSchemaGuard(connection, dbConfig, guardFactory = createLiveMysqlSchemaGuard) {
-  const expectedDatabaseIdentity = resolveAuthorizedPaymentDatabaseIdentity(dbConfig);
+function createPaymentsSchemaGuard(connection, dbConfig, targetEnv, guardFactory = createLiveMysqlSchemaGuard) {
+  const expectedDatabaseIdentity = resolveAuthorizedPaymentDatabaseIdentity(dbConfig, targetEnv);
   return guardFactory({
     connection,
     expectedIdentity: {
@@ -1515,7 +1524,7 @@ async function runPaymentsWorkflowSmoke({
   dbConfig,
   guardFactory = createLiveMysqlSchemaGuard,
 }) {
-  const guard = createPaymentsSchemaGuard(connection, dbConfig, guardFactory);
+  const guard = createPaymentsSchemaGuard(connection, dbConfig, args.targetEnv, guardFactory);
   const schemaEvidence = await guard.preflight();
   if (args.schemaPreflightOnly) {
     return {
@@ -1594,7 +1603,7 @@ async function main({ argv = process.argv.slice(2), mysqlModule = mysql } = {}) 
   args.adminBase = normalizeBaseUrl(args.adminBase, DEFAULT_ADMIN_BASE_URL);
   args.frontendBase = normalizeBaseUrl(args.frontendBase, DEFAULT_FRONTEND_BASE_URL);
   const dbConfig = getDbConfig();
-  resolveAuthorizedPaymentDatabaseIdentity(dbConfig);
+  resolveAuthorizedPaymentDatabaseIdentity(dbConfig, args.targetEnv);
   const connection = await mysqlModule.createConnection(dbConfig);
   let output;
   try {

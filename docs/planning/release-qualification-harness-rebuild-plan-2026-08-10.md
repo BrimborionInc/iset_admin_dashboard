@@ -585,6 +585,41 @@ authorization are in the [narrowed Phase 8 design](./release-qualification-harne
 The mandatory programme review follows `8C` immediately. No Phase 9,
 promotion, admission or authority work is automatic.
 
+### Mandatory Post-Phase-8 Programme Review
+
+The review at clean isolated baseline
+`683d1b01eefa21997f8cbb3bc26be95954658b48` concludes **partially achieved**.
+All four lean outcomes were built and proved. Phase 4's repaired native build
+wrapper and selected browser child and Phase 5's normal rollback contract are
+already invoked by the authoritative DEV gate. Phase 7 remains a task-specific
+r31 read-only proof with `releaseAuthority: none`. Phase 8 remains a frozen
+CFA-only certification with `releaseAuthority: none`; it did not renew
+qualification or change admission.
+
+The normal operational path is not closed. The current TEST inventory still
+invokes the CFA runner without the fresh attempt ID, evidence path and sprint
+timestamp now required by the certified runner. The legacy qualifier also
+continues later fixture checks after a failed prerequisite, and its mandatory
+DEV payment runner still authorizes both DEV and TEST database identities.
+Consequently Bill's desired `complete testing in TEST` workflow cannot yet
+reliably produce current `TEST GO` through the strengthened boundary. The
+existing `deploy to PROD` path remains correct only when supplied that current
+exact-source `TEST GO`. The emergency PROD route remains a separately
+authorized app-only `EMERGENCY-AUTHORIZED` path and is not a substitute.
+
+`portal-aggregate` remains in the authoritative gate and outside the advisory
+cohort. RN02/RN04 remain open. No pack is promoted; the current gate remains
+authoritative. Intacct scope, the broader browser ledger and all other no-loss
+obligations remain unchanged by this review.
+
+Bill authorized and Sprint `RG1` completed that one bounded current-gate repair.
+Failed TEST prerequisites now block dependent stateful dispatch, payment
+execution is explicitly bound to DEV or TEST, and the TEST CFA check receives
+and validates one fresh attempt-owned complete native result. Focused local
+verification passed `35/35`; no qualification, deployment or environment
+operation ran. The rebuild programme can close as implementation work. The
+first live proof remains a separately authorized ordinary exact-source release.
+
 ## Confirmed-Findings Register
 
 During every phase, record potential product weaknesses separately with:
@@ -644,7 +679,7 @@ Before issuing the next Codex prompt, confirm:
 ## Current Checkpoint
 
 - Plan created: 2026-08-10.
-- Current authorized phase/sprint: Sprint `8C` and narrowed Phase 8 are complete pending Bill's mandatory programme review. The accepted latest P1 attestation was unexpired before the first stateful effect. Fresh exact TEST identity and consolidated IAM admission passed; both relevant principals retained explicit SES send denies. The local product-lineage and fixture-contract negatives passed. One controlled post-persistence interruption produced terminal evidence, successful separately dispatched recovery and a fresh independent verifier with 19 zero database scopes, two absent objects, absent Cognito identity and absent bundle. Exactly three subsequent clean attempts each passed all six native product assertions, normal cleanup and the same independent zero-residue boundary. All four attempts bound the same source, bundle, TEST principals, active workflow, 22-object/68-statement catalogue, structural DDL identity and no-email state. `releaseAuthority: none`, pack maturity, deploy admission and the current authoritative gate remain unchanged. Phase 9 is unauthorized.
+- Current authorized phase/sprint: none. Sprint `RG1` is complete under the accepted post-Phase-8 review. The existing authoritative TEST gate now blocks six stateful fixture checks when any declared provenance/rollback/health/runtime prerequisite is missing or non-passing; binds payment execution exclusively to explicit DEV or TEST identity; and creates, retains and validates one fresh CFA attempt-owned native result with terminal, cleanup and independent residue proof. Focused local verification passed `35/35`; no live qualification or environment operation ran. The current gate, GO/NO-GO and deploy authority remain authoritative; Phase 3/7/8 artifacts retain `releaseAuthority: none`; `portal-aggregate` remains deferred from the advisory cohort but mandatory in the current gate; RN02/RN04 remain open; and the emergency PROD route remains separate. The rebuild programme is recommended complete as implementation work. Any live validation belongs to a separately authorized ordinary exact-source release.
 - Phase 0 audit artifact: [release-qualification-harness-current-state-audit-2026-08-10.md](./release-qualification-harness-current-state-audit-2026-08-10.md) (`0A` inventory, `0B` dependency/effect map, `0C` retained-history classification, and `0D` component dispositions and synthesis). Bill reviewed and accepted the completed audit and explicitly authorized Phase 1/Sprint `1A`; the Phase 0 exit gate is satisfied.
 - Sprint `0B` severity correction: the project severity scale is now applied to all 13 confirmed findings: 0 critical, 0 high, 8 medium, and 5 low. No finding triggers the automatic-stop rule.
 - Sprint `0C` taxonomy: 56 identifiable failed qualification gates, counted once at the outer check or, for the two `r18` targeted attempts whose outer artifact is absent, once at the independently retained causal check: 7 `product`, 34 `harness`, 0 `environment`, 0 `infrastructure`, and 15 `unclassified`. Narrative/interrupted events with no named machine check remain separate. No Sprint `0C` finding is critical and no automatic stop applies.
@@ -678,9 +713,9 @@ Before issuing the next Codex prompt, confirm:
 - Sprint `3F` convergence review: the physical Intacct mirror cleanup is isolated and succeeded, but the shared design is not converging. The bridge infers cleanup authority from the aggregate-only `residueBaseline` implementation field instead of an admitted per-operation cleanup contract; all six packs hash the same bridge while binding the same adapter ID to versions `1.0.0` through `1.5.0`, and the runtime result remains `1.0.0`. The exact behavioral cleanup boundary covers Intacct and aggregate; the immutable adapter/harness certification boundary covers all six active pack versions. No permission, IAM, environment, credential or configuration change can repair this deterministic local evidence defect.
 - Sprint `3F-C1-R1` completion: bounded verification `3F-C1-R1-V1` used correctly constructed fresh advisory/direct attempt identities and passed the single Intacct deliberate-drift parity proof. It observed process protocol `1.0.0`, native result `2.0.0`, expected matching native failures, completed cleanup, independent zero residue and `releaseAuthority: none`; no mirror or process residue remained.
 - Sprint `3F` Intacct scope reconciliation: Bill's controlling product fact establishes that the rudimentary sibling simulator is not part of live PATH. Source proves the current check is a mandatory inventory-configured PATH/mock substring guard, not Sage certification or a dependency of runtime, deployment, another check or candidate stability. Live-product envelope/sender assertions remain in the admin aggregate. CODEX recommends removing the pack from the active Phase 3 set and retaining its native/local artifacts outside qualification; merely labelling it non-blocking would not remove its active registry, shared-adapter or exit-cohort coupling. No implementation or command ran.
-- Next required decision/proposed work: Bill performs the mandatory post-Phase-8 programme review and explicitly decides whether the four lean outcomes materially improve pre-PROD evidence. No Phase 9, promotion, admission, retirement or further harness work is implied by Phase 8 completion.
+- Next required decision/proposed work: Bill accepts or rejects Sprint `RG1` and the recommendation to close the rebuild programme. Any live validation, TEST/PROD access or deployment must be authorized as an ordinary exact-source release; no Phase 9, promotion, admission rewrite, retirement or broader harness programme is implied.
 - Environment operations authorized: none currently. Sprint `8C` has ended. Its recorded TEST fixture, product-loopback, Cognito, object, database and SSM effects were attempt-owned and independently proved absent except retained SSM/evidence history. SES/email, deployment, PROD and Phase 9 remain unauthorized.
-- Product or harness implementation authorized: none currently. No implementation changed during Sprint `8C`; only its checkpoints and runbook may be committed.
+- Product or harness implementation authorized: none currently. Sprint `RG1` has stopped after its local implementation and verification boundary.
 - Existing release gate status: remains authoritative during the advisory rebuild.
 - PROD use/cutover authorized: no.
 
@@ -761,3 +796,5 @@ Before issuing the next Codex prompt, confirm:
 | `8C-R1` | completed - CFA lifecycle synthetically certified | [The completion checkpoint](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-8c-safe-pre-execution-stop-and-8c-r1-completion) records executed synthetic ordering for terminal proof, recovery, independently validated recovery evidence, exact Cognito absence, a separately dispatched and validated 19-scope/two-object verifier, and final bundle absence. All three phase results use bounded content-addressed transport and the recorded duration limits. Verification passed 63/63 admin assertions, both portal CFA files, syntax, dependency and whitespace checks; portal is pushed at `a650d481...`. No AWS, TEST, SQL, fixture, HTTP, SES or deployment effect occurred. | Bill accepts `8C-R1` and separately authorizes live Sprint `8C` against the frozen admin/portal commits; Phase 8 remains incomplete and no promotion, admission or authority change is automatic |
 | `8C-P1` | completed - temporary CFA provenance authority `3/3` | [The Phase-8-only checkpoint](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-8c-p1-phase-8-only-provenance-attestation) records strict legacy expiry preservation; exact manifest/DEV raw and canonical checksum proof; original DEV `GO` validity at r31 deployment admission; 56/56 synthetic assertions; and exactly three passed read-only TEST attestations with one stable semantic hash, exact candidate/provenance/artifacts/identity/health, terminal SSM reads and no-write residue proof. Every result expires within 75 minutes, is CFA-only and records `releaseAuthority: none`; it is not renewed DEV `GO` or deploy/qualification/PROD evidence. | Bill accepts `8C-P1` and separately authorizes resumed Sprint `8C` against the frozen `8C-R1` commits, accepted `8B` catalogue and an unexpired accepted attestation; Phase 8 remains incomplete and no later work is automatic |
 | `8C` and Phase 8 | completed - one interrupted recovery plus three clean CFA attempts | [The stateful completion checkpoint](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-8c-stateful-execution-and-phase-8-completion) records fresh exact TEST/IAM/SES-deny admission, passing local product/fixture negatives, the expected post-sign interruption with successful recovery, and three clean six-assertion native passes. Every attempt repeated stable 22-object DDL, the 68-statement catalogue, no-email and zero-marker admission; each ended with absent Cognito/bundle/process state and a fresh independent verifier proving all 19 database scopes zero and both objects absent. | Bill performs the mandatory post-Phase-8 programme review. No Phase 9, promotion, admission, retirement or authority change is automatic |
+| Post-Phase-8 programme review | completed - **partially achieved** | [The mandatory review](./release-qualification-harness-target-architecture-2026-08-10.md#mandatory-post-phase-8-programme-review) separates proved capability from current authority. Phase 4 build/browser and Phase 5 rollback improvements reach native commands already used by DEV qualification; Phase 7/8 evidence remains candidate-specific and `releaseAuthority: none`. The current TEST qualifier has a stale CFA invocation, does not block later fixture dispatch after failed prerequisites, and retains ambiguous DEV/TEST payment authorization. `portal-aggregate`, RN02/RN04, the current gate and the emergency PROD route remain unchanged. | Bill separately authorizes or declines proposed local-only Sprint `RG1`; no Phase 9 or live release work is automatic |
+| `RG1` | completed - authoritative TEST gate locally closed | [The completion checkpoint](./release-qualification-harness-target-architecture-2026-08-10.md#sprint-rg1-completion---authoritative-test-gate-contract-closure) records ordered prerequisite admission blocking all six dependent stateful TEST checks, explicit exclusive DEV/TEST payment identity, and fresh qualifier-owned CFA attempt/evidence/time binding with native success, terminal, cleanup and independent residue validation. Focused verification passed 35/35; syntax, inventory, command-reference/import and whitespace checks passed. No qualification, environment, SQL, AWS, browser, service or deployment operation ran. Current GO/NO-GO, deploy admission, emergency authority, advisory `releaseAuthority: none`, `portal-aggregate` and RN02/RN04 are unchanged. | Bill accepts or rejects the Sprint and programme-close recommendation. The next live validation, if desired, is a separately authorized ordinary exact-source release, not another rebuild sprint. |

@@ -177,7 +177,7 @@ function runtimeCommands(candidate, paymentRollback) {
     `pm2 jlist | node -e 'let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{const rows=JSON.parse(s); for(const name of ["nwac-admin","nwac-portal"]){const row=rows.find(v=>v.name===name); if(!row||row.pm2_env?.status!=="online"||Number(row.pid)<=0) throw new Error(name+" is not online"); console.log("PROCESS_"+name.toUpperCase().replace(/-/g,"_")+"=online;restarts="+Number(row.pm2_env?.restart_time||0));}})'`,
   ];
   if (paymentRollback) {
-    commands.push('cd /opt/nwac/admin-dashboard && node scripts/payments-workflow-smoke.js --json');
+    commands.push('cd /opt/nwac/admin-dashboard && node scripts/payments-workflow-smoke.js --target-env test --json');
   }
   return commands;
 }

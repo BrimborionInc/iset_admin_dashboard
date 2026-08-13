@@ -10589,6 +10589,223 @@ release, alter deploy admission or change the current authoritative gate.
 `releaseAuthority: none` remains unchanged. Phase 9 and all later work remain
 unauthorized pending Bill's explicit post-Phase-8 decision.
 
+## Mandatory Post-Phase-8 Programme Review
+
+Date: 2026-08-13. Baseline: clean isolated admin worktree at
+`683d1b01eefa21997f8cbb3bc26be95954658b48`, matching local `origin/main`.
+No test, qualification, build, deployment, AWS, database, SQL, browser, HTTP or
+environment operation was performed for this review.
+
+### Direct Verdict
+
+**Partially achieved.** The four lean outcomes produced material, repeatable
+safety evidence and repaired two native boundaries already used by the
+authoritative DEV gate. They have not yet produced Bill's complete operational
+outcome: the ordinary current TEST qualification cannot consume the certified
+CFA runner contract as presently declared, and the Phase 7/8 evidence itself
+has no release authority. The work is therefore more than an advisory research
+exercise, but less than a completed `complete testing in TEST` -> `deploy to
+PROD` release path.
+
+### Built, Used and Still Advisory
+
+| Outcome or boundary | Built and proved | Used by the current authoritative gate | Decision consequence and limitation |
+| --- | --- | --- | --- |
+| Phase 3 local controls | Five advisory native packs plus role-aware source inventory/stability were certified; the five-run cohort was accepted by explicit `P3-1` exception at `0/5` (`:8264-8294,8361-8379`) | The current gate invokes the underlying native admin aggregate/lint/privacy/AI commands, not the Phase 3 pack evidence (`docs/testing/release-coverage-inventory.json:28-47,78-117,190-196`) | Every pack remains advisory and `releaseAuthority: none`; no pack result can issue DEV/TEST `GO` or admit a deployment |
+| Phase 4 build/browser safety | The wrapper restores all four generated files; two admin and two portal builds passed; the selected `intervention-posting-context` command passed three times with stable persistent-state evidence and zero local residue (`:8536-8568,8633-8653,8801-8851`) | **Yes, directly in part.** DEV qualification invokes the repaired admin/portal build wrapper and the parent browser suite, which contains the certified child (`release-coverage-inventory.json:142-164`; `scripts/release-browser-smoke-suite.js:26-40,97-119`) | Current releases gain real build-restoration and selected-browser protection. Only one of 13 browser children received the narrowed Phase 4 certification |
+| Phase 5 database rollback safety | One exact DEV contract proved 25-object raw/structural DDL, guarded statements, deliberate failure, abrupt interruption, normal rollback and fresh 13-scope zero residue (`:9442-9464`) | **Yes, directly for the normal native contract.** DEV qualification invokes its metadata preflight and full rollback-only command (`release-coverage-inventory.json:118-140`) | The runner's negative/interruption certification increases confidence in the normal gate; those destructive-negative proofs are certification evidence and are not rerun for every release |
+| Phase 7 TEST identity/provenance | Three stable read-only attempts proved exact TEST operator/role, deployed r31 provenance, health, four current/rollback artifacts, bounded SSM and no residue (`:9675-9743`) | **No, not the Phase 7 artifact.** The task-specific check is pinned to r31 and deliberately separate from the release gate (`docs/ops/deployments/release-qualification-runbook.md:292-310`). The current gate continues to use its older deployment-evidence, rollback-readiness, target-health and runtime-postflight checks (`release-coverage-inventory.json:198-226`) | It proves the intended safety boundary is executable for r31, but it does not authorize or automatically prove a future candidate |
+| Phase 8 stateful CFA workflow | One post-persistence interruption recovered cleanly and three clean deployed attempts passed six native assertions each; every run ended with independent 19-database-scope, two-object, Cognito, bundle, temp and process absence (`:10515-10589`) | **Named but not presently consumable.** The inventory still calls `cfa-signing-test-smoke.js` with only profile, region and JSON (`release-coverage-inventory.json:244-250`), while the certified runner now requires a fresh `--attempt-id`, `--evidence-out`, and stateful `--sprint-started-at` (`scripts/cfa-signing-test-smoke.js:837-846`) | The retained Phase 8 result is candidate-specific and `releaseAuthority: none`. With the current static invocation, a normal TEST qualification reaches a deterministic harness failure instead of authoritative CFA evidence |
+| Portal aggregate and no-loss | `portal-aggregate` was deliberately deferred from the advisory cohort | **Yes, only through the unchanged current gate** (`release-coverage-inventory.json:28-47,86-92`) | RN02 (controlled portal aggregate execution) and RN04 (portal CRACO/native assertions) remain open (`release-qualification-harness-current-state-audit-2026-08-10.md:1101,1103`). Phase 4 did not close them |
+
+Two additional current-gate safety facts remain material. First, the legacy
+qualifier records a failed check but continues dispatching every later check
+(`scripts/path-release-qualify.js:352-380`); the Phase 0 finding that a failed
+TEST prerequisite did not prevent later fixture mutation therefore remains in
+the authoritative path (`release-qualification-harness-current-state-audit-2026-08-10.md:920`).
+Second, mandatory DEV check `payment-db-rollback` is declared as a DEV fixture
+but its native runner still authorizes both exact DEV and exact TEST database
+identities (`release-coverage-inventory.json:174-180`;
+`scripts/payments-workflow-smoke.js:38-71,229-264`). Narrowed Phase 5 did not
+repair that separate payment runner.
+
+### Actual TEST and PROD Authority
+
+- `scripts/path-release-qualify.js` plus
+  `docs/testing/release-coverage-inventory.json` remain the only normal
+  qualification path. A `GO` requires every required check to pass
+  (`scripts/path-release-qualify.js:352-404`).
+- `scripts/path-deploy.js` requires a current exact-source `DEV GO` for TEST and
+  a current exact-source `TEST GO` for PROD; release ID, source, inventory,
+  migrations and declared operations must agree
+  (`docs/ops/deployments/release-qualification-runbook.md:40-45`;
+  `scripts/path-deploy.js:2038-2063,2097-2100`). None of the Phase 3, 7 or 8
+  advisory artifacts satisfies that admission contract.
+- The existing emergency PROD route remains available only when Bill explicitly
+  identifies qualification itself as the blocker. It records
+  `EMERGENCY-AUTHORIZED`, not `TEST GO`, and is restricted to clean-source,
+  app-only `--skip-schema --skip-data` deployment with the remaining build,
+  maintenance, smoke and rollback controls
+  (`scripts/path-deploy.js:2064-2095`;
+  `release-qualification-runbook.md:446-457`). It is an emergency route, not the
+  normal answer to either of Bill's intended simple workflows.
+
+Bill's intended workflow therefore remains conceptually correct but not yet
+operationally closed:
+
+1. **Complete testing in TEST:** run the current exact-source DEV -> deployment
+   manifest -> TEST qualifier sequence and obtain machine `TEST GO`. This is
+   presently blocked by the stale CFA invocation contract and still permits
+   later stateful dispatch after a failed prerequisite.
+2. **Deploy to PROD:** supply that current exact-source `TEST GO` to the existing
+   `path:deploy` PROD command. This admission path is already implemented; it
+   must not consume `releaseAuthority: none` advisory evidence as a substitute.
+
+### Smallest Proportionate Next Action
+
+Do not begin broad Phase 9, promote packs, migrate checks or add another
+platform. The smallest useful continuation is one current-gate closure sprint.
+
+#### Proposed Sprint `RG1` - Authoritative TEST Gate Contract Closure
+
+**Single objective:** make the existing authoritative qualifier safely invoke
+the already certified CFA workflow while preventing failed TEST prerequisites
+or an ambiguously targeted payment fixture from producing later effects. This
+is a repair of the current machinery, not adoption of the advisory control
+plane.
+
+**Exact editable files:**
+
+- `scripts/path-release-qualify.js`
+- `scripts/payments-workflow-smoke.js`
+- `scripts/path-test-runtime-postflight.js`
+- `docs/testing/release-coverage-inventory.json`
+- `tests/releaseQualification.test.js`
+- `tests/paymentPrivacySmokeSchemaPreflight.test.js`
+- `docs/ops/deployments/release-qualification-runbook.md`
+- this target-architecture checkpoint
+- the controlling-plan checkpoint and Sprint Ledger
+
+The Phase 7 runner, CFA admin/portal native runners, `qualification/` package,
+product code, deploy admission and emergency route are read-only inputs and may
+not be changed.
+
+**Required bounded behavior:**
+
+1. Declare the exact existing TEST prerequisite relationship in the coverage
+   inventory. If deployment provenance, rollback readiness, target health or
+   runtime postflight fails, record dependent fixture checks as blocked and do
+   not spawn them. Continue only effect-free final evidence/source-stability
+   handling.
+2. Require an explicit `dev` or `test` target argument for the payment runner;
+   the DEV inventory command must bind `dev`, and the deployed TEST postflight
+   command must bind `test`. Reject either exact database identity under the
+   other target rather than treating credentials/connectivity as authority.
+3. For `test-cfa-signing` only, have the qualifier create a fresh attempt ID,
+   attempt-owned evidence path and sprint timestamp, pass the frozen native
+   command its required arguments, retain its complete result, and fail closed
+   unless the attempt binding, native success, terminal process, cleanup and
+   independent residue evidence are complete. Do not reinterpret product
+   assertions or accept the prior Phase 8 artifact as evidence for a new
+   candidate.
+4. Document the two normal operator steps as `complete testing in TEST`, then
+   `deploy to PROD` with the resulting exact-source `TEST GO`. Preserve the
+   emergency route as a separately authorized non-`GO` path.
+
+**Permitted effects:** only the listed repository edits; focused local synthetic
+tests; JavaScript syntax, inventory-validation, import/dependency and whitespace
+checks; and attempt-owned local test evidence/temp files with proved teardown.
+
+**Prohibited effects:** no existing qualification run, product/native build,
+browser, HTTP service, SQL/database connection, AWS, TEST, PROD, fixture,
+deployment, IAM/configuration change, pack promotion, release-authority or
+admission change, Phase 9 work, Intacct scope change, or unrelated harness
+repair.
+
+**Verification:** focused tests must prove prerequisite failure prevents every
+dependent spawn; successful prerequisites preserve declared order; blocked and
+missing prerequisite evidence cannot yield `GO`; explicit DEV/TEST payment
+binding accepts only its matching synthetic identity; the CFA command receives
+fresh exact arguments and accepts only matching complete success/cleanup/residue
+evidence; missing, stale, malformed, conflicting, nonzero, timeout, cleanup and
+residue cases fail closed; every unrelated inventory command and deploy-
+admission rule remains byte/behavior stable. Run the two focused test files,
+syntax checks for the three scripts, inventory validation, dependency/import
+checks and `git diff --check` only.
+
+**Stopping point:** stop after local certification and checkpoint update. Do not
+run DEV/TEST qualification or deploy. If this sprint passes, the rebuild
+programme can close; the next ordinary release, under separate environment and
+deployment authorization, is the first use of the repaired normal workflow.
+
+**Exact proposed authorization:**
+
+> Bill authorizes Sprint `RG1` only under the mandatory post-Phase-8 review.
+> Repair the existing authoritative release qualifier within the exact files,
+> behavior, local effects, verification and stopping boundary recorded under
+> `Proposed Sprint RG1 - Authoritative TEST Gate Contract Closure` in the
+> accepted target architecture. Block stateful TEST checks after failed
+> prerequisites, bind the payment runner explicitly to DEV or TEST, and bind
+> `test-cfa-signing` to one fresh attempt-owned complete evidence result. Preserve
+> all native product assertions, the current GO/NO-GO and deploy-admission
+> authority, `releaseAuthority: none` advisory boundaries, `portal-aggregate`,
+> RN02/RN04 and the emergency PROD route. Run only the recorded focused local
+> verification. Do not access an environment, run qualification, deploy, begin
+> Phase 9 or broaden the harness. Stop after Sprint `RG1` with a programme-
+> closeout recommendation; any live release use requires separate authorization.
+
+#### Sprint `RG1` Completion - Authoritative TEST Gate Contract Closure
+
+Sprint `RG1` completed the accepted local-only repair without running a release
+qualification or accessing an environment.
+
+- The TEST inventory now declares deployment provenance, rollback readiness,
+  target health and runtime postflight as earlier prerequisites for all six
+  dependent stateful fixture checks. The qualifier records a dependent check
+  as `blocked` without dispatch whenever any prerequisite is missing or not
+  `passed`; effect-free maintenance/source-stability handling remains
+  available, and every non-passed required result remains `NO-GO`.
+- The payment runner now requires one explicit `--target-env dev|test`. Its
+  configured and live identity guard selects only the declared target; the DEV
+  inventory passes `dev` and deployed TEST payment postflight passes `test`.
+  Cross-target and PROD/unknown selection fail before connection creation.
+- For `test-cfa-signing` only, the qualifier creates one fresh UUID-bound
+  attempt directory, evidence file and sprint timestamp, adds the certified
+  native arguments, applies the existing 75-minute sprint bound, retains the
+  complete result by path and SHA-256, and uses the native CFA result validator
+  plus exact lifecycle checks for successful terminal execution, Cognito and
+  bundle absence, and the separate 19-database/two-object zero-residue result.
+  Missing, malformed, stale/conflicting, failed, timed-out, cleanup-incomplete
+  or residue-bearing evidence cannot pass.
+- The runbook now states Bill's two normal actions plainly: complete the
+  exact-source testing chain in TEST, then deploy to PROD with that current
+  `TEST GO`. The separately authorized emergency route remains
+  `EMERGENCY-AUTHORIZED`, not `GO`.
+
+Focused local verification passed `16/16` release-qualification assertions and
+`19/19` payment/privacy schema-admission assertions. The release-qualification
+suite's existing nested bash/Node quoting proof required the bounded local
+process permission after the default sandbox returned `EPERM`; the identical
+focused test then passed. The three edited scripts pass `node --check`; the
+inventory parses and both the established inventory validator and new ordered
+prerequisite validator return no errors; declared command references resolve;
+the CFA qualifier retains only its existing read-only native-runner import;
+and `git diff --check` is clean. All synthetic attempt roots were removed.
+
+No product assertion, deploy-admission rule, emergency route, advisory pack,
+`releaseAuthority: none` boundary, `portal-aggregate`, RN02/RN04, environment,
+credential, SQL, database, AWS, browser, HTTP service, deployment or release
+authority changed. Live validation remains the responsibility of a separately
+authorized ordinary exact-source release.
+
+**Completion decision:** Sprint `RG1` is complete. The rebuild programme can
+close as an implementation programme: the four lean safety outcomes are
+proved, and the existing authoritative gate now consumes the bounded controls
+needed for Bill's normal TEST-then-PROD workflow. This is not a claim that any
+new candidate is qualified or deployable; the first live proof occurs only in
+an ordinary separately authorized release. `portal-aggregate` and RN02/RN04
+remain visible obligations under the unchanged current gate.
+
 ## Exact Proposed Authorization for Sprint 4A
 
 > Bill authorizes Sprint `4A` only under the accepted `P3-1` lean programme.

@@ -2,7 +2,7 @@
 
 Status: authoritative release gate for local DEV, real-MySQL qualification, TEST deployment, deployed TEST acceptance, and PROD authorization.
 
-Last reviewed: 2026-08-10 after the two-step review release exposed the need to separate universal qualification coverage from harness development and validation.
+Last reviewed: 2026-08-13 after Sprint `RG1` closed the current TEST-gate prerequisite, target-identity, and CFA evidence-binding contracts.
 
 This runbook supersedes any shorter deploy checklist when deciding whether a PATH release is admissible. The deployment guides still describe mechanics and maintenance handling, but they do not authorize a release by themselves.
 
@@ -14,6 +14,26 @@ A release is not qualified by a green unit suite, successful build, healthy targ
 2. `TEST GO`: that DEV-qualified candidate was admitted by the TEST deployment manifest, deployed provenance matches, rollback artifacts exist, target health and on-instance readiness pass, configuration and worker state are safe, deployed role/applicant/cross-app journeys pass, strict denials have no skip, rollback fixtures leave no residue, and maintenance state is clear.
 
 Any failed, skipped, unavailable, expired, unmapped, source-drifted, or cleanup-incomplete required check is `NO-GO`; it must never be relabelled `GO`. Normal releases have no skip or waiver flag. A separately recorded operator-authorized emergency PROD release may use the app-only pre-qualification deployment procedure described below without changing or falsifying the `NO-GO` evidence.
+
+The normal operator workflow has two steps:
+
+1. **Complete testing in TEST.** Run the exact-source DEV qualification, deploy
+   that admitted candidate to TEST, then run the authoritative TEST qualifier.
+   The TEST qualifier records `GO` only when every prerequisite and required
+   check passes. A failed deployment-provenance, rollback-readiness,
+   target-health, or runtime-postflight prerequisite blocks every dependent
+   stateful fixture instead of spawning it. The qualifier creates the CFA
+   attempt ID, evidence path, and sprint timestamp and accepts only the native
+   runner's matching complete terminal, cleanup, and independent zero-residue
+   evidence.
+2. **Deploy to PROD.** Supply the resulting unexpired exact-source `TEST GO` to
+   the existing PROD deploy command and obtain Bill's explicit authorization
+   for that release. Advisory evidence with `releaseAuthority: none` cannot
+   replace `TEST GO`.
+
+The emergency PROD route remains a separately authorized
+`EMERGENCY-AUTHORIZED` app-only path. It does not complete either normal step
+and does not create or imply `TEST GO`.
 
 ## Harness design boundary
 
@@ -152,7 +172,12 @@ npm run release:qualify -- run \
   --evidence-out tmp/release-qualification/dev/<release-id>.json
 ```
 
-Use the same `--full` and `--operation` flags as the plan. The qualifier runs all mandatory checks, even after a failure, so the evidence reports the complete blocker set.
+Use the same `--full` and `--operation` flags as the plan. The qualifier runs
+the declared TEST prerequisites and effect-free final checks to retain the
+available blocker evidence. Once any deployment-provenance,
+rollback-readiness, target-health, or runtime-postflight prerequisite is not
+`passed`, every dependent stateful TEST fixture is recorded as `blocked` and is
+not spawned. A blocked required check is `NO-GO`.
 
 Local database effects are bounded:
 
@@ -160,7 +185,9 @@ Local database effects are bounded:
 - the DEV schema plan proves the pinned database/host/port/principal/version identity, discovers and hashes full migration-ledger DDL metadata when present, and permits only one guarded qualified ledger read; it never creates the ledger;
 - privacy ERM is read-only;
 - the release MySQL contract runs its full structural preflight before readiness reads, inserts synthetic staff/import/event/delivery and document-policy fixtures inside one transaction, rolls back, then proves zero residue;
-- the payment fixture is transaction/rollback only and does not call email or a provider;
+- the payment fixture requires `--target-env dev` in DEV; the deployed TEST
+  postflight passes `--target-env test`, and either exact configured/live
+  identity is rejected under the other target;
 - build and browser outputs live under `tmp/release-qualification/`, generated build metadata is restored, and the local HTTP/browser processes are closed.
 
 A schema or finished-statement failure before mutation closes the connection without rollback, residue reads, or cleanup SQL. Once any fixture mutation is dispatched, failure handling must roll back and still run every guarded zero-residue assertion before surfacing the original and cleanup results together.
