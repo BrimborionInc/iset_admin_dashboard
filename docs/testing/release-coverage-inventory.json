@@ -230,7 +230,7 @@
       "cwd": "admin",
       "prerequisites": ["test-deployment-provenance", "test-rollback-readiness", "test-target-health", "test-runtime-postflight"],
       "command": ["node", "scripts/two-step-review-test-smoke.js", "--profile", "nwac-test", "--region", "ca-central-1", "--json"],
-      "description": "Deployed browser/API role journeys for Coordinator, Regional Manager and Decision Maker across assessment/proposal/revision workflows.",
+      "description": "Deployed browser/API role journeys for Coordinator, Regional Manager and Decision Maker across assessment/proposal/revision workflows, including an assigned-staff repeat-application control proving that conflict declaration does not advance status and the first assessment save advances only the selected submitted application.",
       "effects": "Creates disposable TEST Cognito, DB, document, notification and object-store fixtures; no real email.",
       "cleanup": "Script must prove zero Cognito, DB, notification, document and object residue."
     },

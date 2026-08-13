@@ -50,6 +50,164 @@ function sameExactRecord(actual, expected) {
   );
 }
 
+function sameSerializedValue(actual, expected) {
+  return JSON.stringify(actual) === JSON.stringify(expected);
+}
+
+function validateAssessmentStartJourneyEvidence(evidence) {
+  const fail = (code, details = {}) => {
+    const error = new Error(`assessment_start_journey_evidence_invalid:${code}`);
+    error.code = `assessment_start_journey_${code}`;
+    error.details = details;
+    throw error;
+  };
+  const requiredSnapshots = ['before', 'afterDeclaration', 'afterSave'];
+  if (typeof evidence?.attemptStamp !== 'string' || !evidence.attemptStamp.trim()) {
+    fail('attempt_stamp_invalid');
+  }
+  for (const key of requiredSnapshots) {
+    const snapshot = evidence?.[key];
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+      fail('snapshot_missing', { key });
+    }
+    for (const field of ['selected', 'sibling', 'selectedAssessment', 'siblingAssessment', 'caseRow']) {
+      if (!snapshot[field] || typeof snapshot[field] !== 'object' || Array.isArray(snapshot[field])) {
+        fail('snapshot_record_missing', { key, field });
+      }
+    }
+    for (const field of ['conflictDeclarations', 'unrelatedWorkflows']) {
+      if (!Array.isArray(snapshot[field])) fail('snapshot_collection_missing', { key, field });
+    }
+  }
+
+  const { before, afterDeclaration, afterSave, actor, declarationRequest, saveRequest, saveResponse } = evidence;
+  const selectedId = Number(before.selected.id);
+  const siblingId = Number(before.sibling.id);
+  const caseId = Number(before.caseRow.id);
+  const actorId = Number(actor?.staffProfileId);
+  const assignedId = Number(before.caseRow.assigned_staff_profile_id);
+  if (![selectedId, siblingId, caseId, actorId, assignedId].every(Number.isSafeInteger)) {
+    fail('identity_invalid', { selectedId, siblingId, caseId, actorId, assignedId });
+  }
+  if (selectedId === siblingId || Number(before.selected.case_id) !== caseId || Number(before.sibling.case_id) !== caseId) {
+    fail('application_relationship_invalid', { selectedId, siblingId, caseId });
+  }
+  if (!['ISET Coordinator', 'Regional Manager'].includes(actor?.role) || actorId !== assignedId) {
+    fail('assigned_actor_invalid', { actor, assignedId });
+  }
+  if (
+    before.selected.status !== 'submitted' ||
+    before.selected.lifecycle_status !== 'submitted' ||
+    before.sibling.status !== 'submitted' ||
+    before.sibling.lifecycle_status !== 'submitted'
+  ) {
+    fail('submitted_fixture_invalid', { selected: before.selected, sibling: before.sibling });
+  }
+  if (before.selected.workflow_id != null || before.conflictDeclarations.length !== 0) {
+    fail('fixture_prerequisite_invalid', {
+      workflowId: before.selected.workflow_id,
+      conflictDeclarations: before.conflictDeclarations,
+    });
+  }
+  if (before.unrelatedWorkflows.length < 1) {
+    fail('unrelated_workflow_control_missing');
+  }
+
+  if (
+    Number(declarationRequest?.applicationId) !== selectedId ||
+    Number(declarationRequest?.expectedRowVersion) !== Number(before.selected.row_version) ||
+    declarationRequest?.signed !== true ||
+    declarationRequest?.choice !== 'no_conflict' ||
+    declarationRequest?.hasStatusFields !== false ||
+    Number(declarationRequest?.httpStatus) < 200 ||
+    Number(declarationRequest?.httpStatus) >= 300
+  ) {
+    fail('declaration_request_invalid', { declarationRequest });
+  }
+  if (
+    !sameSerializedValue(afterDeclaration.selected, before.selected) ||
+    !sameSerializedValue(afterDeclaration.sibling, before.sibling) ||
+    !sameSerializedValue(afterDeclaration.selectedAssessment, before.selectedAssessment) ||
+    !sameSerializedValue(afterDeclaration.siblingAssessment, before.siblingAssessment) ||
+    !sameSerializedValue(afterDeclaration.caseRow, before.caseRow) ||
+    !sameSerializedValue(afterDeclaration.unrelatedWorkflows, before.unrelatedWorkflows)
+  ) {
+    fail('declaration_changed_protected_state', { before, afterDeclaration });
+  }
+  if (
+    afterDeclaration.conflictDeclarations.length !== 1 ||
+    Number(afterDeclaration.conflictDeclarations[0]?.case_id) !== caseId ||
+    Number(afterDeclaration.conflictDeclarations[0]?.staff_profile_id) !== actorId ||
+    afterDeclaration.conflictDeclarations[0]?.declaration_choice !== 'no_conflict' ||
+    afterDeclaration.conflictDeclarations[0]?.revoked_at != null
+  ) {
+    fail('declaration_persistence_invalid', {
+      conflictDeclarations: afterDeclaration.conflictDeclarations,
+    });
+  }
+
+  if (
+    Number(saveRequest?.applicationId) !== selectedId ||
+    Number(saveRequest?.expectedRowVersion) !== Number(afterDeclaration.selected.row_version) ||
+    typeof saveRequest?.overview !== 'string' ||
+    !saveRequest.overview.includes(String(evidence?.attemptStamp || '')) ||
+    saveRequest?.hasStatusFields !== false ||
+    Number(saveResponse?.httpStatus) < 200 ||
+    Number(saveResponse?.httpStatus) >= 300 ||
+    saveResponse?.success !== true
+  ) {
+    fail('assessment_save_request_invalid', { saveRequest, saveResponse });
+  }
+  const selectedBeforeComparable = { ...before.selected };
+  const selectedAfterComparable = { ...afterSave.selected };
+  for (const key of ['status', 'lifecycle_status', 'row_version']) {
+    delete selectedBeforeComparable[key];
+    delete selectedAfterComparable[key];
+  }
+  if (
+    afterSave.selected.status !== 'in_review' ||
+    afterSave.selected.lifecycle_status !== 'in_review' ||
+    Number(afterSave.selected.row_version) !== Number(before.selected.row_version) + 1 ||
+    afterSave.selected.workflow_id != null ||
+    !sameSerializedValue(selectedAfterComparable, selectedBeforeComparable)
+  ) {
+    fail('selected_application_transition_invalid', {
+      before: before.selected,
+      after: afterSave.selected,
+    });
+  }
+  if (
+    Number(afterSave.selectedAssessment.application_id) !== selectedId ||
+    Number(afterSave.selectedAssessment.case_id) !== caseId ||
+    afterSave.selectedAssessment.overview !== saveRequest.overview
+  ) {
+    fail('selected_assessment_save_invalid', {
+      selectedAssessment: afterSave.selectedAssessment,
+      saveRequest,
+    });
+  }
+  if (
+    !sameSerializedValue(afterSave.sibling, before.sibling) ||
+    !sameSerializedValue(afterSave.siblingAssessment, before.siblingAssessment) ||
+    !sameSerializedValue(afterSave.caseRow, before.caseRow) ||
+    !sameSerializedValue(afterSave.unrelatedWorkflows, before.unrelatedWorkflows) ||
+    !sameSerializedValue(afterSave.conflictDeclarations, afterDeclaration.conflictDeclarations)
+  ) {
+    fail('save_changed_protected_state', { before, afterDeclaration, afterSave });
+  }
+
+  return {
+    caseId,
+    selectedApplicationId: selectedId,
+    siblingApplicationId: siblingId,
+    assignedStaffProfileId: assignedId,
+    assignedRole: actor.role,
+    unrelatedWorkflowCount: before.unrelatedWorkflows.length,
+    selectedRowVersionBefore: Number(before.selected.row_version),
+    selectedRowVersionAfter: Number(afterSave.selected.row_version),
+  };
+}
+
 /*
  * This factory is intentionally self-contained. The local launcher serializes it
  * into the SSM runner, and focused local tests import the same implementation.
@@ -2398,6 +2556,7 @@ function remoteRunner() {
     const auth = await loginAllRoles();
     await runApplicationAssessmentWorkflow(auth);
     await runDualRoleApplicationAssessmentWorkflow(auth);
+    await runAssessmentStartApplicationWorkflow(auth);
     await runInterventionProposalWorkflow(auth);
     await runInterventionRevisionWorkflow(auth);
     await verifyNoKnownFixtureMismatches();
@@ -3075,14 +3234,19 @@ function remoteRunner() {
     if (!clicked) throw new Error(`Visible radio option not found: ${label}`);
   }
 
-  async function ensureNoConflictDeclarationThroughBrowser(page, caseId, applicationId) {
-    const gate = await page.waitForFunction(() => {
+  async function signOrReuseNoConflictDeclarationThroughBrowser(
+    page,
+    caseId,
+    applicationId,
+    readyText
+  ) {
+    const gate = await page.waitForFunction(expectedText => {
       const body = document.body?.innerText || '';
-      if (body.includes('Decision Maker requested changes')) return 'decision';
+      if (body.includes(expectedText)) return 'ready';
       if (body.includes('Conflict of Interest Declaration')) return 'conflict';
       return false;
-    }, { timeout: 60_000 }).then(handle => handle.jsonValue());
-    if (gate === 'decision') return;
+    }, { timeout: 60_000 }, readyText).then(handle => handle.jsonValue());
+    if (gate === 'ready') return { reused: true, requestBody: null, httpStatus: null };
 
     await clickRadioByLabel(page, 'I do not have any actual, potential, or perceived conflict of interest');
     const responsePromise = page.waitForResponse(response => {
@@ -3104,7 +3268,17 @@ function remoteRunner() {
       requestBody.assessment_conflict_declaration_signed === true &&
       requestBody.assessment_conflict_declaration_choice === 'no_conflict'
     ), { caseId, applicationId, requestBody, status: response.status() });
-    await waitForBodyText(page, 'Decision Maker requested changes');
+    await waitForBodyText(page, readyText);
+    return { reused: false, requestBody, httpStatus: response.status() };
+  }
+
+  async function ensureNoConflictDeclarationThroughBrowser(page, caseId, applicationId) {
+    return signOrReuseNoConflictDeclarationThroughBrowser(
+      page,
+      caseId,
+      applicationId,
+      'Decision Maker requested changes'
+    );
   }
 
   async function fillFirstVisibleTextarea(page, value) {
@@ -4880,6 +5054,21 @@ function remoteRunner() {
         assignedStaffProfileId: fixture.staff.manager.staffProfileId,
       });
       await seedRepeatApplicationSibling('dualRoleSibling', 'dualRoleApplication');
+      await seedApplicationAssessmentCase('assessmentStartApplication', {
+        assignedStaffProfileId: fixture.staff.manager.staffProfileId,
+      });
+      await seedRepeatApplicationSibling('assessmentStartSibling', 'assessmentStartApplication');
+      await query(
+        `UPDATE iset_application
+            SET status = 'submitted',
+                lifecycle_status = 'submitted',
+                awaiting_reason = 'none'
+          WHERE id IN (?, ?)`,
+        [
+          fixture.applications.assessmentStartApplication,
+          fixture.applications.assessmentStartSibling,
+        ]
+      );
       await seedPendingCompletionIntervention();
       await seedDocsReminderPair('dualRoleApplication', 'dualRoleApplication');
       await seedDocsReminderPair('dualRoleSibling', 'dualRoleSibling');
@@ -5371,6 +5560,48 @@ function remoteRunner() {
     return row || null;
   }
 
+  async function captureAssessmentStartJourneyState(caseId, selectedApplicationId, siblingApplicationId) {
+    const [[caseRow]] = await query(
+      `SELECT id, case_number, client_id, assigned_staff_profile_id, status,
+              lifecycle_status, stage, portfolio_region_id,
+              created_by_staff_profile_id, updated_by_staff_profile_id
+         FROM iset_case
+        WHERE id = ?
+        LIMIT 1`,
+      [caseId]
+    );
+    const [conflictDeclarations] = await query(
+      `SELECT id, case_id, staff_profile_id, signed_at, revoked_at,
+              declaration_choice, conflict_details
+         FROM iset_case_conflict_declaration
+        WHERE case_id = ?
+        ORDER BY id`,
+      [caseId]
+    );
+    const unrelatedCaseIds = Object.values(fixture.cases)
+      .map(Number)
+      .filter(id => Number.isSafeInteger(id) && id > 0 && id !== Number(caseId));
+    const [unrelatedWorkflows] = unrelatedCaseIds.length
+      ? await query(
+          `SELECT id, case_id, application_id, workflow_type, current_stage,
+                  current_owner_role, submitted_by_staff_profile_id, nwac_decision
+             FROM iset_review_workflow
+            WHERE case_id IN (${unrelatedCaseIds.map(() => '?').join(',')})
+            ORDER BY id`,
+          unrelatedCaseIds
+        )
+      : [[]];
+    return {
+      selected: await getApplicationState(selectedApplicationId),
+      sibling: await getApplicationSentinelState(siblingApplicationId),
+      selectedAssessment: await getApplicationAssessmentSentinelState(selectedApplicationId),
+      siblingAssessment: await getApplicationAssessmentSentinelState(siblingApplicationId),
+      caseRow: caseRow || null,
+      conflictDeclarations: conflictDeclarations || [],
+      unrelatedWorkflows: unrelatedWorkflows || [],
+    };
+  }
+
   async function captureReturnedAssessmentResubmitState(caseId, applicationId, workflowId) {
     const application = await getApplicationState(applicationId);
     const [documents] = await query(
@@ -5810,6 +6041,127 @@ function remoteRunner() {
       headers: authHeaders(auth),
       body: form,
     });
+  }
+
+  async function runAssessmentStartApplicationWorkflow(auth) {
+    const caseId = fixture.cases.assessmentStartApplication;
+    const applicationId = fixture.applications.assessmentStartApplication;
+    const siblingApplicationId = fixture.applications.assessmentStartSibling;
+    const before = await captureAssessmentStartJourneyState(
+      caseId,
+      applicationId,
+      siblingApplicationId
+    );
+    const page = await authedPage(auth.manager);
+    const routePath = `/application-case/${caseId}?applicationId=${applicationId}`;
+    let declarationResult = null;
+    let saveRequestBody = null;
+    let saveResponseBody = null;
+    let saveHttpStatus = null;
+    let revisedOverview = null;
+    let afterDeclaration = null;
+    try {
+      await page.goto(`${config.localBaseUrl}${routePath}`, { waitUntil: 'domcontentloaded' });
+      await dismissTutorialPromptIfPresent(page);
+      declarationResult = await signOrReuseNoConflictDeclarationThroughBrowser(
+        page,
+        caseId,
+        applicationId,
+        'Assess Eligibility'
+      );
+      requireInvariant('assessment start: attempt-owned case signs a new exact assigned-manager declaration', (
+        declarationResult?.reused === false
+      ), { routePath, declarationResult });
+      afterDeclaration = await captureAssessmentStartJourneyState(
+        caseId,
+        applicationId,
+        siblingApplicationId
+      );
+
+      await waitForAssessmentWizardStep(page, 'eligibility');
+      await clickAssessmentWizardButton(page, 'Next');
+      await waitForAssessmentWizardStep(page, 'framing');
+      await clickAssessmentWizardButton(page, 'Next');
+      await waitForAssessmentWizardStep(page, 'rationale');
+      revisedOverview = `ASSESSMENT-START-${config.stamp}`;
+      await fillFirstVisibleTextarea(page, revisedOverview);
+      const responsePromise = page.waitForResponse(response => (
+        response.request().method() === 'PUT' &&
+        response.url() === `${config.localBaseUrl}/api/cases/${caseId}`
+      ), { timeout: 60_000 });
+      await clickVisibleButton(page, 'Save Progress');
+      const response = await responsePromise;
+      saveHttpStatus = response.status();
+      saveRequestBody = JSON.parse(response.request().postData() || '{}');
+      const responseText = await response.text().catch(() => '');
+      if (!response.ok()) {
+        throw new Error(`First assessment Save Progress returned ${response.status()}: ${responseText.slice(0, 500)}`);
+      }
+      saveResponseBody = parseJsonObject(responseText);
+      await waitForBodyText(page, 'Assessment saved successfully');
+    } catch (error) {
+      await addBrowserFailureDiagnostics(page, 'assessment-start-application', error);
+      throw error;
+    } finally {
+      await page.close().catch(() => {});
+    }
+
+    const afterSave = await captureAssessmentStartJourneyState(
+      caseId,
+      applicationId,
+      siblingApplicationId
+    );
+    const hasStatusFields = body => [
+      'status',
+      'applicationStatus',
+      'application_status',
+      'applicationLifecycleStatus',
+      'application_lifecycle_status',
+    ].some(key => Object.prototype.hasOwnProperty.call(body || {}, key));
+    const evidence = {
+      attemptStamp: config.stamp,
+      actor: {
+        staffProfileId: fixture.staff.manager.staffProfileId,
+        role: fixture.staff.manager.role,
+      },
+      declarationRequest: {
+        applicationId: declarationResult?.requestBody?.applicationId,
+        expectedRowVersion: declarationResult?.requestBody?.expectedRowVersion,
+        signed: declarationResult?.requestBody?.assessment_conflict_declaration_signed,
+        choice: declarationResult?.requestBody?.assessment_conflict_declaration_choice,
+        hasStatusFields: hasStatusFields(declarationResult?.requestBody),
+        httpStatus: declarationResult?.httpStatus,
+      },
+      saveRequest: {
+        applicationId: saveRequestBody?.applicationId,
+        expectedRowVersion: saveRequestBody?.expectedRowVersion,
+        overview: saveRequestBody?.case_summary,
+        hasStatusFields: hasStatusFields(saveRequestBody),
+      },
+      saveResponse: {
+        httpStatus: saveHttpStatus,
+        success: saveResponseBody?.success,
+      },
+      before,
+      afterDeclaration,
+      afterSave,
+    };
+    const summary = validateAssessmentStartJourneyEvidence(evidence);
+    result.evidence.assessmentStartApplication = { ...summary, routePath };
+    pass('assessment start: selected and sibling applications begin submitted under the exact assigned Regional Manager', {
+      caseId,
+      applicationId,
+      siblingApplicationId,
+      assignedStaffProfileId: summary.assignedStaffProfileId,
+      assignedRole: summary.assignedRole,
+    });
+    pass('assessment start: signing the conflict declaration leaves application, sibling, case, assessment, and workflow state unchanged', {
+      caseId,
+      applicationId,
+      declarationId: afterDeclaration.conflictDeclarations[0]?.id || null,
+      unrelatedWorkflowCount: summary.unrelatedWorkflowCount,
+    });
+    pass('assessment start: first deployed assessment save advances only the exact selected application to In Review', summary);
   }
 
   async function runApplicationAssessmentWorkflow(auth) {
@@ -8320,4 +8672,5 @@ module.exports = {
   createLiveSchemaGuard,
   orderSelfReferencingVersionDeleteBatches,
   sameExactRecord,
+  validateAssessmentStartJourneyEvidence,
 };
