@@ -546,6 +546,16 @@ function applyCaseMutation(state, body) {
   const currentVersion = Number(state.casePayload.application_row_version || 0) || 0;
   const nextVersion = currentVersion + 1;
   const twoStepEnabled = state.casePayload.twoStepReviewEnabled || state.casePayload.two_step_review_enabled;
+  const currentApplicationStatus = String(
+    state.casePayload.applicationStatus || state.casePayload.application_status || ''
+  ).trim().toLowerCase();
+  const firstAssessmentWrite =
+    currentApplicationStatus === 'submitted' &&
+    !body.applicationStatus &&
+    Object.keys(body).some(key => (
+      key === 'case_summary' ||
+      (key.startsWith('assessment_') && !key.startsWith('assessment_conflict_declaration_'))
+    ));
   const preservePendingForTwoStepPushback =
     twoStepEnabled &&
     body.assessment_nwac_review_status === 'push_back' &&
@@ -621,6 +631,13 @@ function applyCaseMutation(state, body) {
     next.application_status = body.applicationStatus;
     next.applicationStatusRaw = body.applicationStatus;
     next.application_status_raw = body.applicationStatus;
+  } else if (firstAssessmentWrite) {
+    next.applicationStatus = 'in_review';
+    next.application_status = 'in_review';
+    next.applicationStatusRaw = 'in_review';
+    next.application_status_raw = 'in_review';
+    next.application_lifecycle_status = 'in_review';
+    next.applicationLifecycleStatus = 'in_review';
   }
   if (body.status) {
     next.statusRaw = body.status;
@@ -1241,6 +1258,7 @@ function buildScenarios() {
       casePayload: buildCasePayload({
         status: 'submitted',
         applicationStatus: 'submitted',
+        applicationLifecycleStatus: 'submitted',
         conflictSigned: false,
       }),
       run: async ({ page, state }) => {
@@ -1255,13 +1273,85 @@ function buildScenarios() {
         if (declarationPut.body.assessment_conflict_declaration_choice !== 'no_conflict') {
           throw new Error('Conflict declaration did not persist the no-conflict choice.');
         }
-        if (declarationPut.body.applicationStatus !== 'in_review') {
-          throw new Error('Conflict declaration on a submitted application did not promote it to in_review.');
+        if (Object.prototype.hasOwnProperty.call(declarationPut.body, 'applicationStatus') ||
+            Object.prototype.hasOwnProperty.call(declarationPut.body, 'status')) {
+          throw new Error('Conflict declaration incorrectly attempted to change case or application status.');
         }
         if (declarationPut.body.expectedRowVersion !== 7) {
           throw new Error(`Conflict declaration sent wrong expectedRowVersion: ${declarationPut.body.expectedRowVersion}`);
         }
+        if (state.casePayload.applicationStatus !== 'submitted') {
+          throw new Error(`Conflict declaration changed application status to ${state.casePayload.applicationStatus}.`);
+        }
         await waitForText(page, 'Assess Eligibility');
+      },
+    },
+    {
+      name: 'regional-manager-first-assessment-save',
+      role: 'Regional Manager',
+      path: FRONTEND_CASE_PATH,
+      casePayload: buildCasePayload({
+        status: 'submitted',
+        applicationStatus: 'submitted',
+        applicationLifecycleStatus: 'submitted',
+        completeAssessment: true,
+        conflictSigned: true,
+        twoStepReviewEnabled: true,
+        reviewWorkflow: null,
+      }),
+      run: async ({ page, state }) => {
+        await waitForWorkspaceReady(page, 'Assess Eligibility');
+        await waitForButtonEnabled(page, 'Next');
+        await clickButtonByText(page, 'Next');
+        await waitForText(page, 'What is being proposed?');
+        await waitForButtonEnabled(page, 'Next');
+        await clickButtonByText(page, 'Next');
+        await waitForText(page, 'Why is this intervention needed?');
+
+        const overviewInput = await page.evaluate(() => {
+          const textareas = Array.from(document.querySelectorAll('textarea'));
+          const visible = textareas.find(element => {
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+            return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+          });
+          if (!visible) return null;
+          return { readOnly: visible.readOnly, disabled: visible.disabled, value: visible.value };
+        });
+        if (!overviewInput || overviewInput.readOnly || overviewInput.disabled) {
+          throw new Error(`Assigned submitted application remained read-only for its Regional Manager: ${JSON.stringify(overviewInput)}`);
+        }
+
+        const revisedOverview = `${overviewInput.value} First saved note for this application.`;
+        await fillFirstVisibleTextarea(page, revisedOverview);
+        await waitForButtonEnabled(page, 'Save Progress');
+        await clickButtonByText(page, 'Save Progress');
+
+        const savePut = await waitUntil(
+          () => state.mutations.casePuts.find(entry => entry.body.case_summary === revisedOverview),
+          'first Regional Manager assessment save PUT'
+        );
+        if (savePut.body.applicationId !== APPLICATION_ID) {
+          throw new Error(`First assessment save used wrong applicationId: ${savePut.body.applicationId}`);
+        }
+        if (savePut.body.expectedRowVersion !== 7) {
+          throw new Error(`First assessment save sent wrong expectedRowVersion: ${savePut.body.expectedRowVersion}`);
+        }
+        if (Object.prototype.hasOwnProperty.call(savePut.body, 'applicationStatus') ||
+            Object.prototype.hasOwnProperty.call(savePut.body, 'status')) {
+          throw new Error('First assessment save attempted a client-authored status transition.');
+        }
+        if (state.casePayload.applicationStatus !== 'in_review' ||
+            state.casePayload.application_lifecycle_status !== 'in_review') {
+          throw new Error(`Backend draft start was not reflected in the selected application: ${state.casePayload.applicationStatus}/${state.casePayload.application_lifecycle_status}`);
+        }
+        if (state.casePayload.status !== 'submitted') {
+          throw new Error(`First application assessment save changed case status to ${state.casePayload.status}.`);
+        }
+        if (state.casePayload.reviewWorkflow) {
+          throw new Error('First draft save incorrectly created a review workflow.');
+        }
+        await waitForText(page, 'Assessment saved successfully');
       },
     },
     {

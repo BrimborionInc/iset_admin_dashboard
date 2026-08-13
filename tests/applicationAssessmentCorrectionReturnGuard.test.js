@@ -25,6 +25,7 @@ describe('application assessment correction-return caller guard', () => {
   let applyApplicationAssessmentReviewWorkflowAction;
   let applicationAssessmentCaseContextMutationKinds;
   let classifyApplicationAssessmentMutationRequest;
+  let resolveApplicationAssessmentDraftStart;
   let projectApplicationAssessmentCaseContextPatch;
   let assertApplicationAssessmentReviewOwnedStatusMutationAllowed;
   let assertApplicationAssessmentMutationStageAllowed;
@@ -39,6 +40,7 @@ describe('application assessment correction-return caller guard', () => {
       applyApplicationAssessmentReviewWorkflowAction,
       applicationAssessmentCaseContextMutationKinds,
       classifyApplicationAssessmentMutationRequest,
+      resolveApplicationAssessmentDraftStart,
       projectApplicationAssessmentCaseContextPatch,
       assertApplicationAssessmentReviewOwnedStatusMutationAllowed,
       assertApplicationAssessmentMutationStageAllowed,
@@ -587,6 +589,124 @@ describe('application assessment correction-return caller guard', () => {
       assessmentBodyMutationRequested: false,
       assessmentDecisionMutationRequested: false,
     });
+  });
+
+  test('the draft-start boundary reuses the assigned staff member case declaration', async () => {
+    const queries = [];
+    const connection = {
+      query: jest.fn(async (sql, params) => {
+        queries.push({ sql: String(sql), params });
+        return [[{
+          id: 173,
+          declaration_choice: 'no_conflict',
+          resolution_outcome: null,
+        }], []];
+      }),
+    };
+
+    await expect(resolveApplicationAssessmentDraftStart(connection, {
+      caseId: 187,
+      applicationId: 163,
+      beforeApplicationStatus: 'submitted',
+      assessmentWriteRequested: true,
+      assessmentSubmittedForWorkflow: false,
+      reviewWorkflow: null,
+      actorStaffProfileId: 55,
+      actorRole: 'Regional Manager',
+      assignedStaffProfileId: 55,
+    })).resolves.toEqual({
+      shouldStart: true,
+      reason: 'first_assessment_write',
+      declarationId: 173,
+    });
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0].params).toEqual([187, 55]);
+    expect(queries[0].sql).toContain('FROM iset_case_conflict_declaration');
+    expect(queries[0].sql).toContain('revoked_at IS NULL');
+  });
+
+  test('the draft-start boundary validates direct submission without adding an intermediate status', async () => {
+    const connection = {
+      query: jest.fn(async () => [[{
+        id: 174,
+        declaration_choice: 'no_conflict',
+        resolution_outcome: null,
+      }], []]),
+    };
+
+    await expect(resolveApplicationAssessmentDraftStart(connection, {
+      caseId: 187,
+      applicationId: 163,
+      beforeApplicationStatus: 'submitted',
+      assessmentWriteRequested: true,
+      assessmentSubmittedForWorkflow: true,
+      reviewWorkflow: null,
+      actorStaffProfileId: 55,
+      actorRole: 'Regional Manager',
+      assignedStaffProfileId: 55,
+    })).resolves.toMatchObject({
+      shouldStart: false,
+      reason: 'assessment_submits_directly_to_review',
+    });
+  });
+
+  test('the draft-start boundary fails before declaration lookup for a different staff member', async () => {
+    const connection = { query: jest.fn() };
+
+    await expect(resolveApplicationAssessmentDraftStart(connection, {
+      caseId: 187,
+      applicationId: 163,
+      beforeApplicationStatus: 'submitted',
+      assessmentWriteRequested: true,
+      reviewWorkflow: null,
+      actorStaffProfileId: 88,
+      actorRole: 'Regional Manager',
+      assignedStaffProfileId: 55,
+    })).rejects.toMatchObject({
+      code: 'assessment_start_forbidden',
+      status: 403,
+    });
+    expect(connection.query).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    [[], 'conflict_declaration_required'],
+    [[{ id: 175, declaration_choice: 'conflict', resolution_outcome: null }], 'conflict_declaration_unresolved'],
+  ])('the draft-start boundary rejects a missing or unresolved declaration', async (rows, errorCode) => {
+    const connection = { query: jest.fn(async () => [rows, []]) };
+
+    await expect(resolveApplicationAssessmentDraftStart(connection, {
+      caseId: 187,
+      applicationId: 163,
+      beforeApplicationStatus: 'submitted',
+      assessmentWriteRequested: true,
+      reviewWorkflow: null,
+      actorStaffProfileId: 55,
+      actorRole: 'Regional Manager',
+      assignedStaffProfileId: 55,
+    })).rejects.toMatchObject({ code: errorCode, status: 409 });
+  });
+
+  test('the draft-start boundary accepts a declared conflict only after it is cleared', async () => {
+    const connection = {
+      query: jest.fn(async () => [[{
+        id: 176,
+        declaration_choice: 'conflict',
+        resolution_outcome: 'cleared',
+      }], []]),
+    };
+
+    await expect(resolveApplicationAssessmentDraftStart(connection, {
+      caseId: 187,
+      applicationId: 163,
+      beforeApplicationStatus: 'submitted',
+      assessmentWriteRequested: true,
+      reviewWorkflow: null,
+      actorStaffProfileId: 55,
+      actorRole: 'Regional Manager',
+      assignedStaffProfileId: 55,
+    })).resolves.toMatchObject({ shouldStart: true });
   });
 
   test('real application start-review boundary denies a different staff actor before any write', async () => {

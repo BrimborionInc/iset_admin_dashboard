@@ -2,7 +2,7 @@
 
 Purpose: plan the new Regional Manager review stage for assessment and intervention approval workflows.
 Audience: product, engineering, operations, training, and future AI-assisted development threads.
-Last Updated: 2026-08-10
+Last Updated: 2026-08-13
 
 ## Status
 
@@ -398,8 +398,60 @@ Guide should be written as a job aid, not implementation notes.
 - Configurable per-region review routing.
 - Reporting widgets for RM review throughput and returned-work reasons.
 
+## Cross-workflow complexity review ledger
+
+Bill requested on 2026-08-13 that the accumulated two-step review fixes be
+retained as evidence for a later step-back review. The objective is to decide
+whether the composed workflow is still coherent, not to keep treating each
+reported symptom as an independent hotfix.
+
+Current pattern evidence:
+
+| Feedback / area | Interaction exposed | Architectural concern to revisit |
+| --- | --- | --- |
+| `#147`, `#148`, RM-owned submissions | Draft ownership, workflow creation, and RM sign-off | A Regional Manager can act first as submitter and later as reviewer, but those capacities must be explicit and separately tested. |
+| `#168`, `#170`, `#178`, `#179`, returned corrections | Original-submitter identity, final-decision recovery, Financial Overview signing, optimistic concurrency, and renewed review | Review stage, application lifecycle, participant-form state, and correction ownership are separate state machines whose allowed interleavings need one contract. |
+| `#171`, `#173`, `#177`, repeat applications and CFA | Selected application, Action Plan/intervention lineage, generated documents, CFA versions, signing requests, and signed artifacts | Case-level fallback is unsafe whenever an application-scoped owner exists; the complete artifact chain must carry the exact application lineage. |
+| `#182`, approval/denial letters | Immutable Decision Maker outcome versus authorized post-decision communication | Decision facts and follow-up communication were coupled too broadly and need distinct mutation contracts. |
+| `#183`, repeat-application assessment start | A case-and-staff conflict declaration from the denied first application remained valid for the second application, so the declaration-sign action that also incidentally changed `submitted` to `in_review` did not run. The August 7 edit guard then required `in_review` for a Regional Manager draft and left the second assessment read-only before any review workflow existed. | Conflict declarations remain case-and-staff scoped. Assessment start is now a separate, application-scoped transition owned by the backend on the first successful write by the exact assigned staff member. This boundary must remain part of the later composed-workflow review. |
+
+The later review must model at least the cross-product of exact application,
+business role/capacity, application lifecycle, review stage, conflict
+declaration, participant-form/signing state, generated-document version, Action
+Plan/intervention lineage, decision outcome, and post-decision communication.
+Every transition should have one authoritative owner and caller boundary;
+opening a page, selecting an inherited case value, or performing an unrelated
+prerequisite must not be the only way another state machine advances.
+
+The immediate `#183` recovery remained separate from the product fix. Live
+evidence on 2026-08-13 showed Case `187` has denied application `120` and new
+application `163`; Bill moved only application `163` through the normal System
+Administrator application-status control to `In Review`, and independent
+read-back confirmed the case lifecycle, prior application, assessment,
+declaration, and review-workflow state were unchanged.
+
+The agreed DEV implementation keeps declarations case-and-staff scoped and does
+not ask staff to reaffirm an unchanged declaration. Merely opening the page or
+signing/reusing the declaration does not advance an application. On the first
+successful assessment write to a `submitted` application, the transactional
+backend boundary requires the exact assigned ISET Coordinator or Regional
+Manager and an active no-conflict or cleared-conflict declaration, then moves
+only that application to `in_review`. Direct submission can move directly to
+its review-owned state. No existing record is migrated, no review workflow is
+created for a draft save, and case lifecycle, other applications, decisions,
+letters, CFA state, and prior assessments remain untouched.
+
+Focused helper and frontend tests, real PUT-route tests (including missing
+declaration and rollback), syntax checks, the deterministic browser journey,
+and the complete 986-test admin aggregate passed on 2026-08-13. No TEST/PROD
+deployment or further live-data change was made. The later composed-workflow
+review remains open; this fix does not close the broader convolution concern.
+
 ## Open Business Watchpoints
 
 - Confirm remaining stakeholder UAT/training gaps after the early 2026-06-20 PROD activation; do not use the older July 13 target as evidence that PROD is still disabled.
 - Confirm whether the Decision Maker role should be described as permanent in user-facing training, or as a current approval-routing process.
 - Confirm whether final PDFs should include full RM notes or only RM name/date/sign-off plus a reference to internal notes.
+- Keep training and support guidance clear that a valid case-level declaration
+  carries across that staff member's applications on the case, while each
+  application's assessment begins independently on its first successful save.

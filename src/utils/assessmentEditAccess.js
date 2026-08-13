@@ -67,12 +67,23 @@ export const canRegionalManagerEditApplicationAssessment = ({
   applicationStatus,
   reviewWorkflow,
   currentStaffProfileId,
+  assignedStaffProfileId,
 } = {}) => {
-  if (!isRegionalManager || String(applicationStatus || '').trim().toLowerCase() !== 'in_review') {
+  const normalizedApplicationStatus = String(applicationStatus || '').trim().toLowerCase();
+  if (!isRegionalManager || !['submitted', 'in_review'].includes(normalizedApplicationStatus)) {
     return false;
   }
 
   if (!reviewWorkflow) {
+    if (normalizedApplicationStatus === 'submitted') {
+      const activeStaffProfileId = normalizePositiveId(currentStaffProfileId);
+      const assignedProfileId = normalizePositiveId(assignedStaffProfileId);
+      return Boolean(
+        activeStaffProfileId &&
+        assignedProfileId &&
+        activeStaffProfileId === assignedProfileId
+      );
+    }
     return true;
   }
 
@@ -96,6 +107,7 @@ export const canEditApplicationAssessmentBody = ({
   applicationStatus,
   reviewWorkflow,
   currentStaffProfileId,
+  assignedStaffProfileId,
 } = {}) => {
   if (isSystemAdministrator) {
     return true;
@@ -123,5 +135,6 @@ export const canEditApplicationAssessmentBody = ({
     applicationStatus,
     reviewWorkflow,
     currentStaffProfileId,
+    assignedStaffProfileId,
   });
 };

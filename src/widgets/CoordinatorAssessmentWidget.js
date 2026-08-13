@@ -2582,6 +2582,12 @@ const CoordinatorAssessmentWidget = forwardRef(
   const applicantUserId = caseData?.applicant_user_id ?? caseData?.applicantUserId ?? null;
   const applicationId = caseData?.application_id ?? caseData?.applicationId ?? application_id ?? null;
   const caseId = caseData?.id ?? caseData?.case_id ?? null;
+  const assignedStaffProfileId =
+    caseData?.assigned_staff_profile_id ??
+    caseData?.assignedStaffProfileId ??
+    caseData?.assigned_to_user_id ??
+    caseData?.assignedToUserId ??
+    null;
   const reviewWorkflow = caseData?.reviewWorkflow || caseData?.review_workflow || null;
   const reviewStage = reviewWorkflow?.currentStage || reviewWorkflow?.current_stage || null;
   const reviewWorkflowMetadata = (() => {
@@ -4608,9 +4614,10 @@ const CoordinatorAssessmentWidget = forwardRef(
     applicationStatus: normalizedApplicationStatus,
     reviewWorkflow,
     currentStaffProfileId,
+    assignedStaffProfileId,
   });
   const assessmentEditBlockedMessage = isRegionalManager
-    ? 'Regional Managers can edit their own in-review drafts, including assessments returned to them as the original submitter. Other submitted assessments must move through the review actions instead.'
+    ? 'Regional Managers can edit a submitted application only when it is assigned to them. After submission, they can edit only work returned to them as the original submitter.'
     : 'This role cannot edit assessment fields in the current stage.';
   const canManageEligibilityDuringAssessment =
     canManageEiEligibility &&
@@ -6603,17 +6610,12 @@ const CoordinatorAssessmentWidget = forwardRef(
       }
       const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
       const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
-      const shouldPromoteToInReview = canonicalApplicationStatus === 'submitted';
       const payload = {
         applicationId: applicationId || null,
         assessment_conflict_declaration_signed: true,
         assessment_conflict_declaration_choice: choice,
         assessment_conflict_declaration_details: choice === 'conflict' ? detailsValue : ''
       };
-      if (shouldPromoteToInReview) {
-        payload.status = 'in_review';
-        payload.applicationStatus = 'in_review';
-      }
       if (versionToken > 0) {
         payload.expectedRowVersion = versionToken;
       }
@@ -6674,11 +6676,6 @@ const CoordinatorAssessmentWidget = forwardRef(
           assessment_conflict_declaration_resolved_at: null,
           assessment_conflict_declaration_resolution_note: null
         };
-        if (shouldPromoteToInReview) {
-          updates.status = 'in_review';
-          updates.statusRaw = 'in_review';
-          updates.applicationStatus = 'in_review';
-        }
         onCaseUpdate(updates);
       }
       if (choice === 'conflict') {
@@ -6714,7 +6711,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     persistedConflictDeclarationDetails,
     normalizedPersistedConflictChoice,
     isSigningDeclaration,
-    canonicalApplicationStatus,
     ensureLockForOperation,
     lockHeldByCurrentUser,
     onCaseUpdate,
@@ -8027,6 +8023,24 @@ ${JSON.stringify(aiContext, null, 2)}`;
 
       const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
       const caseUpdatePayload = { ...payload };
+      const updatedApplicationStatus =
+        result?.applicationStatus ||
+        result?.application_status ||
+        null;
+      if (updatedApplicationStatus) {
+        caseUpdatePayload.applicationStatus = updatedApplicationStatus;
+        caseUpdatePayload.application_status = updatedApplicationStatus;
+        caseUpdatePayload.applicationStatusRaw = updatedApplicationStatus;
+        caseUpdatePayload.application_status_raw = updatedApplicationStatus;
+      }
+      const updatedApplicationLifecycleStatus =
+        result?.applicationLifecycleStatus ||
+        result?.application_lifecycle_status ||
+        null;
+      if (updatedApplicationLifecycleStatus) {
+        caseUpdatePayload.applicationLifecycleStatus = updatedApplicationLifecycleStatus;
+        caseUpdatePayload.application_lifecycle_status = updatedApplicationLifecycleStatus;
+      }
       if (updatedRowVersion) {
         updateRowVersion(updatedRowVersion);
         caseUpdatePayload.application_row_version = updatedRowVersion;
