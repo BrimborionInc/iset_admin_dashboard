@@ -341,10 +341,30 @@ bundle root absent.
 
 This is read-only admission evidence, not a stateful workflow result and not
 release authority. Do not run the stateful CFA wrapper from this checkpoint.
-Sprint `8C`, product fixtures, product HTTP, Cognito/S3 writes, cleanup SQL,
-SES/email and every database mutation remain unauthorized until Bill separately
-accepts Sprint `8B` and authorizes the recorded `8C` contract. The current
-release gate remains authoritative and `releaseAuthority: none` is unchanged.
+The first Sprint `8C` authorization stopped safely before AWS/TEST on local
+lifecycle defects. Product fixtures, product HTTP, Cognito/S3 writes, cleanup
+SQL, SES/email and every database mutation remain unauthorized until Bill
+accepts the subsequent `8C-R1` correction and separately resumes the recorded
+live `8C` contract. The current release gate remains authoritative and
+`releaseAuthority: none` is unchanged.
+
+Sprint `8C-R1` subsequently certified the CFA lifecycle locally without TEST
+access. A future separately authorized stateful invocation must provide one
+shared `--sprint-started-at` value and select either normal execution or the
+single `--interrupt-after-signed-evidence` path. The outer wrapper must observe
+terminal SSM status and response code before cleanup, reconstruct and validate
+each attempt-owned execution/recovery/verifier result through the bounded file/
+chunk transport, actually dispatch recovery after interruption, prove exact
+Cognito absence, run a fresh separate 19-scope/two-object residue verifier, and
+remove the remote bundle only after those proofs. Execution is bounded to 10
+minutes, recovery and verification to 3 minutes each, one attempt to 15 minutes
+and the complete Sprint `8C` window to 75 minutes. A timeout or failed proof
+does not authorize a retry.
+
+This checkpoint still does not authorize the stateful command. It changes the
+Phase 8 harness/test-pack binding, so any live `8C` run requires Bill to accept
+the frozen admin and portal `8C-R1` commits explicitly. TEST SES must remain
+denied and `releaseAuthority: none` remains unchanged.
 
 ## Hard PROD go/no-go
 

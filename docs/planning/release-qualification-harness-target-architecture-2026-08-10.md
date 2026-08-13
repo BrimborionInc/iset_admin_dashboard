@@ -10359,6 +10359,75 @@ unauthorized. The exact next approval is Bill's explicit acceptance of Sprint
 `8B` plus authorization of Sprint `8C` under the already recorded conditional
 stateful-execution contract; it must not begin automatically.
 
+### Sprint 8C Safe Pre-execution Stop and 8C-R1 Completion
+
+Bill authorized conditional Sprint `8C`, but the local pre-execution review
+stopped before AWS or TEST access. The frozen outer wrapper created command
+strings for recovery and residue verification without dispatching either one;
+deleted the outer Cognito identity and bundle in its unconditional `finally`;
+did not independently prove Cognito absence; and accepted only one monolithic
+stateful child result. The portal runner had no deterministic interruption
+point after durable first-sign database/object evidence. Consequently the
+required interruption, terminal-process, recovery and independent-verifier
+lifecycle was not executable. No live attempt, fixture, SQL, product HTTP, S3,
+Cognito or SES operation occurred.
+
+Bill authorized bounded Sprint `8C-R1` to repair only those CFA lifecycle
+boundaries. The completed task-specific contract now:
+
+- writes and syncs an attempt-owned fixture stamp plus content-addressed result
+  envelope and compact manifest before the one admitted `SIGKILL` interruption,
+  after native signed-state and signed-object evidence and before replay checks;
+- requires explicit terminal SSM status and integer response code before any
+  recovery, Cognito deletion or independent verifier action;
+- dispatches recovery after the interruption, validates its separately chunked
+  result, deletes the exact outer Cognito identity and proves `AdminGetUser`
+  absence, then dispatches a fresh residue-verifier command and independently
+  validates all 19 database scopes and both object absences;
+- uses the certified bounded file/chunk transport independently for execution,
+  recovery and verification, rejecting missing, duplicate, reordered,
+  truncated, corrupt, stale, conflicting or wrong-status evidence; and
+- removes the fixture stamp and runner bundle only after verified recovery or
+  normal cleanup, Cognito absence and the independent verifier. The 10-minute
+  execution, 3-minute recovery, 3-minute verifier, 15-minute attempt and
+  75-minute sprint bounds are explicit and fail closed without retry.
+
+The tests execute injected dispatches rather than inspecting command strings.
+They prove the interruption -> terminal proof -> recovery -> recovery-result
+validation -> Cognito absence -> separate verifier -> verifier-result validation
+-> bundle-removal order, the clean execution -> separate verifier path, and
+failure before later effects on nullable process evidence, invalid recovery or
+nonzero residue. Large execution, recovery and verification envelopes each
+cross the observed 24,000-character boundary and reconstruct by exact digest.
+
+Verification passed without environment access:
+
+- `63/63` admin assertions across the unchanged canonical live-schema guard,
+  CFA preflight and expanded lifecycle suites;
+- both portal CFA contract/SQL files, including durable interruption and result
+  transport cases while preserving every existing product assertion;
+- JavaScript syntax for both runners and focused tests, declared dependency
+  trees, whitespace checks and absence of synthetic temp/process residue.
+
+The accepted `8B` product candidate, environment/resource identities,
+22-object/68-statement/19-residue catalogue, no-email boundary and product
+assertions are unchanged. As required by the impact mapping, the edited outer
+and portal runner bytes advance the Phase 8 harness/test-pack binding; no live
+evidence is carried across that change.
+The portal lifecycle repair is clean and pushed at
+`a650d4816d6e4a346acf6b4e5431801c68fc8572`; portal runner SHA-256 is
+`a21c03ed45e94c9003ce1e0f38188e75df15e9f7217d0e0714d7c86f9dd2aad8`.
+The admin outer runner SHA-256 is
+`62f3a94021a0b63cd2597f86788e67eb1e992e985d4cf0d2a0a7fdfb1ec0c1a1`.
+
+**Completion decision:** Sprint `8C-R1` is complete as local synthetic
+certification only. Phase 8 remains incomplete. No live attempt or stateful
+effect is authorized by this checkpoint; `releaseAuthority: none`, TEST SES
+denies and the current authoritative gate remain unchanged. The exact next
+approval is Bill's acceptance of `8C-R1` and separate authorization to resume
+Sprint `8C` against the frozen admin and portal commits under the complete
+existing conditional stateful-execution contract.
+
 ## Exact Proposed Authorization for Sprint 4A
 
 > Bill authorizes Sprint `4A` only under the accepted `P3-1` lean programme.

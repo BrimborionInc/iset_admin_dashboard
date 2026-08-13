@@ -7,13 +7,18 @@ const sourcePath = path.resolve(__dirname, '..', 'scripts', 'cfa-signing-test-sm
 const source = fs.readFileSync(sourcePath, 'utf8');
 const {
   EVIDENCE_CHUNK_BYTES,
+  STATEFUL_LIMITS,
   admissionBundle,
   admissionEvidenceFile,
   createEvidenceChunk,
+  deleteApplicant,
+  executeStatefulLifecycle,
   parseArgs,
   parseSmokeJson,
   reconstructAdmissionEvidence,
+  reconstructEvidence,
   statefulCommandPlan,
+  statefulEvidenceFile,
   validateCompleteAdmission,
   waitForCommand,
 } = require('../scripts/cfa-signing-test-smoke');
@@ -63,6 +68,44 @@ function transportFixture() {
   const count = Math.ceil(bytes.length / EVIDENCE_CHUNK_BYTES);
   const chunks = Array.from({ length: count }, (_, index) => createEvidenceChunk(bytes, manifest, index));
   return { admission, attemptId, bytes, chunks, filename, manifest, root };
+}
+
+function lifecycleResult(attemptId, phase) {
+  const common = { attemptId, releaseAuthority: 'none', ok: true, status: 'PASS' };
+  if (phase === 'execution') {
+    return {
+      ...common,
+      mode: 'stateful-execution',
+      cleanup: { database: true, objects: true },
+      checks: [
+        'live identity and full DDL verified',
+        'synthetic CFA fixture seeded from verified schema',
+        'real applicant Cognito authentication succeeded',
+        'CFA signed with correct application/document/event lineage',
+        'identical repeat signing was idempotent',
+        'changed signing payload was rejected without changing completion state',
+      ],
+    };
+  }
+  if (phase === 'interrupted') {
+    return {
+      ...common,
+      ok: false,
+      status: 'INTERRUPTED',
+      mode: 'post-sign-interruption',
+      signed: { documentId: 1, objectKey: 'signed.pdf', eventId: 'event-1', objectSize: 10 },
+      interruption: { checkpoint: 'durable-post-sign-evidence' },
+    };
+  }
+  if (phase === 'recovery') return { ...common, mode: 'recovery-only', cleanup: { database: true, objects: true } };
+  return {
+    ...common,
+    mode: 'verify-residue-only',
+    residue: {
+      database: Array.from({ length: 19 }, (_, index) => ({ scope: `scope-${index}`, count: 0 })),
+      objects: [{ key: 'prior.pdf', absent: true }, { key: 'signed.pdf', absent: true }],
+    },
+  };
 }
 
 describe('CFA TEST outer lifecycle contract', () => {
@@ -201,6 +244,7 @@ describe('CFA TEST outer lifecycle contract', () => {
       },
       portalAwsArn: 'arn:aws:iam::124355655255:user/SES_backend',
       workflow: { id: 17, name: 'Funding Agreement', workflowType: 'consent-cm-prefill' },
+      interruptAfterSignedEvidence: true,
     });
 
     for (const command of [plan.execute, plan.recover, plan.verifyResidue]) {
@@ -213,10 +257,14 @@ describe('CFA TEST outer lifecycle contract', () => {
     expect(plan.execute).toContain("--workflow-type 'consent-cm-prefill'");
     expect(plan.execute).toContain(`--applicant-email '${marker.applicantEmail}'`);
     expect(plan.execute).toContain(`--fixture-stamp-out '${plan.fixtureStamp}'`);
+    expect(plan.execute).toContain('--interrupt-after-signed-evidence');
+    expect(plan.execute).toContain(`--evidence-file '${statefulEvidenceFile(bundle, 'execution')}'`);
     expect(plan.recover).toContain('--recovery-only');
     expect(plan.recover).toContain(`--fixture-stamp '${plan.fixtureStamp}'`);
+    expect(plan.recover).toContain(`--evidence-file '${statefulEvidenceFile(bundle, 'recovery')}'`);
     expect(plan.verifyResidue).toContain('--verify-residue-only');
     expect(plan.verifyResidue).toContain(`--fixture-stamp '${plan.fixtureStamp}'`);
+    expect(plan.verifyResidue).toContain(`--evidence-file '${statefulEvidenceFile(bundle, 'verification')}'`);
     expect(() => statefulCommandPlan({ bundle, attemptId, applicant: {}, portalAwsArn: 'arn', workflow: {} }))
       .toThrow('Complete applicant identity is required');
   });
@@ -237,5 +285,263 @@ describe('CFA TEST outer lifecycle contract', () => {
     expect(source).not.toContain('console.log(portalEnv');
     expect(source).not.toContain('JSON.stringify(portalEnv');
     expect(source).not.toContain('DB_PASS:');
+  });
+
+  test.each(['execution', 'recovery', 'verification'])('reconstructs independently validated bounded %s evidence', phase => {
+    const attemptId = `phase8c-result-transport-${phase}-0001`;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cfa-result-transport-'));
+    const filename = path.join(root, `${phase}.json`);
+    const result = lifecycleResult(attemptId, phase);
+    result.schema = {
+      rawDdl: Array.from({ length: 2_000 }, (_, index) => sha256(Buffer.from(`${phase}-${index}`))).join(''),
+    };
+    const manifest = writeEvidenceFile(filename, encodeResult(result));
+    const bytes = fs.readFileSync(filename);
+    const chunks = Array.from(
+      { length: Math.ceil(bytes.length / EVIDENCE_CHUNK_BYTES) },
+      (_, index) => createEvidenceChunk(bytes, manifest, index)
+    );
+    try {
+      expect(bytes.length).toBeGreaterThan(24_000);
+      const reconstructed = reconstructEvidence(manifest, index => chunks[index], {
+        attemptId,
+        evidenceFile: filename,
+        statuses: ['PASS'],
+      });
+      expect(reconstructed.result).toEqual(result);
+      expect(reconstructed.digest).toBe(manifest.evidenceFileSha256);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+    expect(fs.existsSync(root)).toBe(false);
+  });
+
+  test('executes interruption recovery and a genuinely separate verifier in order before bundle removal', async () => {
+    const attemptId = 'phase8c-lifecycle-interruption-0001';
+    const actions = [];
+    const results = {
+      execution: lifecycleResult(attemptId, 'interrupted'),
+      recovery: lifecycleResult(attemptId, 'recovery'),
+      verification: lifecycleResult(attemptId, 'verification'),
+    };
+    const outcome = await executeStatefulLifecycle({
+      plan: { execute: 'execute', recover: 'recover', verifyResidue: 'verify' },
+      attemptId,
+      interruptAfterSignedEvidence: true,
+      sprintStartedAt: 1_000,
+    }, {
+      now: () => 2_000,
+      dispatch: async ({ phase, command, timeoutMs }) => {
+        actions.push(`dispatch:${phase}:${command}:${timeoutMs}`);
+        return {
+          commandId: `command-${phase}`,
+          invocation: phase === 'execution'
+            ? { Status: 'Failed', ResponseCode: 137 }
+            : { Status: 'Success', ResponseCode: 0 },
+        };
+      },
+      retrieve: async ({ phase, statuses }) => {
+        actions.push(`retrieve:${phase}:${statuses.join(',')}`);
+        return { result: results[phase], reconstructedSha256: `sha-${phase}` };
+      },
+      cleanupApplicant: async () => {
+        actions.push('cognito:delete-and-prove');
+        return { absent: true };
+      },
+      finalizeBundle: async () => {
+        actions.push('bundle:remove-and-prove');
+        return { absent: true };
+      },
+    });
+
+    expect(actions).toEqual([
+      `dispatch:execution:execute:${STATEFUL_LIMITS.executionMs}`,
+      'retrieve:execution:INTERRUPTED',
+      `dispatch:recovery:recover:${STATEFUL_LIMITS.cleanupMs}`,
+      'retrieve:recovery:PASS',
+      'cognito:delete-and-prove',
+      `dispatch:verification:verify:${STATEFUL_LIMITS.verificationMs}`,
+      'retrieve:verification:PASS',
+      'bundle:remove-and-prove',
+    ]);
+    expect(outcome.execution.terminal).toEqual({ status: 'Failed', responseCode: 137, terminal: true });
+    expect(outcome.recovery.evidence.result.mode).toBe('recovery-only');
+    expect(outcome.verification.evidence.result.mode).toBe('verify-residue-only');
+  });
+
+  test('runs a separate verifier after clean execution without dispatching recovery', async () => {
+    const attemptId = 'phase8c-lifecycle-clean-0001';
+    const actions = [];
+    const results = {
+      execution: lifecycleResult(attemptId, 'execution'),
+      verification: lifecycleResult(attemptId, 'verification'),
+    };
+    await executeStatefulLifecycle({
+      plan: { execute: 'execute', recover: 'recover', verifyResidue: 'verify' },
+      attemptId,
+      interruptAfterSignedEvidence: false,
+      sprintStartedAt: 1_000,
+    }, {
+      now: () => 2_000,
+      dispatch: async ({ phase }) => {
+        actions.push(`dispatch:${phase}`);
+        return { commandId: phase, invocation: { Status: 'Success', ResponseCode: 0 } };
+      },
+      retrieve: async ({ phase }) => {
+        actions.push(`retrieve:${phase}`);
+        return { result: results[phase], reconstructedSha256: `sha-${phase}` };
+      },
+      cleanupApplicant: async () => {
+        actions.push('cognito');
+        return { absent: true };
+      },
+      finalizeBundle: async () => {
+        actions.push('bundle');
+        return { absent: true };
+      },
+    });
+    expect(actions).toEqual(['dispatch:execution', 'retrieve:execution', 'cognito', 'dispatch:verification', 'retrieve:verification', 'bundle']);
+  });
+
+  test('fails before verifier or bundle removal when recovery evidence is not independently valid', async () => {
+    const attemptId = 'phase8c-lifecycle-invalid-recovery-0001';
+    const actions = [];
+    await expect(executeStatefulLifecycle({
+      plan: { execute: 'execute', recover: 'recover', verifyResidue: 'verify' },
+      attemptId,
+      interruptAfterSignedEvidence: true,
+      sprintStartedAt: 1_000,
+    }, {
+      now: () => 2_000,
+      dispatch: async ({ phase }) => {
+        actions.push(`dispatch:${phase}`);
+        return {
+          commandId: phase,
+          invocation: phase === 'execution'
+            ? { Status: 'Failed', ResponseCode: 137 }
+            : { Status: 'Success', ResponseCode: 0 },
+        };
+      },
+      retrieve: async ({ phase }) => {
+        actions.push(`retrieve:${phase}`);
+        return {
+          result: phase === 'execution'
+            ? lifecycleResult(attemptId, 'interrupted')
+            : { ...lifecycleResult(attemptId, 'recovery'), cleanup: null },
+          reconstructedSha256: `sha-${phase}`,
+        };
+      },
+      cleanupApplicant: async () => { actions.push('cognito'); return { absent: true }; },
+      finalizeBundle: async () => { actions.push('bundle'); return { absent: true }; },
+    })).rejects.toThrow('cfa_recovery_result_incomplete');
+    expect(actions).toEqual(['dispatch:execution', 'retrieve:execution', 'dispatch:recovery', 'retrieve:recovery']);
+  });
+
+  test('requires explicit terminal response evidence before retrieval or cleanup', async () => {
+    const actions = [];
+    await expect(executeStatefulLifecycle({
+      plan: { execute: 'execute', recover: 'recover', verifyResidue: 'verify' },
+      attemptId: 'phase8c-terminal-proof-0001',
+      interruptAfterSignedEvidence: false,
+      sprintStartedAt: 1_000,
+    }, {
+      now: () => 2_000,
+      dispatch: async () => {
+        actions.push('dispatch');
+        return { commandId: 'execution', invocation: { Status: 'Success', ResponseCode: null } };
+      },
+      retrieve: async () => { actions.push('retrieve'); },
+      cleanupApplicant: async () => { actions.push('cleanup'); return { absent: true }; },
+      finalizeBundle: async () => { actions.push('bundle'); return { absent: true }; },
+    })).rejects.toThrow('cfa_execution_terminal_process_unproved');
+    expect(actions).toEqual(['dispatch']);
+  });
+
+  test('validates independent verifier evidence before removing the bundle', async () => {
+    const attemptId = 'phase8c-invalid-verifier-0001';
+    const actions = [];
+    await expect(executeStatefulLifecycle({
+      plan: { execute: 'execute', recover: 'recover', verifyResidue: 'verify' },
+      attemptId,
+      interruptAfterSignedEvidence: false,
+      sprintStartedAt: 1_000,
+    }, {
+      now: () => 2_000,
+      dispatch: async ({ phase }) => {
+        actions.push(`dispatch:${phase}`);
+        return { commandId: phase, invocation: { Status: 'Success', ResponseCode: 0 } };
+      },
+      retrieve: async ({ phase }) => {
+        actions.push(`retrieve:${phase}`);
+        const result = phase === 'execution'
+          ? lifecycleResult(attemptId, 'execution')
+          : lifecycleResult(attemptId, 'verification');
+        if (phase === 'verification') result.residue.database[7].count = 1;
+        return { result, reconstructedSha256: `sha-${phase}` };
+      },
+      cleanupApplicant: async () => { actions.push('cognito'); return { absent: true }; },
+      finalizeBundle: async () => { actions.push('bundle'); return { absent: true }; },
+    })).rejects.toThrow('cfa_independent_residue_result_incomplete');
+    expect(actions).toEqual([
+      'dispatch:execution',
+      'retrieve:execution',
+      'cognito',
+      'dispatch:verification',
+      'retrieve:verification',
+    ]);
+  });
+
+  test('proves Cognito absence after deletion and fails closed when the user remains', () => {
+    const calls = [];
+    const absentAws = args => {
+      calls.push(args[1]);
+      if (args[1] === 'admin-get-user') {
+        const error = new Error('UserNotFoundException');
+        error.stderr = 'UserNotFoundException';
+        throw error;
+      }
+      return '';
+    };
+    expect(deleteApplicant('attempt@example.test', 'pool', {}, { aws: absentAws })).toEqual({
+      username: 'attempt@example.test', deleted: true, absent: true,
+    });
+    expect(calls).toEqual(['admin-delete-user', 'admin-get-user']);
+    expect(() => deleteApplicant('attempt@example.test', 'pool', {}, { aws: () => '' }))
+      .toThrow('cfa_cognito_residue_detected');
+  });
+
+  test('enforces the recorded attempt and sprint duration bounds', async () => {
+    let clock = 1_000;
+    const dependencies = {
+      now: () => clock,
+      dispatch: async ({ phase }) => {
+        clock += STATEFUL_LIMITS.attemptMs + 1;
+        return { commandId: phase, invocation: { Status: 'Success', ResponseCode: 0 } };
+      },
+      retrieve: async () => ({
+        result: lifecycleResult('phase8c-duration-0001', 'execution'),
+        reconstructedSha256: 'sha-execution',
+      }),
+      cleanupApplicant: async () => ({ absent: true }),
+      finalizeBundle: async () => ({ absent: true }),
+    };
+    await expect(executeStatefulLifecycle({
+      plan: { execute: 'execute', recover: 'recover', verifyResidue: 'verify' },
+      attemptId: 'phase8c-duration-0001',
+      interruptAfterSignedEvidence: false,
+      sprintStartedAt: 1_000,
+    }, dependencies)).rejects.toThrow('cfa_attempt_duration_exceeded');
+    clock = 1_000;
+    await expect(executeStatefulLifecycle({
+      plan: { execute: 'execute', recover: 'recover', verifyResidue: 'verify' },
+      attemptId: 'phase8c-duration-0002',
+      interruptAfterSignedEvidence: false,
+      sprintStartedAt: clock - STATEFUL_LIMITS.sprintMs - 1,
+    }, { ...dependencies, dispatch: async () => { throw new Error('must not dispatch'); } }))
+      .rejects.toThrow('cfa_sprint_duration_exceeded');
+    expect(STATEFUL_LIMITS.attemptMs).toBe(15 * 60_000);
+    expect(STATEFUL_LIMITS.cleanupMs).toBe(3 * 60_000);
+    expect(STATEFUL_LIMITS.verificationMs).toBe(3 * 60_000);
+    expect(STATEFUL_LIMITS.sprintMs).toBe(75 * 60_000);
   });
 });
