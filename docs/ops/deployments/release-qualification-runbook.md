@@ -400,6 +400,35 @@ Phase 8 harness/test-pack binding, so any live `8C` run requires Bill to accept
 the frozen admin and portal `8C-R1` commits explicitly. TEST SES must remain
 denied and `releaseAuthority: none` remains unchanged.
 
+### Phase 8 CFA stateful completion
+
+Bill subsequently authorized the frozen stateful contract against admin
+`d5228b1cc385cc20d6c8a32aa00a77f0e9987efa`, portal
+`a650d4816d6e4a346acf6b4e5431801c68fc8572`, shared
+`f81519d74ab0553b19713cff33961386dd0887da` and the accepted unexpired
+CFA-only P1 attestation. Fresh admission re-proved the exact TEST operator,
+instance and effective principals, complete IAM capabilities and both explicit
+SES denies. The local product-lineage and fixture-contract negatives passed.
+
+One post-persistence interruption then reached durable native signed-state and
+object evidence, terminated as designed, ran the separately dispatched
+recovery, proved Cognito absence and passed a fresh independent 19-scope/two-
+object zero-residue verifier. Exactly three subsequent clean attempts each
+passed all six native signing, lineage, replay and changed-payload assertions,
+normal cleanup, Cognito absence and a fresh independent verifier. Every attempt
+repeated two stable 22-object raw/structured DDL proofs, the 68-statement
+catalogue, eight admitted prerequisites, no-email state and zero attempt
+markers. No SES call or email occurred. The detailed attempt IDs, artifact
+digests and source identities are recorded in the target architecture's
+Sprint `8C` completion checkpoint.
+
+Narrowed Phase 8 is complete, but this evidence remains limited to the frozen
+CFA harness-certification exercise. It is not renewed DEV or TEST release
+qualification, does not promote a pack and grants no deployment or PROD
+authority. `releaseAuthority: none` and the current authoritative release gate
+remain unchanged. Stop for Bill's mandatory post-Phase-8 programme review; no
+Phase 9 work follows automatically.
+
 ## Hard PROD go/no-go
 
 `GO` means all of the following are true at the decision time:

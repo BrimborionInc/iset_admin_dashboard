@@ -10512,6 +10512,83 @@ catalogue and an unexpired accepted attestation under the complete existing
 conditional stateful-execution contract. Expiry requires a new explicitly
 authorized attestation attempt; it must never be extended or relabelled.
 
+### Sprint 8C Stateful Execution and Phase 8 Completion
+
+Bill accepted `8C-P1` and authorized the frozen stateful contract against admin
+`d5228b1cc385cc20d6c8a32aa00a77f0e9987efa` (whose CFA lifecycle bytes are
+unchanged from `a7fb28cf5df5af9e3afdfa5db5abf3a996fe296e`), portal
+`a650d4816d6e4a346acf6b4e5431801c68fc8572` and shared
+`f81519d74ab0553b19713cff33961386dd0887da`. Detached worktrees isolated those
+exact commits from Bill's concurrent admin changes. The frozen source hashes
+remained:
+
+| Source | SHA-256 |
+| --- | --- |
+| admin outer runner | `62f3a94021a0b63cd2597f86788e67eb1e992e985d4cf0d2a0a7fdfb1ec0c1a1` |
+| CFA preflight | `304c1876fe6e5db1120000f5233d162abf5759d8327bcd1851a219e59b822532` |
+| canonical live-schema guard | `b8af323c9d550d9a4616a9a8547b64c3c938628e252cfc9a31019ebfda6ca2f2` |
+| Phase-8 attestation runner | `89a56a9a98a8388cef9b5d32ff3d345f79d2d23ebf157cd5edb7a8217881d4df` |
+| portal native runner | `a21c03ed45e94c9003ce1e0f38188e75df15e9f7217d0e0714d7c86f9dd2aad8` |
+| portal S3 provider | `77dfd3501661236228788cc6c3e661bdbe8ca7a9e0c95932f42220fa5d8d8804` |
+
+The accepted attestation
+`phase8c-p1-attestation-9ade9265-5bad-4b1e-934d-96ec3c3116c0` was checksum-valid,
+passed, CFA-only and unexpired before the first stateful effect. Its final
+SHA-256 is
+`83f8aa20e5b6ba4c96aa916598fb8f277d06e7b5f986363d53da83cb05d86259`;
+it remained `releaseAuthority: none` and was not extended, relabelled or
+treated as a renewed DEV `GO`.
+
+Fresh admission proved operator account `124355655255` and
+`arn:aws:iam::124355655255:user/CODEX_CLI_Admin`, the single healthy
+`InService` target `i-0db0637d66d66de8c`, and the complete visible IAM
+boundary. The operator's required operations evaluated `allowed`; the remote
+`nwac-test-app-role` and post-environment `SES_backend` principal both retained
+explicit `ses:SendEmail`/`ses:SendRawEmail` denies. Neither selected bucket had
+a bucket policy, and neither the account nor root `r-qima` had an SCP. No SES
+API or email operation occurred.
+
+The certified local controlled product-lineage and missing-workflow fixture
+negatives both passed before live mutation. The stateful window began at
+`2026-08-13T12:50:31.122Z` and completed within eight minutes. Every live
+attempt independently proved the same exact active workflow (`id=45`,
+`Client Funding Agreement`, `funding_agreement`), two stable 22-object
+raw/structured DDL snapshots, structural SHA-256
+`9115c2040fccebfdccdc618f797c7f8b4f65809f0d266d80aac4430e6ccce0c5`,
+the 68-statement catalogue, eight admitted prerequisite reads, zero postflight
+ordinary statements, `noEmail=true` and zero pre-fixture attempt markers.
+
+| Attempt | Result and required lifecycle | Final SHA-256 |
+| --- | --- | --- |
+| `phase8c-interruption-5b5920fe-e23b-41a6-8139-3eb0d1ebb9cd` | Expected `INTERRUPTED` after four durable checks; terminal `TimedOut`/`137`; recovery `Success`/`0`; independent verifier `Success`/`0` | `af71285197a037068693194633da0c20d0171ca14387fea2567ec172d8aeab54` |
+| `phase8c-clean-1-35118243-35f9-41e4-a2ae-bb9598b8af66` | `PASS`; all six native assertions; normal cleanup and separate verifier | `abe24893d957c920c120c356c6e93d49c23845feee8e1388a793a22055636c42` |
+| `phase8c-clean-2-a7f95672-fe12-4f4b-8fb4-08558867fb4f` | `PASS`; all six native assertions; normal cleanup and separate verifier | `5a037bd2eb36c35261cfed9a88e14316f04395ac2d0bc662b164a8ad2c1642b5` |
+| `phase8c-clean-3-01275888-acf1-46ea-9e85-2245b00260cb` | `PASS`; all six native assertions; normal cleanup and separate verifier | `9776b466e79b1104720dabaf2453d7bd3c1a26a710ca1427b351c2a923a35230` |
+
+The interruption recovery and every clean cleanup were followed by a fresh
+independent verifier: all 19 database scopes were zero, both exact object keys
+were absent, the attempt-owned Cognito identity was absent, the remote bundle
+was absent and no local CFA process or temporary root remained. All four
+attempts used bundle digest
+`1dd6c6d8664b4023bc146f30f90c0687af24195e4e2a34272d0287ed55889e93`,
+the same TEST identities and the same workflow/structural DDL boundary.
+
+Two explained local invocation misses occurred before any stateful attempt or
+TEST mutation because detached worktrees do not contain `node_modules`. The admin
+and portal lockfiles matched the existing installations byte-for-byte; the
+required `mysql2` versions matched those locks; rerunning with `NODE_PATH`
+bound to those already installed bytes changed no source, identity or contract.
+Each affected process terminated during module loading before `main()` and
+issued no AWS command; the first attempted stateful process consumed no live
+attempt.
+
+**Completion decision:** narrowed Phase 8 is complete and stops for Bill's
+mandatory programme review. The result certifies only this one frozen TEST CFA
+workflow and does not renew r31 qualification, promote a pack, authorize a
+release, alter deploy admission or change the current authoritative gate.
+`releaseAuthority: none` remains unchanged. Phase 9 and all later work remain
+unauthorized pending Bill's explicit post-Phase-8 decision.
+
 ## Exact Proposed Authorization for Sprint 4A
 
 > Bill authorizes Sprint `4A` only under the accepted `P3-1` lean programme.
