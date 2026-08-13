@@ -15,18 +15,20 @@ A release is not qualified by a green unit suite, successful build, healthy targ
 
 Any failed, skipped, unavailable, expired, unmapped, source-drifted, or cleanup-incomplete required check is `NO-GO`; it must never be relabelled `GO`. Normal releases have no skip or waiver flag. A separately recorded operator-authorized emergency PROD release may use the app-only pre-qualification deployment procedure described below without changing or falsifying the `NO-GO` evidence.
 
-The normal operator workflow has two steps:
+The normal operator workflow has three separately authorized steps:
 
-1. **Complete testing in TEST.** Run the exact-source DEV qualification, deploy
-   that admitted candidate to TEST, then run the authoritative TEST qualifier.
-   The TEST qualifier records `GO` only when every prerequisite and required
-   check passes. A failed deployment-provenance, rollback-readiness,
-   target-health, or runtime-postflight prerequisite blocks every dependent
-   stateful fixture instead of spawning it. The qualifier creates the CFA
-   attempt ID, evidence path, and sprint timestamp and accepts only the native
-   runner's matching complete terminal, cleanup, and independent zero-residue
-   evidence.
-2. **Deploy to PROD.** Supply the resulting unexpired exact-source `TEST GO` to
+1. **Prepare TEST rehearsal.** Run the exact-source DEV qualification and
+   present its approval packet. This preparation performs no TEST access.
+2. **Execute TEST rehearsal.** After Bill explicitly authorizes the rehearsal,
+   deploy that admitted candidate to the AWS TEST environment and run the
+   authoritative TEST qualifier. The TEST qualifier records `GO` only when
+   every prerequisite and required check passes. A failed
+   deployment-provenance, rollback-readiness, target-health, or
+   runtime-postflight prerequisite blocks every dependent stateful fixture
+   instead of spawning it. The qualifier creates the CFA attempt ID, evidence
+   path, and sprint timestamp and accepts only the native runner's matching
+   complete terminal, cleanup, and independent zero-residue evidence.
+3. **Deploy to PROD.** Supply the resulting unexpired exact-source `TEST GO` to
    the existing PROD deploy command and obtain Bill's explicit authorization
    for that release. Advisory evidence with `releaseAuthority: none` cannot
    replace `TEST GO`.
@@ -99,7 +101,7 @@ The JSON inventory is executable project memory. Every changed file must match a
 
 The local Intacct check is not Sage certification. A release that changes the external Intacct contract must add approved current official-document or sandbox evidence to the inventory before qualification. A test that would send real email, submit to Sage, invoke a billable AI model, or contact a real applicant is unavailable until a controlled substitute or explicitly approved test is defined; it must not be silently skipped.
 
-## Phase 0 — freeze and plan the candidate
+## Phase 0 — Prepare TEST rehearsal: freeze and plan the candidate
 
 Work from:
 
@@ -140,7 +142,7 @@ Any source change after qualification—including committing a previously dirty 
 
 Known qualification-granularity gap (recorded 2026-07-20): the current evidence schema and deploy admission compare one whole-tree fingerprint, so even a release-note-only correction forces complete DEV qualification, another TEST deployment, and complete deployed TEST acceptance. That is intentionally still the enforced behavior until the tooling changes, but it is stricter than the risk warrants when the runtime code, dependencies, migrations, inventory, operations, and generated application behavior are otherwise unchanged. The required follow-up is a machine-enforced non-runtime-drift path that positively allowlists release-note/documentation inputs, regenerates and validates the affected bundle/content, proves every runtime fingerprint is unchanged, issues new auditable evidence for the corrected artifact, and rejects any mixed or uncertain drift. Do not bypass exact-source admission manually before that narrower path exists.
 
-## Phase 1 — local DEV qualification
+## Phase 1 — Prepare TEST rehearsal: local DEV qualification
 
 Run the metadata-only DEV database gate first. It pins both configured and live native-label identity to the recorded 2026-08-09 target (`172.26.176.1` / `root` / `iset_intake` / `3306`; server `DESKTOP-PDFA51K`; principal `root@172.26.%`; MySQL `8.0.40`), discovers every declared object individually, and records the exact raw `SHOW CREATE` value and its SHA-256 alongside structured column/index/constraint proof, a structural DDL SHA-256 and the hashes of the 13 attempt-bound residue statements. The prospective structural identity excludes only the observed numeric InnoDB table-level `AUTO_INCREMENT` counter in the exact `ENGINE=InnoDB AUTO_INCREMENT=<positive integer> DEFAULT CHARSET=` form. The raw value remains retained and hashed; engine, charset, collation, table-option ordering and every other raw byte remain structural. MySQL documents that generated InnoDB auto-increment values are not rolled back and that `SHOW CREATE TABLE` exposes the current counter as a table option ([InnoDB auto-increment handling](https://dev.mysql.com/doc/refman/8.0/en/innodb-auto-increment-handling.html), [`SHOW CREATE TABLE`](https://dev.mysql.com/doc/refman/8.0/en/show-create-table.html)). Any absent, different or repeated option form is not normalized. The gate performs zero ordinary reads, transactions, fixtures, residue queries, or cleanup:
 
@@ -202,7 +204,7 @@ npm run release:qualify -- validate \
 
 DEV evidence expires after 72 hours.
 
-## Mandatory stop before TEST
+## Mandatory stop before Execute TEST rehearsal
 
 Do not set a TEST warning, mutate TEST, create TEST fixtures, upload an artifact, apply a migration, or deploy until the user explicitly approves the rehearsal in the current thread.
 
@@ -221,7 +223,7 @@ Present this exact approval packet:
 
 Approval of investigation or local DEV work is not approval of this TEST mutation.
 
-## Phase 2 — TEST rehearsal after explicit approval
+## Phase 2 — Execute TEST rehearsal after explicit approval
 
 ### Required identities and fixtures
 

@@ -95,20 +95,29 @@ function serializeFailure(error) {
 }
 
 function assertSelectedChildResult(id, processResult, childResult) {
-  if (processResult.status !== 'passed' || processResult.exitCode !== 0 || childResult.pass !== true) {
+  const processPassed = processResult.status === 'passed' && processResult.exitCode === 0;
+  if (processPassed !== childResult.pass) {
+    throw new BrowserSuiteControlError('BROWSER_CHILD_RESULT_CONFLICT', `browser child ${id} process and native result disagree`, {
+      id,
+      process: summarizeProcess(processResult),
+      childResult,
+    });
+  }
+  if (!childResult.pass) {
     throw new BrowserSuiteControlError('BROWSER_CHILD_FAILED', `browser child ${id} failed`, {
       id,
       process: summarizeProcess(processResult),
       childResult,
     });
   }
+  const nativeResult = childResult.nativeResult;
   if (
     id === 'intervention-posting-context' &&
     (
-      childResult.finalRecordReadOnlyVerified !== true ||
-      childResult.unexpectedFinalPatchCount !== 0 ||
-      childResult.savedPostingContexts?.length !== 1 ||
-      childResult.savedPostingContexts[0] !== 'internal' ||
+      nativeResult.finalRecordReadOnlyVerified !== true ||
+      nativeResult.unexpectedFinalPatchCount !== 0 ||
+      nativeResult.savedPostingContexts?.length !== 1 ||
+      nativeResult.savedPostingContexts[0] !== 'internal' ||
       childResult.failures.length !== 0
     )
   ) {
@@ -123,11 +132,12 @@ async function captureScreenshotEvidence(id, childResult) {
   const expectedRoot = path.join(SCREENSHOT_ROOT, id);
   const expectedFile = path.join(expectedRoot, 'intervention-posting-context.png');
   if (id !== 'intervention-posting-context') return null;
-  if (path.normalize(childResult.screenshot || '') !== expectedFile || !fs.existsSync(expectedFile)) {
+  const observedFile = childResult.nativeResult.screenshot || '';
+  if (path.normalize(observedFile) !== expectedFile || !fs.existsSync(expectedFile)) {
     throw new BrowserSuiteControlError('BROWSER_SCREENSHOT_MISSING', 'selected child screenshot is missing or outside its declared root', {
       id,
       expectedFile,
-      observedFile: childResult.screenshot || null,
+      observedFile: observedFile || null,
     });
   }
   const bytes = fs.readFileSync(expectedFile);
@@ -194,7 +204,7 @@ async function runSuite(args) {
             terminationMs: 5_000,
           }
         );
-        const childResult = parseStructuredChildResult(processResult);
+        const childResult = parseStructuredChildResult(id, processResult);
         assertSelectedChildResult(id, processResult, childResult);
         results.push(Object.freeze({
           id,

@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 
 const {
+  BROWSER_CHILD_RESULT_CONTRACTS,
   BrowserSuiteControlError,
   closeLoopbackServer,
   parseStructuredChildResult,
@@ -68,6 +69,16 @@ function processResult(overrides = {}) {
   };
 }
 
+function nativeProcessResult(nativeResult, { failed = false, ...overrides } = {}) {
+  return processResult({
+    status: failed ? 'failed' : 'passed',
+    exitCode: failed ? 1 : 0,
+    stdout: failed ? '' : JSON.stringify(nativeResult),
+    stderr: failed ? JSON.stringify(nativeResult) : '',
+    ...overrides,
+  });
+}
+
 function requestWithHost(port, host) {
   return new Promise((resolve, reject) => {
     const request = http.get({ hostname: '127.0.0.1', port, path: '/', headers: { host } }, response => {
@@ -108,40 +119,169 @@ describe('selected release browser suite control', () => {
     expect(selectSmokes(args.only)).toEqual([
       ['intervention-posting-context', 'intervention-posting-context-browser-smoke.js'],
     ]);
+    expect(Object.keys(BROWSER_CHILD_RESULT_CONTRACTS).sort()).toEqual(
+      selectSmokes(null).map(([id]) => id).sort()
+    );
     expect(() => parseArgs(['--only'])).toThrow('--only requires');
     expect(() => parseArgs(['--only', 'not-a-check'])).toThrow('Unknown browser smoke IDs');
   });
 
-  test('keeps selected-child success and failure attributable to structured native evidence', () => {
-    const passedProcess = processResult();
-    const passedChild = parseStructuredChildResult(passedProcess);
-    expect(() => assertSelectedChildResult('intervention-posting-context', passedProcess, passedChild)).not.toThrow();
-
-    const failedProcess = processResult({
-      status: 'failed',
-      exitCode: 1,
-      stdout: '',
-      stderr: JSON.stringify({ pass: false, failures: [{ type: 'scenario', message: 'synthetic failure' }] }),
+  test.each([
+    {
+      label: 'ok success with conditional failure details',
+      id: 'app-shell-navigation',
+      contract: 'ok-conditional-failures',
+      success: { ok: true, apiCallCount: 12 },
+      failure: { ok: false, failures: [{ type: 'assertion', message: 'shell failed' }], apiCalls: [] },
+    },
+    {
+      label: 'ok failure with a native exception detail',
+      id: 'home-overdue',
+      contract: 'ok-conditional-failures-or-error',
+      success: { ok: true, apiCallCount: 8 },
+      failure: { ok: false, error: 'queue crashed', failures: [], apiCalls: [] },
+    },
+    {
+      label: 'pass success with conditional failure details',
+      id: 'case-assignment',
+      contract: 'pass-conditional-failures',
+      success: { pass: true, screenshots: ['/synthetic/case.png'] },
+      failure: { pass: false, failures: [{ type: 'assertion', message: 'case failed' }] },
+    },
+    {
+      label: 'pass failure with a diagnostic exception detail',
+      id: 'application-overview',
+      contract: 'pass-conditional-failures-or-diagnostic-error',
+      success: { pass: true, screenshot: '/synthetic/overview.png' },
+      failure: {
+        pass: false,
+        error: 'overview timed out',
+        diagnostic: { screenshot: '/synthetic/failure.png', failures: [], apiCalls: [] },
+      },
+    },
+    {
+      label: 'pass summary derived from nested scenarios',
+      id: 'application-assessment',
+      contract: 'pass-nested-scenarios',
+      success: {
+        pass: true,
+        scenarios: [{ name: 'save', pass: true, failures: [], screenshot: '/synthetic/save.png' }],
+      },
+      failure: {
+        pass: false,
+        scenarios: [{
+          name: 'save',
+          pass: false,
+          failures: [{ type: 'scenario', message: 'save failed' }],
+          screenshot: '/synthetic/save-failed.png',
+        }],
+      },
+    },
+    {
+      label: 'pass result with an always-present failure array',
+      id: 'intervention-recall',
+      contract: 'pass-required-failures',
+      success: { pass: true, failures: [], screenshot: '/synthetic/recall.png' },
+      failure: { pass: false, failures: [{ type: 'scenario', message: 'recall failed' }] },
+    },
+  ])('normalizes the admitted $label contract without weakening native failure authority', ({
+    id,
+    contract,
+    success,
+    failure,
+  }) => {
+    const passedProcess = nativeProcessResult(success);
+    const passedChild = parseStructuredChildResult(id, passedProcess);
+    expect(passedChild).toMatchObject({
+      schemaVersion: 1,
+      childId: id,
+      contract,
+      pass: true,
+      failures: [],
+      nativeResult: success,
     });
-    const failedChild = parseStructuredChildResult(failedProcess);
-    expect(() => assertSelectedChildResult('intervention-posting-context', failedProcess, failedChild)).toThrow(
-      expect.objectContaining({ code: 'BROWSER_CHILD_FAILED' })
+    expect(() => assertSelectedChildResult(id, passedProcess, passedChild)).not.toThrow();
+
+    const failedProcess = nativeProcessResult(failure, { failed: true });
+    const failedChild = parseStructuredChildResult(id, failedProcess);
+    expect(failedChild.pass).toBe(false);
+    expect(failedChild.failures.length).toBeGreaterThan(0);
+    expect(failedChild.nativeResult).toEqual(failure);
+    expect(() => assertSelectedChildResult(id, failedProcess, failedChild)).toThrow(
+      expect.objectContaining({
+        code: 'BROWSER_CHILD_FAILED',
+        evidence: expect.objectContaining({
+          id,
+          process: expect.objectContaining({ status: 'failed', exitCode: 1 }),
+          childResult: expect.objectContaining({ nativeResult: failure }),
+        }),
+      })
     );
   });
 
-  test('rejects missing, malformed, truncated and semantically incomplete child results', () => {
-    expect(() => parseStructuredChildResult(processResult({ stdout: '' }))).toThrow(
-      expect.objectContaining({ code: 'BROWSER_CHILD_RESULT_INVALID' })
+  test('rejects missing, malformed, truncated and unknown child results with attribution', () => {
+    expect(() => parseStructuredChildResult(
+      'intervention-posting-context',
+      processResult({ stdout: '' })
+    )).toThrow(expect.objectContaining({
+      code: 'BROWSER_CHILD_RESULT_INVALID',
+      evidence: expect.objectContaining({ childId: 'intervention-posting-context' }),
+    }));
+    expect(() => parseStructuredChildResult(
+      'intervention-posting-context',
+      processResult({ stdout: '{"pass":true}', stdoutTruncated: true })
+    )).toThrow(expect.objectContaining({ code: 'BROWSER_CHILD_RESULT_INVALID' }));
+    expect(() => parseStructuredChildResult('not-configured', processResult())).toThrow(
+      expect.objectContaining({ code: 'BROWSER_CHILD_CONTRACT_UNKNOWN' })
     );
-    expect(() => parseStructuredChildResult(processResult({ stdout: '{"pass":true', stdoutTruncated: true }))).toThrow(
-      expect.objectContaining({ code: 'BROWSER_CHILD_RESULT_INVALID' })
+  });
+
+  test.each([
+    ['mixed ok/pass flags', 'app-shell-navigation', { ok: true, pass: true }],
+    ['success with failures', 'case-assignment', { pass: true, failures: [{ type: 'assertion' }] }],
+    ['failure without details', 'case-assignment', { pass: false }],
+    ['empty native error detail', 'home-overdue', { ok: false, error: '', failures: [] }],
+    ['conflicting diagnostic shapes', 'application-overview', {
+      pass: false,
+      error: 'timed out',
+      diagnostic: { failures: [] },
+      failures: [{ type: 'assertion' }],
+    }],
+    ['scenario summary disagreement', 'application-assessment', {
+      pass: true,
+      scenarios: [{ name: 'save', pass: false, failures: [{ type: 'scenario' }] }],
+    }],
+    ['successful scenario with failures', 'intervention-workflow', {
+      pass: true,
+      scenarios: [{ name: 'review', pass: true, failures: [{ type: 'assertion' }] }],
+    }],
+  ])('rejects contradictory native evidence: %s', (_label, id, nativeResult) => {
+    expect(() => parseStructuredChildResult(id, nativeProcessResult(nativeResult))).toThrow(
+      expect.objectContaining({ code: expect.stringMatching(/^BROWSER_CHILD_RESULT_(?:CONFLICT|INVALID)$/) })
     );
-    const incompleteProcess = processResult({ stdout: JSON.stringify({ pass: true, failures: [] }) });
+  });
+
+  test('rejects disagreement between process status and normalized native authority', () => {
+    const process = nativeProcessResult({ pass: true, failures: [] }, { failed: true });
+    const child = parseStructuredChildResult('intervention-recall', process);
+    expect(() => assertSelectedChildResult('intervention-recall', process, child)).toThrow(
+      expect.objectContaining({
+        code: 'BROWSER_CHILD_RESULT_CONFLICT',
+        evidence: expect.objectContaining({
+          id: 'intervention-recall',
+          process: expect.objectContaining({ status: 'failed', exitCode: 1 }),
+        }),
+      })
+    );
+  });
+
+  test('retains the selected posting-context native semantic guard after normalization', () => {
+    const incompleteProcess = nativeProcessResult({ pass: true, failures: [] });
     expect(() =>
       assertSelectedChildResult(
         'intervention-posting-context',
         incompleteProcess,
-        parseStructuredChildResult(incompleteProcess)
+        parseStructuredChildResult('intervention-posting-context', incompleteProcess)
       )
     ).toThrow(expect.objectContaining({ code: 'BROWSER_CHILD_SEMANTIC_EVIDENCE_INVALID' }));
   });

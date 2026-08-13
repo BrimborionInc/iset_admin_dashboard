@@ -4,13 +4,37 @@ Status: current guidance from the 2026-05-08/09 application-assessment containme
 
 Audience: Codex threads and developers building or rehearsing browser-level workflow smokes for PATH.
 
-Last Updated: 2026-08-09
+Last Updated: 2026-08-13
 
 ## Purpose
 
 Use this note when a workflow defect needs more than route health checks or SQL counts, especially approval, assessment, letter-generation, queue, and workspace flows where the bug depends on selected case/application/proposal state.
 
 The core lesson from the repeat-application assessment release is that browser testing should prove workflow invariants, not merely click through screens. The useful automation combined database fixtures, authenticated API checks, browser route checks, and post-run SQL cleanup verification.
+
+## Release-Suite Child Result Contracts
+
+The compiled release browser suite runs 13 native children. Their product
+assertions and native failure decisions remain authoritative; the suite only
+normalizes their existing top-level result envelopes. The admitted contracts
+are finite and bound to the configured child ID:
+
+| Native envelope | Configured children | Admitted success | Admitted failure |
+| --- | --- | --- | --- |
+| `ok-conditional-failures` | `app-shell-navigation`, `manual-intake` | `ok: true`; no top-level `failures` or `error` | `ok: false`; non-empty object-array `failures` |
+| `ok-conditional-failures-or-error` | `home-overdue` | `ok: true`; no top-level `failures` or `error` | `ok: false`; object-array `failures`, with a non-empty `error` permitted when the array is empty |
+| `pass-conditional-failures` | `esdc-participants`, `case-assignment`, `manage-components`, `modify-component`, `application-workspace` | `pass: true`; no top-level `failures` or `error` | `pass: false`; non-empty object-array `failures` |
+| `pass-conditional-failures-or-diagnostic-error` | `application-overview` | `pass: true`; no top-level failure fields | `pass: false`; either non-empty object-array `failures`, or one non-empty `error` plus a diagnostic record |
+| `pass-nested-scenarios` | `application-assessment`, `intervention-workflow` | `pass: true` exactly agrees with non-empty successful `scenarios`; every scenario has an empty `failures` array | `pass: false` exactly agrees with at least one failed scenario carrying native failure objects |
+| `pass-required-failures` | `intervention-posting-context`, `intervention-recall` | `pass: true` with an empty `failures` array | `pass: false` with a non-empty object-array `failures` |
+
+The normalizer retains the complete native result beside the normalized child
+ID, contract, pass value, and failures. Unknown child IDs, mixed `ok`/`pass`
+flags, malformed or truncated JSON, undocumented failure containers,
+success-with-failure evidence, scenario-summary disagreement, and disagreement
+between native authority and process exit status fail closed. Child-specific
+semantic assertions, including the posting-context final-record proof, run
+against the retained native result after normalization.
 
 ## Layered Pattern
 

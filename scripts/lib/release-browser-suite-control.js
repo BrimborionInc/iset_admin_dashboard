@@ -15,6 +15,22 @@ class BrowserSuiteControlError extends Error {
   }
 }
 
+const BROWSER_CHILD_RESULT_CONTRACTS = Object.freeze({
+  'app-shell-navigation': 'ok-conditional-failures',
+  'esdc-participants': 'pass-conditional-failures',
+  'case-assignment': 'pass-conditional-failures',
+  'home-overdue': 'ok-conditional-failures-or-error',
+  'manual-intake': 'ok-conditional-failures',
+  'manage-components': 'pass-conditional-failures',
+  'modify-component': 'pass-conditional-failures',
+  'application-overview': 'pass-conditional-failures-or-diagnostic-error',
+  'application-workspace': 'pass-conditional-failures',
+  'application-assessment': 'pass-nested-scenarios',
+  'intervention-posting-context': 'pass-required-failures',
+  'intervention-recall': 'pass-required-failures',
+  'intervention-workflow': 'pass-nested-scenarios',
+});
+
 function fail(code, message, evidence) {
   throw new BrowserSuiteControlError(code, message, evidence);
 }
@@ -506,23 +522,312 @@ async function closeLoopbackServer(control) {
   return Object.freeze({ shutdown: 'passed', portReleased: true });
 }
 
-function parseStructuredChildResult(processResult) {
+function isRecord(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function hasOwn(record, key) {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function childProcessEvidence(processResult, source) {
+  return {
+    status: processResult.status,
+    exitCode: processResult.exitCode,
+    signal: processResult.signal || null,
+    stdoutBytes: Buffer.byteLength(String(processResult.stdout || '')),
+    stderrBytes: Buffer.byteLength(String(processResult.stderr || '')),
+    stdoutSha256: sha256Bytes(String(processResult.stdout || '')),
+    stderrSha256: sha256Bytes(String(processResult.stderr || '')),
+    stdoutTruncated: Boolean(processResult.stdoutTruncated),
+    stderrTruncated: Boolean(processResult.stderrTruncated),
+    selectedOutput: String(source || '').slice(0, 2_000),
+  };
+}
+
+function requireFailureArray(childId, value, { allowEmpty = true, field = 'failures' } = {}) {
+  if (!Array.isArray(value) || value.some(failure => !isRecord(failure))) {
+    fail('BROWSER_CHILD_RESULT_INVALID', `browser child ${childId} ${field} must be an array of objects`, {
+      childId,
+      field,
+    });
+  }
+  if (!allowEmpty && value.length === 0) {
+    fail('BROWSER_CHILD_RESULT_INVALID', `browser child ${childId} ${field} must retain native failure details`, {
+      childId,
+      field,
+    });
+  }
+  return value;
+}
+
+function requireExclusiveBooleanFlag(childId, nativeResult, expectedFlag) {
+  const alternateFlag = expectedFlag === 'ok' ? 'pass' : 'ok';
+  if (hasOwn(nativeResult, alternateFlag)) {
+    fail('BROWSER_CHILD_RESULT_CONFLICT', `browser child ${childId} emitted conflicting authority fields`, {
+      childId,
+      expectedFlag,
+      alternateFlag,
+    });
+  }
+  if (typeof nativeResult[expectedFlag] !== 'boolean') {
+    fail('BROWSER_CHILD_RESULT_INVALID', `browser child ${childId} ${expectedFlag} must be boolean`, {
+      childId,
+      expectedFlag,
+    });
+  }
+  return nativeResult[expectedFlag];
+}
+
+function normalizeConditionalFailures(childId, contract, nativeResult, flag) {
+  const passed = requireExclusiveBooleanFlag(childId, nativeResult, flag);
+  if (passed) {
+    if (hasOwn(nativeResult, 'failures') || hasOwn(nativeResult, 'error')) {
+      fail('BROWSER_CHILD_RESULT_CONFLICT', `browser child ${childId} success included failure evidence`, {
+        childId,
+        contract,
+      });
+    }
+    return { passed, failures: [] };
+  }
+
+  const failures = requireFailureArray(childId, nativeResult.failures, { allowEmpty: false });
+  if (hasOwn(nativeResult, 'error')) {
+    fail('BROWSER_CHILD_RESULT_CONFLICT', `browser child ${childId} emitted an undocumented failure shape`, {
+      childId,
+      contract,
+    });
+  }
+  return { passed, failures: [...failures] };
+}
+
+function normalizeConditionalFailuresOrError(childId, contract, nativeResult, flag) {
+  const passed = requireExclusiveBooleanFlag(childId, nativeResult, flag);
+  if (passed) {
+    if (hasOwn(nativeResult, 'failures') || hasOwn(nativeResult, 'error')) {
+      fail('BROWSER_CHILD_RESULT_CONFLICT', `browser child ${childId} success included failure evidence`, {
+        childId,
+        contract,
+      });
+    }
+    return { passed, failures: [] };
+  }
+
+  const failures = requireFailureArray(childId, nativeResult.failures);
+  const hasErrorField = hasOwn(nativeResult, 'error');
+  const errorMessage = typeof nativeResult.error === 'string' && nativeResult.error.trim()
+    ? nativeResult.error.trim()
+    : null;
+  if (hasErrorField && !errorMessage) {
+    fail('BROWSER_CHILD_RESULT_INVALID', `browser child ${childId} error must be a non-empty string`, {
+      childId,
+      contract,
+    });
+  }
+  if (failures.length === 0 && !errorMessage) {
+    fail('BROWSER_CHILD_RESULT_INVALID', `browser child ${childId} failure omitted failure details`, {
+      childId,
+      contract,
+    });
+  }
+  return {
+    passed,
+    failures: errorMessage
+      ? [...failures, { type: 'native-error', message: errorMessage }]
+      : [...failures],
+  };
+}
+
+function normalizeDiagnosticFailure(childId, contract, nativeResult) {
+  const passed = requireExclusiveBooleanFlag(childId, nativeResult, 'pass');
+  if (passed) {
+    if (hasOwn(nativeResult, 'failures') || hasOwn(nativeResult, 'error') || hasOwn(nativeResult, 'diagnostic')) {
+      fail('BROWSER_CHILD_RESULT_CONFLICT', `browser child ${childId} success included failure evidence`, {
+        childId,
+        contract,
+      });
+    }
+    return { passed, failures: [] };
+  }
+
+  const hasFailures = hasOwn(nativeResult, 'failures');
+  const hasErrorField = hasOwn(nativeResult, 'error');
+  const hasError = typeof nativeResult.error === 'string' && nativeResult.error.trim().length > 0;
+  if (hasErrorField && !hasError) {
+    fail('BROWSER_CHILD_RESULT_INVALID', `browser child ${childId} error must be a non-empty string`, {
+      childId,
+      contract,
+    });
+  }
+  if (hasFailures === hasError) {
+    fail('BROWSER_CHILD_RESULT_CONFLICT', `browser child ${childId} failure must use exactly one native detail shape`, {
+      childId,
+      contract,
+    });
+  }
+  if (hasFailures) {
+    if (hasOwn(nativeResult, 'diagnostic')) {
+      fail('BROWSER_CHILD_RESULT_CONFLICT', `browser child ${childId} mixed native failure detail shapes`, {
+        childId,
+        contract,
+      });
+    }
+    return {
+      passed,
+      failures: [...requireFailureArray(childId, nativeResult.failures, { allowEmpty: false })],
+    };
+  }
+  if (!isRecord(nativeResult.diagnostic)) {
+    fail('BROWSER_CHILD_RESULT_INVALID', `browser child ${childId} diagnostic failure is missing its diagnostic record`, {
+      childId,
+      contract,
+    });
+  }
+  const diagnosticFailures = requireFailureArray(
+    childId,
+    nativeResult.diagnostic.failures,
+    { field: 'diagnostic.failures' }
+  );
+  return {
+    passed,
+    failures: [
+      ...diagnosticFailures,
+      { type: 'native-error', message: nativeResult.error.trim() },
+    ],
+  };
+}
+
+function normalizeNestedScenarios(childId, contract, nativeResult) {
+  const passed = requireExclusiveBooleanFlag(childId, nativeResult, 'pass');
+  if (hasOwn(nativeResult, 'failures') || hasOwn(nativeResult, 'error')) {
+    fail('BROWSER_CHILD_RESULT_CONFLICT', `browser child ${childId} emitted an undocumented top-level failure field`, {
+      childId,
+      contract,
+    });
+  }
+  if (!Array.isArray(nativeResult.scenarios) || nativeResult.scenarios.length === 0) {
+    fail('BROWSER_CHILD_RESULT_INVALID', `browser child ${childId} scenarios must be a non-empty array`, {
+      childId,
+      contract,
+    });
+  }
+
+  const failures = [];
+  for (const scenario of nativeResult.scenarios) {
+    if (!isRecord(scenario) || typeof scenario.name !== 'string' || !scenario.name.trim() || typeof scenario.pass !== 'boolean') {
+      fail('BROWSER_CHILD_RESULT_INVALID', `browser child ${childId} emitted an invalid scenario result`, {
+        childId,
+        contract,
+      });
+    }
+    const scenarioFailures = requireFailureArray(childId, scenario.failures, {
+      allowEmpty: scenario.pass,
+      field: `scenarios.${scenario.name}.failures`,
+    });
+    if (scenario.pass && scenarioFailures.length > 0) {
+      fail('BROWSER_CHILD_RESULT_CONFLICT', `browser child ${childId} scenario success included failures`, {
+        childId,
+        scenario: scenario.name,
+      });
+    }
+    for (const failure of scenarioFailures) {
+      failures.push({ scenario: scenario.name, detail: failure });
+    }
+  }
+
+  const derivedPass = nativeResult.scenarios.every(scenario => scenario.pass === true);
+  if (passed !== derivedPass) {
+    fail('BROWSER_CHILD_RESULT_CONFLICT', `browser child ${childId} summary contradicts its scenarios`, {
+      childId,
+      contract,
+      summaryPass: passed,
+      derivedPass,
+    });
+  }
+  return { passed, failures };
+}
+
+function normalizeRequiredFailures(childId, contract, nativeResult) {
+  const passed = requireExclusiveBooleanFlag(childId, nativeResult, 'pass');
+  if (hasOwn(nativeResult, 'error')) {
+    fail('BROWSER_CHILD_RESULT_CONFLICT', `browser child ${childId} emitted an undocumented error field`, {
+      childId,
+      contract,
+    });
+  }
+  const failures = requireFailureArray(childId, nativeResult.failures, { allowEmpty: passed });
+  if (passed && failures.length > 0) {
+    fail('BROWSER_CHILD_RESULT_CONFLICT', `browser child ${childId} success included failures`, {
+      childId,
+      contract,
+    });
+  }
+  return { passed, failures: [...failures] };
+}
+
+function parseStructuredChildResult(childId, processResult) {
+  const contract = BROWSER_CHILD_RESULT_CONTRACTS[childId];
+  if (!contract) {
+    fail('BROWSER_CHILD_CONTRACT_UNKNOWN', `browser child ${childId} has no admitted result contract`, { childId });
+  }
   const source = processResult.status === 'passed' ? processResult.stdout : processResult.stderr;
+  const processEvidence = childProcessEvidence(processResult, source);
+  if (
+    (processResult.status === 'passed' && processResult.stdoutTruncated) ||
+    (processResult.status !== 'passed' && processResult.stderrTruncated)
+  ) {
+    fail('BROWSER_CHILD_RESULT_INVALID', `browser child ${childId} result was truncated`, {
+      childId,
+      contract,
+      process: processEvidence,
+    });
+  }
   let parsed;
   try {
     parsed = JSON.parse(String(source || '').trim());
   } catch (_error) {
     fail('BROWSER_CHILD_RESULT_INVALID', 'browser child did not emit one complete JSON result', {
-      processStatus: processResult.status,
-      exitCode: processResult.exitCode,
-      stdoutTruncated: processResult.stdoutTruncated,
-      stderrTruncated: processResult.stderrTruncated,
+      childId,
+      contract,
+      process: processEvidence,
     });
   }
-  if (!parsed || typeof parsed !== 'object' || typeof parsed.pass !== 'boolean' || !Array.isArray(parsed.failures)) {
-    fail('BROWSER_CHILD_RESULT_INVALID', 'browser child result has an invalid shape');
+  if (!isRecord(parsed)) {
+    fail('BROWSER_CHILD_RESULT_INVALID', `browser child ${childId} result must be an object`, {
+      childId,
+      contract,
+      process: processEvidence,
+    });
   }
-  return parsed;
+
+  let normalized;
+  if (contract === 'ok-conditional-failures') {
+    normalized = normalizeConditionalFailures(childId, contract, parsed, 'ok');
+  } else if (contract === 'ok-conditional-failures-or-error') {
+    normalized = normalizeConditionalFailuresOrError(childId, contract, parsed, 'ok');
+  } else if (contract === 'pass-conditional-failures') {
+    normalized = normalizeConditionalFailures(childId, contract, parsed, 'pass');
+  } else if (contract === 'pass-conditional-failures-or-diagnostic-error') {
+    normalized = normalizeDiagnosticFailure(childId, contract, parsed);
+  } else if (contract === 'pass-nested-scenarios') {
+    normalized = normalizeNestedScenarios(childId, contract, parsed);
+  } else if (contract === 'pass-required-failures') {
+    normalized = normalizeRequiredFailures(childId, contract, parsed);
+  } else {
+    fail('BROWSER_CHILD_CONTRACT_UNKNOWN', `browser child ${childId} uses an unsupported result contract`, {
+      childId,
+      contract,
+    });
+  }
+
+  return Object.freeze({
+    schemaVersion: 1,
+    childId,
+    contract,
+    pass: normalized.passed,
+    failures: Object.freeze(normalized.failures),
+    nativeResult: parsed,
+  });
 }
 
 async function sha256File(filename) {
@@ -559,6 +864,7 @@ function sha256Bytes(bytes) {
 }
 
 module.exports = {
+  BROWSER_CHILD_RESULT_CONTRACTS,
   BrowserSuiteControlError,
   closeLoopbackServer,
   parseStructuredChildResult,
