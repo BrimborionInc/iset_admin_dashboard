@@ -89,18 +89,6 @@ function serializeTransportCause(value, seen = new WeakSet()) {
   return serialized;
 }
 
-function headersForFreshHttpConnection(headers = {}) {
-  const normalized = {};
-  const entries = typeof headers?.entries === 'function'
-    ? Array.from(headers.entries())
-    : Object.entries(headers || {});
-  for (const [name, value] of entries) {
-    if (String(name).toLowerCase() !== 'connection') normalized[name] = value;
-  }
-  normalized.connection = 'close';
-  return normalized;
-}
-
 async function fetchAndReadBoundedTransport(url, options = {}, limits = {}, hooks = {}) {
   if (options.signal) throw new Error('smoke_http_external_abort_signal_not_allowed');
   const requestTimeoutMs = Number(limits.requestTimeoutMs || 45_000);
@@ -171,6 +159,41 @@ async function fetchAndReadBoundedTransport(url, options = {}, limits = {}, hook
     throw error;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+function createFreshLoopbackDispatcher(url, hooks = {}) {
+  const target = new URL(String(url));
+  if (target.protocol !== 'http:' || target.hostname !== '127.0.0.1') {
+    throw new Error('smoke_fresh_transport_target_must_be_loopback_http');
+  }
+  const Client = hooks.Client || require('undici').Client;
+  return new Client(target.origin, { pipelining: 0 });
+}
+
+async function fetchAndReadBoundedFreshLoopback(url, options = {}, limits = {}, hooks = {}) {
+  if (options.dispatcher) throw new Error('smoke_fresh_transport_external_dispatcher_not_allowed');
+  if (options.redirect && options.redirect !== 'error') {
+    throw new Error('smoke_fresh_transport_redirect_must_fail_closed');
+  }
+  const dispatcher = createFreshLoopbackDispatcher(url, hooks);
+  let requestError = null;
+  try {
+    return await fetchAndReadBoundedTransport(
+      url,
+      { ...options, redirect: 'error', dispatcher },
+      limits,
+      hooks
+    );
+  } catch (error) {
+    requestError = error;
+    throw error;
+  } finally {
+    try {
+      await dispatcher.close();
+    } catch (closeError) {
+      if (!requestError) throw closeError;
+    }
   }
 }
 
@@ -3145,11 +3168,18 @@ function remoteRunner() {
     });
   }
 
-  async function fetchJson(urlOrPath, options = {}) {
+  async function fetchJson(urlOrPath, options = {}, transport = {}) {
     const url = String(urlOrPath).startsWith('http')
       ? urlOrPath
       : `${config.localBaseUrl}${urlOrPath}`;
-    const response = await fetchAndReadBounded(url, options);
+    const response = transport.freshLoopback
+      ? await fetchAndReadBoundedFreshLoopback(url, options, {}, {
+        onFailure: transportDiagnostics => {
+          result.evidence.httpTransportFailures = result.evidence.httpTransportFailures || [];
+          result.evidence.httpTransportFailures.push(transportDiagnostics);
+        },
+      })
+      : await fetchAndReadBounded(url, options);
     const text = response.text;
     let body = null;
     try {
@@ -6404,9 +6434,9 @@ function remoteRunner() {
     }
     return fetchJson(`/api/applicants/${fixture.applicantUser}/documents/upload`, {
       method: 'POST',
-      headers: headersForFreshHttpConnection(authHeaders(auth)),
+      headers: authHeaders(auth),
       body: form,
-    });
+    }, { freshLoopback: true });
   }
 
   async function prepareAssessmentStartEiPrerequisites(auth) {
@@ -9169,9 +9199,10 @@ if (require.main === module && process.argv.includes('--remote-runner')) {
 
 module.exports = {
   createEncryptedFixtureEnvelope,
+  createFreshLoopbackDispatcher,
   createLiveSchemaGuard,
+  fetchAndReadBoundedFreshLoopback,
   fetchAndReadBoundedTransport,
-  headersForFreshHttpConnection,
   orderSelfReferencingVersionDeleteBatches,
   sameExactRecord,
   serializeTransportCause,

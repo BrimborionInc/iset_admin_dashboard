@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const fs = require('fs');
+const http = require('http');
 const path = require('path');
 const { Worker } = require('worker_threads');
 
@@ -68,14 +69,39 @@ function waitForWorkerMessage(worker, predicate, timeoutMs = 5000) {
   });
 }
 
+function requestWithPooledAgent(agent, target, options = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.request(target, {
+      agent,
+      method: options.method || 'GET',
+      headers: options.headers || {},
+      signal: options.signal,
+    }, response => {
+      const localPort = response.socket.localPort;
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => resolve({
+        status: response.statusCode,
+        localPort,
+        body: Buffer.concat(chunks).toString('utf8'),
+      }));
+    });
+    request.on('error', reject);
+    if (options.body) request.write(options.body);
+    request.end();
+  });
+}
+
 describe('two-step TEST runner HTTP transport boundary', () => {
-  test('uses a fresh socket for the effectful POST after a blocked interval exceeds server keep-alive', async () => {
+  test('reproduces pooled EPIPE and sends the effectful POST once on a fresh one-shot connection', async () => {
     const serverWorker = new Worker(`
       const http = require('http');
       const { parentPort } = require('worker_threads');
       const requests = [];
       const closedSockets = [];
+      let requestCount = 0;
       const server = http.createServer((request, response) => {
+        requestCount += 1;
         const chunks = [];
         request.on('data', chunk => chunks.push(chunk));
         request.on('end', () => {
@@ -86,11 +112,17 @@ describe('two-step TEST runner HTTP transport boundary', () => {
             receivedAt: new Date().toISOString(),
             body: Buffer.concat(chunks).toString('utf8'),
           });
-          response.end('ok');
+          response.setHeader('Connection', 'keep-alive');
+          response.setHeader('Keep-Alive', 'timeout=5');
+          response.end('ok', () => {
+            if (requestCount === 1) {
+              setTimeout(() => request.socket.destroy(), 10);
+            }
+          });
         });
       });
-      server.keepAliveTimeout = 25;
-      server.headersTimeout = 1000;
+      server.keepAliveTimeout = 5000;
+      server.headersTimeout = 6000;
       server.on('connection', socket => {
         const remotePort = socket.remotePort;
         socket.on('close', () => closedSockets.push({
@@ -110,30 +142,79 @@ describe('two-step TEST runner HTTP transport boundary', () => {
         }
       });
     `, { eval: true });
-    let clientWorker = null;
+    const pooledAgent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    let freshClientWorker = null;
 
     try {
       const listening = await waitForWorkerMessage(serverWorker, message => message?.type === 'listening');
       const target = `http://127.0.0.1:${listening.port}/fixture`;
-      clientWorker = new Worker(`
-        const { parentPort, workerData } = require('worker_threads');
-        const {
-          fetchAndReadBoundedTransport,
-          headersForFreshHttpConnection,
-        } = require(workerData.runnerPath);
-        (async () => {
-          const first = await fetchAndReadBoundedTransport(workerData.target);
-          const blockedUntil = Date.now() + 200;
-          while (Date.now() < blockedUntil) {
-            // Recreate the remote runner being unable to process its pooled socket lifecycle.
-          }
-          const post = await fetchAndReadBoundedTransport(workerData.target, {
-            method: 'POST',
-            headers: headersForFreshHttpConnection({ 'content-type': 'text/plain' }),
-            body: 'effectful-once',
+      const first = await requestWithPooledAgent(pooledAgent, target);
+      expect(first).toMatchObject({ status: 200, body: 'ok' });
+
+      const blockedUntil = Date.now() + 200;
+      while (Date.now() < blockedUntil) {
+        // Prevent this client from observing that the independently running server closed its idle socket.
+      }
+
+      const staleBody = Buffer.alloc(1024 * 1024, 'x');
+      let staleFailureEvidence = null;
+      const staleFetch = async (url, options) => {
+        try {
+          await requestWithPooledAgent(pooledAgent, url, {
+            method: options.method,
+            signal: options.signal,
+            headers: {
+              connection: 'close',
+              'content-length': String(staleBody.length),
+            },
+            body: staleBody,
           });
-          parentPort.postMessage({ type: 'complete', firstStatus: first.status, postStatus: post.status });
-        })().catch(error => {
+          throw new Error('expected_stale_socket_failure');
+        } catch (cause) {
+          if (cause.message === 'expected_stale_socket_failure') throw cause;
+          const error = new TypeError('fetch failed');
+          error.cause = cause;
+          throw error;
+        }
+      };
+      await expect(fetchAndReadBoundedTransport(target, {
+        method: 'POST',
+      }, {}, {
+        fetchImpl: staleFetch,
+        onFailure: evidence => { staleFailureEvidence = evidence; },
+      })).rejects.toMatchObject({
+        name: 'TypeError',
+        message: 'fetch failed',
+        cause: expect.objectContaining({ code: 'EPIPE', message: 'write EPIPE' }),
+      });
+      expect(staleFailureEvidence).toMatchObject({
+        method: 'POST',
+        target,
+        timeout: { configuredMs: 45000, fired: false, signalAborted: false },
+        error: {
+          name: 'TypeError',
+          message: 'fetch failed',
+          cause: expect.objectContaining({ code: 'EPIPE', message: 'write EPIPE' }),
+        },
+      });
+      expect(staleFailureEvidence.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(staleFailureEvidence.dispatchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(staleFailureEvidence.failedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(staleFailureEvidence.elapsedMs).toBeGreaterThanOrEqual(0);
+
+      freshClientWorker = new Worker(`
+        const { parentPort, workerData } = require('worker_threads');
+        const { fetchAndReadBoundedFreshLoopback } = require(workerData.runnerPath);
+        fetchAndReadBoundedFreshLoopback(workerData.target, {
+          method: 'POST',
+          headers: { 'content-type': 'text/plain' },
+          body: 'effectful-once',
+        }).then(response => {
+          parentPort.postMessage({
+            type: 'complete',
+            response: { ok: response.ok, status: response.status, text: response.text },
+          });
+        }).catch(error => {
           parentPort.postMessage({
             type: 'failed',
             error: error?.stack || String(error),
@@ -147,11 +228,14 @@ describe('two-step TEST runner HTTP transport boundary', () => {
           target,
         },
       });
-      const clientResult = await waitForWorkerMessage(
-        clientWorker,
+      const corrected = await waitForWorkerMessage(
+        freshClientWorker,
         message => message?.type === 'complete' || message?.type === 'failed'
       );
-      expect(clientResult).toEqual({ type: 'complete', firstStatus: 200, postStatus: 200 });
+      expect(corrected).toEqual({
+        type: 'complete',
+        response: { ok: true, status: 200, text: 'ok' },
+      });
 
       serverWorker.postMessage('snapshot');
       const snapshot = await waitForWorkerMessage(serverWorker, message => message?.type === 'snapshot');
@@ -159,15 +243,16 @@ describe('two-step TEST runner HTTP transport boundary', () => {
       expect(snapshot.requests[0]).toMatchObject({ method: 'GET', connection: 'keep-alive' });
       expect(snapshot.requests[1]).toMatchObject({
         method: 'POST',
-        connection: 'close',
         body: 'effectful-once',
       });
+      expect(snapshot.requests.filter(request => request.method === 'POST')).toHaveLength(1);
       expect(snapshot.requests[1].remotePort).not.toBe(snapshot.requests[0].remotePort);
       expect(snapshot.closedSockets).toEqual(expect.arrayContaining([
         expect.objectContaining({ remotePort: snapshot.requests[0].remotePort }),
       ]));
     } finally {
-      if (clientWorker) await clientWorker.terminate();
+      pooledAgent.destroy();
+      if (freshClientWorker) await freshClientWorker.terminate();
       await serverWorker.terminate();
     }
   }, 10_000);
@@ -275,9 +360,14 @@ describe('two-step TEST runner HTTP transport boundary', () => {
     const uploadEnd = source.indexOf('\n  async function ', uploadStart + 20);
     const uploadSource = source.slice(uploadStart, uploadEnd);
 
-    expect(uploadSource).toContain('headers: headersForFreshHttpConnection(authHeaders(auth))');
+    expect(uploadSource).toContain('return fetchJson(');
+    expect(uploadSource).toContain('headers: authHeaders(auth)');
+    expect(uploadSource).toContain('{ freshLoopback: true }');
     expect(uploadSource.match(/fetchJson\(/g)).toHaveLength(1);
     expect(uploadSource).not.toMatch(/retry|catch\s*\(/i);
+    expect(source).toContain("return new Client(target.origin, { pipelining: 0 });");
+    expect(source).toContain("{ ...options, redirect: 'error', dispatcher }");
+    expect(source).toContain('await dispatcher.close();');
   });
 });
 
