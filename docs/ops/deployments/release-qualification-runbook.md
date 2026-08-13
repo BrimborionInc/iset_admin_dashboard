@@ -326,6 +326,26 @@ recorded in the target-architecture Sprint `7B` completion checkpoint. SSM
 command history is an intentional control-plane record; terminal SSM evidence
 must prove the remote read process ended, and no local check process may remain.
 
+## Phase 8 CFA admission status
+
+Sprint `8B` is complete and the CFA read-only admission contract is frozen by
+the completion evidence recorded in the target architecture. Its task-specific
+transport retains the complete attempt-owned evidence envelope remotely,
+returns a compact digest manifest, reconstructs ordered bounded chunks locally,
+and validates both the envelope and decoded admission digests. The successful
+fresh attempt proved two matching raw/structured full-DDL snapshots for all 22
+admitted objects, the 68-statement finished catalogue, eight guarded
+prerequisite reads, exact workflow selection, no-email state and zero
+postflight ordinary statements. Remote cleanup proved the evidence file and
+bundle root absent.
+
+This is read-only admission evidence, not a stateful workflow result and not
+release authority. Do not run the stateful CFA wrapper from this checkpoint.
+Sprint `8C`, product fixtures, product HTTP, Cognito/S3 writes, cleanup SQL,
+SES/email and every database mutation remain unauthorized until Bill separately
+accepts Sprint `8B` and authorizes the recorded `8C` contract. The current
+release gate remains authoritative and `releaseAuthority: none` is unchanged.
+
 ## Hard PROD go/no-go
 
 `GO` means all of the following are true at the decision time:

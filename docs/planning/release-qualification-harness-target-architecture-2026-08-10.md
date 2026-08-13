@@ -9742,6 +9742,623 @@ deployment, build, PROD, IAM/configuration or application-state operation
 occurred. TEST SES remained disabled. Narrowed Phase 7 is complete and ready
 for Bill's review. Phase 8 remains unauthorized.
 
+## Narrowed Phase 8 Sprint Design
+
+Sprint `8A` is definition only. It selects one existing product-owned deployed
+workflow and fixes the admission, effect, fixture, cleanup, evidence and later
+execution boundary. It does not certify the current runner, authorize TEST
+mutation or turn the workflow into a qualification-platform pack.
+
+### Sprint 8A Selection Decision
+
+The selected workflow is the existing deployed TEST **CFA signing** contract,
+invoked through the current native entry point:
+
+```bash
+node scripts/cfa-signing-test-smoke.js \
+  --profile nwac-test --region ca-central-1 --json
+```
+
+The admin wrapper and portal-owned `scripts/cfa-signing-smoke.js` remain the
+native operational and product-assertion authorities. The future bounded work
+may repair their execution, evidence and cleanup boundaries, but it must not
+reinterpret the product contract or create another generic adapter/pack/kernel
+layer. The current release gate remains authoritative and
+`releaseAuthority: none` remains unchanged.
+
+CFA signing is the smallest high-value choice because it proves an applicant's
+authenticated final signature on a funding agreement, the immutable signed
+state, exact application/document/event lineage, one generated PDF object,
+idempotent replay and changed-payload rejection. Its source-declared fixture is
+one applicant, one synthetic case/application/signing chain and one generated
+object family. It has no concurrency journey and one product event type,
+`document_signed`, so the no-email condition can be admitted explicitly before
+mutation. The existing runner already preserves these assertions
+(`../ISET-intake/scripts/cfa-signing-smoke.js:399-491,621-652`). Phase 0
+classifies it as deployed end-to-end and preserves those assertions while
+requiring repair to transport, cross-repository guard coupling, Cognito absence
+and cleanup proof (Phase 0 audit `:355,519-528,1126-1128`).
+
+| Alternative | Credible value | Why it is not selected first |
+| --- | --- | --- |
+| R1 intake completion | Critical public intake, published-workflow validation, coherent case/application creation and retry | It creates a broader 18-object database/document/event/notification graph and can emit submission, assignment or watchlist notification work. Proving that no SES operation is reached is materially broader than the single CFA event boundary (`scripts/r1-intake-completion-test-smoke.js:524-543,592-703`; portal `src/routes/intakeComplete.js:392-485`; portal `server.js:719-803`). RN25 remains open under the current gate. |
+| Payment rollback | Strong transactional safety and already narrowed in Phase 5 | It is a direct database integration contract, not a deployed authenticated product workflow, and the historical runner admitted both DEV and TEST. Phase 5 already supplies the selected rollback-safety outcome. |
+| Applicant-scope/privacy | Important authorization coverage | It combines browser/API modes, Cognito, database and privacy-denial effects and retains transport, cleanup and progress-artifact defects (audit RN30-RN31). It is not the smallest first stateful workflow. |
+| Two-step role journey | Broad role/final-decision coverage | Explicitly excluded: it is cross-domain and concurrency-heavy; Phase 0 assigns replacement to the monolith. |
+| Intervention posting context | Phase 4 proved the local compiled workflow | There is no existing bounded deployed TEST fixture/cleanup runner for it; creating one would be more new machinery than repairing the existing CFA native path. |
+| Intacct local contract | Local simulator contract | Excluded by Bill and the accepted Phase 3 reconciliation: the simulator is not part of the live PATH solution. |
+
+### Exact Identity and Resource Boundary
+
+The following values are fixed inputs, not substitutes for fresh admission:
+
+| Boundary | Exact selected value and proof status |
+| --- | --- |
+| TEST control identity | Profile `nwac-test`, account `124355655255`, region `ca-central-1`, operator `arn:aws:iam::124355655255:user/CODEX_CLI_Admin`. Phase 7 proved this exact tuple three times; every resumed Phase 8 AWS operation must prove it again (`scripts/path-test-readonly-control-plane.js:14-23`; Sprint `7B` checkpoint above). |
+| Deployed product candidate | Exact retained r31 manifest `tmp/path-deploy/test/20260809-two-step-review-assurance-r31--2026-08-10T03-24-21-698Z.json`, plus the exact admin/portal/shared fingerprints and installed provenance accepted by Sprint `7B`. Any current/deployed difference requires a new read-only Phase 7 proof and Bill decision; it cannot be silently rebound. |
+| Compute and transport | ASG `nwac-test-asg`; dynamically rediscovered running, `InService`, target-healthy and SSM-online instance; SSM document `AWS-RunShellScript`; portal loopback `http://127.0.0.1:5000`. The Phase 7 instance `i-0db0637d66d66de8c` is retained evidence, not a hard-coded future target. |
+| Applicant identity | Pool ID `ca-central-1_NdVuhOCwE`, ARN `arn:aws:cognito-idp:ca-central-1:124355655255:userpool/ca-central-1_NdVuhOCwE`, and the configured portal app-client identifier. Only the non-secret pool ID was read from the locally available portal `.env.test`; the app-client value remains secret-excluding configuration evidence. Sprint `8B` must freshly bind both after the same environment-loading sequence used by the deployed portal and call `DescribeUserPool` before creation. |
+| Database declaration | Configured endpoint `nwac-test-db.cluster-cn4yoy2s4w5t.ca-central-1.rds.amazonaws.com:3306`, database `iset_intake`, configured user `app_admin`; required live hostname `ip-172-16-0-199`, principal `app_admin@10.48.%`, MySQL `8.0.42`. These are current source/config declarations only (`scripts/cfa-signing-test-smoke.js:16-26`); Sprint `8B` must freshly prove native-label identity and raw/structured live DDL before any ordinary read or external fixture effect. |
+| Product object store | Driver `s3`, bucket `nwac-test-uploads-20251014`, region `ca-central-1`, configured prefix `uploads/`. The final signing object family is structurally `uploads/signed-forms/<participantUserId>/<signingRequestId>/<completionToken>.pdf` (`../ISET-intake/src/services/signingCompletion.js:35-47`). Exact IDs, key, size, checksum and version ID where returned are attempt evidence, never guessed in advance. |
+| Harness transfer | One content-addressed runner bundle under `s3://nwac-test-artifacts/phase8/cfa-signing/<harnessVersion>/<attemptId>/`. It contains only the frozen native wrapper, portal child, schema guard and required task-specific metadata. It is downloaded to an attempt-owned remote temporary root and deleted with independent `HeadObject` absence proof. It is harness evidence, not a product deployment or `productCandidateId` change. |
+| Workflow row | One exact active `funding_agreement` workflow ID/name/type must be selected and frozen by Sprint `8B` after live DDL. The current `ORDER BY id DESC LIMIT 1` behavior is not admission proof (`../ISET-intake/scripts/cfa-signing-smoke.js:252-264`). Multiple eligible rows, no eligible row or changed selection stops before mutation. |
+| Email/SES | No SES API and no email delivery is admitted. TEST's explicit `ses:Send*` denies remain mandatory but are not sufficient. Sprint `8B` must use live-DDL-guarded read-only discovery to prove that `document_signed` cannot enqueue or dispatch email for the selected fixture and must retain the relevant notification-setting/effect evidence. Any enabled or ambiguous email path stops Phase 8; it is not tested against the deny. |
+
+The locally available portal `.env.test` was read only for the selected non-secret resource
+keys above. No credential, token, password, access key or other secret value is
+recorded here or permitted in evidence.
+
+### Fixture, Effects and Persistent Contract
+
+The source-declared minimum database set is `user`, `client`, `iset_case`,
+`iset_application_submission`, `iset_application`, `messages`,
+`signing_request`, `message_signing_request`, `cfa_series`, `cfa_version`,
+`cfa_version_documents`, `iset_document`, `iset_event_entry` and `workflow`
+(`../ISET-intake/scripts/cfa-signing-smoke.js:33-48`). That list is not current
+live-schema proof and is not yet a finished effect catalogue. Sprint `8B` must
+trace the deployed route's current source closure and use one-object-at-a-time
+live metadata to add every actually read or written object, including any
+event-delivery, notification or application-reconciliation relationship. No
+ordinary statement may be admitted until that closure and every identifier,
+function, enum, alias, relationship and delete order are proved.
+
+The fixture plan is immutable and bound to one fresh `attemptId`:
+
+- one suppressed applicant Cognito user with an attempt-owned `example.test`
+  username; no confirmation or other message action;
+- one applicant `user`, one synthetic local staff `user`, one `client`, one
+  case/submission/application chain, one CFA series/version, one selected
+  workflow-bound signing request and one linked message;
+- one prior clean CFA document and its actual attempt-owned prior object, plus
+  the one product-created final signed object;
+- a unique attempt marker stored in every live-DDL-proven marker-bearing root
+  available to the fixture. Numeric IDs returned by the database are evidence,
+  not the sole cleanup authority;
+- zero shared, first-row, cross-attempt or unowned fixtures. The selected
+  workflow is an environment prerequisite and is never modified.
+
+Permitted later effects are only: retained SSM command history; one short-lived
+remote process tree and temporary root; the attempt-owned harness bundle;
+suppressed Cognito create/password/get/delete/get-absence operations in the
+exact applicant pool; live-DDL-admitted reads and writes for the one fixture;
+loopback password login and signing POSTs; exactly the two attempt-owned CFA
+objects; cleanup of those owned effects; and content-addressed evidence. No
+email/SES, public product HTTP, browser, deployment, build, configuration/IAM
+change, TEST maintenance change, unrelated database/object/Cognito resource,
+PROD operation or release-authority effect is permitted.
+
+The native persistent assertions remain:
+
+1. authentication succeeds for the exact disposable applicant;
+2. the first sign returns `signed`, retains the exact signed payload and binds
+   `signing_request`, CFA version, active replacement document, application,
+   case, participant and `document_signed` event coherently;
+3. the prior document is archived and the final PDF object exists with nonzero
+   bytes and matching key/checksum evidence;
+4. exact replay returns `alreadySigned` and changes no persisted or object
+   state; and
+5. a changed signer payload returns `409 signing_payload_mismatch` and changes
+   no persisted or object state.
+
+These assertions are supported by the existing native runner
+(`../ISET-intake/scripts/cfa-signing-smoke.js:399-512,621-652`) and portal route
+contracts (`../ISET-intake/routes/__tests__/cfaSigningSmokeContract.test.js:11-105`,
+`../ISET-intake/routes/__tests__/cfaSigningSmokeSql.test.js:11-26`). Concurrency
+is deliberately outside this Phase 8 scope.
+
+### Preflight, Cleanup and Independent Residue Proof
+
+Sprint `8B` must make this exact sequence executable and prove it synthetically
+before any stateful authorization:
+
+1. Freeze admin/portal/shared product candidate, harness source/bundle,
+   attempt and TEST environment identities. Re-run the Phase 7 identity,
+   resource, provenance, target-health and bounded-transport admission.
+2. Complete one consolidated IAM/configuration review for every action below,
+   both the instance role before environment loading and the effective product
+   principal after loading. A different post-load principal is evidence, not a
+   reason to assume the instance role.
+3. On the exact remote target, load the selected environment, then freshly
+   prove the effective AWS account/principal, applicant pool/client, object
+   bucket/region/prefix and explicit SES deny/no-email boundary.
+4. Connect only to the declared database; prove native-label identity, then
+   retain raw `SHOW CREATE`, full columns, indexes and constraints one object at
+   a time. Validate the finished metadata, fixture, assertion, cleanup and
+   residue statement catalogue against that proof. The preflight executes zero
+   ordinary statements.
+5. Only after DDL is complete, run read-only prerequisite admission for the
+   single exact active workflow, zero email-setting path and zero pre-existing
+   attempt marker. Freeze the selected row and complete relationship graph.
+6. Prove that cleanup/recovery is independently callable before admitting the
+   first fixture effect. A failed prerequisite closes connections and runs no
+   cleanup SQL, Cognito, S3 or product request.
+
+Cleanup belongs to the portal native runner/recovery mode for database and
+product objects, and to the outer wrapper for Cognito and harness-transfer
+objects. Before cleanup, the outer controller must prove the remote workflow
+process is terminal; cancellation or process-tree termination failure blocks
+cleanup and stops. Database cleanup starts a new transaction, re-resolves all
+current descendants from the attempt markers inside that transaction, deletes
+child to parent through guarded statements, proves the in-transaction result
+and commits. Stored pre-interruption IDs are supporting evidence only. S3 and
+Cognito cleanup follows with exact version/key/username absence reads.
+
+The independent verifier uses a fresh connection/process after cleanup. It
+repeats identity/full-DDL admission and proves zero across every admitted
+attempt-bearing root and descendant, at minimum the two `user` roles,
+`client`, case, submission, application, message/link, signing request, CFA
+series/version/document link, prior/final documents, event and any discovered
+delivery/notification/reconciliation rows. It separately proves no object in
+the exact prior/final signing prefixes, no Cognito username and no harness
+bundle/temp/process residue. Cleanup exit zero never substitutes for these
+checks. Nonzero, missing, partial or ambiguous proof stops without cleanup SQL
+or another workflow attempt.
+
+### Failure, Interruption and Duration Contract
+
+- **Controlled product failure:** a local synthetic controlled candidate must
+  make one verified native persistent assertion false (for example, wrong
+  application lineage or changed state after replay). The native assertion
+  must fail and the deterministic record must classify `product` using the
+  exact product contract. No deliberately broken product is deployed to TEST.
+- **Harness-fixture failure:** a local synthetic fixture plan with a missing or
+  conflicting required relationship must fail before any effect and classify
+  `harness`. It must not weaken the live fixture or product assertion.
+- **Interruption:** after one live first-sign result and persistent/object
+  evidence are durably recorded but before normal cleanup, terminate the exact
+  remote process tree once. Prove SSM/process terminal state, run the separately
+  admitted recovery once, then run one fresh independent zero-residue verifier.
+  No new attempt starts until it passes.
+- **Clean attempts:** only after interruption recovery, run exactly three clean
+  attempts from one frozen source/candidate/environment boundary. Each uses a
+  fresh `attemptId`, completes every native assertion and cleanup, and is
+  followed by an independent zero-residue verifier. No implicit retry.
+
+Each remote command has a 30-second startup bound, 60-second idle bound,
+10-minute execution bound and 30-second cancellation/forced-termination bound.
+Cleanup/recovery and independent residue verification each have a 3-minute
+bound. A complete live attempt has a 15-minute total bound; the authorized
+stateful Sprint `8C` has a 75-minute total bound. Timeout does not extend these
+limits or authorize a rerun.
+
+### Consolidated IAM and Database Capability Admission
+
+Sprint `8B` must inspect all visible attached, inline and group policies,
+permission boundaries, bucket/resource policies and visible SCP restrictions
+once, then compare them with this complete matrix. No operation-by-operation
+permission discovery, alternate credentials, role assumption or workaround is
+permitted.
+
+| Principal | Required action | Exact resource/condition |
+| --- | --- | --- |
+| Local TEST operator | `sts:GetCallerIdentity` | `*`; must return the exact operator/account above |
+| Local TEST operator | `autoscaling:DescribeAutoScalingGroups`, `ec2:DescribeInstances`, `ssm:DescribeInstanceInformation` | `*`; requests restricted to dynamic membership of `nwac-test-asg` |
+| Local TEST operator | `ssm:SendCommand` | Exact `AWS-RunShellScript` document and freshly verified TEST instance |
+| Local TEST operator | `ssm:GetCommandInvocation`, `ssm:CancelCommand` | Only attempt-returned command IDs and verified instance; `CancelCommand` only on timeout/interruption |
+| Local TEST operator | `cognito-idp:DescribeUserPool`, `AdminCreateUser`, `AdminSetUserPassword`, `AdminGetUser`, `AdminDeleteUser` | Exact applicant pool ARN above; username must contain the fresh attempt marker; `MessageAction=SUPPRESS` |
+| Local TEST operator | `s3:PutObject`, `GetObject`, `HeadObject`, `DeleteObject` | Only `arn:aws:s3:::nwac-test-artifacts/phase8/cfa-signing/<harnessVersion>/<attemptId>/*` |
+| Pre-environment instance role | `sts:GetCallerIdentity`; `s3:GetObject` | Exact freshly proved role; only the attempt harness object |
+| Post-environment product principal | `sts:GetCallerIdentity` | `*`; exact account and ARN retained after the same environment load as product execution |
+| Post-environment product principal | `s3:PutObject`, `HeadObject`, `DeleteObject` | Only exact attempt-owned objects under `arn:aws:s3:::nwac-test-uploads-20251014/uploads/signed-forms/<participantUserId>/<signingRequestId>/*` and the admitted prior-object key |
+| Post-environment product principal | `s3:ListBucket` | Bucket `nwac-test-uploads-20251014`, conditioned to the two exact attempt prefixes, solely for independent residue proof |
+| Portal Cognito app client | `InitiateAuth` protocol capability | Exact configured client/pool/region; this is a product authentication capability, not authority inferred from IAM credentials |
+| TEST database principal | Native identity/DDL metadata operations | Exact configured/live tuple above; the metadata stage executes zero ordinary statements |
+| TEST database principal | `SELECT` | In Sprint `8B`, only finished prerequisite queries admitted identifier by identifier by the preceding live-DDL proof: exact workflow selection, no-email state and zero attempt-marker state |
+| TEST database principal | `INSERT`, `UPDATE`, `DELETE` and transaction control | Reserved for separately authorized Sprint `8C`; only the finished per-statement catalogue and objects proved by Sprint `8B`; no broad grant is inferred or requested |
+
+The permission-source review additionally requires the same bounded IAM and
+Organizations inspection actions used in Sprint `7B`: user/role/group attached
+and inline policy reads, policy-version reads, boundary reads, principal-policy
+simulation, bucket-policy reads and visible organization parent/SCP reads. If
+inspection or a required capability is denied, Sprint `8B` stops with one
+complete least-privilege package naming the effective principal, exact action,
+exact resource, denial evidence and any boundary/SCP/resource-policy condition.
+No IAM change is authorized by `8A` or automatically by `8B`.
+
+TEST's explicit `ses:Send*` denies on both the documented `SES_backend`
+principal and `nwac-test-app-role` must remain. The admission must also prove
+that the effective post-environment principal has the deny. No SES action is
+included in the matrix and none may be attempted.
+
+### Incremental Ownership and Impact Mapping
+
+This is the complete merged Phase 6 increment for the selected workflow; it
+does not implement a selector or alter the current gate.
+
+| Change/input | Owner | Required impact |
+| --- | --- | --- |
+| Admin CFA outer wrapper, schema preflight, canonical live-schema guard, task-specific tests or runner-bundle declaration | Admin release operations | Invalidates Phase 8 harness identity and its synthetic/admission certification; does not change product candidate unless product source also changes |
+| Portal CFA native runner or its focused smoke-contract tests | Portal product owner for semantic assertions; admin release operations for execution wrapper | Changes the CFA test-pack/harness binding; requires contract review and full Phase 8 recertification |
+| Portal signing route/services, PDF/rendering, S3 provider, auth boundary or lockfile | Portal product owner | Changes product candidate and selects the CFA workflow plus prerequisite Phase 7 provenance proof |
+| Shared event/notification delivery code used by the portal | Shared owner plus portal product owner | Changes product candidate/dependency closure; selects CFA and re-proves the no-email boundary |
+| CFA/signing/application/document/event schema or migration | Owning product/data team | Selects exact metadata admission and CFA workflow; any stale DDL blocks mutation |
+| TEST Cognito pool/client, DB tuple, object bucket/prefix, ASG/SSM/role, IAM capability or SES deny | Infrastructure owner | Operation-triggered safety gate; re-prove environment identity/capability, no silent product-candidate change |
+| Unrelated documentation | Documentation owner | Does not select CFA alone |
+| Unknown, unmapped, ambiguous or conflicting source/operation/resource | Bill plus current gate | Fail closed to the unchanged authoritative full gate; never silently omit or infer scope |
+
+### Phase 8 Sprint Breakdown
+
+| Sprint | One objective | Effects, verification and stopping point |
+| --- | --- | --- |
+| `8A` | **Completed definition only.** Select CFA signing and fix exact identity/resource/fixture/effect/duration/admission/cleanup/IAM/mapping boundaries. | Read repository, tests, Phase 0/4/5/7 evidence and selected non-secret local configuration; edit only architecture and controlling plan. No AWS/TEST/network/database/HTTP/fixture/IAM/implementation effect. Stop with copy-ready `8B` authorization. |
+| `8B` | **Close the native contract and complete read-only admission.** | Editable only: admin `scripts/cfa-signing-test-smoke.js`, `scripts/cfa-signing-schema-preflight.js`, `tests/cfaSigningTestSmokePreflight.test.js`, one focused lifecycle test, deploy/runbook checkpoint references; portal `scripts/cfa-signing-smoke.js` and its two existing focused smoke tests; architecture/plan. Reuse the canonical Phase 5 guard and Phase 7 proof read-only. First prove synthetic product/fixture/timeout/cancellation/cleanup/residue/no-email negatives and source boundaries. Then perform one consolidated IAM review, one Phase 7 read-only re-admission, exactly two stable metadata-only full-DDL/catalog preflights and, between those matching proofs, only the finished prerequisite reads admitted identifier by identifier by the first proof. No Cognito create, product HTTP, S3 write, fixture, transaction or mutation. Any unresolved object/statement/relationship, email path, permission, identity, source or evidence defect stops. |
+| `8C` | **Execute and certify the frozen one-workflow contract.** | From accepted frozen `8B`, re-prove identity/IAM/DDL/no-email/zero baseline; run the already-certified local controlled product and harness-fixture negatives, one live post-persistence interruption plus one recovery/verifier, then exactly three clean live attempts with fresh IDs and independent verifiers. Effects and 75-minute bound are exactly those above. Any failure, disagreement, source/DDL drift, email/SES attempt, missing terminal proof, cleanup failure or residue stops without repair/rerun. Stop for Bill's mandatory post-Phase-8 programme review; no Phase 9, promotion or authority change follows automatically. |
+
+### Exact Proposed Authorization for Sprint 8B
+
+> Read and obey `docs/AGENTS.md`, the controlling rebuild plan and approved
+> target architecture.
+>
+> Bill accepts Sprint `8A` and authorizes Sprint `8B` only under the complete
+> narrowed Phase 8 CFA-signing contract recorded in the target architecture.
+>
+> Objective: close and synthetically certify the existing CFA native wrapper,
+> schema-preflight, portal runner, recovery and independent residue boundary,
+> then perform one consolidated read-only IAM/TEST admission, exactly two
+> stable metadata-only full-DDL/statement-catalogue preflights and only the
+> finished prerequisite reads admitted by the first proof. Do not create a
+> fixture or run the product workflow.
+>
+> Editable scope is limited to:
+>
+> - `scripts/cfa-signing-test-smoke.js`
+> - `scripts/cfa-signing-schema-preflight.js`
+> - `tests/cfaSigningTestSmokePreflight.test.js`
+> - `tests/cfaSigningTestSmokeLifecycle.test.js`
+> - `../ISET-intake/scripts/cfa-signing-smoke.js`
+> - `../ISET-intake/routes/__tests__/cfaSigningSmokeContract.test.js`
+> - `../ISET-intake/routes/__tests__/cfaSigningSmokeSql.test.js`
+> - `docs/ops/deployments/release-qualification-runbook.md`
+> - the approved target-architecture checkpoint
+> - the controlling-plan checkpoint and Sprint Ledger
+>
+> Reuse `scripts/lib/live-mysql-schema-guard.js` and
+> `scripts/path-test-readonly-control-plane.js` read-only; do not change them or
+> add a generic adapter, pack, selector, schema, registry or kernel component.
+> Preserve the native CFA product assertions and the exact r31 deployed product
+> candidate. Deliver any future runner only as the content-addressed,
+> attempt-owned harness bundle defined by the architecture; do not deploy or
+> modify installed product files.
+>
+> Before TEST access, run the complete focused synthetic gate for strict inputs,
+> exact workflow selection, finished-statement admission, controlled product
+> failure, harness-fixture failure, no-email rejection, timeout, cancellation,
+> process termination, cleanup/recovery, every residue scope and evidence
+> corruption. Stop if it fails.
+>
+> If it passes, use only profile `nwac-test`, account `124355655255`, region
+> `ca-central-1`, exact operator, r31 manifest and dynamically verified Phase 7
+> resources. Perform one consolidated permission-source review against the
+> complete matrix in the architecture. If insufficient, stop before consuming
+> a TEST attempt and provide one complete least-privilege policy/constraint
+> package; do not change IAM, substitute credentials or weaken checks.
+>
+> If IAM admission passes, run the Phase 7 read-only re-admission and exactly two
+> metadata-only database preflights. Between the two matching proofs, execute
+> only the finished, per-identifier-admitted read-only prerequisite queries for
+> the exact workflow row, no-email state and zero attempt-marker state. Retain
+> native-label target identity, raw and structured one-object-at-a-time DDL,
+> exact selected workflow, post-environment AWS identity, no-email state,
+> statement/effect catalogue and the separation between metadata and admitted
+> prerequisite reads. TEST SES must remain disabled and no SES operation may be
+> attempted.
+>
+> Do not execute any unguarded statement or any database write, transaction or
+> cleanup SQL; create Cognito users or S3 objects; call product HTTP; create or
+> clean fixtures; mutate TEST; deploy; build; use browsers or PROD; change IAM,
+> configuration, pack status, admission or release authority; or begin Sprint
+> `8C`.
+>
+> Any identity, permission, source, DDL, object, statement, relationship,
+> workflow-selection, notification/email, process, cleanup, residue or evidence
+> ambiguity stops without repair, workaround or another live preflight.
+>
+> Stop after Sprint `8B` with the frozen executable catalogue and a completion
+> decision. Sprint `8C` requires separate Bill authorization.
+
+### Sprint 8A Completion Decision
+
+Sprint `8A` is analytically complete. CFA signing is selected, but it is not
+yet certified or authorized to mutate TEST. The exact current live DDL,
+finished statement/effect closure, unique active workflow row, post-environment
+AWS principal/capabilities, no-email setting and complete residue graph remain
+deliberately unresolved until the separately authorized read-only `8B`
+admission proves them. Phase 8 remains incomplete. The mandatory programme
+review remains immediately after `8C`; no later phase is implied.
+
+No permission or configuration change is currently proved necessary. If the
+consolidated Sprint `8B` review finds a missing capability, it must return one
+complete least-privilege decision package. If the no-email prerequisite is not
+proved, Bill must choose whether to change TEST configuration in a separately
+authorized task or stop Phase 8; Sprint `8B` may not devise a workaround.
+
+### Sprint 8B - Consolidated IAM Admission Stop
+
+Sprint `8B` stopped before Phase 7 re-admission, remote dispatch, database
+connection or SQL. The local candidate closure added a canonical, task-specific
+CFA preflight with 22 declared live objects, a 68-statement finished catalogue,
+19 independent database-residue scopes, two independently connected metadata
+proofs, content-addressed raw/structured DDL evidence, exact active-workflow and
+no-email prerequisite reads, attempt-owned fixture markers and a separately
+callable cleanup/residue contract. It removed the CFA path's import of the
+two-step monolith and preserved the portal runner's product-semantic signing,
+replay and changed-payload assertions.
+
+The pre-TEST focused gate passed:
+
+- admin canonical-guard, CFA preflight and lifecycle suites: 3 suites and
+  44 tests;
+- portal CFA contract and SQL suites: 2 files, all subtests passed;
+- JavaScript syntax, declared dependency and whitespace checks in both owning
+  repositories.
+
+The frozen candidate source digests at the stop are:
+
+| Source | SHA-256 |
+| --- | --- |
+| `scripts/cfa-signing-test-smoke.js` | `ab39c1f4acacafb7c9682898dad058543ba4cde067353906af4bfaa4672054ab` |
+| `scripts/cfa-signing-schema-preflight.js` | `72c9ff4cb95e347cd24aa924acaf6a95aa2565624d33d93e44064e053678d7b8` |
+| `scripts/lib/live-mysql-schema-guard.js` (read-only dependency) | `b8af323c9d550d9a4616a9a8547b64c3c938628e252cfc9a31019ebfda6ca2f2` |
+| portal `scripts/cfa-signing-smoke.js` | `36a589258e637a6964055e740452c9504a2105a54506f33dc966033eb79928ca` |
+
+These are retained candidate bytes, not an accepted Sprint `8B` harness
+identity. The consolidated IAM review used explicit profile `nwac-test` and
+proved operator account `124355655255` and principal
+`arn:aws:iam::124355655255:user/CODEX_CLI_Admin`. The local operator's visible
+policy sources admitted the complete read-only/admission matrix. The remote
+`nwac-test-app-role` retained an explicit `ses:Send*` deny and admitted the
+declared uploads/artifact reads. Its visible attached and inline policies had no
+permissions boundary, and visible organization inspection found no SCP on the
+account path.
+
+The same consolidated review proved the mandatory no-email boundary false for
+`arn:aws:iam::124355655255:user/SES_backend`. That user has an attached
+`AllowSESSendOnly` policy permitting `ses:SendEmail` and
+`ses:SendRawEmail` on `*`, and membership in group `tf-bootstrap`, whose
+attached `AdministratorAccess` also permits them. Principal-policy simulation
+returned `allowed` for both actions. No visible permission boundary, SCP or
+resource-policy restriction supplied the explicit deny required by this
+architecture. This is an environment-safety admission failure, not evidence
+that an email was attempted or sent. No SES API was invoked.
+
+The minimum required infrastructure correction is an explicit deny on the
+exact `SES_backend` user; an inline policy is sufficient and does not require
+broader credentials:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyOutboundSesInTest",
+      "Effect": "Deny",
+      "Action": "ses:Send*",
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+Recommended attachment target and name:
+`arn:aws:iam::124355655255:user/SES_backend` /
+`DenySesSendInTest`. The explicit deny overrides both current allows. Removing
+the user from `tf-bootstrap` and detaching the send policy are desirable
+privilege-hygiene decisions but are not substitutes for the required explicit
+deny and are not authorized by this sprint.
+
+One additional source-boundary defect remains open. The admission-only branch
+passes the required attempt identity to the new preflight, but the retained
+stateful branch still invokes that preflight without `--attempt-id` and invokes
+the portal runner without its now-required attempt, workflow and fixture-stamp
+bindings (`scripts/cfa-signing-test-smoke.js:429-500`; portal
+`scripts/cfa-signing-smoke.js:91-111`). The focused gate exercised the
+admission-only boundary and therefore did not certify this future stateful
+composition. It must be corrected and covered before any renewed TEST access;
+it cannot be deferred to a live Sprint `8C` failure.
+
+Two ordinary local test defects were corrected before TEST admission: a
+whitespace-sensitive source assertion and an invalid dynamically constructed
+regular expression. One read-only IAM simulation request combined incompatible
+resource forms and AWS rejected it before evaluation; the review corrected the
+evidence query by splitting the simulations, with no resource effect. None of
+these events consumed a TEST attempt. No product HTTP, Cognito fixture, S3
+write, database operation, SQL, build, deploy, SES action or TEST mutation
+occurred.
+
+Sprint `8B` is incomplete. Its executable catalogue and harness identity are
+not accepted or frozen, and Sprint `8C` remains unauthorized. After the IAM
+owner applies the explicit deny, Bill may separately authorize one bounded
+Sprint `8B` continuation: first repair and synthetically prove only the
+confirmed stateful command-binding gap within the already approved files; then
+re-prove the complete IAM matrix once. Only if both gates pass may that
+continuation run one Phase 7 read-only re-admission and the two matching
+metadata/full-DDL preflights with only their DDL-admitted prerequisite reads.
+
+### Sprint 8B Continuation - Evidence Transport Stop
+
+Bill confirmed the SES-deny change and reauthorized only the recorded bounded
+continuation. The local repair bound the future stateful execution, recovery
+and independent residue commands to the same explicit `attemptId`,
+attempt-derived applicant identity, admitted workflow id/name/type,
+post-environment principal and attempt-owned fixture-stamp path. The runner
+bundle now content-binds the canonical guard, CFA preflight, portal CFA runner
+and unchanged portal S3 provider instead of invoking an unbound installed
+harness script. The stateful branch decodes the current compressed preflight
+envelope and requires an evidence destination in every mode. These are harness
+bindings only; no fixture or product workflow ran.
+
+The corrected pre-live synthetic gate passed 46/46 admin assertions across the
+canonical guard, CFA preflight and outer lifecycle suites. Both portal CFA
+contract/SQL test files passed. One first-run test assertion incorrectly
+required the recovery input flag on the normal execution command; it was
+corrected before TEST access to distinguish `--fixture-stamp-out` from
+`--fixture-stamp`, without changing the implementation contract.
+
+The one consolidated IAM review then passed:
+
+- fresh operator proof returned account `124355655255` and
+  `arn:aws:iam::124355655255:user/CODEX_CLI_Admin`;
+- visible operator, role, user, group, policy-version, permissions-boundary,
+  bucket-policy and organization/SCP sources were inspected as one set;
+- the local control-plane, exact SSM document/TEST instance class, applicant
+  pool, artifact and future uploads capabilities evaluated `allowed`;
+- `nwac-test-app-role` and `SES_backend` both evaluated
+  `ses:SendEmail` and `ses:SendRawEmail` as `explicitDeny`;
+- the new deny is customer-managed policy
+  `arn:aws:iam::124355655255:policy/DenySesSendInTest`, default version `v1`,
+  attached to `SES_backend`; it overrides that user's retained send and group
+  administrator allows;
+- neither relevant principal has a visible permissions boundary, both selected
+  buckets have no bucket policy, and the account's visible root has no SCP.
+
+No SES API was called. The one Phase 7 read-only re-admission then passed:
+
+| Field | Retained evidence |
+| --- | --- |
+| Attempt | `phase8b-phase7-1446303c-34f2-4dbb-9f07-54853d163fe9` |
+| Final evidence | `tmp/release-qualification/test-control-plane/phase8b-phase7-1446303c-34f2-4dbb-9f07-54853d163fe9/final.json` |
+| Evidence SHA-256 | `39b1c3935782291c0be0fdb4c1ef46883abdce5470cd6fdbde9e3dca9ee75b27` |
+| Result | `passed`, `releaseAuthority: none`; exact r31 manifest, dynamic instance, both healthy target groups, four current/rollback artifacts, admin/portal provenance, terminal remote process and unchanged source proved |
+
+The sole CFA admission attempt was
+`phase8b-admission-70ec019f-99a9-4556-a28d-442647e14d74`. It bound bundle
+digest `896f6203a918d0e1e7a5806b810eb4e2b4247de565c9b86b68ca285daeeee982`
+to the four exact runner files, proved the instance role before environment
+loading and `arn:aws:iam::124355655255:user/SES_backend` afterward, then
+executed the bundled admission preflight. Remote command
+`2abd020f-15a0-4f93-9148-9b57d2ae10c3` reached terminal `Success`, response
+code `0`, with empty stderr. Its SSM `StandardOutputContent` was exactly 24,000
+characters and ended before the JSON envelope was complete. The local parser
+therefore failed once with `Unterminated string in JSON at position 24000`.
+
+This is a deterministic **harness evidence-transport** failure. The remote
+success status indicates the preflight process returned normally, but the
+truncated envelope cannot independently prove or reconstruct the two raw/full
+DDL artifacts, selected workflow, no-email rows, marker counts or complete
+68-statement catalogue. It therefore cannot satisfy Sprint `8B`, and those
+facts must not be inferred from exit zero. No correction or rerun followed.
+
+The immutable partial final evidence is retained at
+`tmp/release-qualification/phase8/cfa-signing/phase8b-admission-70ec019f-99a9-4556-a28d-442647e14d74/final.json`
+with SHA-256
+`ba835243fbbb4095c611e59c5248bdf7c52ea6a28537abffb30210df38be835d`.
+It records `ok: false`, `releaseAuthority: none`, every SSM command id and no
+parsed admission result. Cleanup command
+`5f4d546a-9a03-4661-b75c-366c777d9a1d` reached terminal `Success`, response
+code `0`, and its guarded `test ! -e` proved the exact remote bundle root
+absent. The preflight and cleanup processes are terminal. No Cognito user,
+product object, product HTTP request, database write/transaction/cleanup SQL,
+SES action or email occurred; only SSM history, attempt-owned remote temporary
+files, identity/DDL metadata and the admitted prerequisite reads were used.
+
+Sprint `8B` remains incomplete. The local catalogue is still 22 objects, 68
+statements and 19 database residue scopes, but it is not a frozen live
+executable catalogue because the live evidence handoff is incomplete. Sprint
+`8C` remains unauthorized. Any further work requires a separately approved,
+bounded evidence-transport decision; it must preserve the raw DDL and exact
+evidence digest, avoid another monolithic stdout payload, and must be proved
+synthetically before another live admission is considered. This sprint does
+not select or implement that correction.
+
+### Sprint 8B Evidence-Transport Correction and Completion
+
+Bill accepted the transport stop and authorized one bounded continuation. The
+repair remains CFA-specific: the remote preflight atomically writes its complete
+compressed evidence envelope to an attempt-owned file, returns only a compact
+content-addressed manifest, and the outer runner retrieves the immutable file
+in ordered 15,360-byte chunks. Every chunk binds its index, count, offset,
+length, total length and whole-file SHA-256. Local reconstruction rejects
+missing, duplicated, reordered, truncated, malformed or corrupted chunks,
+recomputes the whole-file digest, validates the envelope/manifest binding,
+recomputes the decoded admission digest, and validates the complete admission
+contract. The remote reader accepts only the exact regular, non-symlink file
+under the bundle root and verifies its complete size and digest before emitting
+each bounded chunk. This is not a generic transport framework.
+
+The complete pre-live gate passed:
+
+- 53/53 admin assertions across the canonical live-schema guard, CFA
+  admission/preflight and outer lifecycle suites;
+- both portal CFA product-contract/SQL test files;
+- a synthetic 24,000-character-boundary proof using an envelope larger than
+  that limit, exact reconstruction/digest parity, every required malformed
+  chunk case, timeout, cancellation, cleanup/root absence, CFA cleanup failure
+  and residue detection, no-email rejection and preserved native assertions;
+- JavaScript syntax, declared dependency trees, import boundaries and
+  whitespace checks in both owning repositories.
+
+One explained local test failure occurred before TEST access: a lifecycle test
+still asserted the superseded monolithic-stdout decode statement. The assertion
+was corrected to require manifest parsing, chunk reconstruction and complete
+admission validation. No runtime contract was weakened and no live attempt was
+consumed.
+
+The sole authorized fresh live admission then passed:
+
+| Field | Retained result |
+| --- | --- |
+| Attempt | `phase8b-admission-transport-41e162d1-010e-4458-bdb6-e70888d96646` |
+| Operator / region | account `124355655255`, `arn:aws:iam::124355655255:user/CODEX_CLI_Admin`, `ca-central-1` |
+| Remote identities | `nwac-test-app-role` before environment loading; `arn:aws:iam::124355655255:user/SES_backend` afterward |
+| Bundle | digest `405a8da428951dbca4748de513ce43322b9f7e93f50fd6d8a984c3de0092589f`; four exact source files |
+| Transport | 36,403-byte envelope, three ordered chunks, reconstructed SHA-256 `5e4eb4856891ca82e08ccdd66879dc86de0162f7e50a3a0b7660621ed7b30554` |
+| Admission | decoded 139,413 bytes; SHA-256 `55733c2dc26606688283c6c00b29f5a84265c7dae328409de85176a2b82cae5b` |
+| Schema/catalogue | two matching raw and structured full-DDL proofs for all 22 objects; 68 finished statements admitted; eight prerequisite reads; zero postflight ordinary statements |
+| Safety prerequisites | exact single workflow selected, no-email state true, all attempt markers zero, no raw/structural DDL change |
+| Cleanup | SSM command `c52e98aa-5d5f-46f7-a4be-622577525b55` terminal `Success`, response code `0`, empty stderr; exact evidence file and bundle root absent |
+| Final evidence | `tmp/release-qualification/phase8/cfa-signing/phase8b-admission-transport-41e162d1-010e-4458-bdb6-e70888d96646/final.json`, 158,839 bytes, SHA-256 `64d3f579f760370f4963a25cce98fe799c2302fc3a3f1a0e1748c6b1c6c3414e` |
+
+Independent local validation reconstructed the retained scope without printing
+raw DDL: both exact object sets and every required raw/structural/column/index/
+constraint hash were complete and identical; all 68 statements, eight admitted
+reads, no-email result, transport topology, unique command ids and cleanup
+result passed. The final source hashes still matched the pre-live freeze:
+
+| Source | SHA-256 |
+| --- | --- |
+| `scripts/cfa-signing-test-smoke.js` | `7f3021df456f2fd6f3cc988bdc13ee324d2a6fdca42ee31c27bd1283315e2a32` |
+| `scripts/cfa-signing-schema-preflight.js` | `304c1876fe6e5db1120000f5233d162abf5759d8327bcd1851a219e59b822532` |
+| `scripts/lib/live-mysql-schema-guard.js` | `b8af323c9d550d9a4616a9a8547b64c3c938628e252cfc9a31019ebfda6ca2f2` |
+| portal `scripts/cfa-signing-smoke.js` | `36a589258e637a6964055e740452c9504a2105a54506f33dc966033eb79928ca` |
+| portal `s3Provider.js` | `77dfd3501661236228788cc6c3e661bdbe8ca7a9e0c95932f42220fa5d8d8804` |
+
+No Cognito user, product S3 object, product HTTP request, product fixture,
+database write/transaction/cleanup SQL, SES request or email was created. The
+only durable environment effect is admitted SSM command history; local and
+remote attempt-owned transport residue is absent. `releaseAuthority: none`
+and the current authoritative gate remain unchanged. The owning portal changes
+are clean and pushed at
+`3f15f77b282bc927b10bed105df67e8d728fedb7`.
+
+**Completion decision:** Sprint `8B` is complete. Its 22-object, 68-statement
+and 19-residue-scope executable catalogue, task-specific transport and read-only
+TEST admission are frozen by the evidence above. Phase 8 remains incomplete.
+Sprint `8C`, TEST fixture mutation, product HTTP, Cognito/S3 writes, cleanup
+execution, promotion, admission and release-authority changes remain
+unauthorized. The exact next approval is Bill's explicit acceptance of Sprint
+`8B` plus authorization of Sprint `8C` under the already recorded conditional
+stateful-execution contract; it must not begin automatically.
+
 ## Exact Proposed Authorization for Sprint 4A
 
 > Bill authorizes Sprint `4A` only under the accepted `P3-1` lean programme.
