@@ -12,6 +12,9 @@ const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
 const {
+  clickVisibleEnabledButtonByText,
+} = require('./lib/release-browser-suite-control');
+const {
   REVIEW_ACTIONS: REVIEW_WORKFLOW_ACTIONS,
   getReviewTransition,
 } = require('../src/lib/reviewWorkflow');
@@ -922,37 +925,10 @@ async function visibleButtonStates(page, text, options = {}) {
 }
 
 async function clickButtonByText(page, text, options = {}) {
-  const clicked = await page.evaluate(({ targetText, preferLast, scopeSelector }) => {
-    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
-    const isVisible = element => {
-      if (!element) return false;
-      const rect = element.getBoundingClientRect();
-      const style = window.getComputedStyle(element);
-      return rect.width > 0 &&
-        rect.height > 0 &&
-        style.visibility !== 'hidden' &&
-        style.display !== 'none';
-    };
-    const scope = scopeSelector ? document.querySelector(scopeSelector) : document;
-    if (!scope) return false;
-    const buttons = Array.from(scope.querySelectorAll('button, [role="button"]'))
-      .filter(button => isVisible(button))
-      .filter(button => !button.disabled && button.getAttribute('aria-disabled') !== 'true');
-    const matches = buttons.filter(button => normalize(button.innerText || button.textContent || '') === targetText);
-    const target = preferLast ? matches[matches.length - 1] : matches[0];
-    if (!target) return false;
-    target.scrollIntoView({ block: 'center', inline: 'center' });
-    target.click();
-    return true;
-  }, {
-    targetText: text,
-    preferLast: Boolean(options.preferLast),
+  return clickVisibleEnabledButtonByText(page, text, {
+    ...options,
     scopeSelector: options.scopeSelector || INTERVENTION_WIDGET_SELECTOR,
   });
-  if (!clicked) {
-    const available = await visibleEnabledButtons(page, text, options);
-    throw new Error(`Could not click button "${text}". Matching visible enabled buttons: ${JSON.stringify(available)}`);
-  }
 }
 
 async function fillFirstVisibleTextarea(page, value, options = {}) {

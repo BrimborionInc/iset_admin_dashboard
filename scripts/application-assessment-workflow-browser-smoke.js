@@ -12,6 +12,9 @@ const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
 const {
+  clickVisibleEnabledButtonByText,
+} = require('./lib/release-browser-suite-control');
+const {
   REVIEW_ACTIONS: REVIEW_WORKFLOW_ACTIONS,
   REVIEW_WORKFLOW_TYPES,
   getReviewTransition,
@@ -1075,43 +1078,7 @@ async function visibleEnabledButtons(page, text, { exact = true, dialogOnly = fa
 }
 
 async function clickButtonByText(page, text, options = {}) {
-  const clicked = await page.evaluate(({ targetText, exactMatch, dialogOnlyValue, preferLast }) => {
-    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
-    const isVisible = element => {
-      if (!element) return false;
-      const rect = element.getBoundingClientRect();
-      const style = window.getComputedStyle(element);
-      return rect.width > 0 &&
-        rect.height > 0 &&
-        style.visibility !== 'hidden' &&
-        style.display !== 'none';
-    };
-    const root = dialogOnlyValue
-      ? document.querySelector('[role="dialog"], .awsui-modal')
-      : document;
-    if (!root) return false;
-    const buttons = Array.from(root.querySelectorAll('button, [role="button"]'))
-      .filter(button => isVisible(button))
-      .filter(button => !button.disabled && button.getAttribute('aria-disabled') !== 'true');
-    const matches = buttons.filter(button => {
-      const label = normalize(button.innerText || button.textContent || '');
-      return exactMatch ? label === targetText : label.includes(targetText);
-    });
-    const target = preferLast ? matches[matches.length - 1] : matches[0];
-    if (!target) return false;
-    target.scrollIntoView({ block: 'center', inline: 'center' });
-    target.click();
-    return true;
-  }, {
-    targetText: text,
-    exactMatch: options.exact !== false,
-    dialogOnlyValue: Boolean(options.dialogOnly),
-    preferLast: Boolean(options.preferLast),
-  });
-  if (!clicked) {
-    const available = await visibleEnabledButtons(page, text, options);
-    throw new Error(`Could not click button "${text}". Matching visible enabled buttons: ${JSON.stringify(available)}`);
-  }
+  return clickVisibleEnabledButtonByText(page, text, options);
 }
 
 async function waitForButtonEnabled(page, text, options = {}) {

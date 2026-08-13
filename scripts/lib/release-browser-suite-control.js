@@ -218,6 +218,140 @@ function signalProcessGroup(pid, signal) {
 
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
+async function clickVisibleEnabledButtonByText(page, text, options = {}) {
+  if (!page || typeof page.evaluate !== 'function') {
+    fail('BROWSER_BUTTON_PAGE_INVALID', 'button interaction requires a browser page with evaluate()');
+  }
+  const targetText = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!targetText) {
+    fail('BROWSER_BUTTON_TEXT_INVALID', 'button interaction requires non-empty text');
+  }
+  if (!options || typeof options !== 'object' || Array.isArray(options)) {
+    fail('BROWSER_BUTTON_OPTIONS_INVALID', 'button interaction options must be an object');
+  }
+
+  const scopeSelector = options.scopeSelector == null ? null : String(options.scopeSelector).trim();
+  const dialogOnly = Boolean(options.dialogOnly);
+  if (dialogOnly && scopeSelector) {
+    fail(
+      'BROWSER_BUTTON_SCOPE_AMBIGUOUS',
+      'button interaction cannot combine dialogOnly with scopeSelector',
+      { targetText, scopeSelector }
+    );
+  }
+
+  const timeoutMs = options.timeoutMs == null ? 45_000 : Number(options.timeoutMs);
+  const pollIntervalMs = options.pollIntervalMs == null ? 50 : Number(options.pollIntervalMs);
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    fail('BROWSER_BUTTON_TIMEOUT_INVALID', 'button interaction timeoutMs must be a non-negative number');
+  }
+  if (!Number.isFinite(pollIntervalMs) || pollIntervalMs < 0) {
+    fail('BROWSER_BUTTON_POLL_INVALID', 'button interaction pollIntervalMs must be a non-negative number');
+  }
+
+  const request = Object.freeze({
+    targetText,
+    exactMatch: options.exact !== false,
+    dialogOnly,
+    scopeSelector: scopeSelector || null,
+    preferLast: Boolean(options.preferLast),
+  });
+  const startedAtMs = Date.now();
+  const startedAt = new Date(startedAtMs).toISOString();
+  let attempts = 0;
+  let lastObservation = null;
+
+  while (true) {
+    attempts += 1;
+    // Finding and clicking happen in one browser task. React cannot replace the
+    // selected node between these two operations. A rejected evaluate() is
+    // deliberately not retried because the click may already have dispatched.
+    const observation = await page.evaluate((interaction) => {
+      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+      const isVisible = element => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0 &&
+          rect.height > 0 &&
+          style.visibility !== 'hidden' &&
+          style.display !== 'none';
+      };
+      const root = interaction.dialogOnly
+        ? document.querySelector('[role="dialog"], .awsui-modal')
+        : interaction.scopeSelector
+          ? document.querySelector(interaction.scopeSelector)
+          : document;
+      if (!root) {
+        return { clicked: false, scopeFound: false, matchingButtons: [] };
+      }
+      const matchingButtons = Array.from(root.querySelectorAll('button, [role="button"]'))
+        .filter(isVisible)
+        .map((button, index) => ({
+          element: button,
+          index,
+          text: normalize(button.innerText || button.textContent || ''),
+          disabled: Boolean(button.disabled || button.getAttribute('aria-disabled') === 'true'),
+        }))
+        .filter(({ text: label }) => interaction.exactMatch
+          ? label === interaction.targetText
+          : label.includes(interaction.targetText));
+      const enabledMatches = matchingButtons.filter(button => !button.disabled);
+      const target = interaction.preferLast
+        ? enabledMatches[enabledMatches.length - 1]
+        : enabledMatches[0];
+      const evidence = matchingButtons.map(({ index, text: label, disabled }) => ({
+        index,
+        text: label,
+        disabled,
+      }));
+      if (!target) {
+        return { clicked: false, scopeFound: true, matchingButtons: evidence };
+      }
+      target.element.scrollIntoView({ block: 'center', inline: 'center' });
+      target.element.click();
+      return {
+        clicked: true,
+        scopeFound: true,
+        matchingButtons: evidence,
+        clickedButton: { index: target.index, text: target.text },
+      };
+    }, request);
+
+    if (!observation || typeof observation !== 'object' || typeof observation.clicked !== 'boolean') {
+      fail('BROWSER_BUTTON_OBSERVATION_INVALID', 'browser returned malformed button interaction evidence', {
+        request,
+        attempts,
+        observation,
+      });
+    }
+    lastObservation = observation;
+    const elapsedMs = Date.now() - startedAtMs;
+    if (observation.clicked) {
+      return Object.freeze({
+        clicked: true,
+        attempts,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        elapsedMs,
+        request,
+        observation,
+      });
+    }
+    if (elapsedMs >= timeoutMs) {
+      fail('BROWSER_BUTTON_CLICK_TIMEOUT', `Could not click visible enabled button "${targetText}"`, {
+        request,
+        attempts,
+        startedAt,
+        failedAt: new Date().toISOString(),
+        elapsedMs,
+        lastObservation,
+      });
+    }
+    await delay(Math.min(pollIntervalMs, Math.max(0, timeoutMs - elapsedMs)));
+  }
+}
+
 async function waitForProcessGroupAbsence(pid, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() <= deadline) {
@@ -866,6 +1000,7 @@ function sha256Bytes(bytes) {
 module.exports = {
   BROWSER_CHILD_RESULT_CONTRACTS,
   BrowserSuiteControlError,
+  clickVisibleEnabledButtonByText,
   closeLoopbackServer,
   parseStructuredChildResult,
   processGroupExists,

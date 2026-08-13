@@ -8,6 +8,7 @@ const path = require('path');
 const {
   BROWSER_CHILD_RESULT_CONTRACTS,
   BrowserSuiteControlError,
+  clickVisibleEnabledButtonByText,
   closeLoopbackServer,
   parseStructuredChildResult,
   processGroupExists,
@@ -112,6 +113,158 @@ afterEach(() => {
 });
 
 describe('selected release browser suite control', () => {
+  test('closes the stale React-node check-then-click race inside one browser task', async () => {
+    const originalDocument = global.document;
+    const originalWindow = global.window;
+    let clickCount = 0;
+    const createButton = () => ({
+      innerText: 'Submit for final decision',
+      disabled: false,
+      getAttribute: () => null,
+      getBoundingClientRect: () => ({ width: 120, height: 32 }),
+      scrollIntoView: jest.fn(),
+      click: () => { clickCount += 1; },
+    });
+    let renderedButtons = [createButton()];
+    global.document = {
+      querySelectorAll: () => renderedButtons,
+      querySelector: () => null,
+    };
+    global.window = {
+      getComputedStyle: () => ({ visibility: 'visible', display: 'block' }),
+    };
+
+    try {
+      // This deterministically recreates the retired two-task implementation:
+      // the presence check succeeds, then a React render replaces the node
+      // before the separate click lookup.
+      const legacyPresenceCheck = renderedButtons.some(
+        button => button.innerText === 'Submit for final decision' && !button.disabled
+      );
+      renderedButtons = [];
+      const legacySeparateClick = renderedButtons.find(
+        button => button.innerText === 'Submit for final decision' && !button.disabled
+      );
+      expect(legacyPresenceCheck).toBe(true);
+      expect(legacySeparateClick).toBeUndefined();
+
+      renderedButtons = [createButton()];
+      const page = {
+        evaluate: jest.fn(async (browserTask, interaction) => browserTask(interaction)),
+      };
+      const result = await clickVisibleEnabledButtonByText(page, 'Submit for final decision', {
+        pollIntervalMs: 0,
+      });
+
+      expect(result).toMatchObject({ clicked: true, attempts: 1 });
+      expect(clickCount).toBe(1);
+      expect(page.evaluate).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalDocument === undefined) delete global.document;
+      else global.document = originalDocument;
+      if (originalWindow === undefined) delete global.window;
+      else global.window = originalWindow;
+    }
+  });
+
+  test('waits through transient absence and disabled state, then clicks exactly once', async () => {
+    const page = {
+      evaluate: jest.fn()
+        .mockResolvedValueOnce({ clicked: false, scopeFound: false, matchingButtons: [] })
+        .mockResolvedValueOnce({
+          clicked: false,
+          scopeFound: true,
+          matchingButtons: [{ index: 0, text: 'Submit for final decision', disabled: true }],
+        })
+        .mockResolvedValueOnce({
+          clicked: true,
+          scopeFound: true,
+          matchingButtons: [{ index: 0, text: 'Submit for final decision', disabled: false }],
+          clickedButton: { index: 0, text: 'Submit for final decision' },
+        }),
+    };
+
+    const result = await clickVisibleEnabledButtonByText(page, 'Submit for final decision', {
+      scopeSelector: '#intervention-assessment-widget',
+      pollIntervalMs: 0,
+      timeoutMs: 1_000,
+    });
+
+    expect(result).toMatchObject({ clicked: true, attempts: 3 });
+    expect(page.evaluate).toHaveBeenCalledTimes(3);
+    expect(page.evaluate.mock.calls[2][1]).toEqual({
+      targetText: 'Submit for final decision',
+      exactMatch: true,
+      dialogOnly: false,
+      scopeSelector: '#intervention-assessment-widget',
+      preferLast: false,
+    });
+  });
+
+  test('does not repeat or reconcile an effectful click', async () => {
+    const page = {
+      evaluate: jest.fn().mockResolvedValue({
+        clicked: true,
+        scopeFound: true,
+        matchingButtons: [{ index: 1, text: 'Recall submission', disabled: false }],
+        clickedButton: { index: 1, text: 'Recall submission' },
+      }),
+    };
+
+    const result = await clickVisibleEnabledButtonByText(page, 'Recall submission', {
+      dialogOnly: true,
+      preferLast: true,
+      pollIntervalMs: 0,
+    });
+
+    expect(result.attempts).toBe(1);
+    expect(page.evaluate).toHaveBeenCalledTimes(1);
+  });
+
+  test('fails closed with bounded timing and the last DOM observation', async () => {
+    const observation = {
+      clicked: false,
+      scopeFound: true,
+      matchingButtons: [{ index: 0, text: 'Commit', disabled: true }],
+    };
+    const page = { evaluate: jest.fn().mockResolvedValue(observation) };
+
+    await expect(clickVisibleEnabledButtonByText(page, 'Commit', {
+      timeoutMs: 0,
+      pollIntervalMs: 0,
+    })).rejects.toMatchObject({
+      code: 'BROWSER_BUTTON_CLICK_TIMEOUT',
+      evidence: expect.objectContaining({
+        attempts: 1,
+        elapsedMs: expect.any(Number),
+        startedAt: expect.any(String),
+        failedAt: expect.any(String),
+        lastObservation: observation,
+      }),
+    });
+    expect(page.evaluate).toHaveBeenCalledTimes(1);
+  });
+
+  test('never retries an ambiguous browser evaluation failure', async () => {
+    const error = new Error('Execution context was destroyed');
+    const page = { evaluate: jest.fn().mockRejectedValue(error) };
+
+    await expect(clickVisibleEnabledButtonByText(page, 'Next')).rejects.toBe(error);
+    expect(page.evaluate).toHaveBeenCalledTimes(1);
+  });
+
+  test('rejects malformed observations and ambiguous scopes', async () => {
+    const page = { evaluate: jest.fn().mockResolvedValue({ clicked: 'yes' }) };
+    await expect(clickVisibleEnabledButtonByText(page, 'Next', {
+      timeoutMs: 0,
+    })).rejects.toMatchObject({ code: 'BROWSER_BUTTON_OBSERVATION_INVALID' });
+    await expect(clickVisibleEnabledButtonByText(page, 'Next', {
+      dialogOnly: true,
+      scopeSelector: '#widget',
+    })).rejects.toMatchObject({ code: 'BROWSER_BUTTON_SCOPE_AMBIGUOUS' });
+    expect(page.evaluate).toHaveBeenCalledTimes(1);
+  });
+
   test('admits an exact known --only set and rejects missing or unknown IDs', () => {
     const args = parseArgs(['--only', 'intervention-posting-context', '--json']);
     expect(args.json).toBe(true);
