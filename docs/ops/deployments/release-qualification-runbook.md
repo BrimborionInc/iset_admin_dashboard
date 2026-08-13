@@ -2,7 +2,7 @@
 
 Status: authoritative release gate for local DEV, real-MySQL qualification, TEST deployment, deployed TEST acceptance, and PROD authorization.
 
-Last reviewed: 2026-08-13 after Sprint `RG1` closed the current TEST-gate prerequisite, target-identity, and CFA evidence-binding contracts.
+Last reviewed: 2026-08-13 after the r5 clean-workspace gate correction removed ignored historical test inputs and ordinary-release coupling to the development-only Intacct simulator.
 
 This runbook supersedes any shorter deploy checklist when deciding whether a PATH release is admissible. The deployment guides still describe mechanics and maintenance handling, but they do not authorize a release by themselves.
 
@@ -10,7 +10,7 @@ This runbook supersedes any shorter deploy checklist when deciding whether a PAT
 
 A release is not qualified by a green unit suite, successful build, healthy target group, `/healthz`, or `/readyz` alone. PROD authorization requires two unexpired machine-generated decisions for the same exact admin, portal, shared, and migration candidate:
 
-1. `DEV GO`: local aggregates, lint, static privacy checks, both compiled bundles, the deterministic admin browser suite, real DEV MySQL schema/request/write contracts, privacy ERM, payment rollback, AI fixtures, and Intacct drift checks all passed.
+1. `DEV GO`: local aggregates, lint, static privacy checks, both compiled bundles, the deterministic admin browser suite, real DEV MySQL schema/request/write contracts, privacy ERM, payment rollback, and AI fixtures all passed.
 2. `TEST GO`: that DEV-qualified candidate was admitted by the TEST deployment manifest, deployed provenance matches, rollback artifacts exist, target health and on-instance readiness pass, configuration and worker state are safe, deployed role/applicant/cross-app journeys pass, strict denials have no skip, rollback fixtures leave no residue, and maintenance state is clear.
 
 Any failed, skipped, unavailable, expired, unmapped, source-drifted, or cleanup-incomplete required check is `NO-GO`; it must never be relabelled `GO`. Normal releases have no skip or waiver flag. A separately recorded operator-authorized emergency PROD release may use the app-only pre-qualification deployment procedure described below without changing or falsifying the `NO-GO` evidence.
@@ -96,10 +96,14 @@ The JSON inventory is executable project memory. Every changed file must match a
 | Jobs, notifications, and delivery queues | Real MySQL event/delivery persistence, worker code suites, on-instance processes, zero stale/dead-letter/ambiguous TEST deliveries, role workflow notification cleanup |
 | Files, messages, signing, and object scope | Privacy ERM, payment/file tests, deployed generated-file and object-store fixtures, applicant document/message denials, zero S3/DB residue |
 | Payments and Finance | Safety suite, rollback-only DEV and deployed TEST payment fixture, Finance email disabled, no provider call, cleanup assertion |
-| External services | Disposable TEST Cognito/S3 only; local Intacct drift guard and AI fixture check; TEST Finance email/Intacct disabled; controlled provider tests require separate explicit scope |
+| External services | Disposable TEST Cognito/S3 only; AI fixture check; TEST Finance email/Intacct disabled; controlled provider tests require separate explicit scope |
 | Deployment, recovery, and provenance | Evidence admission before mutation, candidate provenance inside each artifact, successful deploy manifest, retained prior TEST artifacts, maintenance cleanup, PROD restore point for DB-affecting runs |
 
-The local Intacct check is not Sage certification. A release that changes the external Intacct contract must add approved current official-document or sandbox evidence to the inventory before qualification. A test that would send real email, submit to Sage, invoke a billable AI model, or contact a real applicant is unavailable until a controlled substitute or explicitly approved test is defined; it must not be silently skipped.
+The sibling Intacct simulator is development-only tooling and is not part of the live PATH solution. Its checker, simulator, fixtures and historical evidence remain available through `npm run audit:intacct-contract`; the machine inventory selects that check for Intacct-specific source or simulator changes, and operators may run it explicitly. It is not mandatory for an ordinary release and is not Sage certification. A release that changes the external Intacct contract must add approved current official-document or sandbox evidence to the inventory before qualification. A test that would send real email, submit to Sage, invoke a billable AI model, or contact a real applicant is unavailable until a controlled substitute or explicitly approved test is defined; it must not be silently skipped.
+
+### Clean isolated workspace prerequisites
+
+Ordinary DEV qualification requires clean admin, portal and shared candidate checkouts at the recorded heads, installed Node dependencies, the repository-owned synthetic aggregate inputs, the portal TEST build environment file, and the documented local DEV database environment/identity. These are execution prerequisites, not candidate source. No ordinary mandatory check may depend on ignored historical evidence under `tmp/` or on the development-only `intacct-mock-service` sibling. The admin aggregate's historical control-plane contract uses repository-owned synthetic manifest and DEV-evidence bytes while the operator tool remains pinned to the separately retained historical paths and checksums.
 
 ## Phase 0 — Prepare TEST rehearsal: freeze and plan the candidate
 
@@ -109,7 +113,7 @@ Work from:
 cd /home/bill/ISET/admin-dashboard
 ```
 
-Choose one release ID and do not reuse it for a different tree. Inspect all three repos and the unversioned Intacct mock. For committed release ranges, provide a merge-base per changed repository; uncommitted files are included automatically.
+Choose one release ID and do not reuse it for a different tree. Inspect the admin, portal and shared candidate repos. Inspect the Intacct simulator only when Intacct-specific source or simulator changes select its development check, or when running that check explicitly. For committed release ranges, provide a merge-base per changed repository; uncommitted files are included automatically.
 
 ```bash
 git status --short

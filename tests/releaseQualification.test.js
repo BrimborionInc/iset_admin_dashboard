@@ -117,6 +117,35 @@ describe('release qualification contract', () => {
       'admin-browser-suite',
       'payment-db-rollback',
     ]));
+    expect(inventory.alwaysRequired.dev).not.toContain('intacct-local-contract');
+    expect(checks).toContain('intacct-local-contract');
+  });
+
+  test('ordinary releases do not require the development-only Intacct sibling, while Intacct changes do', () => {
+    const ordinary = resolveDomains(inventory, {
+      admin: ['scripts/path-release-qualify.js'],
+      portal: [],
+      shared: [],
+      intacctMock: [],
+    });
+    expect(ordinary.unmatched).toEqual([]);
+    expect(requiredChecksFor(inventory, 'dev', ordinary.domainIds))
+      .not.toContain('intacct-local-contract');
+    expect(requiredChecksFor(inventory, 'dev', resolveDomains(inventory, {}, true).domainIds))
+      .not.toContain('intacct-local-contract');
+
+    const intacct = resolveDomains(inventory, {
+      admin: ['scripts/intacct-contract-audit.js'],
+      portal: [],
+      shared: [],
+      intacctMock: ['src/server.js'],
+    });
+    expect(intacct.unmatched).toEqual([]);
+    expect(intacct.domainIds).toContain('intacct-development-tooling');
+    expect(requiredChecksFor(inventory, 'dev', intacct.domainIds))
+      .toContain('intacct-local-contract');
+    expect(inventory.checks['intacct-local-contract'].command)
+      .toEqual(['npm', 'run', 'audit:intacct-contract']);
   });
 
   test('TEST prerequisite failures block every dependent fixture without suppressing effect-free final checks', () => {
@@ -196,6 +225,14 @@ describe('release qualification contract', () => {
       'check test-cfa-signing references unknown prerequisite unknown-check',
       'check test-cfa-signing prerequisite unknown-check must be an earlier test mandatory check',
     ]));
+  });
+
+  test('unknown development-only selection policy fails inventory admission', () => {
+    const invalid = JSON.parse(JSON.stringify(inventory));
+    invalid.domains.find(domain => domain.id === 'intacct-development-tooling').selection = 'optional';
+    expect(validateInventory(invalid)).toContain(
+      'domain intacct-development-tooling has invalid selection optional'
+    );
   });
 
   test('CFA dispatch binds a fresh attempt and accepts one complete native result', () => {

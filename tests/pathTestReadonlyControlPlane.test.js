@@ -12,7 +12,6 @@ const {
   EXPECTED_ASG,
   EXPECTED_BUCKET,
   EXPECTED_DEV_EVIDENCE_PATH,
-  EXPECTED_DEV_EVIDENCE_SHA256,
   EXPECTED_MANIFEST_PATH,
   EXPECTED_OPERATOR_ARN,
   EXPECTED_PROFILE,
@@ -26,6 +25,7 @@ const {
   buildRemoteCommand,
   executeControlPlane,
   loadAndValidateHistoricalDevEvidence,
+  loadAndValidateManifest,
   parseArgs,
   parseRemoteOutput,
   runBoundedSsm,
@@ -36,22 +36,27 @@ const {
   verifyEvidenceDigest,
 } = require('../scripts/path-test-readonly-control-plane');
 const { createEvidenceId, validateQualificationEvidence } = require('../src/lib/releaseQualification');
+const {
+  createSyntheticHistoricalInputs,
+  writeSyntheticHistoricalInputs,
+} = require('./fixtures/pathTestReadonlyControlPlane');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const TEST_NOW = Date.parse('2026-08-12T12:00:00.000Z');
 const PHASE8_NOW = Date.parse('2026-08-13T12:00:00.000Z');
 const temporaryRoots = [];
+const syntheticInputs = createSyntheticHistoricalInputs();
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
 function loadManifest() {
-  return JSON.parse(fs.readFileSync(EXPECTED_MANIFEST_PATH, 'utf8'));
+  return clone(syntheticInputs.manifest);
 }
 
 function loadDevEvidence() {
-  return JSON.parse(fs.readFileSync(EXPECTED_DEV_EVIDENCE_PATH, 'utf8'));
+  return clone(syntheticInputs.evidence);
 }
 
 function createTemporaryRoot() {
@@ -176,7 +181,8 @@ async function runSynthetic(options = {}) {
   const root = createTemporaryRoot();
   const manifest = options.manifest || loadManifest();
   const phase8CfaAttestation = options.phase8CfaAttestation === true;
-  const manifestPath = phase8CfaAttestation ? EXPECTED_MANIFEST_PATH : writeManifest(root, manifest);
+  const historicalInputs = phase8CfaAttestation ? writeSyntheticHistoricalInputs(root) : null;
+  const manifestPath = historicalInputs?.manifestPath || writeManifest(root, manifest);
   const attemptId = options.attemptId || (phase8CfaAttestation
     ? 'phase8c-p1-synthetic-attempt'
     : 'phase7b-synthetic-attempt');
@@ -186,7 +192,7 @@ async function runSynthetic(options = {}) {
   return executeControlPlane({
     manifestPath,
     phase8CfaAttestation,
-    devEvidencePath: phase8CfaAttestation ? EXPECTED_DEV_EVIDENCE_PATH : null,
+    devEvidencePath: historicalInputs?.devEvidencePath || null,
     attemptId,
     evidenceOut,
     adapter,
@@ -196,6 +202,9 @@ async function runSynthetic(options = {}) {
       : '2026-08-12T12:00:00.000Z')),
     clockMs: options.clockMs || (() => (phase8CfaAttestation ? PHASE8_NOW : TEST_NOW)),
     sourceStateProvider: options.sourceStateProvider || (() => clone(source)),
+    expectedManifestSha256: historicalInputs?.manifestSha256 || null,
+    expectedDevEvidenceSha256: historicalInputs?.devEvidenceSha256 || null,
+    syntheticHistoricalInput: Boolean(historicalInputs),
   });
 }
 
@@ -236,12 +245,12 @@ describe('Sprint 7B read-only TEST control-plane contract', () => {
     }
   });
 
-  test('accepts the frozen r31 manifest and preserves all five identities', () => {
+  test('accepts the repository-owned synthetic r31 manifest and preserves all five identities', () => {
     const result = validateManifestObject(loadManifest(), { nowMs: TEST_NOW });
     expect(result).toMatchObject({
       releaseId: '20260809-two-step-review-assurance-r31',
-      evidenceId: 'fca2569014f43a2209d85f317a5745d7e0f3b164c430b4ea56730061d7e31eb5',
-      preflightEvidenceId: '483bb120ec35bbded0bc9de91da45ad4462375012e571f09c13bfb04cb773aee',
+      evidenceId: syntheticInputs.evidence.evidenceId,
+      preflightEvidenceId: syntheticInputs.manifest.preflight.evidenceId,
     });
     expect(result.source).toEqual({
       admin: expect.objectContaining({ gitHead: expect.any(String), treeFingerprint: expect.any(String), gitDirty: false }),
@@ -498,17 +507,23 @@ describe('Sprint 8C-P1 bounded provenance attestation', () => {
       .toThrow(expect.objectContaining({ code: 'DEV_EVIDENCE_PATH_REJECTED' }));
   });
 
-  test('proves the checksum-valid original DEV GO was live when deployment admission began', () => {
+  test('proves a checksum-bound synthetic DEV GO was live when deployment admission began', () => {
+    const root = createTemporaryRoot();
+    const inputs = writeSyntheticHistoricalInputs(root);
     const manifest = validateManifestObject(loadManifest(), {
       nowMs: PHASE8_NOW,
       historicalQualification: true,
     });
     const evidence = loadAndValidateHistoricalDevEvidence(
-      EXPECTED_DEV_EVIDENCE_PATH,
+      inputs.devEvidencePath,
       manifest,
-      { nowMs: PHASE8_NOW }
+      {
+        nowMs: PHASE8_NOW,
+        expectedDevEvidenceSha256: inputs.devEvidenceSha256,
+        syntheticHistoricalInput: true,
+      }
     );
-    expect(evidence.digest).toBe(EXPECTED_DEV_EVIDENCE_SHA256);
+    expect(evidence.digest).toBe(inputs.devEvidenceSha256);
     expect(evidence.model).toMatchObject({
       evidenceId: manifest.evidenceId,
       generatedAt: '2026-08-10T03:23:30.461Z',
@@ -522,7 +537,7 @@ describe('Sprint 8C-P1 bounded provenance attestation', () => {
         schemaSha256: manifest.schemaSha256,
       },
     });
-    expect(evidence.model.requiredChecks).toHaveLength(17);
+    expect(evidence.model.requiredChecks).toEqual(syntheticInputs.evidence.requiredChecks);
   });
 
   test.each([
@@ -563,17 +578,48 @@ describe('Sprint 8C-P1 bounded provenance attestation', () => {
 
   test('rejects any retained DEV artifact byte drift independently of JSON semantics', () => {
     const root = createTemporaryRoot();
+    const inputs = writeSyntheticHistoricalInputs(root);
     const copyPath = path.join(root, 'dev-evidence.json');
-    fs.copyFileSync(EXPECTED_DEV_EVIDENCE_PATH, copyPath);
+    fs.copyFileSync(inputs.devEvidencePath, copyPath);
     const manifest = validateManifestObject(loadManifest(), {
       nowMs: PHASE8_NOW,
       historicalQualification: true,
     });
-    expect(loadAndValidateHistoricalDevEvidence(copyPath, manifest, { nowMs: PHASE8_NOW }).digest)
-      .toBe(EXPECTED_DEV_EVIDENCE_SHA256);
+    expect(loadAndValidateHistoricalDevEvidence(copyPath, manifest, {
+      nowMs: PHASE8_NOW,
+      expectedDevEvidenceSha256: inputs.devEvidenceSha256,
+      syntheticHistoricalInput: true,
+    }).digest).toBe(inputs.devEvidenceSha256);
     fs.appendFileSync(copyPath, ' ');
-    expect(() => loadAndValidateHistoricalDevEvidence(copyPath, manifest, { nowMs: PHASE8_NOW }))
+    expect(() => loadAndValidateHistoricalDevEvidence(copyPath, manifest, {
+      nowMs: PHASE8_NOW,
+      expectedDevEvidenceSha256: inputs.devEvidenceSha256,
+      syntheticHistoricalInput: true,
+    }))
       .toThrow(expect.objectContaining({ code: 'FIELD_CONFLICT' }));
+  });
+
+  test('rejects synthetic historical checksum overrides outside the unit-test boundary', () => {
+    const root = createTemporaryRoot();
+    const inputs = writeSyntheticHistoricalInputs(root);
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      expect(() => loadAndValidateManifest(inputs.manifestPath, {
+        nowMs: PHASE8_NOW,
+        historicalQualification: true,
+        expectedManifestSha256: inputs.manifestSha256,
+        syntheticHistoricalInput: true,
+      })).toThrow(expect.objectContaining({ code: 'SYNTHETIC_INPUT_REJECTED' }));
+      expect(() => loadAndValidateHistoricalDevEvidence(inputs.devEvidencePath, {}, {
+        nowMs: PHASE8_NOW,
+        expectedDevEvidenceSha256: inputs.devEvidenceSha256,
+        syntheticHistoricalInput: true,
+      })).toThrow(expect.objectContaining({ code: 'SYNTHETIC_INPUT_REJECTED' }));
+    } finally {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
   });
 
   test('emits a short-lived CFA-only artifact with no release or deployment authority', async () => {
@@ -587,7 +633,7 @@ describe('Sprint 8C-P1 bounded provenance attestation', () => {
         allowedConsumer: 'frozen-phase8-cfa-harness-certification-exercise',
         releaseAuthority: 'none',
         historicalDevAuthority: {
-          fileSha256: EXPECTED_DEV_EVIDENCE_SHA256,
+          fileSha256: syntheticInputs.devEvidenceSha256,
           validAtDeploymentAdmission: true,
           currentStatus: 'expired',
         },

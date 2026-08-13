@@ -370,7 +370,14 @@ function loadAndValidateManifest(manifestPath, options = {}) {
   const bytes = readFileBounded(manifestPath, 16 * 1024 * 1024);
   const digest = sha256(bytes);
   if (options.historicalQualification) {
-    requireExact(digest, EXPECTED_MANIFEST_SHA256, 'retained TEST manifest file SHA-256');
+    if (options.expectedManifestSha256 && !(options.syntheticHistoricalInput && process.env.NODE_ENV === 'test')) {
+      throw new ControlPlaneError('SYNTHETIC_INPUT_REJECTED', 'Synthetic historical manifest input is test-only');
+    }
+    requireExact(
+      digest,
+      options.expectedManifestSha256 || EXPECTED_MANIFEST_SHA256,
+      'retained TEST manifest file SHA-256'
+    );
   }
   const model = validateManifestObject(parseJsonBytes(bytes, 'retained TEST manifest'), options);
   return { bytes, digest, model };
@@ -459,7 +466,14 @@ function validateHistoricalDevEvidenceObject(evidence, manifestModel, options = 
 function loadAndValidateHistoricalDevEvidence(devEvidencePath, manifestModel, options = {}) {
   const bytes = readFileBounded(devEvidencePath, 16 * 1024 * 1024);
   const digest = sha256(bytes);
-  requireExact(digest, EXPECTED_DEV_EVIDENCE_SHA256, 'historical DEV evidence file SHA-256');
+  if (options.expectedDevEvidenceSha256 && !(options.syntheticHistoricalInput && process.env.NODE_ENV === 'test')) {
+    throw new ControlPlaneError('SYNTHETIC_INPUT_REJECTED', 'Synthetic historical DEV evidence input is test-only');
+  }
+  requireExact(
+    digest,
+    options.expectedDevEvidenceSha256 || EXPECTED_DEV_EVIDENCE_SHA256,
+    'historical DEV evidence file SHA-256'
+  );
   const model = validateHistoricalDevEvidenceObject(
     parseJsonBytes(bytes, 'historical DEV evidence'),
     manifestModel,
@@ -1024,6 +1038,9 @@ async function executeControlPlane(options) {
     nowMs = Date.now(),
     clock = () => new Date(),
     clockMs = () => Date.now(),
+    expectedManifestSha256 = null,
+    expectedDevEvidenceSha256 = null,
+    syntheticHistoricalInput = false,
   } = options;
   if (phase8CfaAttestation && !devEvidencePath) {
     throw new ControlPlaneError('DEV_EVIDENCE_REQUIRED', 'Phase 8 attestation requires the retained DEV evidence');
@@ -1063,6 +1080,8 @@ async function executeControlPlane(options) {
     manifest = loadAndValidateManifest(manifestPath, {
       nowMs,
       historicalQualification: phase8CfaAttestation,
+      expectedManifestSha256,
+      syntheticHistoricalInput,
     });
     recorder.record('manifest-accepted', {
       path: path.relative(REPO_ROOT, manifestPath).replace(/\\/gu, '/'),
@@ -1079,7 +1098,7 @@ async function executeControlPlane(options) {
       historicalDevEvidence = loadAndValidateHistoricalDevEvidence(
         devEvidencePath,
         manifest.model,
-        { nowMs }
+        { nowMs, expectedDevEvidenceSha256, syntheticHistoricalInput }
       );
       recorder.record('historical-dev-authority-proved', {
         path: path.relative(REPO_ROOT, devEvidencePath).replace(/\\/gu, '/'),

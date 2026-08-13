@@ -38,6 +38,9 @@ function validateInventory(inventory) {
     if (!domain?.id) errors.push('domain id is required');
     else if (domainIds.has(domain.id)) errors.push(`duplicate domain id: ${domain.id}`);
     else domainIds.add(domain.id);
+    if (domain?.selection !== undefined && domain.selection !== 'change-triggered-development') {
+      errors.push(`domain ${domain.id} has invalid selection ${domain.selection}`);
+    }
     Object.entries(domain?.matches || {}).forEach(([repo, patterns]) => {
       if (!inventory?.repositories?.[repo]) errors.push(`domain ${domain.id} references unknown repository ${repo}`);
       (patterns || []).forEach(pattern => {
@@ -94,7 +97,9 @@ function resolveDomains(inventory, changedFiles, full = false) {
   const matched = new Set();
   const unmatched = [];
   if (full) {
-    domains.filter(domain => domain.id !== 'documentation-only').forEach(domain => matched.add(domain.id));
+    domains
+      .filter(domain => domain.id !== 'documentation-only' && domain.selection !== 'change-triggered-development')
+      .forEach(domain => matched.add(domain.id));
     return { domainIds: Array.from(matched).sort(), unmatched };
   }
 
