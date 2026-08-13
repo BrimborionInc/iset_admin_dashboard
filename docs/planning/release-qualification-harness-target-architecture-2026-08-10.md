@@ -10428,6 +10428,90 @@ approval is Bill's acceptance of `8C-R1` and separate authorization to resume
 Sprint `8C` against the frozen admin and portal commits under the complete
 existing conditional stateful-execution contract.
 
+### Sprint 8C-P1 Phase-8-Only Provenance Attestation
+
+The resumed stateful Sprint `8C` stopped before TEST access because the r31
+deployment manifest's embedded DEV qualification expired at
+`2026-08-13T03:23:30.461Z`. The deployment and deployed product candidate did
+not thereby change, but the expired evidence could no longer satisfy the
+legacy current-time Phase 7 admission rule. Bill accepted the read-only
+reconciliation and authorized only a distinct, short-lived provenance
+attestation for the frozen CFA harness-certification exercise.
+
+The task-specific mode in `scripts/path-test-readonly-control-plane.js` keeps
+the original validator unchanged for ordinary use: without the explicit
+`--phase8-cfa-attestation` flag, the expired manifest remains rejected. The new
+mode also requires the exact retained DEV artifact and proves all of the
+following before AWS admission:
+
+- the manifest bytes equal SHA-256
+  `2f4d93539642479aa7d223f5b5f64b79467d6f49d29f0ec6a6517ecba5813a51`;
+- the original DEV file bytes equal SHA-256
+  `6c26876c6a8ec10bd55382f9c2f4a14e84689675eb95a9aae9cd1d5469c78dea`;
+- canonical reconstruction of the DEV evidence equals evidence ID
+  `fca2569014f43a2209d85f317a5745d7e0f3b164c430b4ea56730061d7e31eb5`;
+- every one of its 17 required checks is present and passed, and its exact
+  admin/portal/shared source plus schema tuple equals the manifest tuple; and
+- the DEV evidence was generated at `2026-08-10T03:23:30.461Z`, before the
+  manifest's `release.qualification` admission began at
+  `2026-08-10T03:24:22.279Z`, and had not expired at that admission time.
+
+That is historical admission proof, not a renewed DEV `GO`. The emitted shape
+is `phase8-cfa-provenance-attestation`, allows only the
+`frozen-phase8-cfa-harness-certification-exercise` consumer, explicitly
+prohibits deployment, TEST release qualification, PROD admission and another
+candidate, omits release-evidence `stage`, `decision` and `evidenceId`, expires
+75 minutes after issuance, and records `releaseAuthority: none`.
+
+Local verification passed JavaScript syntax, whitespace and the complete
+focused Phase 7/attestation suite: 56/56 assertions. It covers the unchanged
+legacy expiry rejection, exact CLI paths, raw and canonical checksum failures,
+historical timing, candidate/source/check conflicts, structural rejection by
+the release-evidence validator, bounded expiry, the existing identity/resource/
+artifact/provenance/process negatives and content-addressed output. One first-
+run test expectation was corrected before TEST access: after changing an
+evidence timestamp, its recomputed ID necessarily conflicts with the immutable
+manifest before the independent timing rule is reached. The timing rule now has
+its own direct negative test; no implementation contract was weakened.
+
+Fresh STS proof returned account `124355655255` and
+`arn:aws:iam::124355655255:user/CODEX_CLI_Admin`. Exactly three fresh live
+attempts then passed without retry:
+
+| Attempt | Final SHA-256 | SSM command | Window (UTC) |
+| --- | --- | --- | --- |
+| `phase8c-p1-attestation-75f32267-af20-47f9-99f7-20d15441508a` | `d4ffdae4121d52fd8b1b0b7cdcd9261c3399ad010aa880322c3242b44ae36294` | `241d45c6-21c2-40cc-9d4c-561dbdc35a03` | `12:22:24.548` to `12:22:37.687`; expires `13:37:24.548` |
+| `phase8c-p1-attestation-80d22492-2d23-43ad-9674-de47d08e3c0c` | `bf43475a715fc44b160279234141a0bea5c8c4ed256e1460694ba215f4911c32` | `407e8ee8-7a7b-4eed-b052-227565a8fcab` | `12:22:47.570` to `12:22:59.977`; expires `13:37:47.570` |
+| `phase8c-p1-attestation-9ade9265-5bad-4b1e-934d-96ec3c3116c0` | `83f8aa20e5b6ba4c96aa916598fb8f277d06e7b5f986363d53da83cb05d86259` | `e1a97aed-87dd-400b-8e6a-213056f4111e` | `12:23:12.493` to `12:23:24.401`; expires `13:38:12.493` |
+
+All three independently proved the exact r31 candidate, one healthy
+`InService`/SSM-online instance, exact membership and health for both target
+groups, the two current and two rollback artifacts, exact installed admin and
+portal provenance, terminal remote reads, source stability and completed
+independent no-write residue evidence. The stable semantic SHA-256, excluding
+only attempt/time/process/transport identifiers and final-artifact digests, is
+`350cc4666f41ccdd27a2f59789029014b7511c203b362a4dabbd93475f255945`
+for all three. A first local retained-evidence summary command mistakenly
+hashed the JSON representation of a Node `Buffer`; the corrected byte-digest
+reader then verified every immutable sidecar and the stable comparison. It did
+not alter evidence or execute another live attempt.
+
+Only the admitted AWS reads, S3 `HeadObject`, SSM history and short-lived
+remote provenance-read processes occurred. No build, deployment, SQL/database,
+product HTTP, Cognito/product-object, SES/email, IAM/configuration or PROD
+operation occurred. The original manifest, DEV evidence and current release
+gate are unchanged.
+
+**Completion decision:** Sprint `8C-P1` is complete. It establishes temporary
+authority only for the frozen Phase 8 CFA harness-certification exercise; it
+does not complete Phase 8 or authorize stateful work. The exact next approval
+is Bill's acceptance of this attestation plus a separate resumption of Sprint
+`8C` against admin `a7fb28cf5df5af9e3afdfa5db5abf3a996fe296e`, portal
+`a650d4816d6e4a346acf6b4e5431801c68fc8572`, the accepted Sprint `8B`
+catalogue and an unexpired accepted attestation under the complete existing
+conditional stateful-execution contract. Expiry requires a new explicitly
+authorized attestation attempt; it must never be extended or relabelled.
+
 ## Exact Proposed Authorization for Sprint 4A
 
 > Bill authorizes Sprint `4A` only under the accepted `P3-1` lean programme.

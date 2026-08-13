@@ -11,26 +11,35 @@ const {
   EXPECTED_ACCOUNT,
   EXPECTED_ASG,
   EXPECTED_BUCKET,
+  EXPECTED_DEV_EVIDENCE_PATH,
+  EXPECTED_DEV_EVIDENCE_SHA256,
   EXPECTED_MANIFEST_PATH,
   EXPECTED_OPERATOR_ARN,
   EXPECTED_PROFILE,
   EXPECTED_REGION,
+  PHASE8_ATTESTATION_CHECK_ID,
+  PHASE8_ATTESTATION_PURPOSE,
+  PHASE8_ATTESTATION_TTL_MS,
   PROVENANCE_PATHS,
   TARGETS,
   assertAdmittedAwsOperation,
   buildRemoteCommand,
   executeControlPlane,
+  loadAndValidateHistoricalDevEvidence,
   parseArgs,
   parseRemoteOutput,
   runBoundedSsm,
   sha256,
   validateCliBoundary,
+  validateHistoricalDevEvidenceObject,
   validateManifestObject,
   verifyEvidenceDigest,
 } = require('../scripts/path-test-readonly-control-plane');
+const { createEvidenceId, validateQualificationEvidence } = require('../src/lib/releaseQualification');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const TEST_NOW = Date.parse('2026-08-12T12:00:00.000Z');
+const PHASE8_NOW = Date.parse('2026-08-13T12:00:00.000Z');
 const temporaryRoots = [];
 
 function clone(value) {
@@ -39,6 +48,10 @@ function clone(value) {
 
 function loadManifest() {
   return JSON.parse(fs.readFileSync(EXPECTED_MANIFEST_PATH, 'utf8'));
+}
+
+function loadDevEvidence() {
+  return JSON.parse(fs.readFileSync(EXPECTED_DEV_EVIDENCE_PATH, 'utf8'));
 }
 
 function createTemporaryRoot() {
@@ -162,19 +175,26 @@ function successfulAdapter(manifest = loadManifest()) {
 async function runSynthetic(options = {}) {
   const root = createTemporaryRoot();
   const manifest = options.manifest || loadManifest();
-  const manifestPath = writeManifest(root, manifest);
-  const attemptId = options.attemptId || 'phase7b-synthetic-attempt';
+  const phase8CfaAttestation = options.phase8CfaAttestation === true;
+  const manifestPath = phase8CfaAttestation ? EXPECTED_MANIFEST_PATH : writeManifest(root, manifest);
+  const attemptId = options.attemptId || (phase8CfaAttestation
+    ? 'phase8c-p1-synthetic-attempt'
+    : 'phase7b-synthetic-attempt');
   const evidenceOut = path.join(root, attemptId, 'final.json');
   const source = expectedSourceState();
   const adapter = options.adapter || successfulAdapter(manifest);
   return executeControlPlane({
     manifestPath,
+    phase8CfaAttestation,
+    devEvidencePath: phase8CfaAttestation ? EXPECTED_DEV_EVIDENCE_PATH : null,
     attemptId,
     evidenceOut,
     adapter,
-    nowMs: TEST_NOW,
-    clock: options.clock || (() => new Date('2026-08-12T12:00:00.000Z')),
-    clockMs: options.clockMs || (() => TEST_NOW),
+    nowMs: phase8CfaAttestation ? PHASE8_NOW : TEST_NOW,
+    clock: options.clock || (() => new Date(phase8CfaAttestation
+      ? '2026-08-13T12:00:00.000Z'
+      : '2026-08-12T12:00:00.000Z')),
+    clockMs: options.clockMs || (() => (phase8CfaAttestation ? PHASE8_NOW : TEST_NOW)),
     sourceStateProvider: options.sourceStateProvider || (() => clone(source)),
   });
 }
@@ -450,5 +470,172 @@ describe('Sprint 7B read-only TEST control-plane contract', () => {
     const outcome = await runSynthetic();
     fs.appendFileSync(outcome.retained.path, 'corrupt');
     expect(() => verifyEvidenceDigest(outcome.retained.path)).toThrow(expect.objectContaining({ code: 'EVIDENCE_DIGEST_MISMATCH' }));
+  });
+});
+
+describe('Sprint 8C-P1 bounded provenance attestation', () => {
+  test('keeps legacy validation stale while admitting only the explicit attestation CLI boundary', () => {
+    expect(() => validateManifestObject(loadManifest(), { nowMs: PHASE8_NOW }))
+      .toThrow(expect.objectContaining({ code: 'MANIFEST_STALE' }));
+
+    const attemptId = 'phase8c-p1-cli-contract';
+    const args = parseArgs([
+      '--manifest', EXPECTED_MANIFEST_PATH,
+      '--phase8-cfa-attestation',
+      '--dev-evidence', EXPECTED_DEV_EVIDENCE_PATH,
+      '--profile', EXPECTED_PROFILE,
+      '--region', EXPECTED_REGION,
+      '--attempt-id', attemptId,
+      '--evidence-out', path.join(REPO_ROOT, 'tmp/release-qualification/test-control-plane', attemptId, 'final.json'),
+      '--json',
+    ]);
+    expect(() => validateCliBoundary(args)).not.toThrow();
+    expect(() => validateCliBoundary({ ...args, devEvidence: path.join(REPO_ROOT, 'other.json') }))
+      .toThrow(expect.objectContaining({ code: 'DEV_EVIDENCE_PATH_REJECTED' }));
+    expect(() => validateCliBoundary({ ...args, phase8CfaAttestation: false }))
+      .toThrow(expect.objectContaining({ code: 'DEV_EVIDENCE_UNEXPECTED' }));
+    expect(() => validateCliBoundary({ ...args, devEvidence: null }))
+      .toThrow(expect.objectContaining({ code: 'DEV_EVIDENCE_PATH_REJECTED' }));
+  });
+
+  test('proves the checksum-valid original DEV GO was live when deployment admission began', () => {
+    const manifest = validateManifestObject(loadManifest(), {
+      nowMs: PHASE8_NOW,
+      historicalQualification: true,
+    });
+    const evidence = loadAndValidateHistoricalDevEvidence(
+      EXPECTED_DEV_EVIDENCE_PATH,
+      manifest,
+      { nowMs: PHASE8_NOW }
+    );
+    expect(evidence.digest).toBe(EXPECTED_DEV_EVIDENCE_SHA256);
+    expect(evidence.model).toMatchObject({
+      evidenceId: manifest.evidenceId,
+      generatedAt: '2026-08-10T03:23:30.461Z',
+      expiresAt: '2026-08-13T03:23:30.461Z',
+      deploymentAdmissionStartedAt: '2026-08-10T03:24:22.279Z',
+      validAtDeploymentAdmission: true,
+      currentStatus: 'expired',
+      candidate: {
+        components: ['admin', 'portal', 'shared'],
+        source: manifest.source,
+        schemaSha256: manifest.schemaSha256,
+      },
+    });
+    expect(evidence.model.requiredChecks).toHaveLength(17);
+  });
+
+  test.each([
+    ['changed canonical bytes', evidence => { evidence.checks[0].status = 'failed'; }, 'FIELD_CONFLICT'],
+    ['candidate source conflict', evidence => {
+      evidence.candidate.source.portal.treeFingerprint = 'f'.repeat(64);
+      evidence.evidenceId = createEvidenceId(evidence);
+    }, 'FIELD_CONFLICT'],
+    ['failed required check', evidence => {
+      evidence.checks.find(check => check.id === 'portal-build').status = 'failed';
+      evidence.evidenceId = createEvidenceId(evidence);
+    }, 'FIELD_CONFLICT'],
+  ])('rejects %s before any adapter operation', (_name, mutate, code) => {
+    const manifest = validateManifestObject(loadManifest(), {
+      nowMs: PHASE8_NOW,
+      historicalQualification: true,
+    });
+    const evidence = loadDevEvidence();
+    mutate(evidence);
+    expect(() => validateHistoricalDevEvidenceObject(evidence, manifest, { nowMs: PHASE8_NOW }))
+      .toThrow(expect.objectContaining({ code }));
+  });
+
+  test('independently rejects evidence generated after deployment admission began', () => {
+    const manifest = validateManifestObject(loadManifest(), {
+      nowMs: PHASE8_NOW,
+      historicalQualification: true,
+    });
+    const evidence = loadDevEvidence();
+    evidence.generatedAt = '2026-08-10T03:25:00.000Z';
+    evidence.evidenceId = createEvidenceId(evidence);
+    expect(() => validateHistoricalDevEvidenceObject(
+      evidence,
+      { ...manifest, evidenceId: evidence.evidenceId },
+      { nowMs: PHASE8_NOW }
+    )).toThrow(expect.objectContaining({ code: 'HISTORICAL_AUTHORITY_TIMING_INVALID' }));
+  });
+
+  test('rejects any retained DEV artifact byte drift independently of JSON semantics', () => {
+    const root = createTemporaryRoot();
+    const copyPath = path.join(root, 'dev-evidence.json');
+    fs.copyFileSync(EXPECTED_DEV_EVIDENCE_PATH, copyPath);
+    const manifest = validateManifestObject(loadManifest(), {
+      nowMs: PHASE8_NOW,
+      historicalQualification: true,
+    });
+    expect(loadAndValidateHistoricalDevEvidence(copyPath, manifest, { nowMs: PHASE8_NOW }).digest)
+      .toBe(EXPECTED_DEV_EVIDENCE_SHA256);
+    fs.appendFileSync(copyPath, ' ');
+    expect(() => loadAndValidateHistoricalDevEvidence(copyPath, manifest, { nowMs: PHASE8_NOW }))
+      .toThrow(expect.objectContaining({ code: 'FIELD_CONFLICT' }));
+  });
+
+  test('emits a short-lived CFA-only artifact with no release or deployment authority', async () => {
+    const outcome = await runSynthetic({ phase8CfaAttestation: true });
+    expect(outcome.final).toMatchObject({
+      checkId: PHASE8_ATTESTATION_CHECK_ID,
+      releaseAuthority: 'none',
+      status: 'passed',
+      attestation: {
+        purpose: PHASE8_ATTESTATION_PURPOSE,
+        allowedConsumer: 'frozen-phase8-cfa-harness-certification-exercise',
+        releaseAuthority: 'none',
+        historicalDevAuthority: {
+          fileSha256: EXPECTED_DEV_EVIDENCE_SHA256,
+          validAtDeploymentAdmission: true,
+          currentStatus: 'expired',
+        },
+      },
+      cleanup: {
+        status: 'unnecessary',
+        residueDecision: 'no-declared-write-effect',
+        independentProof: { completed: true, passed: true },
+      },
+    });
+    expect(outcome.final.attestation.prohibitedConsumers).toEqual([
+      'deployment',
+      'test-release-qualification',
+      'prod-admission',
+      'other-product-candidates',
+    ]);
+    expect(Date.parse(outcome.final.attestation.expiresAt) - Date.parse(outcome.final.attestation.issuedAt))
+      .toBe(PHASE8_ATTESTATION_TTL_MS);
+    expect(outcome.final).not.toHaveProperty('stage');
+    expect(outcome.final).not.toHaveProperty('decision');
+    expect(outcome.final).not.toHaveProperty('evidenceId');
+    expect(validateQualificationEvidence({
+      evidence: outcome.final,
+      expectedStage: 'dev',
+      currentSource: loadManifest().qualification.candidate.source,
+      inventorySha256: loadDevEvidence().inventorySha256,
+      schemaSha256: loadManifest().qualification.candidate.schemaSha256,
+      requiredComponents: ['admin', 'portal', 'shared'],
+      now: new Date(PHASE8_NOW),
+    })).toEqual(expect.arrayContaining([
+      'qualification evidence checksum mismatch',
+      'qualification stage must be dev',
+    ]));
+    expect(outcome.final.events.map(event => event.type)).toContain('historical-dev-authority-proved');
+    expect(verifyEvidenceDigest(outcome.retained.path).sha256).toBe(outcome.retained.sha256);
+  });
+
+  test('fails closed if the bounded Phase 8 attestation expires before finalization', async () => {
+    let call = 0;
+    const outcome = await runSynthetic({
+      phase8CfaAttestation: true,
+      clock: () => new Date(call++ === 0 ? '2026-08-13T12:00:00.000Z' : '2026-08-13T13:16:00.000Z'),
+    });
+    expect(outcome.final.status).toBe('failed');
+    expect(outcome.final.failure).toMatchObject({
+      code: 'ATTESTATION_WINDOW_EXPIRED',
+      phase: 'attestation-finalization',
+    });
+    expect(outcome.final.releaseAuthority).toBe('none');
   });
 });

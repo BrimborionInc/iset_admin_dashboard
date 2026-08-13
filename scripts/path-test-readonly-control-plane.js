@@ -11,6 +11,12 @@ const EXPECTED_MANIFEST_PATH = path.join(
   REPO_ROOT,
   'tmp/path-deploy/test/20260809-two-step-review-assurance-r31--2026-08-10T03-24-21-698Z.json'
 );
+const EXPECTED_MANIFEST_SHA256 = '2f4d93539642479aa7d223f5b5f64b79467d6f49d29f0ec6a6517ecba5813a51';
+const EXPECTED_DEV_EVIDENCE_PATH = path.join(
+  REPO_ROOT,
+  'tmp/release-qualification/dev/20260809-two-step-review-assurance-r31.json'
+);
+const EXPECTED_DEV_EVIDENCE_SHA256 = '6c26876c6a8ec10bd55382f9c2f4a14e84689675eb95a9aae9cd1d5469c78dea';
 const EXPECTED_PROFILE = 'nwac-test';
 const EXPECTED_REGION = 'ca-central-1';
 const EXPECTED_ACCOUNT = '124355655255';
@@ -22,6 +28,10 @@ const EXPECTED_SSM_DOCUMENT = 'AWS-RunShellScript';
 const EXPECTED_SSM_DOCUMENT_ARN = `arn:aws:ssm:${EXPECTED_REGION}::document/${EXPECTED_SSM_DOCUMENT}`;
 const CHECK_ID = 'test-readonly-control-plane';
 const OPERATION_CLASS = 'release-operation:test-readonly-provenance';
+const PHASE8_ATTESTATION_CHECK_ID = 'phase8-cfa-provenance-attestation';
+const PHASE8_ATTESTATION_OPERATION_CLASS = 'release-operation:phase8-cfa-harness-certification';
+const PHASE8_ATTESTATION_PURPOSE = 'phase8-cfa-harness-certification-only';
+const PHASE8_ATTESTATION_TTL_MS = 75 * 60 * 1000;
 const RELEASE_AUTHORITY = 'none';
 const EVIDENCE_ROOT = path.join(REPO_ROOT, 'tmp/release-qualification/test-control-plane');
 const PROVENANCE_PATHS = Object.freeze({
@@ -85,6 +95,8 @@ function usage() {
     '',
     'Options:',
     `  --manifest PATH       Exact retained r31 manifest (required)`,
+    `  --phase8-cfa-attestation  Issue only a bounded Phase 8 CFA provenance attestation`,
+    `  --dev-evidence PATH   Exact retained r31 DEV evidence (required only for Phase 8 attestation)`,
     `  --profile NAME        Must be ${EXPECTED_PROFILE}`,
     `  --region REGION       Must be ${EXPECTED_REGION}`,
     '  --attempt-id ID       Fresh attempt identifier (required)',
@@ -97,6 +109,8 @@ function usage() {
 function parseArgs(argv) {
   const args = {
     manifest: null,
+    phase8CfaAttestation: false,
+    devEvidence: null,
     profile: null,
     region: null,
     attemptId: null,
@@ -106,6 +120,8 @@ function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === '--manifest') args.manifest = argv[++index];
+    else if (token === '--phase8-cfa-attestation') args.phase8CfaAttestation = true;
+    else if (token === '--dev-evidence') args.devEvidence = argv[++index];
     else if (token === '--profile') args.profile = argv[++index];
     else if (token === '--region') args.region = argv[++index];
     else if (token === '--attempt-id') args.attemptId = argv[++index];
@@ -119,6 +135,20 @@ function parseArgs(argv) {
 
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalize(value[key])]));
+  }
+  return value;
+}
+
+function createLegacyEvidenceId(evidence) {
+  const copy = { ...evidence };
+  delete copy.evidenceId;
+  return sha256(Buffer.from(JSON.stringify(canonicalize(copy))));
 }
 
 function readFileBounded(filename, maxBytes) {
@@ -204,6 +234,7 @@ function parseS3Uri(uri, label) {
 
 function validateManifestObject(manifest, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
+  const historicalQualification = options.historicalQualification === true;
   requireObject(manifest, 'manifest');
   requireExact(manifest.status, 'successful', 'manifest.status');
   requireExact(manifest.environment, 'test', 'manifest.environment');
@@ -222,8 +253,11 @@ function validateManifestObject(manifest, options = {}) {
   requireExact(qualification.releaseId, releaseId, 'manifest.qualification.releaseId');
   const evidenceId = requireDigest(qualification.evidenceId, 'manifest.qualification.evidenceId');
   const expiresAt = requireTimestamp(qualification.expiresAt, 'manifest.qualification.expiresAt');
-  if (Date.parse(expiresAt) <= nowMs) {
+  if (!historicalQualification && Date.parse(expiresAt) <= nowMs) {
     throw new ControlPlaneError('MANIFEST_STALE', 'The retained qualification evidence has expired');
+  }
+  if (historicalQualification && Date.parse(expiresAt) > nowMs) {
+    throw new ControlPlaneError('HISTORICAL_EVIDENCE_NOT_EXPIRED', 'Phase 8 attestation is permitted only for the expired retained qualification evidence');
   }
 
   const candidate = requireObject(qualification.candidate, 'manifest.qualification.candidate');
@@ -267,6 +301,12 @@ function validateManifestObject(manifest, options = {}) {
   if (!Array.isArray(manifest.steps) || manifest.steps.length === 0 || manifest.steps.some(step => step?.status !== 'successful')) {
     throw new ControlPlaneError('FIELD_CONFLICT', 'Every retained deployment step must be successful');
   }
+  const qualificationStep = requireObject(manifest.steps[0], 'manifest.steps[0]');
+  requireExact(qualificationStep.name, 'release.qualification', 'manifest first deployment step');
+  const deploymentAdmissionStartedAt = requireTimestamp(
+    qualificationStep.startedAt,
+    'manifest release qualification step startedAt'
+  );
   const appApply = requireObject(manifest.appApply, 'manifest.appApply');
   requireExact(appApply.deployAdmin, true, 'manifest.appApply.deployAdmin');
   requireExact(appApply.deployPortal, true, 'manifest.appApply.deployPortal');
@@ -318,6 +358,7 @@ function validateManifestObject(manifest, options = {}) {
     evidenceId,
     preflightEvidenceId: preflight.evidenceId,
     expiresAt,
+    deploymentAdmissionStartedAt,
     identity: { account: String(identity.account), arn: identity.arn, userId: identity.userId },
     source,
     schemaSha256: requireDigest(candidate.schemaSha256, 'manifest candidate schemaSha256'),
@@ -327,8 +368,104 @@ function validateManifestObject(manifest, options = {}) {
 
 function loadAndValidateManifest(manifestPath, options = {}) {
   const bytes = readFileBounded(manifestPath, 16 * 1024 * 1024);
+  const digest = sha256(bytes);
+  if (options.historicalQualification) {
+    requireExact(digest, EXPECTED_MANIFEST_SHA256, 'retained TEST manifest file SHA-256');
+  }
   const model = validateManifestObject(parseJsonBytes(bytes, 'retained TEST manifest'), options);
-  return { bytes, digest: sha256(bytes), model };
+  return { bytes, digest, model };
+}
+
+function validateHistoricalDevEvidenceObject(evidence, manifestModel, options = {}) {
+  const nowMs = options.nowMs ?? Date.now();
+  requireObject(evidence, 'historical DEV evidence');
+  requireExact(evidence.schemaVersion, 1, 'historical DEV evidence schemaVersion');
+  requireExact(evidence.stage, 'dev', 'historical DEV evidence stage');
+  requireExact(evidence.decision, 'GO', 'historical DEV evidence decision');
+  requireExact(evidence.releaseId, manifestModel.releaseId, 'historical DEV evidence releaseId');
+  requireExact(evidence.evidenceId, manifestModel.evidenceId, 'historical DEV evidence evidenceId');
+  requireDigest(evidence.inventorySha256, 'historical DEV evidence inventorySha256');
+  requireExact(
+    createLegacyEvidenceId(evidence),
+    evidence.evidenceId,
+    'historical DEV evidence canonical checksum'
+  );
+
+  const generatedAt = requireTimestamp(evidence.generatedAt, 'historical DEV evidence generatedAt');
+  const expiresAt = requireTimestamp(evidence.expiresAt, 'historical DEV evidence expiresAt');
+  requireExact(expiresAt, manifestModel.expiresAt, 'historical DEV evidence expiresAt');
+  const admissionStartedAt = manifestModel.deploymentAdmissionStartedAt;
+  if (Date.parse(generatedAt) >= Date.parse(admissionStartedAt)) {
+    throw new ControlPlaneError('HISTORICAL_AUTHORITY_TIMING_INVALID', 'The DEV GO was not generated before deployment admission began');
+  }
+  if (Date.parse(admissionStartedAt) >= Date.parse(expiresAt)) {
+    throw new ControlPlaneError('HISTORICAL_AUTHORITY_TIMING_INVALID', 'The DEV GO was expired when deployment admission began');
+  }
+  if (Date.parse(expiresAt) > nowMs) {
+    throw new ControlPlaneError('HISTORICAL_EVIDENCE_NOT_EXPIRED', 'The retained DEV evidence has not expired');
+  }
+
+  const candidate = requireObject(evidence.candidate, 'historical DEV evidence candidate');
+  if (!Array.isArray(candidate.components)
+    || JSON.stringify(candidate.components) !== JSON.stringify(['admin', 'portal', 'shared'])) {
+    throw new ControlPlaneError('FIELD_CONFLICT', 'historical DEV evidence components must be admin, portal, shared');
+  }
+  requireExact(candidate.schemaSha256, manifestModel.schemaSha256, 'historical DEV evidence schemaSha256');
+  const source = requireObject(candidate.source, 'historical DEV evidence candidate.source');
+  for (const repository of ['admin', 'portal', 'shared']) {
+    assertSameSource(source[repository], manifestModel.source[repository], `historical DEV evidence source.${repository}`);
+  }
+
+  if (!Array.isArray(evidence.requiredChecks) || evidence.requiredChecks.length === 0) {
+    throw new ControlPlaneError('FIELD_MALFORMED', 'historical DEV evidence requiredChecks must be non-empty');
+  }
+  if (!Array.isArray(evidence.checks)) {
+    throw new ControlPlaneError('FIELD_MALFORMED', 'historical DEV evidence checks must be an array');
+  }
+  const requiredChecks = new Set(evidence.requiredChecks);
+  if (requiredChecks.size !== evidence.requiredChecks.length) {
+    throw new ControlPlaneError('FIELD_CONFLICT', 'historical DEV evidence requiredChecks contain duplicates');
+  }
+  const seenChecks = new Set();
+  for (const check of evidence.checks) {
+    requireObject(check, 'historical DEV evidence check');
+    const id = requireNonEmptyString(check.id, 'historical DEV evidence check.id');
+    if (seenChecks.has(id)) throw new ControlPlaneError('FIELD_CONFLICT', `historical DEV evidence check is duplicated: ${id}`);
+    seenChecks.add(id);
+  }
+  for (const id of requiredChecks) {
+    const check = evidence.checks.find(value => value.id === id);
+    if (!check) throw new ControlPlaneError('FIELD_CONFLICT', `historical DEV evidence is missing required check ${id}`);
+    requireExact(check.status, 'passed', `historical DEV evidence check ${id}.status`);
+  }
+
+  return {
+    evidenceId: evidence.evidenceId,
+    generatedAt,
+    expiresAt,
+    deploymentAdmissionStartedAt: admissionStartedAt,
+    validAtDeploymentAdmission: true,
+    currentStatus: 'expired',
+    inventorySha256: evidence.inventorySha256,
+    requiredChecks: [...evidence.requiredChecks],
+    candidate: {
+      components: [...candidate.components],
+      source: manifestModel.source,
+      schemaSha256: manifestModel.schemaSha256,
+    },
+  };
+}
+
+function loadAndValidateHistoricalDevEvidence(devEvidencePath, manifestModel, options = {}) {
+  const bytes = readFileBounded(devEvidencePath, 16 * 1024 * 1024);
+  const digest = sha256(bytes);
+  requireExact(digest, EXPECTED_DEV_EVIDENCE_SHA256, 'historical DEV evidence file SHA-256');
+  const model = validateHistoricalDevEvidenceObject(
+    parseJsonBytes(bytes, 'historical DEV evidence'),
+    manifestModel,
+    options
+  );
+  return { bytes, digest, model };
 }
 
 function captureSourceState(paths = SOURCE_PATHS) {
@@ -354,6 +491,13 @@ function validateCliBoundary(args) {
   requireExact(args.region, EXPECTED_REGION, '--region');
   if (!args.manifest || path.resolve(args.manifest) !== EXPECTED_MANIFEST_PATH) {
     throw new ControlPlaneError('MANIFEST_PATH_REJECTED', `--manifest must be ${EXPECTED_MANIFEST_PATH}`);
+  }
+  if (args.phase8CfaAttestation) {
+    if (!args.devEvidence || path.resolve(args.devEvidence) !== EXPECTED_DEV_EVIDENCE_PATH) {
+      throw new ControlPlaneError('DEV_EVIDENCE_PATH_REJECTED', `--dev-evidence must be ${EXPECTED_DEV_EVIDENCE_PATH}`);
+    }
+  } else if (args.devEvidence) {
+    throw new ControlPlaneError('DEV_EVIDENCE_UNEXPECTED', '--dev-evidence is permitted only with --phase8-cfa-attestation');
   }
   if (typeof args.attemptId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/u.test(args.attemptId)) {
     throw new ControlPlaneError('ATTEMPT_ID_INVALID', '--attempt-id must be an explicit fresh identifier');
@@ -875,12 +1019,26 @@ async function executeControlPlane(options) {
     attemptId,
     evidenceOut,
     adapter,
+    phase8CfaAttestation = false,
+    devEvidencePath = null,
     nowMs = Date.now(),
     clock = () => new Date(),
     clockMs = () => Date.now(),
   } = options;
+  if (phase8CfaAttestation && !devEvidencePath) {
+    throw new ControlPlaneError('DEV_EVIDENCE_REQUIRED', 'Phase 8 attestation requires the retained DEV evidence');
+  }
+  if (!phase8CfaAttestation && devEvidencePath) {
+    throw new ControlPlaneError('DEV_EVIDENCE_UNEXPECTED', 'DEV evidence is permitted only for Phase 8 attestation');
+  }
+  const checkId = phase8CfaAttestation ? PHASE8_ATTESTATION_CHECK_ID : CHECK_ID;
+  const operationClass = phase8CfaAttestation ? PHASE8_ATTESTATION_OPERATION_CLASS : OPERATION_CLASS;
   const sourceStateProvider = options.sourceStateProvider
-    || (() => captureSourceState([...SOURCE_PATHS, manifestPath]));
+    || (() => captureSourceState([
+      ...SOURCE_PATHS,
+      manifestPath,
+      ...(phase8CfaAttestation ? [devEvidencePath] : []),
+    ]));
   const recorder = options.recorder || createEvidenceRecorder(evidenceOut, attemptId, clock);
   const startedAt = clock().toISOString();
   const attemptDeadline = clockMs() + DEFAULT_LIMITS.totalAttemptMs;
@@ -888,6 +1046,7 @@ async function executeControlPlane(options) {
   let sourceBefore = null;
   let sourceAfter = null;
   let manifest = null;
+  let historicalDevEvidence = null;
   const collected = {};
   let failure = null;
   function proveAttemptTime() {
@@ -895,13 +1054,16 @@ async function executeControlPlane(options) {
   }
 
   try {
-    recorder.record('invocation-received', { attemptId, checkId: CHECK_ID, operationClass: OPERATION_CLASS });
+    recorder.record('invocation-received', { attemptId, checkId, operationClass });
     phase = 'source-before';
     sourceBefore = sourceStateProvider('before');
     recorder.record('source-before', { source: sourceBefore });
 
     phase = 'manifest-validation';
-    manifest = loadAndValidateManifest(manifestPath, { nowMs });
+    manifest = loadAndValidateManifest(manifestPath, {
+      nowMs,
+      historicalQualification: phase8CfaAttestation,
+    });
     recorder.record('manifest-accepted', {
       path: path.relative(REPO_ROOT, manifestPath).replace(/\\/gu, '/'),
       sha256: manifest.digest,
@@ -911,6 +1073,26 @@ async function executeControlPlane(options) {
       source: manifest.model.source,
     });
     proveAttemptTime();
+
+    if (phase8CfaAttestation) {
+      phase = 'historical-dev-authority';
+      historicalDevEvidence = loadAndValidateHistoricalDevEvidence(
+        devEvidencePath,
+        manifest.model,
+        { nowMs }
+      );
+      recorder.record('historical-dev-authority-proved', {
+        path: path.relative(REPO_ROOT, devEvidencePath).replace(/\\/gu, '/'),
+        fileSha256: historicalDevEvidence.digest,
+        evidenceId: historicalDevEvidence.model.evidenceId,
+        generatedAt: historicalDevEvidence.model.generatedAt,
+        expiresAt: historicalDevEvidence.model.expiresAt,
+        deploymentAdmissionStartedAt: historicalDevEvidence.model.deploymentAdmissionStartedAt,
+        validAtDeploymentAdmission: true,
+        currentStatus: 'expired',
+      });
+      proveAttemptTime();
+    }
 
     phase = 'local-identity';
     collected.localIdentity = validateLocalIdentity(await adapter.getLocalIdentity());
@@ -981,15 +1163,45 @@ async function executeControlPlane(options) {
     }
   }
 
+  const finishedAt = clock().toISOString();
+  const attestationExpiresAt = phase8CfaAttestation
+    ? new Date(Date.parse(startedAt) + PHASE8_ATTESTATION_TTL_MS).toISOString()
+    : null;
+  if (phase8CfaAttestation && !failure && Date.parse(finishedAt) >= Date.parse(attestationExpiresAt)) {
+    failure = sanitizedFailure(
+      new ControlPlaneError('ATTESTATION_WINDOW_EXPIRED', 'The Phase 8 attestation expired before finalization'),
+      'attestation-finalization'
+    );
+    recorder.record('attempt-failed', { failure });
+  }
+
   const final = {
     schemaVersion: 1,
-    checkId: CHECK_ID,
-    operationClass: OPERATION_CLASS,
+    checkId,
+    operationClass,
     releaseAuthority: RELEASE_AUTHORITY,
     attemptId,
     status: failure ? 'failed' : 'passed',
     startedAt,
-    finishedAt: clock().toISOString(),
+    finishedAt,
+    attestation: phase8CfaAttestation ? {
+      purpose: PHASE8_ATTESTATION_PURPOSE,
+      allowedConsumer: 'frozen-phase8-cfa-harness-certification-exercise',
+      prohibitedConsumers: [
+        'deployment',
+        'test-release-qualification',
+        'prod-admission',
+        'other-product-candidates',
+      ],
+      issuedAt: startedAt,
+      expiresAt: attestationExpiresAt,
+      releaseAuthority: RELEASE_AUTHORITY,
+      historicalDevAuthority: historicalDevEvidence ? {
+        path: path.relative(REPO_ROOT, devEvidencePath).replace(/\\/gu, '/'),
+        fileSha256: historicalDevEvidence.digest,
+        ...historicalDevEvidence.model,
+      } : null,
+    } : null,
     effect: {
       class: 'external-read-with-control-plane-record',
       awsReadsOnly: true,
@@ -1001,7 +1213,7 @@ async function executeControlPlane(options) {
     },
     cleanup: {
       status: 'unnecessary',
-      owner: CHECK_ID,
+      owner: checkId,
       residueScope: ['local child processes', 'remote SSM read processes'],
       residueDecision: failure ? 'unresolved-on-failure' : 'no-declared-write-effect',
       independentProof: {
@@ -1049,6 +1261,8 @@ async function main(argv = process.argv.slice(2)) {
   try {
     outcome = await executeControlPlane({
       manifestPath: path.resolve(args.manifest),
+      phase8CfaAttestation: args.phase8CfaAttestation,
+      devEvidencePath: args.devEvidence ? path.resolve(args.devEvidence) : null,
       attemptId: args.attemptId,
       evidenceOut: path.resolve(args.evidenceOut),
       adapter,
@@ -1058,7 +1272,7 @@ async function main(argv = process.argv.slice(2)) {
     return 1;
   }
   if (args.json) process.stdout.write(`${JSON.stringify(outcome.final)}\n`);
-  else process.stdout.write(`${CHECK_ID}: ${outcome.final.status}; evidence=${outcome.retained.path}\n`);
+  else process.stdout.write(`${outcome.final.checkId}: ${outcome.final.status}; evidence=${outcome.retained.path}\n`);
   return outcome.final.status === 'passed' ? 0 : 1;
 }
 
@@ -1074,11 +1288,17 @@ module.exports = {
   EXPECTED_ACCOUNT,
   EXPECTED_ASG,
   EXPECTED_BUCKET,
+  EXPECTED_DEV_EVIDENCE_PATH,
+  EXPECTED_DEV_EVIDENCE_SHA256,
   EXPECTED_MANIFEST_PATH,
+  EXPECTED_MANIFEST_SHA256,
   EXPECTED_OPERATOR_ARN,
   EXPECTED_PROFILE,
   EXPECTED_REGION,
   EXPECTED_REMOTE_ROLE,
+  PHASE8_ATTESTATION_CHECK_ID,
+  PHASE8_ATTESTATION_PURPOSE,
+  PHASE8_ATTESTATION_TTL_MS,
   PROVENANCE_PATHS,
   TARGETS,
   assertAdmittedAwsOperation,
@@ -1089,6 +1309,7 @@ module.exports = {
   createEvidenceRecorder,
   createLiveAdapter,
   executeControlPlane,
+  loadAndValidateHistoricalDevEvidence,
   loadAndValidateManifest,
   main,
   parseArgs,
@@ -1100,6 +1321,7 @@ module.exports = {
   validateHeadObject,
   validateLocalIdentity,
   validateManifestObject,
+  validateHistoricalDevEvidenceObject,
   validateRemoteResult,
   validateRemoteTransport,
   validateTarget,

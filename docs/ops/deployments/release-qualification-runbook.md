@@ -326,6 +326,40 @@ recorded in the target-architecture Sprint `7B` completion checkpoint. SSM
 command history is an intentional control-plane record; terminal SSM evidence
 must prove the remote read process ended, and no local check process may remain.
 
+### Phase 8 CFA-only provenance attestation
+
+The explicit `--phase8-cfa-attestation` mode exists only to bind the frozen
+Phase 8 CFA harness-certification exercise to the unchanged product candidate
+already deployed by r31. It does not renew the expired DEV `GO`, replace TEST
+qualification, admit a deployment or authorize PROD. Its output always records
+`releaseAuthority: none`, names the CFA-only consumer, names every prohibited
+consumer and expires 75 minutes after the attempt starts.
+
+The mode requires both exact retained artifacts. It verifies the raw file
+digests and the DEV evidence's canonical `evidenceId`, proves the DEV `GO` was
+unexpired when the manifest's `release.qualification` step began, then freshly
+repeats the Phase 7 identity, target-health, artifact and deployed-provenance
+proof:
+
+```bash
+node scripts/path-test-readonly-control-plane.js \
+  --manifest tmp/path-deploy/test/20260809-two-step-review-assurance-r31--2026-08-10T03-24-21-698Z.json \
+  --phase8-cfa-attestation \
+  --dev-evidence tmp/release-qualification/dev/20260809-two-step-review-assurance-r31.json \
+  --profile nwac-test --region ca-central-1 \
+  --attempt-id <fresh-attempt-id> \
+  --evidence-out tmp/release-qualification/test-control-plane/<fresh-attempt-id>/final.json \
+  --json
+```
+
+The legacy command without `--phase8-cfa-attestation` continues to reject the
+expired manifest. The attestation shape deliberately omits release-evidence
+`stage`, `decision` and `evidenceId` fields and therefore cannot be consumed as
+DEV/TEST qualification or deployment admission. Any candidate, evidence,
+manifest, source, artifact, environment, health, provenance, process or local
+source-state difference fails the attempt. Do not relabel, extend or reuse an
+expired attestation; a new attempt and explicit authorization are required.
+
 ## Phase 8 CFA admission status
 
 Sprint `8B` is complete and the CFA read-only admission contract is frozen by
