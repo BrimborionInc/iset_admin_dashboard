@@ -1,10 +1,12 @@
 const {
+  validateAssessmentStartPrerequisiteEvidence,
   validateAssessmentStartJourneyEvidence,
 } = require('../scripts/two-step-review-test-smoke');
 
 const clone = value => JSON.parse(JSON.stringify(value));
 
 function buildValidEvidence() {
+  const attemptStamp = 'attempt-r4';
   const selected = {
     id: 101,
     case_id: 77,
@@ -79,6 +81,98 @@ function buildValidEvidence() {
     submitted_by_staff_profile_id: 50,
     nwac_decision: 'approved',
   }];
+  const buildEiDocument = ({ id, applicationId, kind, checksum, size }) => {
+    const fileName = `two-step-review-${attemptStamp}-assessment-start-${kind}-ei-verification.pdf`;
+    const label = `Synthetic assessment-start ${kind} EI verification ${attemptStamp}`;
+    return {
+      id,
+      case_id: 77,
+      application_id: applicationId,
+      action_plan_id: null,
+      client_id: 44,
+      applicant_user_id: 300,
+      user_id: 400,
+      source: 'manual_upload',
+      file_name: fileName,
+      file_path: `uploads/2026/08/13/300/${kind}-owned-key.pdf`,
+      mime_type: 'application/pdf',
+      label,
+      metadata: JSON.stringify({
+        label,
+        document_type: 'ei_verification',
+        ei_eligibility_status: 'CRF',
+      }),
+      size_bytes: size,
+      checksum_sha256: checksum,
+      status: 'active',
+      document_category: 'ei_verification',
+      created_at: '2026-08-13T12:00:30.000Z',
+      updated_at: '2026-08-13T12:00:30.000Z',
+    };
+  };
+  const eiDocuments = [
+    buildEiDocument({
+      id: 700,
+      applicationId: 101,
+      kind: 'selected',
+      checksum: 'a'.repeat(64),
+      size: 301,
+    }),
+    buildEiDocument({
+      id: 701,
+      applicationId: 102,
+      kind: 'sibling',
+      checksum: 'b'.repeat(64),
+      size: 302,
+    }),
+  ];
+  const prerequisites = {
+    attemptStamp,
+    caseId: 77,
+    selectedApplicationId: 101,
+    siblingApplicationId: 102,
+    clientId: 44,
+    applicantUserId: 300,
+    uploaderUserId: 400,
+    assessments: [
+      { application_id: 101, case_id: 77, esdc_eligibility: 'CRF' },
+      { application_id: 102, case_id: 77, esdc_eligibility: 'CRF' },
+    ],
+    documents: clone(eiDocuments),
+    uploads: eiDocuments.map((document, index) => ({
+      kind: index === 0 ? 'selected' : 'sibling',
+      response: {
+        ok: true,
+        document: {
+          id: document.id,
+          case_id: document.case_id,
+          application_id: document.application_id,
+          client_id: document.client_id,
+          applicant_user_id: document.applicant_user_id,
+          file_name: document.file_name,
+          file_path: document.file_path,
+          label: document.label,
+          document_category: document.document_category,
+          source: document.source,
+          status: document.status,
+        },
+      },
+    })),
+    objectAdditions: {
+      prefixes: ['uploads/2026/08/13/300/'],
+      currentObjects: eiDocuments.map(document => ({
+        key: document.file_path,
+        size: document.size_bytes,
+        etag: `etag-${document.id}`,
+      })),
+      versions: eiDocuments.map(document => ({
+        key: document.file_path,
+        versionId: `version-${document.id}`,
+        kind: 'version',
+        size: document.size_bytes,
+      })),
+    },
+  };
   const before = {
     selected,
     sibling,
@@ -87,6 +181,7 @@ function buildValidEvidence() {
     caseRow,
     conflictDeclarations: [],
     unrelatedWorkflows,
+    eiDocuments: clone(eiDocuments),
   };
   const declaration = {
     id: 500,
@@ -103,11 +198,11 @@ function buildValidEvidence() {
   afterSave.selected.status = 'in_review';
   afterSave.selected.lifecycle_status = 'in_review';
   afterSave.selected.row_version = 2;
-  afterSave.selectedAssessment.overview = 'ASSESSMENT-START-attempt-r3';
+  afterSave.selectedAssessment.overview = `ASSESSMENT-START-${attemptStamp}`;
   afterSave.selectedAssessment.updated_at = '2026-08-13T12:02:00.000Z';
 
   return {
-    attemptStamp: 'attempt-r3',
+    attemptStamp,
     actor: { staffProfileId: 55, role: 'Regional Manager' },
     declarationRequest: {
       applicationId: 101,
@@ -120,15 +215,51 @@ function buildValidEvidence() {
     saveRequest: {
       applicationId: 101,
       expectedRowVersion: 1,
-      overview: 'ASSESSMENT-START-attempt-r3',
+      overview: `ASSESSMENT-START-${attemptStamp}`,
       hasStatusFields: false,
     },
     saveResponse: { httpStatus: 200, success: true },
+    prerequisites,
     before,
     afterDeclaration,
     afterSave,
   };
 }
+
+describe('two-step TEST assessment-start prerequisite evidence', () => {
+  test('accepts two distinct application-scoped CRF documents and exact object versions', () => {
+    expect(validateAssessmentStartPrerequisiteEvidence(buildValidEvidence().prerequisites)).toEqual({
+      caseId: 77,
+      selectedApplicationId: 101,
+      siblingApplicationId: 102,
+      eligibilityStatus: 'CRF',
+      documentIds: [700, 701],
+      objectKeys: [
+        'uploads/2026/08/13/300/selected-owned-key.pdf',
+        'uploads/2026/08/13/300/sibling-owned-key.pdf',
+      ],
+      objectCurrentCount: 2,
+      objectVersionCount: 2,
+    });
+  });
+
+  test.each([
+    ['missing sibling document', evidence => { evidence.documents.pop(); }, 'cardinality_invalid'],
+    ['invalid sibling eligibility', evidence => { evidence.assessments[1].esdc_eligibility = 'Unknown'; }, 'application_eligibility_invalid'],
+    ['cross-scoped sibling document', evidence => { evidence.documents[1].application_id = 101; }, 'application_document_scope_invalid'],
+    ['non-synthetic manifest', evidence => { evidence.documents[0].label = 'EI verification'; }, 'document_manifest_invalid'],
+    ['contradictory upload response', evidence => { evidence.uploads[0].response.document.application_id = 102; }, 'upload_response_invalid'],
+    ['shared document bytes', evidence => { evidence.documents[1].checksum_sha256 = 'a'.repeat(64); }, 'document_bytes_not_distinct'],
+    ['missing object version', evidence => { evidence.objectAdditions.versions.pop(); }, 'cardinality_invalid'],
+    ['delete marker instead of owned version', evidence => { evidence.objectAdditions.versions[0].kind = 'delete-marker'; }, 'object_manifest_invalid'],
+  ])('rejects %s evidence', (_label, mutate, code) => {
+    const evidence = buildValidEvidence().prerequisites;
+    mutate(evidence);
+    expect(() => validateAssessmentStartPrerequisiteEvidence(evidence)).toThrow(
+      `assessment_start_prerequisite_evidence_invalid:${code}`
+    );
+  });
+});
 
 describe('two-step TEST assessment-start journey evidence', () => {
   test('accepts the exact assigned Regional Manager journey and returns bounded evidence', () => {
@@ -139,6 +270,11 @@ describe('two-step TEST assessment-start journey evidence', () => {
       assignedStaffProfileId: 55,
       assignedRole: 'Regional Manager',
       unrelatedWorkflowCount: 1,
+      eiVerificationDocumentIds: [700, 701],
+      eiVerificationObjectKeys: [
+        'uploads/2026/08/13/300/selected-owned-key.pdf',
+        'uploads/2026/08/13/300/sibling-owned-key.pdf',
+      ],
       selectedRowVersionBefore: 1,
       selectedRowVersionAfter: 2,
     });
@@ -187,6 +323,7 @@ describe('two-step TEST assessment-start journey evidence', () => {
     ['sibling application', evidence => { evidence.afterSave.sibling.status = 'in_review'; }],
     ['sibling assessment', evidence => { evidence.afterSave.siblingAssessment.overview = 'changed'; }],
     ['case', evidence => { evidence.afterSave.caseRow.status = 'active'; }],
+    ['EI verification documents', evidence => { evidence.afterSave.eiDocuments[0].status = 'archived'; }],
     ['unrelated workflow', evidence => { evidence.afterSave.unrelatedWorkflows[0].current_stage = 'rm_review'; }],
     ['declaration', evidence => { evidence.afterSave.conflictDeclarations[0].declaration_choice = 'conflict'; }],
   ])('rejects a first save that changes the protected %s control', (_label, mutate) => {

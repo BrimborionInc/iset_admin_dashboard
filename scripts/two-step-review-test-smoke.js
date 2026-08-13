@@ -54,6 +54,195 @@ function sameSerializedValue(actual, expected) {
   return JSON.stringify(actual) === JSON.stringify(expected);
 }
 
+function validateAssessmentStartPrerequisiteEvidence(evidence) {
+  const fail = (code, details = {}) => {
+    const error = new Error(`assessment_start_prerequisite_evidence_invalid:${code}`);
+    error.code = `assessment_start_prerequisite_${code}`;
+    error.details = details;
+    throw error;
+  };
+  const attemptStamp = typeof evidence?.attemptStamp === 'string'
+    ? evidence.attemptStamp.trim()
+    : '';
+  if (!attemptStamp) fail('attempt_stamp_invalid');
+  const caseId = Number(evidence?.caseId);
+  const selectedApplicationId = Number(evidence?.selectedApplicationId);
+  const siblingApplicationId = Number(evidence?.siblingApplicationId);
+  const clientId = Number(evidence?.clientId);
+  const applicantUserId = Number(evidence?.applicantUserId);
+  const uploaderUserId = Number(evidence?.uploaderUserId);
+  if (
+    ![caseId, selectedApplicationId, siblingApplicationId, clientId, applicantUserId, uploaderUserId]
+      .every(value => Number.isSafeInteger(value) && value > 0) ||
+    selectedApplicationId === siblingApplicationId
+  ) {
+    fail('identity_invalid', {
+      caseId,
+      selectedApplicationId,
+      siblingApplicationId,
+      clientId,
+      applicantUserId,
+      uploaderUserId,
+    });
+  }
+
+  const assessments = Array.isArray(evidence?.assessments) ? evidence.assessments : [];
+  const documents = Array.isArray(evidence?.documents) ? evidence.documents : [];
+  const uploads = Array.isArray(evidence?.uploads) ? evidence.uploads : [];
+  const currentObjects = Array.isArray(evidence?.objectAdditions?.currentObjects)
+    ? evidence.objectAdditions.currentObjects
+    : [];
+  const versions = Array.isArray(evidence?.objectAdditions?.versions)
+    ? evidence.objectAdditions.versions
+    : [];
+  const objectPrefixes = Array.isArray(evidence?.objectAdditions?.prefixes)
+    ? evidence.objectAdditions.prefixes
+    : [];
+  if (
+    assessments.length !== 2 ||
+    documents.length !== 2 ||
+    uploads.length !== 2 ||
+    currentObjects.length !== 2 ||
+    versions.length !== 2 ||
+    objectPrefixes.length < 1
+  ) {
+    fail('cardinality_invalid', {
+      assessmentCount: assessments.length,
+      documentCount: documents.length,
+      uploadCount: uploads.length,
+      currentObjectCount: currentObjects.length,
+      versionCount: versions.length,
+      prefixCount: objectPrefixes.length,
+    });
+  }
+
+  const targets = [
+    { kind: 'selected', applicationId: selectedApplicationId },
+    { kind: 'sibling', applicationId: siblingApplicationId },
+  ];
+  const documentIds = new Set();
+  const documentKeys = new Set();
+  const documentChecksums = new Set();
+  for (const target of targets) {
+    const assessmentRows = assessments.filter(row => Number(row?.application_id) === target.applicationId);
+    if (
+      assessmentRows.length !== 1 ||
+      Number(assessmentRows[0]?.case_id) !== caseId ||
+      assessmentRows[0]?.esdc_eligibility !== 'CRF'
+    ) {
+      fail('application_eligibility_invalid', { target, assessmentRows });
+    }
+
+    const documentRows = documents.filter(row => Number(row?.application_id) === target.applicationId);
+    if (documentRows.length !== 1) {
+      fail('application_document_scope_invalid', { target, documentRows });
+    }
+    const document = documentRows[0];
+    const expectedFileName = `two-step-review-${attemptStamp}-assessment-start-${target.kind}-ei-verification.pdf`;
+    const expectedLabel = `Synthetic assessment-start ${target.kind} EI verification ${attemptStamp}`;
+    let metadata = null;
+    try {
+      metadata = typeof document.metadata === 'string'
+        ? JSON.parse(document.metadata)
+        : document.metadata;
+    } catch (_) {
+      metadata = null;
+    }
+    const documentId = Number(document.id);
+    const filePath = typeof document.file_path === 'string' ? document.file_path.trim() : '';
+    const checksum = typeof document.checksum_sha256 === 'string'
+      ? document.checksum_sha256.trim().toLowerCase()
+      : '';
+    if (
+      !Number.isSafeInteger(documentId) || documentId < 1 ||
+      documentIds.has(documentId) ||
+      Number(document.case_id) !== caseId ||
+      Number(document.client_id) !== clientId ||
+      Number(document.applicant_user_id) !== applicantUserId ||
+      Number(document.user_id) !== uploaderUserId ||
+      document.action_plan_id != null ||
+      document.source !== 'manual_upload' ||
+      document.file_name !== expectedFileName ||
+      document.label !== expectedLabel ||
+      document.document_category !== 'ei_verification' ||
+      document.status !== 'active' ||
+      document.mime_type !== 'application/pdf' ||
+      !Number.isSafeInteger(Number(document.size_bytes)) || Number(document.size_bytes) < 1 ||
+      !/^[a-f0-9]{64}$/.test(checksum) ||
+      !filePath || documentKeys.has(filePath) ||
+      !metadata || Array.isArray(metadata) ||
+      metadata.label !== expectedLabel ||
+      metadata.document_type !== 'ei_verification' ||
+      metadata.ei_eligibility_status !== 'CRF'
+    ) {
+      fail('document_manifest_invalid', { target, document, metadata });
+    }
+    documentIds.add(documentId);
+    documentKeys.add(filePath);
+    documentChecksums.add(checksum);
+
+    const uploadRows = uploads.filter(row => row?.kind === target.kind);
+    const uploadDocument = uploadRows[0]?.response?.document;
+    if (
+      uploadRows.length !== 1 ||
+      uploadRows[0]?.response?.ok !== true ||
+      !uploadDocument ||
+      Number(uploadDocument.id) !== documentId ||
+      Number(uploadDocument.case_id) !== caseId ||
+      Number(uploadDocument.application_id) !== target.applicationId ||
+      Number(uploadDocument.client_id) !== clientId ||
+      Number(uploadDocument.applicant_user_id) !== applicantUserId ||
+      uploadDocument.file_name !== expectedFileName ||
+      uploadDocument.file_path !== filePath ||
+      uploadDocument.label !== expectedLabel ||
+      uploadDocument.document_category !== 'ei_verification' ||
+      uploadDocument.source !== 'manual_upload' ||
+      uploadDocument.status !== 'active'
+    ) {
+      fail('upload_response_invalid', { target, uploadRows, document });
+    }
+  }
+  if (documentChecksums.size !== 2) {
+    fail('document_bytes_not_distinct', { checksums: Array.from(documentChecksums) });
+  }
+
+  const expectedKeys = Array.from(documentKeys).sort();
+  const currentKeys = currentObjects.map(item => item?.key).sort();
+  const versionKeys = versions.map(item => item?.key).sort();
+  if (
+    !sameSerializedValue(currentKeys, expectedKeys) ||
+    !sameSerializedValue(versionKeys, expectedKeys) ||
+    currentObjects.some(item => (
+      !objectPrefixes.some(prefix => String(item?.key || '').startsWith(prefix)) ||
+      Number(item?.size) !== Number(documents.find(row => row.file_path === item.key)?.size_bytes)
+    )) ||
+    versions.some(item => (
+      item?.kind !== 'version' ||
+      typeof item?.versionId !== 'string' || !item.versionId ||
+      !objectPrefixes.some(prefix => String(item?.key || '').startsWith(prefix)) ||
+      Number(item?.size) !== Number(documents.find(row => row.file_path === item.key)?.size_bytes)
+    ))
+  ) {
+    fail('object_manifest_invalid', {
+      expectedKeys,
+      objectPrefixes,
+      currentObjects,
+      versions,
+    });
+  }
+
+  return {
+    caseId,
+    selectedApplicationId,
+    siblingApplicationId,
+    eligibilityStatus: 'CRF',
+    documentIds: Array.from(documentIds).sort((left, right) => left - right),
+    objectKeys: expectedKeys,
+    objectCurrentCount: currentObjects.length,
+    objectVersionCount: versions.length,
+  };
+}
+
 function validateAssessmentStartJourneyEvidence(evidence) {
   const fail = (code, details = {}) => {
     const error = new Error(`assessment_start_journey_evidence_invalid:${code}`);
@@ -75,7 +264,7 @@ function validateAssessmentStartJourneyEvidence(evidence) {
         fail('snapshot_record_missing', { key, field });
       }
     }
-    for (const field of ['conflictDeclarations', 'unrelatedWorkflows']) {
+    for (const field of ['conflictDeclarations', 'unrelatedWorkflows', 'eiDocuments']) {
       if (!Array.isArray(snapshot[field])) fail('snapshot_collection_missing', { key, field });
     }
   }
@@ -112,6 +301,23 @@ function validateAssessmentStartJourneyEvidence(evidence) {
   if (before.unrelatedWorkflows.length < 1) {
     fail('unrelated_workflow_control_missing');
   }
+  let prerequisiteSummary;
+  try {
+    prerequisiteSummary = validateAssessmentStartPrerequisiteEvidence(evidence?.prerequisites);
+  } catch (error) {
+    fail('prerequisite_evidence_invalid', {
+      error: error?.message || String(error),
+      details: error?.details || null,
+    });
+  }
+  if (
+    prerequisiteSummary.caseId !== caseId ||
+    prerequisiteSummary.selectedApplicationId !== selectedId ||
+    prerequisiteSummary.siblingApplicationId !== siblingId ||
+    !sameSerializedValue(before.eiDocuments, evidence.prerequisites.documents)
+  ) {
+    fail('prerequisite_journey_scope_mismatch', { prerequisiteSummary, before });
+  }
 
   if (
     Number(declarationRequest?.applicationId) !== selectedId ||
@@ -130,6 +336,7 @@ function validateAssessmentStartJourneyEvidence(evidence) {
     !sameSerializedValue(afterDeclaration.selectedAssessment, before.selectedAssessment) ||
     !sameSerializedValue(afterDeclaration.siblingAssessment, before.siblingAssessment) ||
     !sameSerializedValue(afterDeclaration.caseRow, before.caseRow) ||
+    !sameSerializedValue(afterDeclaration.eiDocuments, before.eiDocuments) ||
     !sameSerializedValue(afterDeclaration.unrelatedWorkflows, before.unrelatedWorkflows)
   ) {
     fail('declaration_changed_protected_state', { before, afterDeclaration });
@@ -190,6 +397,7 @@ function validateAssessmentStartJourneyEvidence(evidence) {
     !sameSerializedValue(afterSave.sibling, before.sibling) ||
     !sameSerializedValue(afterSave.siblingAssessment, before.siblingAssessment) ||
     !sameSerializedValue(afterSave.caseRow, before.caseRow) ||
+    !sameSerializedValue(afterSave.eiDocuments, before.eiDocuments) ||
     !sameSerializedValue(afterSave.unrelatedWorkflows, before.unrelatedWorkflows) ||
     !sameSerializedValue(afterSave.conflictDeclarations, afterDeclaration.conflictDeclarations)
   ) {
@@ -203,6 +411,8 @@ function validateAssessmentStartJourneyEvidence(evidence) {
     assignedStaffProfileId: assignedId,
     assignedRole: actor.role,
     unrelatedWorkflowCount: before.unrelatedWorkflows.length,
+    eiVerificationDocumentIds: prerequisiteSummary.documentIds,
+    eiVerificationObjectKeys: prerequisiteSummary.objectKeys,
     selectedRowVersionBefore: Number(before.selected.row_version),
     selectedRowVersionAfter: Number(afterSave.selected.row_version),
   };
@@ -2168,6 +2378,7 @@ function remoteRunner() {
     'cfa_version',
     'cfa_version_documents',
     'client',
+    'document_type',
     'esdc_participant_submission',
     'esdc_participant_submission_history',
     'funding_overview_series',
@@ -4398,6 +4609,21 @@ function remoteRunner() {
   }
 
   async function resolveFixtureReferences() {
+    const [eiDocumentTypeRows] = await query(
+      `SELECT code, scope, is_active
+         FROM document_type
+        WHERE code = 'ei_verification'
+        LIMIT 1`
+    );
+    if (
+      eiDocumentTypeRows.length !== 1 ||
+      eiDocumentTypeRows[0]?.code !== 'ei_verification' ||
+      eiDocumentTypeRows[0]?.scope !== 'application' ||
+      Number(eiDocumentTypeRows[0]?.is_active) !== 1
+    ) {
+      throw new Error('TEST EI verification document type is not active and application-scoped.');
+    }
+
     const regionOverride = config.regionOverride
       ? Number(config.regionOverride)
       : null;
@@ -5560,6 +5786,22 @@ function remoteRunner() {
     return row || null;
   }
 
+  async function getAssessmentStartEiDocuments(caseId, selectedApplicationId, siblingApplicationId) {
+    const [rows] = await query(
+      `SELECT id, case_id, application_id, action_plan_id, client_id,
+              applicant_user_id, user_id, source, file_name, file_path,
+              mime_type, label, metadata, size_bytes, checksum_sha256,
+              status, document_category, created_at, updated_at
+         FROM iset_document
+        WHERE case_id = ?
+          AND application_id IN (?, ?)
+          AND document_category = 'ei_verification'
+        ORDER BY id ASC`,
+      [caseId, selectedApplicationId, siblingApplicationId]
+    );
+    return rows || [];
+  }
+
   async function captureAssessmentStartJourneyState(caseId, selectedApplicationId, siblingApplicationId) {
     const [[caseRow]] = await query(
       `SELECT id, case_number, client_id, assigned_staff_profile_id, status,
@@ -5599,6 +5841,11 @@ function remoteRunner() {
       caseRow: caseRow || null,
       conflictDeclarations: conflictDeclarations || [],
       unrelatedWorkflows: unrelatedWorkflows || [],
+      eiDocuments: await getAssessmentStartEiDocuments(
+        caseId,
+        selectedApplicationId,
+        siblingApplicationId
+      ),
     };
   }
 
@@ -6028,7 +6275,15 @@ function remoteRunner() {
     );
   }
 
-  async function uploadDocument(auth, filePath, documentType, label, caseId, applicationId) {
+  async function uploadDocument(
+    auth,
+    filePath,
+    documentType,
+    label,
+    caseId,
+    applicationId,
+    options = {}
+  ) {
     const form = new FormData();
     const blob = new Blob([fs.readFileSync(filePath)], { type: 'application/pdf' });
     form.append('file', blob, path.basename(filePath));
@@ -6036,6 +6291,9 @@ function remoteRunner() {
     form.append('documentType', documentType);
     form.append('caseId', String(caseId));
     form.append('applicationId', String(applicationId));
+    if (typeof options.eligibilityStatus === 'string' && options.eligibilityStatus.trim()) {
+      form.append('eligibilityStatus', options.eligibilityStatus.trim());
+    }
     return fetchJson(`/api/applicants/${fixture.applicantUser}/documents/upload`, {
       method: 'POST',
       headers: authHeaders(auth),
@@ -6043,10 +6301,90 @@ function remoteRunner() {
     });
   }
 
+  async function prepareAssessmentStartEiPrerequisites(auth) {
+    const caseId = fixture.cases.assessmentStartApplication;
+    const selectedApplicationId = fixture.applications.assessmentStartApplication;
+    const siblingApplicationId = fixture.applications.assessmentStartSibling;
+    const targets = [
+      { kind: 'selected', applicationId: selectedApplicationId },
+      { kind: 'sibling', applicationId: siblingApplicationId },
+    ];
+    const objectInventoryBefore = listFixturePrefixInventory();
+    const uploads = [];
+    for (const target of targets) {
+      const fileName = `two-step-review-${config.stamp}-assessment-start-${target.kind}-ei-verification.pdf`;
+      const filePath = `/tmp/${fileName}`;
+      const label = `Synthetic assessment-start ${target.kind} EI verification ${config.stamp}`;
+      makePdf(filePath, label);
+      try {
+        const response = await uploadDocument(
+          auth.manager,
+          filePath,
+          'ei_verification',
+          label,
+          caseId,
+          target.applicationId,
+          { eligibilityStatus: 'CRF' }
+        );
+        uploads.push({ kind: target.kind, response });
+        if (response?.document?.file_path) fixture.documents.push(response.document.file_path);
+      } finally {
+        fs.rmSync(filePath, { force: true });
+      }
+    }
+
+    const [assessments] = await query(
+      `SELECT application_id, case_id, esdc_eligibility
+         FROM iset_application_assessment
+        WHERE application_id IN (?, ?)
+        ORDER BY application_id ASC`,
+      [selectedApplicationId, siblingApplicationId]
+    );
+    const documents = await getAssessmentStartEiDocuments(
+      caseId,
+      selectedApplicationId,
+      siblingApplicationId
+    );
+    const objectInventoryAfter = listFixturePrefixInventory();
+    const evidence = {
+      attemptStamp: config.stamp,
+      caseId,
+      selectedApplicationId,
+      siblingApplicationId,
+      clientId: fixture.client,
+      applicantUserId: fixture.applicantUser,
+      uploaderUserId: fixture.staff.manager.staffUserId,
+      assessments,
+      documents,
+      uploads,
+      objectAdditions: {
+        prefixes: objectInventoryAfter.prefixes,
+        currentObjects: objectEntriesAdded(
+          objectInventoryBefore.currentObjects,
+          objectInventoryAfter.currentObjects
+        ),
+        versions: objectEntriesAdded(
+          objectInventoryBefore.versions,
+          objectInventoryAfter.versions
+        ),
+      },
+    };
+    const summary = validateAssessmentStartPrerequisiteEvidence(evidence);
+    fixture.documents = Array.from(new Set([...fixture.documents, ...summary.objectKeys])).sort();
+    fixture.expectedObjectKeys = Array.from(new Set([
+      ...fixture.expectedObjectKeys,
+      ...summary.objectKeys,
+    ])).sort();
+    result.evidence.assessmentStartPrerequisites = evidence;
+    pass('assessment start: selected and sibling have distinct attempt-owned EI prerequisites', summary);
+    return evidence;
+  }
+
   async function runAssessmentStartApplicationWorkflow(auth) {
     const caseId = fixture.cases.assessmentStartApplication;
     const applicationId = fixture.applications.assessmentStartApplication;
     const siblingApplicationId = fixture.applications.assessmentStartSibling;
+    const prerequisites = await prepareAssessmentStartEiPrerequisites(auth);
     const before = await captureAssessmentStartJourneyState(
       caseId,
       applicationId,
@@ -6142,6 +6480,7 @@ function remoteRunner() {
         httpStatus: saveHttpStatus,
         success: saveResponseBody?.success,
       },
+      prerequisites,
       before,
       afterDeclaration,
       afterSave,
@@ -7936,7 +8275,60 @@ function remoteRunner() {
         esdcParticipantSubmissionIds,
         agreementIds,
       });
-      const cleanupIsComplete = Object.values(leftovers).every(count => count === 0);
+      let assessmentStartCleanupIsComplete = true;
+      const assessmentStartPrerequisites = result.evidence?.assessmentStartPrerequisites;
+      if (assessmentStartPrerequisites) {
+        const prerequisiteDocumentIds = assessmentStartPrerequisites.documents
+          .map(row => Number(row.id))
+          .filter(value => Number.isSafeInteger(value) && value > 0)
+          .sort((left, right) => left - right);
+        const prerequisiteObjectKeys = assessmentStartPrerequisites.documents
+          .map(row => String(row.file_path || '').trim())
+          .filter(Boolean)
+          .sort();
+        const cleanupDocumentIds = new Set(documentIds.map(Number));
+        const verifiedAbsentKeys = new Set(fixture.verifiedAbsentObjectKeys || []);
+        const deletedVersionKeys = new Set(
+          (fixture.deletedObjectVersions || [])
+            .filter(item => item?.kind === 'version' && item?.versionId)
+            .map(item => item.key)
+        );
+        assessmentStartCleanupIsComplete = (
+          prerequisiteDocumentIds.length === 2 &&
+          prerequisiteObjectKeys.length === 2 &&
+          prerequisiteDocumentIds.every(id => cleanupDocumentIds.has(id)) &&
+          prerequisiteObjectKeys.every(key => verifiedAbsentKeys.has(key)) &&
+          prerequisiteObjectKeys.every(key => deletedVersionKeys.has(key)) &&
+          Number(leftovers.documents || 0) === 0 &&
+          Number(leftovers.caseDocuments || 0) === 0 &&
+          Number(leftovers.documentIds || 0) === 0 &&
+          Number(leftovers.documentInterventionLinks || 0) === 0 &&
+          Number(leftovers.objectStorageResidue || 0) === 0 &&
+          Number(result.evidence?.objectCleanup?.finalCurrentObjectCount) === 0 &&
+          Number(result.evidence?.objectCleanup?.finalVersionOrDeleteMarkerCount) === 0
+        );
+        result.evidence.assessmentStartCleanup = {
+          documentIds: prerequisiteDocumentIds,
+          databaseDocumentResidue: Number(leftovers.documentIds || 0),
+          relatedDatabaseResidue: {
+            caseDocuments: Number(leftovers.caseDocuments || 0),
+            documentInterventionLinks: Number(leftovers.documentInterventionLinks || 0),
+            caseEvents: Number(leftovers.caseEvents || 0),
+          },
+          objectKeys: prerequisiteObjectKeys,
+          exactKeysVerifiedAbsent: prerequisiteObjectKeys.filter(key => verifiedAbsentKeys.has(key)),
+          exactKeysWithDeletedVersions: prerequisiteObjectKeys.filter(key => deletedVersionKeys.has(key)),
+          finalCurrentObjectCount: Number(result.evidence?.objectCleanup?.finalCurrentObjectCount),
+          finalVersionOrDeleteMarkerCount: Number(
+            result.evidence?.objectCleanup?.finalVersionOrDeleteMarkerCount
+          ),
+          complete: assessmentStartCleanupIsComplete,
+        };
+      }
+      const cleanupIsComplete = (
+        Object.values(leftovers).every(count => count === 0) &&
+        assessmentStartCleanupIsComplete
+      );
       if (!options.quiet) {
         result.cleanup = leftovers;
         expect('TEST synthetic fixture cleaned up', cleanupIsComplete, leftovers);
@@ -8672,5 +9064,6 @@ module.exports = {
   createLiveSchemaGuard,
   orderSelfReferencingVersionDeleteBatches,
   sameExactRecord,
+  validateAssessmentStartPrerequisiteEvidence,
   validateAssessmentStartJourneyEvidence,
 };

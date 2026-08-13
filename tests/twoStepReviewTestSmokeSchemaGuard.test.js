@@ -659,4 +659,32 @@ describe('two-step TEST smoke live-schema guard', () => {
     expect(dualRoleUpload).toBeGreaterThan(-1);
     expect(dualRoleChecklist).toBeGreaterThan(dualRoleUpload);
   });
+
+  test('assessment-start journey prepares both application-owned EI prerequisites before browser navigation', () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '..', 'scripts', 'two-step-review-test-smoke.js'),
+      'utf8'
+    );
+    const journeyStart = source.indexOf('async function runAssessmentStartApplicationWorkflow(auth)');
+    const journeyEnd = source.indexOf('\n  async function ', journeyStart + 20);
+    const journeySource = source.slice(journeyStart, journeyEnd);
+    const prerequisiteStart = source.indexOf('async function prepareAssessmentStartEiPrerequisites(auth)');
+    const prerequisiteEnd = source.indexOf('\n  async function ', prerequisiteStart + 20);
+    const prerequisiteSource = source.slice(prerequisiteStart, prerequisiteEnd);
+
+    expect(source).toContain("'document_type',");
+    expect(source).toContain("WHERE code = 'ei_verification'");
+    expect(prerequisiteSource).toContain("{ kind: 'selected', applicationId: selectedApplicationId }");
+    expect(prerequisiteSource).toContain("{ kind: 'sibling', applicationId: siblingApplicationId }");
+    expect(prerequisiteSource).toContain("{ eligibilityStatus: 'CRF' }");
+    expect(prerequisiteSource).toContain('listFixturePrefixInventory()');
+    expect(prerequisiteSource).toContain('validateAssessmentStartPrerequisiteEvidence(evidence)');
+    expect(journeySource.indexOf('await prepareAssessmentStartEiPrerequisites(auth)')).toBeLessThan(
+      journeySource.indexOf('await captureAssessmentStartJourneyState(')
+    );
+    expect(source).toContain('finalCurrentObjectCount: 0');
+    expect(source).toContain('finalVersionOrDeleteMarkerCount: 0');
+    expect(source).toContain('counts.documentIds');
+    expect(source).toContain('counts.objectStorageResidue');
+  });
 });
