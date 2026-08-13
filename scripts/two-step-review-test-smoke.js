@@ -37,6 +37,7 @@ const EXPECTED_TEST_OBJECT_BUCKET = 'nwac-test-uploads-20251014';
 const REMOTE_COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
 const REMOTE_EVIDENCE_MARKER = '@@TWO_STEP_REVIEW_SMOKE_EVIDENCE@@';
 const REMOTE_EVIDENCE_TRANSPORT_VERSION = 1;
+const MAX_TRANSFERRED_HARNESS_BYTES = 2 * 1024 * 1024;
 
 function sanitizeHttpTarget(value) {
   try {
@@ -213,6 +214,31 @@ function sameSerializedValue(actual, expected) {
   return JSON.stringify(actual) === JSON.stringify(expected);
 }
 
+function createTransferredHarnessDescriptor(sourcePath, stamp) {
+  const exactStamp = String(stamp || '').trim();
+  if (!/^two-step-[0-9]+-[a-z0-9]+$/.test(exactStamp)) {
+    throw new Error('transferred_harness_stamp_invalid');
+  }
+  const stat = fs.lstatSync(sourcePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error('transferred_harness_source_not_regular_file');
+  }
+  if (stat.size < 1 || stat.size > MAX_TRANSFERRED_HARNESS_BYTES) {
+    throw new Error('transferred_harness_source_size_invalid');
+  }
+  const source = fs.readFileSync(sourcePath);
+  if (source.length !== stat.size) {
+    throw new Error('transferred_harness_source_size_changed');
+  }
+  return Object.freeze({
+    key: `ssm-scripts/two-step-review-smoke-${exactStamp}.runner.js`,
+    remotePath: `/tmp/two-step-review-smoke-${exactStamp}.runner.js`,
+    sha256: crypto.createHash('sha256').update(source).digest('hex'),
+    bytes: source.length,
+    source,
+  });
+}
+
 function validateAssessmentStartPrerequisiteEvidence(evidence) {
   const fail = (code, details = {}) => {
     const error = new Error(`assessment_start_prerequisite_evidence_invalid:${code}`);
@@ -332,7 +358,7 @@ function validateAssessmentStartPrerequisiteEvidence(evidence) {
       !metadata || Array.isArray(metadata) ||
       metadata.label !== expectedLabel ||
       metadata.document_type !== 'ei_verification' ||
-      metadata.ei_eligibility_status !== 'CRF'
+      metadata.ei_eligibility_status !== 'crf'
     ) {
       fail('document_manifest_invalid', { target, document, metadata });
     }
@@ -1497,6 +1523,7 @@ function parseArgs(argv) {
     portalEnv: process.env.TWO_STEP_REVIEW_SMOKE_PORTAL_ENV || DEFAULT_PORTAL_ENV,
     keepFixture: false,
     schemaPreflightOnly: false,
+    assessmentStartOnly: false,
     cleanupStamp: '',
     json: false,
   };
@@ -1512,6 +1539,7 @@ function parseArgs(argv) {
       throw new Error('--keep-fixture is disabled: release smoke must prove zero TEST residue.');
     }
     else if (token === '--schema-preflight-only') args.schemaPreflightOnly = true;
+    else if (token === '--assessment-start-only') args.assessmentStartOnly = true;
     else if (token === '--cleanup-stamp') {
       if (index + 1 >= argv.length) throw new Error('--cleanup-stamp requires a value.');
       args.cleanupStamp = argv[++index];
@@ -1537,6 +1565,7 @@ function usage() {
     'Options:',
     '  --instance-id ID   Run on a specific online nwac-test-app instance.',
     '  --schema-preflight-only  Prove live TEST identities/DDL without creating fixtures.',
+    '  --assessment-start-only  Run only the assessment-status acceptance journey.',
     '  --cleanup-stamp STAMP  Recover and verify cleanup for one exact interrupted smoke stamp.',
     '  --profile NAME     AWS profile. Default: nwac-test.',
     '  --region REGION    AWS region. Default: ca-central-1.',
@@ -2218,6 +2247,7 @@ async function main() {
   }
   const suffix = cleanupStamp ? cleanupStamp.split('-').at(-1) : randomSuffix();
   const stamp = cleanupStamp || `two-step-${Date.now()}-${suffix}`;
+  const transferredHarness = createTransferredHarnessDescriptor(__filename, stamp);
   const credentialKeyPath = `/tmp/two-step-review-smoke-${stamp}.credential.pem`;
   const staffUsers = [
     {
@@ -2255,6 +2285,7 @@ async function main() {
     sub: null,
   };
   let remoteConfigKey = null;
+  let remoteHarnessKey = transferredHarness.key;
   let instanceId = null;
   let instanceRoleExpectation = null;
   let remoteAwsIdentityExpectation = null;
@@ -2263,6 +2294,8 @@ async function main() {
   const retainedEvidenceArtifacts = [];
 
   try {
+    console.log(`[two-step-smoke] Staging exact harness ${transferredHarness.sha256}...`);
+    uploadRemoteScript(transferredHarness.source, remoteHarnessKey, options);
     console.log('[two-step-smoke] Discovering TEST app instance...');
     instanceId = discoverInstanceId(options);
     instanceRoleExpectation = discoverInstanceRoleExpectation(instanceId, options);
@@ -2275,11 +2308,14 @@ async function main() {
       remoteEvidenceKeys.add(remoteEvidenceKey);
       const commandLines = [
         'set -euo pipefail',
+        `aws s3 cp ${shellQuote(`s3://${options.bucket}/${remoteHarnessKey}`)} ${shellQuote(transferredHarness.remotePath)} --region ${shellQuote(options.region)} --only-show-errors`,
+        `chmod 500 ${shellQuote(transferredHarness.remotePath)}`,
+        `printf '%s  %s\\n' ${shellQuote(transferredHarness.sha256)} ${shellQuote(transferredHarness.remotePath)} | sha256sum --check --strict --status -`,
         ...(preflightOnly || cleanupOnly ? [] : [
           `aws s3 cp ${shellQuote(`s3://${options.bucket}/${remoteConfigKey}`)} ${shellQuote(remoteConfigPath)} --region ${shellQuote(options.region)} --only-show-errors`,
           `chmod 600 ${shellQuote(remoteConfigPath)}`,
         ]),
-        `trap 'rm -f ${shellQuote(remoteConfigPath)}${preflightOnly ? '' : ` ${shellQuote(credentialKeyPath)}`}' EXIT`,
+        `trap 'rm -f ${shellQuote(transferredHarness.remotePath)} ${shellQuote(remoteConfigPath)}${preflightOnly ? '' : ` ${shellQuote(credentialKeyPath)}`}' EXIT`,
         'cd /opt/nwac/admin-dashboard',
         [
           `FIXTURE_STAMP=${shellQuote(preflightOnly ? `${stamp}-preflight` : stamp)}`,
@@ -2307,13 +2343,15 @@ async function main() {
           `TWO_STEP_REVIEW_EVIDENCE_BUCKET=${shellQuote(expectedObjectBucket)}`,
           `TWO_STEP_REVIEW_EVIDENCE_KEY=${shellQuote(remoteEvidenceKey)}`,
           `TWO_STEP_REVIEW_CREDENTIAL_KEY_PATH=${shellQuote(credentialKeyPath)}`,
+          `TWO_STEP_REVIEW_HARNESS_SHA256=${shellQuote(transferredHarness.sha256)}`,
+          `TWO_STEP_REVIEW_ASSESSMENT_START_ONLY=${options.assessmentStartOnly ? '1' : '0'}`,
           `TWO_STEP_REVIEW_NOTIFICATION_WAIT_ATTEMPTS=${shellQuote(process.env.TWO_STEP_REVIEW_NOTIFICATION_WAIT_ATTEMPTS || '31')}`,
           `LOCAL_BASE_URL=${shellQuote(DEFAULT_LOCAL_BASE_URL)}`,
           `PORTAL_LOCAL_BASE_URL=${shellQuote(DEFAULT_PORTAL_LOCAL_BASE_URL)}`,
           ...(preflightOnly || cleanupOnly ? [] : [
             `TWO_STEP_REVIEW_CONFIG_ENVELOPE_FILE=${shellQuote(remoteConfigPath)}`,
           ]),
-          `node ${shellQuote('/opt/nwac/admin-dashboard/scripts/two-step-review-test-smoke.js')} --remote-runner`,
+          `node ${shellQuote(transferredHarness.remotePath)} --remote-runner`,
         ].join(' '),
       ];
       const commandId = sendRemoteCommand(
@@ -2418,6 +2456,13 @@ async function main() {
         verifiedTemporaryObjectCleanup.push(remoteConfigKey);
       } catch (error) { cleanupErrors.push(error); }
     }
+    if (remoteHarnessKey) {
+      try {
+        deleteRemoteScript(remoteHarnessKey, options);
+        verifiedTemporaryObjectCleanup.push(remoteHarnessKey);
+        remoteHarnessKey = null;
+      } catch (error) { cleanupErrors.push(error); }
+    }
     for (const evidenceKey of Array.from(remoteEvidenceKeys).sort()) {
       try {
         deleteRemoteScript(evidenceKey, options, expectedObjectBucket);
@@ -2491,6 +2536,7 @@ function remoteRunner() {
     stamp: requiredEnv('FIXTURE_STAMP'),
     schemaPreflightOnly,
     cleanupOnly,
+    assessmentStartOnly: process.env.TWO_STEP_REVIEW_ASSESSMENT_START_ONLY === '1',
     keepFixture: process.env.KEEP_FIXTURE === '1',
     localBaseUrl: stripTrailingSlash(process.env.LOCAL_BASE_URL || 'http://127.0.0.1:5001'),
     portalLocalBaseUrl: stripTrailingSlash(process.env.PORTAL_LOCAL_BASE_URL || 'http://127.0.0.1:5000'),
@@ -2517,6 +2563,7 @@ function remoteRunner() {
     expectedRemoteAwsUserId: requiredEnv('TWO_STEP_REVIEW_EXPECTED_REMOTE_AWS_USER_ID'),
     evidenceBucket: requiredEnv('TWO_STEP_REVIEW_EVIDENCE_BUCKET'),
     evidenceKey: requiredEnv('TWO_STEP_REVIEW_EVIDENCE_KEY'),
+    harnessSha256: requiredEnv('TWO_STEP_REVIEW_HARNESS_SHA256'),
     regionOverride: String(process.env.TWO_STEP_REVIEW_REGION_ID || '').trim(),
     budgetPotOverride: String(process.env.TWO_STEP_REVIEW_BUDGET_POT_ID || '').trim(),
     notificationWaitAttempts: Math.max(
@@ -2848,6 +2895,14 @@ function remoteRunner() {
 
   async function main() {
     progress('remote runner starting');
+    if (!/^[a-f0-9]{64}$/.test(config.harnessSha256)) {
+      throw new Error('transferred_harness_sha256_invalid');
+    }
+    result.evidence.harness = {
+      source: 'attempt-owned-transfer',
+      sha256: config.harnessSha256,
+      executionMode: config.assessmentStartOnly ? 'assessment-start-only' : 'full-two-step-review',
+    };
     const remoteAwsIdentity = verifyRemoteAwsIdentity();
     connection = await mysql.createConnection(dbConfig());
     progress('db connected');
@@ -2925,12 +2980,19 @@ function remoteRunner() {
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
     const auth = await loginAllRoles();
-    await runApplicationAssessmentWorkflow(auth);
-    await runDualRoleApplicationAssessmentWorkflow(auth);
-    await runAssessmentStartApplicationWorkflow(auth);
-    await runInterventionProposalWorkflow(auth);
-    await runInterventionRevisionWorkflow(auth);
-    await verifyNoKnownFixtureMismatches();
+    if (config.assessmentStartOnly) {
+      await runAssessmentStartApplicationWorkflow(auth);
+      pass('focused execution ran only the assessment-start acceptance journey', {
+        mode: 'assessment-start-only',
+      });
+    } else {
+      await runApplicationAssessmentWorkflow(auth);
+      await runDualRoleApplicationAssessmentWorkflow(auth);
+      await runAssessmentStartApplicationWorkflow(auth);
+      await runInterventionProposalWorkflow(auth);
+      await runInterventionRevisionWorkflow(auth);
+      await verifyNoKnownFixtureMismatches();
+    }
     if (!config.keepFixture) {
       await cleanupFixture();
       finalCleanupComplete = true;
@@ -9200,6 +9262,7 @@ if (require.main === module && process.argv.includes('--remote-runner')) {
 module.exports = {
   createEncryptedFixtureEnvelope,
   createFreshLoopbackDispatcher,
+  createTransferredHarnessDescriptor,
   createLiveSchemaGuard,
   fetchAndReadBoundedFreshLoopback,
   fetchAndReadBoundedTransport,

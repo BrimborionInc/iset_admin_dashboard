@@ -1,9 +1,70 @@
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
 const {
+  createTransferredHarnessDescriptor,
   validateAssessmentStartPrerequisiteEvidence,
   validateAssessmentStartJourneyEvidence,
 } = require('../scripts/two-step-review-test-smoke');
 
 const clone = value => JSON.parse(JSON.stringify(value));
+
+describe('two-step TEST harness transfer boundary', () => {
+  test('binds exact source bytes to an attempt-owned S3 key and remote path', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'two-step-harness-transfer-'));
+    try {
+      const sourcePath = path.join(root, 'runner.js');
+      fs.writeFileSync(sourcePath, "process.stdout.write('synthetic runner');\n");
+      const descriptor = createTransferredHarnessDescriptor(
+        sourcePath,
+        'two-step-1786663557212-d37a6b9c78'
+      );
+      expect(descriptor).toMatchObject({
+        key: 'ssm-scripts/two-step-review-smoke-two-step-1786663557212-d37a6b9c78.runner.js',
+        remotePath: '/tmp/two-step-review-smoke-two-step-1786663557212-d37a6b9c78.runner.js',
+        bytes: 42,
+      });
+      expect(descriptor.sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(Buffer.isBuffer(descriptor.source)).toBe(true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects an ambiguous attempt stamp and a symlinked source', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'two-step-harness-transfer-'));
+    try {
+      const sourcePath = path.join(root, 'runner.js');
+      const linkPath = path.join(root, 'runner-link.js');
+      fs.writeFileSync(sourcePath, 'synthetic');
+      fs.symlinkSync(sourcePath, linkPath);
+      expect(() => createTransferredHarnessDescriptor(sourcePath, 'r8')).toThrow(
+        'transferred_harness_stamp_invalid'
+      );
+      expect(() => createTransferredHarnessDescriptor(
+        linkPath,
+        'two-step-1786663557212-d37a6b9c78'
+      )).toThrow('transferred_harness_source_not_regular_file');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('executes the transferred source and exposes a focused journey mode', () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '..', 'scripts', 'two-step-review-test-smoke.js'),
+      'utf8'
+    );
+    expect(source).not.toContain("node ${shellQuote('/opt/nwac/admin-dashboard/scripts/two-step-review-test-smoke.js')}");
+    expect(source).toContain('node ${shellQuote(transferredHarness.remotePath)} --remote-runner');
+    expect(source).toContain('TWO_STEP_REVIEW_HARNESS_SHA256=${shellQuote(transferredHarness.sha256)}');
+    expect(source).toContain("executionMode: config.assessmentStartOnly ? 'assessment-start-only' : 'full-two-step-review'");
+    expect(source).toContain('await runAssessmentStartApplicationWorkflow(auth);');
+    expect(source).toContain('deleteRemoteScript(remoteHarnessKey, options)');
+    expect(source).toContain('verifiedTemporaryObjectCleanup.push(remoteHarnessKey)');
+  });
+});
 
 function buildValidEvidence() {
   const attemptStamp = 'attempt-r4';
@@ -100,7 +161,7 @@ function buildValidEvidence() {
       metadata: JSON.stringify({
         label,
         document_type: 'ei_verification',
-        ei_eligibility_status: 'CRF',
+        ei_eligibility_status: 'crf',
       }),
       size_bytes: size,
       checksum_sha256: checksum,
@@ -227,7 +288,15 @@ function buildValidEvidence() {
 }
 
 describe('two-step TEST assessment-start prerequisite evidence', () => {
-  test('accepts two distinct application-scoped CRF documents and exact object versions', () => {
+  test('matches the product-owned canonical CRF metadata contract', () => {
+    const productSource = fs.readFileSync(path.resolve(__dirname, '..', 'isetadminserver.js'), 'utf8');
+    expect(productSource).toContain("if (normalized === 'crf') return 'crf';");
+    expect(productSource).toContain(
+      'metadataObj.ei_eligibility_status = normalizeEsdcEligibilityValue(eiEligibilityStatus);'
+    );
+  });
+
+  test('accepts two distinct application-scoped CRF documents with canonical product metadata and exact object versions', () => {
     expect(validateAssessmentStartPrerequisiteEvidence(buildValidEvidence().prerequisites)).toEqual({
       caseId: 77,
       selectedApplicationId: 101,
@@ -248,6 +317,11 @@ describe('two-step TEST assessment-start prerequisite evidence', () => {
     ['invalid sibling eligibility', evidence => { evidence.assessments[1].esdc_eligibility = 'Unknown'; }, 'application_eligibility_invalid'],
     ['cross-scoped sibling document', evidence => { evidence.documents[1].application_id = 101; }, 'application_document_scope_invalid'],
     ['non-synthetic manifest', evidence => { evidence.documents[0].label = 'EI verification'; }, 'document_manifest_invalid'],
+    ['display-form EI metadata instead of the product canonical value', evidence => {
+      const metadata = JSON.parse(evidence.documents[0].metadata);
+      metadata.ei_eligibility_status = 'CRF';
+      evidence.documents[0].metadata = JSON.stringify(metadata);
+    }, 'document_manifest_invalid'],
     ['contradictory upload response', evidence => { evidence.uploads[0].response.document.application_id = 102; }, 'upload_response_invalid'],
     ['shared document bytes', evidence => { evidence.documents[1].checksum_sha256 = 'a'.repeat(64); }, 'document_bytes_not_distinct'],
     ['missing object version', evidence => { evidence.objectAdditions.versions.pop(); }, 'cardinality_invalid'],
