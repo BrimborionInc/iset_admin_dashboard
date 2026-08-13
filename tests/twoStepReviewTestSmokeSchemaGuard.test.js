@@ -1,10 +1,12 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { Worker } = require('worker_threads');
 
 const {
   createEncryptedFixtureEnvelope,
   createLiveSchemaGuard,
+  fetchAndReadBoundedTransport,
   orderSelfReferencingVersionDeleteBatches,
   sameExactRecord,
 } = require('../scripts/two-step-review-test-smoke');
@@ -38,6 +40,244 @@ describe('two-step evidence record comparison', () => {
     expect(sameExactRecord({ key: 'subject:1', caseId: 1 }, expected)).toBe(false);
     expect(sameExactRecord({ ...expected, proposalId: 3 }, expected)).toBe(false);
     expect(sameExactRecord({ ...expected, applicationId: 4 }, expected)).toBe(false);
+  });
+});
+
+function waitForWorkerMessage(worker, predicate, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('transport_test_worker_message_timeout'));
+    }, timeoutMs);
+    const onMessage = message => {
+      if (!predicate(message)) return;
+      cleanup();
+      resolve(message);
+    };
+    const onError = error => {
+      cleanup();
+      reject(error);
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      worker.off('message', onMessage);
+      worker.off('error', onError);
+    };
+    worker.on('message', onMessage);
+    worker.on('error', onError);
+  });
+}
+
+describe('two-step TEST runner HTTP transport boundary', () => {
+  test('uses a fresh socket for the effectful POST after a blocked interval exceeds server keep-alive', async () => {
+    const serverWorker = new Worker(`
+      const http = require('http');
+      const { parentPort } = require('worker_threads');
+      const requests = [];
+      const closedSockets = [];
+      const server = http.createServer((request, response) => {
+        const chunks = [];
+        request.on('data', chunk => chunks.push(chunk));
+        request.on('end', () => {
+          requests.push({
+            method: request.method,
+            connection: request.headers.connection || null,
+            remotePort: request.socket.remotePort,
+            receivedAt: new Date().toISOString(),
+            body: Buffer.concat(chunks).toString('utf8'),
+          });
+          response.end('ok');
+        });
+      });
+      server.keepAliveTimeout = 25;
+      server.headersTimeout = 1000;
+      server.on('connection', socket => {
+        const remotePort = socket.remotePort;
+        socket.on('close', () => closedSockets.push({
+          remotePort,
+          closedAt: new Date().toISOString(),
+        }));
+      });
+      server.listen(0, '127.0.0.1', () => {
+        parentPort.postMessage({ type: 'listening', port: server.address().port });
+      });
+      parentPort.on('message', message => {
+        if (message === 'snapshot') {
+          parentPort.postMessage({ type: 'snapshot', requests, closedSockets });
+        }
+        if (message === 'close') {
+          server.close(() => parentPort.postMessage({ type: 'closed' }));
+        }
+      });
+    `, { eval: true });
+    let clientWorker = null;
+
+    try {
+      const listening = await waitForWorkerMessage(serverWorker, message => message?.type === 'listening');
+      const target = `http://127.0.0.1:${listening.port}/fixture`;
+      clientWorker = new Worker(`
+        const { parentPort, workerData } = require('worker_threads');
+        const {
+          fetchAndReadBoundedTransport,
+          headersForFreshHttpConnection,
+        } = require(workerData.runnerPath);
+        (async () => {
+          const first = await fetchAndReadBoundedTransport(workerData.target);
+          const blockedUntil = Date.now() + 200;
+          while (Date.now() < blockedUntil) {
+            // Recreate the remote runner being unable to process its pooled socket lifecycle.
+          }
+          const post = await fetchAndReadBoundedTransport(workerData.target, {
+            method: 'POST',
+            headers: headersForFreshHttpConnection({ 'content-type': 'text/plain' }),
+            body: 'effectful-once',
+          });
+          parentPort.postMessage({ type: 'complete', firstStatus: first.status, postStatus: post.status });
+        })().catch(error => {
+          parentPort.postMessage({
+            type: 'failed',
+            error: error?.stack || String(error),
+            transportDiagnostics: error?.transportDiagnostics || null,
+          });
+        });
+      `, {
+        eval: true,
+        workerData: {
+          runnerPath: path.resolve(__dirname, '..', 'scripts', 'two-step-review-test-smoke.js'),
+          target,
+        },
+      });
+      const clientResult = await waitForWorkerMessage(
+        clientWorker,
+        message => message?.type === 'complete' || message?.type === 'failed'
+      );
+      expect(clientResult).toEqual({ type: 'complete', firstStatus: 200, postStatus: 200 });
+
+      serverWorker.postMessage('snapshot');
+      const snapshot = await waitForWorkerMessage(serverWorker, message => message?.type === 'snapshot');
+      expect(snapshot.requests).toHaveLength(2);
+      expect(snapshot.requests[0]).toMatchObject({ method: 'GET', connection: 'keep-alive' });
+      expect(snapshot.requests[1]).toMatchObject({
+        method: 'POST',
+        connection: 'close',
+        body: 'effectful-once',
+      });
+      expect(snapshot.requests[1].remotePort).not.toBe(snapshot.requests[0].remotePort);
+      expect(snapshot.closedSockets).toEqual(expect.arrayContaining([
+        expect.objectContaining({ remotePort: snapshot.requests[0].remotePort }),
+      ]));
+    } finally {
+      if (clientWorker) await clientWorker.terminate();
+      await serverWorker.terminate();
+    }
+  }, 10_000);
+
+  test('retains sanitized request timing, timeout state, and every nested cause field', async () => {
+    const lowestCause = new Error('connection reset by peer');
+    lowestCause.code = 'ECONNRESET';
+    lowestCause.errno = -104;
+    const socketCause = new Error(
+      'other side closed at http://127.0.0.1:5001/upload?access_token=must-not-retain Bearer must-not-retain'
+    );
+    socketCause.code = 'UND_ERR_SOCKET';
+    socketCause.socket = {
+      localAddress: '127.0.0.1',
+      localPort: 41000,
+      remoteAddress: '127.0.0.1',
+      remotePort: 5001,
+      bytesWritten: 742,
+      bytesRead: 0,
+    };
+    socketCause.cause = lowestCause;
+    const fetchError = new TypeError('fetch failed');
+    fetchError.cause = socketCause;
+    const fetchImpl = jest.fn(async () => {
+      throw fetchError;
+    });
+    let retained = null;
+
+    await expect(fetchAndReadBoundedTransport(
+      'http://127.0.0.1:5001/api/applicants/999/documents/upload?access_token=must-not-retain',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer must-not-retain' },
+      },
+      { requestTimeoutMs: 45000 },
+      { fetchImpl, onFailure: evidence => { retained = evidence; } }
+    )).rejects.toBe(fetchError);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(retained).toMatchObject({
+      method: 'POST',
+      target: 'http://127.0.0.1:5001/api/applicants/999/documents/upload',
+      timeout: {
+        configuredMs: 45000,
+        fired: false,
+        signalAborted: false,
+        abortReason: null,
+      },
+      error: {
+        name: 'TypeError',
+        message: 'fetch failed',
+        cause: {
+          name: 'Error',
+          message: 'other side closed at http://127.0.0.1:5001/upload Bearer [redacted]',
+          code: 'UND_ERR_SOCKET',
+          socket: socketCause.socket,
+          cause: {
+            name: 'Error',
+            message: 'connection reset by peer',
+            code: 'ECONNRESET',
+            errno: -104,
+          },
+        },
+      },
+    });
+    expect(retained.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(retained.dispatchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(retained.failedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(retained.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(retained)).not.toContain('must-not-retain');
+    expect(fetchError.transportDiagnostics).toBe(retained);
+  });
+
+  test('records when the bounded request timeout actually fires', async () => {
+    let retained = null;
+    const fetchImpl = jest.fn((_url, options) => new Promise((resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    }));
+
+    await expect(fetchAndReadBoundedTransport(
+      'http://127.0.0.1:5001/api/slow',
+      { method: 'GET' },
+      { requestTimeoutMs: 10 },
+      { fetchImpl, onFailure: evidence => { retained = evidence; } }
+    )).rejects.toThrow('smoke_http_timeout');
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(retained.timeout).toMatchObject({
+      configuredMs: 10,
+      fired: true,
+      signalAborted: true,
+      abortReason: {
+        name: 'Error',
+        message: 'smoke_http_timeout',
+      },
+    });
+  });
+
+  test('applies the fresh-connection boundary to the document upload without retrying it', () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '..', 'scripts', 'two-step-review-test-smoke.js'),
+      'utf8'
+    );
+    const uploadStart = source.indexOf('async function uploadDocument(');
+    const uploadEnd = source.indexOf('\n  async function ', uploadStart + 20);
+    const uploadSource = source.slice(uploadStart, uploadEnd);
+
+    expect(uploadSource).toContain('headers: headersForFreshHttpConnection(authHeaders(auth))');
+    expect(uploadSource.match(/fetchJson\(/g)).toHaveLength(1);
+    expect(uploadSource).not.toMatch(/retry|catch\s*\(/i);
   });
 });
 
@@ -488,7 +728,7 @@ describe('two-step TEST smoke live-schema guard', () => {
     expect(source).not.toContain("visibleReviewActions.includes('Forward changes to Coordinator')");
     const remoteRunnerSource = source.slice(source.indexOf('function remoteRunner()'));
     expect(remoteRunnerSource).not.toMatch(/\b(?:LEFT|RIGHT|INNER|OUTER)?\s*JOIN\s+[A-Za-z_]/i);
-    expect(remoteRunnerSource.match(/\bfetch\(/g) || []).toHaveLength(1);
+    expect(source.match(/await fetchImpl\(/g) || []).toHaveLength(1);
     expect(source).toContain('const controller = new AbortController();');
     expect(source).toContain('smoke_http_body_limit_exceeded');
     expect(source).toContain("const expectedDbHost = String(adminEnv.DB_HOST || '').trim();");

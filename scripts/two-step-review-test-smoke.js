@@ -38,6 +38,142 @@ const REMOTE_COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
 const REMOTE_EVIDENCE_MARKER = '@@TWO_STEP_REVIEW_SMOKE_EVIDENCE@@';
 const REMOTE_EVIDENCE_TRANSPORT_VERSION = 1;
 
+function sanitizeHttpTarget(value) {
+  try {
+    const target = new URL(String(value));
+    return `${target.protocol}//${target.host}${target.pathname}`;
+  } catch (_) {
+    return '[invalid-http-target]';
+  }
+}
+
+function sanitizeTransportText(value) {
+  return String(value)
+    .replace(/\bBearer\s+[^\s,;]+/giu, 'Bearer [redacted]')
+    .replace(/https?:\/\/[^\s)'\"]+/gi, match => sanitizeHttpTarget(match));
+}
+
+function serializeTransportCause(value, seen = new WeakSet()) {
+  if (value === null || value === undefined) return value ?? null;
+  if (typeof value === 'string') return sanitizeTransportText(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value !== 'object') return String(value);
+  if (seen.has(value)) return '[circular]';
+  seen.add(value);
+  if (Array.isArray(value)) return value.map(item => serializeTransportCause(item, seen));
+  if (Buffer.isBuffer(value)) {
+    return {
+      type: 'Buffer',
+      bytes: value.length,
+      sha256: crypto.createHash('sha256').update(value).digest('hex'),
+    };
+  }
+
+  const serialized = {};
+  const propertyNames = Array.from(new Set([
+    ...(value instanceof Error ? ['name', 'message', 'stack'] : []),
+    ...Object.getOwnPropertyNames(value),
+  ])).sort();
+  for (const propertyName of propertyNames) {
+    if (/authorization|cookie|password|secret|token|requestbody|responsebody/i.test(propertyName)) {
+      serialized[propertyName] = '[redacted]';
+      continue;
+    }
+    try {
+      serialized[propertyName] = serializeTransportCause(value[propertyName], seen);
+    } catch (error) {
+      serialized[propertyName] = `[unavailable:${error?.name || 'Error'}]`;
+    }
+  }
+  return serialized;
+}
+
+function headersForFreshHttpConnection(headers = {}) {
+  const normalized = {};
+  const entries = typeof headers?.entries === 'function'
+    ? Array.from(headers.entries())
+    : Object.entries(headers || {});
+  for (const [name, value] of entries) {
+    if (String(name).toLowerCase() !== 'connection') normalized[name] = value;
+  }
+  normalized.connection = 'close';
+  return normalized;
+}
+
+async function fetchAndReadBoundedTransport(url, options = {}, limits = {}, hooks = {}) {
+  if (options.signal) throw new Error('smoke_http_external_abort_signal_not_allowed');
+  const requestTimeoutMs = Number(limits.requestTimeoutMs || 45_000);
+  const maxBodyBytes = Number(limits.maxBodyBytes || (2 * 1024 * 1024));
+  const fetchImpl = hooks.fetchImpl || fetch;
+  const controller = new AbortController();
+  const startedAt = new Date().toISOString();
+  let dispatchedAt = null;
+  let timeoutFired = false;
+  const timer = setTimeout(() => {
+    timeoutFired = true;
+    controller.abort(new Error('smoke_http_timeout'));
+  }, requestTimeoutMs);
+  try {
+    dispatchedAt = new Date().toISOString();
+    const response = await fetchImpl(url, { ...options, signal: controller.signal });
+    const chunks = [];
+    let bodyBytes = 0;
+    if (response.body) {
+      for await (const rawChunk of response.body) {
+        const chunk = Buffer.from(rawChunk);
+        bodyBytes += chunk.length;
+        if (bodyBytes > maxBodyBytes) {
+          controller.abort(new Error('smoke_http_body_limit_exceeded'));
+          throw new Error(`smoke_http_body_limit_exceeded:${maxBodyBytes}`);
+        }
+        chunks.push(chunk);
+      }
+    }
+    const buffer = Buffer.concat(chunks, bodyBytes);
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+      setCookieHeaders: typeof response.headers.getSetCookie === 'function'
+        ? response.headers.getSetCookie()
+        : String(response.headers.get('set-cookie') || '').split(/,(?=\s*[^;,=\s]+=[^;,]+)/g).filter(Boolean),
+      buffer,
+      text: buffer.toString('utf8'),
+    };
+  } catch (error) {
+    const failedAt = new Date().toISOString();
+    const transportDiagnostics = {
+      startedAt,
+      dispatchedAt,
+      failedAt,
+      elapsedMs: Math.max(0, Date.parse(failedAt) - Date.parse(dispatchedAt || startedAt)),
+      method: String(options.method || 'GET').toUpperCase(),
+      target: sanitizeHttpTarget(url),
+      timeout: {
+        configuredMs: requestTimeoutMs,
+        fired: timeoutFired,
+        signalAborted: controller.signal.aborted,
+        abortReason: controller.signal.aborted
+          ? serializeTransportCause(controller.signal.reason)
+          : null,
+      },
+      error: {
+        name: error?.name || 'Error',
+        message: error?.message || String(error),
+        stack: error?.stack || null,
+        cause: serializeTransportCause(error?.cause),
+      },
+    };
+    if (typeof hooks.onFailure === 'function') hooks.onFailure(transportDiagnostics);
+    if (error && typeof error === 'object') error.transportDiagnostics = transportDiagnostics;
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function sameExactRecord(actual, expected) {
   if (!actual || typeof actual !== 'object' || Array.isArray(actual)) return false;
   if (!expected || typeof expected !== 'object' || Array.isArray(expected)) return false;
@@ -2535,6 +2671,7 @@ function remoteRunner() {
     .catch(async error => {
       fail('remote runner completed without crashing', {
         error: error && error.stack ? error.stack : String(error),
+        transportDiagnostics: error?.transportDiagnostics || null,
       });
       const schemaSafetyFailureCodes = new Set([
         'ER_BAD_FIELD_ERROR',
@@ -3000,41 +3137,12 @@ function remoteRunner() {
   }
 
   async function fetchAndReadBounded(url, options = {}, limits = {}) {
-    if (options.signal) throw new Error('smoke_http_external_abort_signal_not_allowed');
-    const requestTimeoutMs = Number(limits.requestTimeoutMs || 45_000);
-    const maxBodyBytes = Number(limits.maxBodyBytes || (2 * 1024 * 1024));
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new Error('smoke_http_timeout')), requestTimeoutMs);
-    try {
-      const response = await fetch(url, { ...options, signal: controller.signal });
-      const chunks = [];
-      let bodyBytes = 0;
-      if (response.body) {
-        for await (const rawChunk of response.body) {
-          const chunk = Buffer.from(rawChunk);
-          bodyBytes += chunk.length;
-          if (bodyBytes > maxBodyBytes) {
-            controller.abort(new Error('smoke_http_body_limit_exceeded'));
-            throw new Error(`smoke_http_body_limit_exceeded:${maxBodyBytes}`);
-          }
-          chunks.push(chunk);
-        }
-      }
-      const buffer = Buffer.concat(chunks, bodyBytes);
-      return {
-        ok: response.ok,
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers,
-        setCookieHeaders: typeof response.headers.getSetCookie === 'function'
-          ? response.headers.getSetCookie()
-          : String(response.headers.get('set-cookie') || '').split(/,(?=\s*[^;,=\s]+=[^;,]+)/g).filter(Boolean),
-        buffer,
-        text: buffer.toString('utf8'),
-      };
-    } finally {
-      clearTimeout(timer);
-    }
+    return fetchAndReadBoundedTransport(url, options, limits, {
+      onFailure: transportDiagnostics => {
+        result.evidence.httpTransportFailures = result.evidence.httpTransportFailures || [];
+        result.evidence.httpTransportFailures.push(transportDiagnostics);
+      },
+    });
   }
 
   async function fetchJson(urlOrPath, options = {}) {
@@ -6296,7 +6404,7 @@ function remoteRunner() {
     }
     return fetchJson(`/api/applicants/${fixture.applicantUser}/documents/upload`, {
       method: 'POST',
-      headers: authHeaders(auth),
+      headers: headersForFreshHttpConnection(authHeaders(auth)),
       body: form,
     });
   }
@@ -9062,8 +9170,11 @@ if (require.main === module && process.argv.includes('--remote-runner')) {
 module.exports = {
   createEncryptedFixtureEnvelope,
   createLiveSchemaGuard,
+  fetchAndReadBoundedTransport,
+  headersForFreshHttpConnection,
   orderSelfReferencingVersionDeleteBatches,
   sameExactRecord,
+  serializeTransportCause,
   validateAssessmentStartPrerequisiteEvidence,
   validateAssessmentStartJourneyEvidence,
 };
