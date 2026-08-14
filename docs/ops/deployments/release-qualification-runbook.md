@@ -123,6 +123,11 @@ From `<isolated-parent>/admin-dashboard`, complete this read-only preflight and 
 5. `npm run release:qualify -- plan ...` succeeds, reports exactly the intended heads/domains/operations, and does not select `intacct-local-contract` for an ordinary non-Intacct change.
 6. Recheck exact heads, clean status, required files, and import resolution after the plan. Only then assign the fresh attempt ID, run the separately required metadata-only DEV schema preflight, and start formal qualification.
 
+Before a separately authorized live smoke, admit its invocation as well:
+
+7. Create and prove writable every ignored local directory used for redirected wrapper output or downloaded evidence. A missing redirection target can prevent the runner from starting before it has a chance to retain evidence.
+8. If the runner has a focused `--*-only` mode, prove with a deterministic composed local test that this exact mode seeds every fixture/control its strict validator requires, captures the native evidence, and admits that evidence without relying on an earlier journey. Hand-built validator fixtures and a passing full-mode aggregate are insufficient. If the repository has no such exact-mode proof, stop before TEST instead of using TEST to discover the missing composition.
+
 A missing workspace prerequisite is an operator-preparation failure, not candidate evidence. Correct it before any formal attempt exists. If a formal run was started and emitted `NO-GO`, preserve its evidence unchanged, do not reuse its release/proof ID, and require a fresh preflight and fresh ID for any separately authorized attempt.
 
 ## Phase 0 — Prepare TEST rehearsal: freeze and plan the candidate
