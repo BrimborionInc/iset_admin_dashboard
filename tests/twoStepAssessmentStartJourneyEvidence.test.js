@@ -5,6 +5,7 @@ const { spawnSync } = require('child_process');
 
 const {
   createTransferredHarnessDescriptor,
+  establishAssessmentStartFocusedControl,
   validateAssessmentStartPrerequisiteEvidence,
   validateAssessmentStartJourneyEvidence,
 } = require('../scripts/two-step-review-test-smoke');
@@ -65,6 +66,28 @@ describe('two-step TEST harness transfer boundary', () => {
     expect(source).toContain('await runAssessmentStartApplicationWorkflow(auth);');
     expect(source).toContain('deleteRemoteScript(remoteHarnessKey, options)');
     expect(source).toContain('verifiedTemporaryObjectCleanup.push(remoteHarnessKey)');
+  });
+
+  test('wires the focused control seed and native capture before browser execution', () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '..', 'scripts', 'two-step-review-test-smoke.js'),
+      'utf8'
+    );
+    const baseSeed = source.indexOf('await seedFixture();');
+    const focusedControl = source.indexOf('const focusedControl = await establishAssessmentStartFocusedControl({');
+    const objectBaseline = source.indexOf('await proveFixtureObjectPrefixBaseline();');
+    const browserLaunch = source.indexOf('browser = await puppeteer.launch({');
+    expect(baseSeed).toBeGreaterThan(-1);
+    expect(focusedControl).toBeGreaterThan(baseSeed);
+    expect(objectBaseline).toBeGreaterThan(focusedControl);
+    expect(browserLaunch).toBeGreaterThan(objectBaseline);
+    expect(source).toContain("await seedApplicationAssessmentCase('assessmentStartControl'");
+    expect(source).toContain('fixture.workflows.assessmentStartControl = workflowId;');
+    expect(source).toContain('return snapshot.unrelatedWorkflows;');
+    expect(source).toContain("pass('assessment start: focused mode owns an independently captured unrelated workflow control'");
+    expect(source).toContain('...Object.values(fixture.cases).filter(Boolean),');
+    expect(source).toContain('await deleteWorkflowRows(caseIds, applicationIds, interventionIds, proposalIds);');
+    expect(source).toContain('counts.reviewWorkflows = Number(reviewWorkflowCount.count || 0);');
   });
 
   test('recreates transferred-source dependency failure and proves the declared module root repairs it', () => {
@@ -174,11 +197,13 @@ function buildValidEvidence() {
   };
   const unrelatedWorkflows = [{
     id: 900,
+    subject_key: 'application_assessment:application:90',
     case_id: 70,
     application_id: 90,
     workflow_type: 'application_assessment',
     current_stage: 'final_decision_recorded',
     current_owner_role: null,
+    current_owner_staff_profile_id: 55,
     submitted_by_staff_profile_id: 50,
     nwac_decision: 'approved',
   }];
@@ -435,6 +460,81 @@ describe('two-step TEST assessment-start prerequisite evidence', () => {
 });
 
 describe('two-step TEST assessment-start journey evidence', () => {
+  test('composes the exact focused-mode seed, capture, and full journey-validator boundary', async () => {
+    const calls = [];
+    const seeded = {
+      workflowId: 900,
+      subjectKey: 'application_assessment:application:90',
+      caseId: 70,
+      applicationId: 90,
+      submittedByStaffProfileId: 50,
+      ownerStaffProfileId: 55,
+    };
+    const store = [];
+    const control = await establishAssessmentStartFocusedControl({
+      assessmentStartOnly: true,
+      seedControl: async () => {
+        calls.push('seed');
+        store.push({
+          id: seeded.workflowId,
+          subject_key: seeded.subjectKey,
+          case_id: seeded.caseId,
+          application_id: seeded.applicationId,
+          workflow_type: 'application_assessment',
+          current_stage: 'rm_review',
+          current_owner_role: 'Regional Manager',
+          current_owner_staff_profile_id: seeded.ownerStaffProfileId,
+          submitted_by_staff_profile_id: seeded.submittedByStaffProfileId,
+          nwac_decision: null,
+        });
+        return seeded;
+      },
+      captureControl: async () => {
+        calls.push('capture');
+        return clone(store);
+      },
+    });
+    expect(calls).toEqual(['seed', 'capture']);
+    expect(control).toMatchObject({
+      workflowId: 900,
+      caseId: 70,
+      applicationId: 90,
+      capturedRows: [{ id: 900, current_stage: 'rm_review' }],
+    });
+
+    const evidence = buildValidEvidence();
+    for (const key of ['before', 'afterDeclaration', 'afterSave']) {
+      evidence[key].unrelatedWorkflows = clone(control.capturedRows);
+    }
+    expect(validateAssessmentStartJourneyEvidence(evidence).unrelatedWorkflowCount).toBe(1);
+  });
+
+  test('focused composition rejects a missing captured control and non-focused mode has no fixture effect', async () => {
+    const seeded = {
+      workflowId: 900,
+      subjectKey: 'application_assessment:application:90',
+      caseId: 70,
+      applicationId: 90,
+      submittedByStaffProfileId: 50,
+      ownerStaffProfileId: 55,
+    };
+    await expect(establishAssessmentStartFocusedControl({
+      assessmentStartOnly: true,
+      seedControl: async () => seeded,
+      captureControl: async () => [],
+    })).rejects.toThrow('assessment_start_focused_control_invalid:capture_cardinality_invalid');
+
+    const seedControl = jest.fn();
+    const captureControl = jest.fn();
+    await expect(establishAssessmentStartFocusedControl({
+      assessmentStartOnly: false,
+      seedControl,
+      captureControl,
+    })).resolves.toBeNull();
+    expect(seedControl).not.toHaveBeenCalled();
+    expect(captureControl).not.toHaveBeenCalled();
+  });
+
   test('accepts the exact assigned Regional Manager journey and returns bounded evidence', () => {
     expect(validateAssessmentStartJourneyEvidence(buildValidEvidence())).toEqual({
       caseId: 77,

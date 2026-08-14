@@ -469,6 +469,76 @@ function validateAssessmentStartPrerequisiteEvidence(evidence) {
   };
 }
 
+function validateAssessmentStartFocusedControlEvidence(evidence) {
+  const fail = (code, details = {}) => {
+    const error = new Error(`assessment_start_focused_control_invalid:${code}`);
+    error.code = `assessment_start_focused_control_${code}`;
+    error.details = details;
+    throw error;
+  };
+  if (evidence?.mode !== 'assessment-start-only') fail('mode_invalid');
+  const seeded = evidence?.seeded;
+  const captured = Array.isArray(evidence?.captured) ? evidence.captured : [];
+  const workflowId = Number(seeded?.workflowId);
+  const caseId = Number(seeded?.caseId);
+  const applicationId = Number(seeded?.applicationId);
+  const submittedByStaffProfileId = Number(seeded?.submittedByStaffProfileId);
+  const ownerStaffProfileId = Number(seeded?.ownerStaffProfileId);
+  if (
+    ![workflowId, caseId, applicationId, submittedByStaffProfileId, ownerStaffProfileId]
+      .every(value => Number.isSafeInteger(value) && value > 0) ||
+    typeof seeded?.subjectKey !== 'string' ||
+    seeded.subjectKey !== `application_assessment:application:${applicationId}`
+  ) {
+    fail('seed_identity_invalid', { seeded });
+  }
+  const rows = captured.filter(row => Number(row?.id) === workflowId);
+  if (rows.length !== 1) {
+    fail('capture_cardinality_invalid', { workflowId, captured });
+  }
+  const row = rows[0];
+  if (
+    row?.subject_key !== seeded.subjectKey ||
+    Number(row?.case_id) !== caseId ||
+    Number(row?.application_id) !== applicationId ||
+    row?.workflow_type !== 'application_assessment' ||
+    row?.current_stage !== 'rm_review' ||
+    row?.current_owner_role !== 'Regional Manager' ||
+    Number(row?.current_owner_staff_profile_id) !== ownerStaffProfileId ||
+    Number(row?.submitted_by_staff_profile_id) !== submittedByStaffProfileId ||
+    row?.nwac_decision != null
+  ) {
+    fail('captured_row_invalid', { seeded, row });
+  }
+  return {
+    workflowId,
+    subjectKey: seeded.subjectKey,
+    caseId,
+    applicationId,
+    submittedByStaffProfileId,
+    ownerStaffProfileId,
+    capturedRows: captured.map(item => ({ ...item })),
+  };
+}
+
+async function establishAssessmentStartFocusedControl({
+  assessmentStartOnly,
+  seedControl,
+  captureControl,
+}) {
+  if (!assessmentStartOnly) return null;
+  if (typeof seedControl !== 'function' || typeof captureControl !== 'function') {
+    throw new Error('assessment_start_focused_control_adapter_invalid');
+  }
+  const seeded = await seedControl();
+  const captured = await captureControl();
+  return validateAssessmentStartFocusedControlEvidence({
+    mode: 'assessment-start-only',
+    seeded,
+    captured,
+  });
+}
+
 function validateAssessmentStartJourneyEvidence(evidence) {
   const fail = (code, details = {}) => {
     const error = new Error(`assessment_start_journey_evidence_invalid:${code}`);
@@ -3015,6 +3085,26 @@ function remoteRunner() {
     databaseWorkStarted = true;
     await cleanupFixture({ quiet: true });
     await seedFixture();
+    const focusedControl = await establishAssessmentStartFocusedControl({
+      assessmentStartOnly: config.assessmentStartOnly,
+      seedControl: seedAssessmentStartFocusedControl,
+      captureControl: async () => {
+        const snapshot = await captureAssessmentStartJourneyState(
+          fixture.cases.assessmentStartApplication,
+          fixture.applications.assessmentStartApplication,
+          fixture.applications.assessmentStartSibling
+        );
+        return snapshot.unrelatedWorkflows;
+      },
+    });
+    if (focusedControl) {
+      result.evidence.assessmentStartFocusedControl = focusedControl;
+      pass('assessment start: focused mode owns an independently captured unrelated workflow control', {
+        workflowId: focusedControl.workflowId,
+        caseId: focusedControl.caseId,
+        applicationId: focusedControl.applicationId,
+      });
+    }
     await proveFixtureObjectPrefixBaseline();
     await verifyRuntimeConfig();
     browser = await puppeteer.launch({
@@ -5553,9 +5643,53 @@ function remoteRunner() {
         applications: fixture.applications,
         actionPlans: fixture.actionPlans,
         interventions: fixture.interventions,
+        workflows: fixture.workflows,
       };
       pass('TEST synthetic two-step fixture seeded', result.fixtureIds);
       progress('seed fixture committed');
+    } catch (error) {
+      await query('ROLLBACK');
+      throw error;
+    }
+  }
+
+  async function seedAssessmentStartFocusedControl() {
+    progress('assessment-start focused control seed starting');
+    await query('START TRANSACTION');
+    try {
+      await seedApplicationAssessmentCase('assessmentStartControl', {
+        assignedStaffProfileId: fixture.staff.coordinator.staffProfileId,
+      });
+      const caseId = fixture.cases.assessmentStartControl;
+      const applicationId = fixture.applications.assessmentStartControl;
+      const subjectKey = `application_assessment:application:${applicationId}`;
+      const workflowId = await insert(
+        `INSERT INTO iset_review_workflow
+           (workflow_type, subject_key, case_id, application_id, current_stage,
+            current_owner_role, current_owner_staff_profile_id,
+            submitted_by_staff_profile_id, submitted_at, metadata_json)
+         VALUES ('application_assessment', ?, ?, ?, 'rm_review',
+            'Regional Manager', ?, ?, NOW(), CAST(? AS JSON))`,
+        [
+          subjectKey,
+          caseId,
+          applicationId,
+          fixture.staff.manager.staffProfileId,
+          fixture.staff.coordinator.staffProfileId,
+          markerJson({ kind: 'assessment-start-unrelated-workflow-control' }),
+        ]
+      );
+      fixture.workflows.assessmentStartControl = workflowId;
+      await query('COMMIT');
+      progress('assessment-start focused control seed committed');
+      return {
+        workflowId,
+        subjectKey,
+        caseId,
+        applicationId,
+        submittedByStaffProfileId: fixture.staff.coordinator.staffProfileId,
+        ownerStaffProfileId: fixture.staff.manager.staffProfileId,
+      };
     } catch (error) {
       await query('ROLLBACK');
       throw error;
@@ -6071,8 +6205,9 @@ function remoteRunner() {
       .filter(id => Number.isSafeInteger(id) && id > 0 && id !== Number(caseId));
     const [unrelatedWorkflows] = unrelatedCaseIds.length
       ? await query(
-          `SELECT id, case_id, application_id, workflow_type, current_stage,
-                  current_owner_role, submitted_by_staff_profile_id, nwac_decision
+          `SELECT id, subject_key, case_id, application_id, workflow_type, current_stage,
+                  current_owner_role, current_owner_staff_profile_id,
+                  submitted_by_staff_profile_id, nwac_decision
              FROM iset_review_workflow
             WHERE case_id IN (${unrelatedCaseIds.map(() => '?').join(',')})
             ORDER BY id`,
@@ -9315,11 +9450,13 @@ module.exports = {
   createFreshLoopbackDispatcher,
   createTransferredHarnessDescriptor,
   createLiveSchemaGuard,
+  establishAssessmentStartFocusedControl,
   fetchAndReadBoundedFreshLoopback,
   fetchAndReadBoundedTransport,
   orderSelfReferencingVersionDeleteBatches,
   sameExactRecord,
   serializeTransportCause,
+  validateAssessmentStartFocusedControlEvidence,
   validateAssessmentStartPrerequisiteEvidence,
   validateAssessmentStartJourneyEvidence,
 };
