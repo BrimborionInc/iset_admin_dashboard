@@ -301,6 +301,43 @@ function validateAssessmentStartPrerequisiteEvidence(evidence) {
     });
   }
 
+  const validateChecklistSnapshot = (snapshot, phase) => {
+    const items = Array.isArray(snapshot?.items) ? snapshot.items : [];
+    const requiredItems = items.filter(item => item?.required !== false);
+    const expected = new Map([
+      ['ei-consent-form', {
+        documentType: 'ei_consent',
+        sources: ['application_form'],
+      }],
+      ['ei-eligibility-verification', {
+        documentType: 'ei_verification',
+        sources: ['application_submission', 'manual_upload', 'secure_message_attachment'],
+      }],
+    ]);
+    if (
+      snapshot?.gateId !== 'start_assessment' ||
+      Number(snapshot?.missingRequiredCount) !== (phase === 'before' ? 1 : 0) ||
+      requiredItems.length !== expected.size
+    ) {
+      fail('checklist_contract_invalid', { phase, snapshot });
+    }
+    for (const item of requiredItems) {
+      const expectedItem = expected.get(item?.id);
+      const expectedMatchedCount = phase === 'after' || expectedItem?.documentType === 'ei_consent' ? 1 : 0;
+      if (
+        !expectedItem ||
+        !sameSerializedValue(item?.documentTypes, [expectedItem.documentType]) ||
+        !sameSerializedValue(item?.sources, expectedItem.sources) ||
+        item?.status !== (expectedMatchedCount ? 'complete' : 'missing') ||
+        Number(item?.matchedCount) !== expectedMatchedCount
+      ) {
+        fail('checklist_contract_invalid', { phase, item, snapshot });
+      }
+    }
+  };
+  validateChecklistSnapshot(evidence?.checklistBefore, 'before');
+  validateChecklistSnapshot(evidence?.checklistAfter, 'after');
+
   const targets = [
     { kind: 'selected', applicationId: selectedApplicationId },
     { kind: 'sibling', applicationId: siblingApplicationId },
@@ -318,7 +355,10 @@ function validateAssessmentStartPrerequisiteEvidence(evidence) {
       fail('application_eligibility_invalid', { target, assessmentRows });
     }
 
-    const documentRows = documents.filter(row => Number(row?.application_id) === target.applicationId);
+    const documentRows = documents.filter(row => (
+      Number(row?.application_id) === target.applicationId &&
+      row?.document_category === 'ei_verification'
+    ));
     if (documentRows.length !== 1) {
       fail('application_document_scope_invalid', { target, documentRows });
     }
@@ -387,6 +427,7 @@ function validateAssessmentStartPrerequisiteEvidence(evidence) {
       fail('upload_response_invalid', { target, uploadRows, document });
     }
   }
+
   if (documentChecksums.size !== 2) {
     fail('document_bytes_not_distinct', { checksums: Array.from(documentChecksums) });
   }
@@ -5483,6 +5524,7 @@ function remoteRunner() {
       await seedRepeatApplicationSibling('dualRoleSibling', 'dualRoleApplication');
       await seedApplicationAssessmentCase('assessmentStartApplication', {
         assignedStaffProfileId: fixture.staff.manager.staffProfileId,
+        includeEiConsent: true,
       });
       await seedRepeatApplicationSibling('assessmentStartSibling', 'assessmentStartApplication');
       await query(
@@ -5531,6 +5573,9 @@ function remoteRunner() {
       email: `codex.twostep.${suffix}.assessment@example.com`,
       'address-province': 'QC',
     };
+    if (options.includeEiConsent) {
+      answers.consent = { signed: true };
+    }
     const payload = { ...fixture.marker, answers, submission_snapshot: { reference_number: reference } };
     const submissionId = await insert(
       `INSERT INTO iset_application_submission
@@ -6502,10 +6547,12 @@ function remoteRunner() {
     }, { freshLoopback: true });
   }
 
-  async function prepareAssessmentStartEiPrerequisites(auth) {
+  async function prepareAssessmentStartPrerequisites(auth) {
     const caseId = fixture.cases.assessmentStartApplication;
     const selectedApplicationId = fixture.applications.assessmentStartApplication;
     const siblingApplicationId = fixture.applications.assessmentStartSibling;
+    const checklistPath = `/api/applicants/${fixture.applicantUser}/document-checklist?applicationId=${selectedApplicationId}&stage=start_assessment`;
+    const checklistBefore = await fetchJson(checklistPath, { headers: authHeaders(auth.manager) });
     const targets = [
       { kind: 'selected', applicationId: selectedApplicationId },
       { kind: 'sibling', applicationId: siblingApplicationId },
@@ -6546,6 +6593,7 @@ function remoteRunner() {
       selectedApplicationId,
       siblingApplicationId
     );
+    const checklistAfter = await fetchJson(checklistPath, { headers: authHeaders(auth.manager) });
     const objectInventoryAfter = listFixturePrefixInventory();
     const evidence = {
       attemptStamp: config.stamp,
@@ -6558,6 +6606,8 @@ function remoteRunner() {
       assessments,
       documents,
       uploads,
+      checklistBefore,
+      checklistAfter,
       objectAdditions: {
         prefixes: objectInventoryAfter.prefixes,
         currentObjects: objectEntriesAdded(
@@ -6577,7 +6627,7 @@ function remoteRunner() {
       ...summary.objectKeys,
     ])).sort();
     result.evidence.assessmentStartPrerequisites = evidence;
-    pass('assessment start: selected and sibling have distinct attempt-owned EI prerequisites', summary);
+    pass('assessment start: selected signed consent and both application EI prerequisites are complete', summary);
     return evidence;
   }
 
@@ -6585,7 +6635,7 @@ function remoteRunner() {
     const caseId = fixture.cases.assessmentStartApplication;
     const applicationId = fixture.applications.assessmentStartApplication;
     const siblingApplicationId = fixture.applications.assessmentStartSibling;
-    const prerequisites = await prepareAssessmentStartEiPrerequisites(auth);
+    const prerequisites = await prepareAssessmentStartPrerequisites(auth);
     const before = await captureAssessmentStartJourneyState(
       caseId,
       applicationId,

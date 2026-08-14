@@ -227,6 +227,43 @@ function buildValidEvidence() {
       size: 302,
     }),
   ];
+  const buildChecklist = complete => ({
+    gateId: 'start_assessment',
+    gateLabel: 'Gate 2 - Start Assessment',
+    missingRequiredCount: complete ? 0 : 1,
+    items: [
+      {
+        id: 'ei-consent-form',
+        label: 'EI Consent Form',
+        required: true,
+        minCount: 1,
+        matchedCount: 1,
+        status: 'complete',
+        documentTypes: ['ei_consent'],
+        sources: ['application_form'],
+      },
+      {
+        id: 'ei-eligibility-verification',
+        label: 'EI Eligibility Verification',
+        required: true,
+        minCount: 1,
+        matchedCount: complete ? 1 : 0,
+        status: complete ? 'complete' : 'missing',
+        documentTypes: ['ei_verification'],
+        sources: ['application_submission', 'manual_upload', 'secure_message_attachment'],
+      },
+      {
+        id: 'case-manager-assessment',
+        label: 'Case manager assessment',
+        required: false,
+        minCount: 1,
+        matchedCount: 0,
+        status: 'complete',
+        documentTypes: ['case_assessment'],
+        sources: ['application_form'],
+      },
+    ],
+  });
   const prerequisites = {
     attemptStamp,
     caseId: 77,
@@ -259,6 +296,8 @@ function buildValidEvidence() {
         },
       },
     })),
+    checklistBefore: buildChecklist(false),
+    checklistAfter: buildChecklist(true),
     objectAdditions: {
       prefixes: ['uploads/2026/08/13/300/'],
       currentObjects: eiDocuments.map(document => ({
@@ -336,7 +375,7 @@ describe('two-step TEST assessment-start prerequisite evidence', () => {
     );
   });
 
-  test('accepts two distinct application-scoped CRF documents with canonical product metadata and exact object versions', () => {
+  test('accepts signed selected consent plus two distinct application-scoped CRF documents and exact object versions', () => {
     expect(validateAssessmentStartPrerequisiteEvidence(buildValidEvidence().prerequisites)).toEqual({
       caseId: 77,
       selectedApplicationId: 101,
@@ -363,6 +402,26 @@ describe('two-step TEST assessment-start prerequisite evidence', () => {
       evidence.documents[0].metadata = JSON.stringify(metadata);
     }, 'document_manifest_invalid'],
     ['contradictory upload response', evidence => { evidence.uploads[0].response.document.application_id = 102; }, 'upload_response_invalid'],
+    ['missing selected signed EI consent', evidence => {
+      evidence.checklistBefore.items[0].matchedCount = 0;
+      evidence.checklistBefore.items[0].status = 'missing';
+      evidence.checklistBefore.missingRequiredCount = 2;
+    }, 'checklist_contract_invalid'],
+    ['unexpected required start prerequisite', evidence => {
+      evidence.checklistBefore.items.push({
+        id: 'unexpected',
+        required: true,
+        matchedCount: 0,
+        status: 'missing',
+        documentTypes: ['unexpected'],
+      });
+      evidence.checklistBefore.missingRequiredCount = 3;
+    }, 'checklist_contract_invalid'],
+    ['incomplete start checklist after fixture setup', evidence => {
+      evidence.checklistAfter.items[0].matchedCount = 0;
+      evidence.checklistAfter.items[0].status = 'missing';
+      evidence.checklistAfter.missingRequiredCount = 1;
+    }, 'checklist_contract_invalid'],
     ['shared document bytes', evidence => { evidence.documents[1].checksum_sha256 = 'a'.repeat(64); }, 'document_bytes_not_distinct'],
     ['missing object version', evidence => { evidence.objectAdditions.versions.pop(); }, 'cardinality_invalid'],
     ['delete marker instead of owned version', evidence => { evidence.objectAdditions.versions[0].kind = 'delete-marker'; }, 'object_manifest_invalid'],
