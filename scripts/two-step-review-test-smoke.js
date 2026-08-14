@@ -2345,6 +2345,7 @@ async function main() {
           `TWO_STEP_REVIEW_CREDENTIAL_KEY_PATH=${shellQuote(credentialKeyPath)}`,
           `TWO_STEP_REVIEW_HARNESS_SHA256=${shellQuote(transferredHarness.sha256)}`,
           `TWO_STEP_REVIEW_ASSESSMENT_START_ONLY=${options.assessmentStartOnly ? '1' : '0'}`,
+          `NODE_PATH=${shellQuote('/opt/nwac/admin-dashboard/node_modules')}`,
           `TWO_STEP_REVIEW_NOTIFICATION_WAIT_ATTEMPTS=${shellQuote(process.env.TWO_STEP_REVIEW_NOTIFICATION_WAIT_ATTEMPTS || '31')}`,
           `LOCAL_BASE_URL=${shellQuote(DEFAULT_LOCAL_BASE_URL)}`,
           `PORTAL_LOCAL_BASE_URL=${shellQuote(DEFAULT_PORTAL_LOCAL_BASE_URL)}`,

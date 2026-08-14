@@ -1,6 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const {
   createTransferredHarnessDescriptor,
@@ -59,10 +60,49 @@ describe('two-step TEST harness transfer boundary', () => {
     expect(source).not.toContain("node ${shellQuote('/opt/nwac/admin-dashboard/scripts/two-step-review-test-smoke.js')}");
     expect(source).toContain('node ${shellQuote(transferredHarness.remotePath)} --remote-runner');
     expect(source).toContain('TWO_STEP_REVIEW_HARNESS_SHA256=${shellQuote(transferredHarness.sha256)}');
+    expect(source).toContain("NODE_PATH=${shellQuote('/opt/nwac/admin-dashboard/node_modules')}");
     expect(source).toContain("executionMode: config.assessmentStartOnly ? 'assessment-start-only' : 'full-two-step-review'");
     expect(source).toContain('await runAssessmentStartApplicationWorkflow(auth);');
     expect(source).toContain('deleteRemoteScript(remoteHarnessKey, options)');
     expect(source).toContain('verifiedTemporaryObjectCleanup.push(remoteHarnessKey)');
+  });
+
+  test('recreates transferred-source dependency failure and proves the declared module root repairs it', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'two-step-harness-module-root-'));
+    try {
+      const transferredPath = path.join(root, 'runner.js');
+      fs.copyFileSync(
+        path.resolve(__dirname, '..', 'scripts', 'two-step-review-test-smoke.js'),
+        transferredPath
+      );
+      const launcher = [
+        '(async () => {',
+        '  const runner = require(process.argv[1]);',
+        "  const dispatcher = runner.createFreshLoopbackDispatcher('http://127.0.0.1:65534');",
+        '  await dispatcher.close();',
+        '})().catch(error => { console.error(error.stack || error); process.exit(1); });',
+      ].join('\n');
+      const withoutModuleRoot = spawnSync(process.execPath, ['-e', launcher, transferredPath], {
+        cwd: root,
+        env: { ...process.env, NODE_PATH: '' },
+        encoding: 'utf8',
+      });
+      expect(withoutModuleRoot.status).not.toBe(0);
+      expect(withoutModuleRoot.stderr).toContain("Cannot find module 'undici'");
+
+      const withModuleRoot = spawnSync(process.execPath, ['-e', launcher, transferredPath], {
+        cwd: root,
+        env: {
+          ...process.env,
+          NODE_PATH: path.resolve(__dirname, '..', 'node_modules'),
+        },
+        encoding: 'utf8',
+      });
+      expect(withModuleRoot.status).toBe(0);
+      expect(withModuleRoot.stderr).toBe('');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
