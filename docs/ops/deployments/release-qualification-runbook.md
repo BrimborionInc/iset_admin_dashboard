@@ -103,7 +103,27 @@ The sibling Intacct simulator is development-only tooling and is not part of the
 
 ### Clean isolated workspace prerequisites
 
-Ordinary DEV qualification requires clean admin, portal and shared candidate checkouts at the recorded heads, installed Node dependencies, the repository-owned synthetic aggregate inputs, the portal TEST build environment file, and the documented local DEV database environment/identity. These are execution prerequisites, not candidate source. No ordinary mandatory check may depend on ignored historical evidence under `tmp/` or on the development-only `intacct-mock-service` sibling. The admin aggregate's historical control-plane contract uses repository-owned synthetic manifest and DEV-evidence bytes while the operator tool remains pinned to the separately retained historical paths and checksums.
+Ordinary DEV qualification requires clean admin, portal and shared candidate checkouts at the recorded heads, installed Node dependencies, the repository-owned synthetic aggregate inputs, both application TEST build environment files, and the documented local DEV database environment/identity. These are execution prerequisites, not candidate source. No ordinary mandatory check may depend on ignored historical evidence under `tmp/` or execute the development-only `intacct-mock-service` checker. The planner still requires that sibling directory to be inventory-readable while validating command references; its source must not select `intacct-local-contract` unless Intacct files changed or the operator explicitly selected that development check. The admin aggregate's historical control-plane contract uses repository-owned synthetic manifest and DEV-evidence bytes while the operator tool remains pinned to the separately retained historical paths and checksums.
+
+Admit the local workspace before assigning a release/proof ID or running any qualifier command. One isolated parent must contain the exact names below because portal tests and build contracts resolve siblings by repository name, not by Git identity alone:
+
+```text
+<isolated-parent>/admin-dashboard
+<isolated-parent>/ISET-intake
+<isolated-parent>/shared
+<isolated-parent>/intacct-mock-service
+```
+
+From `<isolated-parent>/admin-dashboard`, complete this read-only preflight and stop on the first failure:
+
+1. `pwd -P` ends in `/admin-dashboard`, and `../ISET-intake`, `../shared`, and `../intacct-mock-service` are readable directories.
+2. `git rev-parse HEAD` in admin, portal, and shared equals the intended frozen head; `git status --porcelain` is empty in all three repositories.
+3. Admin `node_modules`, `.env`, and `.env.test` are readable; portal `node_modules` and `.env.test` are readable. Dependency symlinks and ignored environment files are execution prerequisites and must not make candidate Git state dirty.
+4. `require.resolve` succeeds for the portal's admin/shared cross-repository imports, including `../admin-dashboard/scripts/cfa-signing-schema-preflight.js`; do not infer success from directory existence.
+5. `npm run release:qualify -- plan ...` succeeds, reports exactly the intended heads/domains/operations, and does not select `intacct-local-contract` for an ordinary non-Intacct change.
+6. Recheck exact heads, clean status, required files, and import resolution after the plan. Only then assign the fresh attempt ID, run the separately required metadata-only DEV schema preflight, and start formal qualification.
+
+A missing workspace prerequisite is an operator-preparation failure, not candidate evidence. Correct it before any formal attempt exists. If a formal run was started and emitted `NO-GO`, preserve its evidence unchanged, do not reuse its release/proof ID, and require a fresh preflight and fresh ID for any separately authorized attempt.
 
 ## Phase 0 — Prepare TEST rehearsal: freeze and plan the candidate
 
