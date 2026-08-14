@@ -539,6 +539,266 @@ async function establishAssessmentStartFocusedControl({
   });
 }
 
+const ASSESSMENT_START_JOURNEY_ARTIFACT_VERSION = 1;
+const ASSESSMENT_START_JOURNEY_ARTIFACT_KIND = 'assessment-start-application-status';
+
+function cloneAssessmentStartEvidence(value, label) {
+  try {
+    const encoded = JSON.stringify(value);
+    if (typeof encoded !== 'string') throw new Error('not_json_serializable');
+    return JSON.parse(encoded);
+  } catch (error) {
+    const failure = new Error(`assessment_start_artifact_invalid:${label}_not_json_serializable`);
+    failure.code = `assessment_start_artifact_${label}_not_json_serializable`;
+    failure.details = { label, error: error?.message || String(error) };
+    throw failure;
+  }
+}
+
+async function captureAssessmentStartBrowserExchange(response) {
+  if (
+    !response ||
+    typeof response.request !== 'function' ||
+    typeof response.status !== 'function' ||
+    typeof response.url !== 'function' ||
+    typeof response.text !== 'function'
+  ) {
+    throw new Error('assessment_start_browser_exchange_response_invalid');
+  }
+  const request = response.request();
+  if (!request || typeof request.method !== 'function' || typeof request.postData !== 'function') {
+    throw new Error('assessment_start_browser_exchange_request_invalid');
+  }
+  let responseBodyText = null;
+  let responseBodyReadError = null;
+  try {
+    responseBodyText = await response.text();
+  } catch (error) {
+    responseBodyReadError = {
+      name: error?.name || 'Error',
+      message: error?.message || String(error),
+    };
+  }
+  return {
+    capturedAt: new Date().toISOString(),
+    request: {
+      method: String(request.method() || '').toUpperCase(),
+      target: sanitizeHttpTarget(response.url()),
+      bodyText: request.postData() ?? null,
+    },
+    response: {
+      httpStatus: Number(response.status()),
+      bodyText: responseBodyText,
+      bodyReadError: responseBodyReadError,
+    },
+  };
+}
+
+function createAssessmentStartJourneyArtifact(rawCapture) {
+  const artifact = cloneAssessmentStartEvidence(rawCapture, 'capture');
+  const fail = (code, details = {}) => {
+    const error = new Error(`assessment_start_artifact_invalid:${code}`);
+    error.code = `assessment_start_artifact_${code}`;
+    error.details = details;
+    throw error;
+  };
+  if (artifact?.schemaVersion !== ASSESSMENT_START_JOURNEY_ARTIFACT_VERSION) {
+    fail('schema_version_invalid', { actual: artifact?.schemaVersion });
+  }
+  if (artifact?.kind !== ASSESSMENT_START_JOURNEY_ARTIFACT_KIND) {
+    fail('kind_invalid', { actual: artifact?.kind });
+  }
+  if (typeof artifact?.attemptStamp !== 'string' || !artifact.attemptStamp.trim()) {
+    fail('attempt_stamp_invalid', { actual: artifact?.attemptStamp });
+  }
+  if (typeof artifact?.routePath !== 'string' || !artifact.routePath.startsWith('/application-case/')) {
+    fail('route_path_invalid', { actual: artifact?.routePath });
+  }
+  if (!artifact?.actor || typeof artifact.actor !== 'object' || Array.isArray(artifact.actor)) {
+    fail('actor_invalid');
+  }
+  if (!artifact?.prerequisites || typeof artifact.prerequisites !== 'object' || Array.isArray(artifact.prerequisites)) {
+    fail('prerequisites_invalid');
+  }
+  const snapshotKeys = Object.keys(artifact?.snapshots || {}).sort();
+  if (!sameSerializedValue(snapshotKeys, ['afterDeclaration', 'afterSave', 'before'])) {
+    fail('snapshot_keys_invalid', { actual: snapshotKeys });
+  }
+  for (const key of ['before', 'afterDeclaration', 'afterSave']) {
+    if (!artifact?.snapshots?.[key] || typeof artifact.snapshots[key] !== 'object' || Array.isArray(artifact.snapshots[key])) {
+      fail('snapshot_missing', { key });
+    }
+  }
+  const exchangeKeys = Object.keys(artifact?.exchanges || {}).sort();
+  if (!sameSerializedValue(exchangeKeys, ['assessmentSave', 'declaration'])) {
+    fail('exchange_keys_invalid', { actual: exchangeKeys });
+  }
+  for (const key of ['declaration', 'assessmentSave']) {
+    if (!artifact?.exchanges?.[key] || typeof artifact.exchanges[key] !== 'object' || Array.isArray(artifact.exchanges[key])) {
+      fail('exchange_missing', { key });
+    }
+  }
+  artifact.phase = 'complete';
+  return artifact;
+}
+
+function parseAssessmentStartExchangeBody(exchange, exchangeName, side, fail) {
+  const bodyReadError = exchange?.[side]?.bodyReadError;
+  if (bodyReadError != null) {
+    fail(`${exchangeName}_${side}_body_unreadable`, { bodyReadError });
+  }
+  const bodyText = exchange?.[side]?.bodyText;
+  if (typeof bodyText !== 'string' || !bodyText.trim()) {
+    fail(`${exchangeName}_${side}_body_missing`, {
+      actualType: typeof bodyText,
+      length: typeof bodyText === 'string' ? bodyText.length : null,
+    });
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch (error) {
+    fail(`${exchangeName}_${side}_body_malformed`, {
+      error: error?.message || String(error),
+      length: bodyText.length,
+    });
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    fail(`${exchangeName}_${side}_body_not_object`, { actualType: Array.isArray(parsed) ? 'array' : typeof parsed });
+  }
+  return parsed;
+}
+
+function assessmentStartRequestHasStatusFields(body) {
+  return [
+    'status',
+    'applicationStatus',
+    'application_status',
+    'applicationLifecycleStatus',
+    'application_lifecycle_status',
+  ].some(key => Object.prototype.hasOwnProperty.call(body || {}, key));
+}
+
+function validateAssessmentStartJourneyArtifact(artifactInput) {
+  const artifact = createAssessmentStartJourneyArtifact(artifactInput);
+  const fail = (code, details = {}) => {
+    const error = new Error(`assessment_start_artifact_invalid:${code}`);
+    error.code = `assessment_start_artifact_${code}`;
+    error.details = details;
+    throw error;
+  };
+  const before = artifact.snapshots.before;
+  const caseId = Number(before?.caseRow?.id);
+  const selectedApplicationId = Number(before?.selected?.id);
+  if (!Number.isSafeInteger(caseId) || !Number.isSafeInteger(selectedApplicationId)) {
+    fail('route_identity_invalid', { caseId, selectedApplicationId });
+  }
+  let artifactRoute;
+  try {
+    artifactRoute = new URL(artifact.routePath, 'http://assessment-start.invalid');
+  } catch (_) {
+    fail('route_path_malformed', { actual: artifact.routePath });
+  }
+  if (
+    artifactRoute.pathname !== `/application-case/${caseId}` ||
+    Number(artifactRoute.searchParams.get('applicationId')) !== selectedApplicationId ||
+    artifactRoute.searchParams.getAll('applicationId').length !== 1 ||
+    Array.from(artifactRoute.searchParams.keys()).some(key => key !== 'applicationId')
+  ) {
+    fail('route_scope_invalid', {
+      expected: `/application-case/${caseId}?applicationId=${selectedApplicationId}`,
+      actual: artifact.routePath,
+    });
+  }
+  const expectedTarget = `/api/cases/${caseId}`;
+  const parsedExchanges = {};
+  for (const key of ['declaration', 'assessmentSave']) {
+    const exchange = artifact.exchanges[key];
+    if (typeof exchange?.capturedAt !== 'string' || !Number.isFinite(Date.parse(exchange.capturedAt))) {
+      fail(`${key}_captured_at_invalid`, { actual: exchange?.capturedAt });
+    }
+    if (exchange?.request?.method !== 'PUT') {
+      fail(`${key}_request_method_invalid`, { expected: 'PUT', actual: exchange?.request?.method });
+    }
+    let targetUrl = null;
+    try {
+      targetUrl = new URL(String(exchange?.request?.target || ''));
+    } catch (_) {
+      fail(`${key}_request_target_malformed`, { actual: exchange?.request?.target });
+    }
+    if (targetUrl.origin !== DEFAULT_LOCAL_BASE_URL || targetUrl.pathname !== expectedTarget) {
+      fail(`${key}_request_target_invalid`, {
+        expected: `${DEFAULT_LOCAL_BASE_URL}${expectedTarget}`,
+        actual: exchange?.request?.target,
+      });
+    }
+    const httpStatus = Number(exchange?.response?.httpStatus);
+    if (!Number.isInteger(httpStatus) || httpStatus < 100 || httpStatus > 599) {
+      fail(`${key}_response_status_invalid`, { actual: exchange?.response?.httpStatus });
+    }
+    parsedExchanges[key] = {
+      requestBody: parseAssessmentStartExchangeBody(exchange, key, 'request', fail),
+      responseBody: parseAssessmentStartExchangeBody(exchange, key, 'response', fail),
+      httpStatus,
+    };
+  }
+  const declarationCapturedAt = Date.parse(artifact.exchanges.declaration.capturedAt);
+  const saveCapturedAt = Date.parse(artifact.exchanges.assessmentSave.capturedAt);
+  if (declarationCapturedAt > saveCapturedAt) {
+    fail('exchange_order_invalid', {
+      declarationCapturedAt: artifact.exchanges.declaration.capturedAt,
+      assessmentSaveCapturedAt: artifact.exchanges.assessmentSave.capturedAt,
+    });
+  }
+  const declaration = parsedExchanges.declaration;
+  const assessmentSave = parsedExchanges.assessmentSave;
+  return validateAssessmentStartJourneyEvidence({
+    attemptStamp: artifact.attemptStamp,
+    actor: artifact.actor,
+    declarationRequest: {
+      applicationId: declaration.requestBody.applicationId,
+      expectedRowVersion: declaration.requestBody.expectedRowVersion,
+      signed: declaration.requestBody.assessment_conflict_declaration_signed,
+      choice: declaration.requestBody.assessment_conflict_declaration_choice,
+      hasStatusFields: assessmentStartRequestHasStatusFields(declaration.requestBody),
+      httpStatus: declaration.httpStatus,
+      responseSuccess: declaration.responseBody.success,
+    },
+    saveRequest: {
+      applicationId: assessmentSave.requestBody.applicationId,
+      expectedRowVersion: assessmentSave.requestBody.expectedRowVersion,
+      overview: assessmentSave.requestBody.case_summary,
+      hasStatusFields: assessmentStartRequestHasStatusFields(assessmentSave.requestBody),
+    },
+    saveResponse: {
+      httpStatus: assessmentSave.httpStatus,
+      success: assessmentSave.responseBody.success,
+    },
+    prerequisites: artifact.prerequisites,
+    before: artifact.snapshots.before,
+    afterDeclaration: artifact.snapshots.afterDeclaration,
+    afterSave: artifact.snapshots.afterSave,
+  });
+}
+
+function replayAssessmentStartJourneyArtifact(serializedArtifact) {
+  if (typeof serializedArtifact !== 'string' || !serializedArtifact.trim()) {
+    const error = new Error('assessment_start_artifact_invalid:serialized_artifact_missing');
+    error.code = 'assessment_start_artifact_serialized_artifact_missing';
+    throw error;
+  }
+  let artifact;
+  try {
+    artifact = JSON.parse(serializedArtifact);
+  } catch (cause) {
+    const error = new Error('assessment_start_artifact_invalid:serialized_artifact_malformed');
+    error.code = 'assessment_start_artifact_serialized_artifact_malformed';
+    error.details = { cause: cause?.message || String(cause) };
+    throw error;
+  }
+  return validateAssessmentStartJourneyArtifact(artifact);
+}
+
 function validateAssessmentStartJourneyEvidence(evidence) {
   const fail = (code, details = {}) => {
     const error = new Error(`assessment_start_journey_evidence_invalid:${code}`);
@@ -616,15 +876,30 @@ function validateAssessmentStartJourneyEvidence(evidence) {
   }
 
   if (
-    Number(declarationRequest?.applicationId) !== selectedId ||
-    Number(declarationRequest?.expectedRowVersion) !== Number(before.selected.row_version) ||
-    declarationRequest?.signed !== true ||
-    declarationRequest?.choice !== 'no_conflict' ||
-    declarationRequest?.hasStatusFields !== false ||
-    Number(declarationRequest?.httpStatus) < 200 ||
-    Number(declarationRequest?.httpStatus) >= 300
-  ) {
-    fail('declaration_request_invalid', { declarationRequest });
+    Number(declarationRequest?.applicationId) !== selectedId
+  ) fail('declaration_application_id_invalid', { expected: selectedId, actual: declarationRequest?.applicationId });
+  if (
+    Number(declarationRequest?.expectedRowVersion) !== Number(before.selected.row_version)
+  ) fail('declaration_row_version_invalid', {
+    expected: Number(before.selected.row_version),
+    actual: declarationRequest?.expectedRowVersion,
+  });
+  if (declarationRequest?.signed !== true) {
+    fail('declaration_signed_invalid', { actual: declarationRequest?.signed });
+  }
+  if (declarationRequest?.choice !== 'no_conflict') {
+    fail('declaration_choice_invalid', { actual: declarationRequest?.choice });
+  }
+  if (declarationRequest?.hasStatusFields !== false) {
+    fail('declaration_authored_status', { actual: declarationRequest?.hasStatusFields });
+  }
+  if (
+    !Number.isInteger(Number(declarationRequest?.httpStatus)) ||
+    Number(declarationRequest.httpStatus) < 200 ||
+    Number(declarationRequest.httpStatus) >= 300
+  ) fail('declaration_response_http_invalid', { actual: declarationRequest?.httpStatus });
+  if (declarationRequest?.responseSuccess !== true) {
+    fail('declaration_response_success_invalid', { actual: declarationRequest?.responseSuccess });
   }
   if (
     !sameSerializedValue(afterDeclaration.selected, before.selected) ||
@@ -649,17 +924,33 @@ function validateAssessmentStartJourneyEvidence(evidence) {
     });
   }
 
+  if (Number(saveRequest?.applicationId) !== selectedId) {
+    fail('save_request_application_id_invalid', { expected: selectedId, actual: saveRequest?.applicationId });
+  }
+  if (Number(saveRequest?.expectedRowVersion) !== Number(afterDeclaration.selected.row_version)) {
+    fail('save_request_row_version_invalid', {
+      expected: Number(afterDeclaration.selected.row_version),
+      actual: saveRequest?.expectedRowVersion,
+    });
+  }
   if (
-    Number(saveRequest?.applicationId) !== selectedId ||
-    Number(saveRequest?.expectedRowVersion) !== Number(afterDeclaration.selected.row_version) ||
     typeof saveRequest?.overview !== 'string' ||
-    !saveRequest.overview.includes(String(evidence?.attemptStamp || '')) ||
-    saveRequest?.hasStatusFields !== false ||
-    Number(saveResponse?.httpStatus) < 200 ||
-    Number(saveResponse?.httpStatus) >= 300 ||
-    saveResponse?.success !== true
-  ) {
-    fail('assessment_save_request_invalid', { saveRequest, saveResponse });
+    !saveRequest.overview.includes(String(evidence?.attemptStamp || ''))
+  ) fail('save_request_overview_invalid', {
+    attemptStamp: evidence?.attemptStamp,
+    actualType: typeof saveRequest?.overview,
+    actualLength: typeof saveRequest?.overview === 'string' ? saveRequest.overview.length : null,
+  });
+  if (saveRequest?.hasStatusFields !== false) {
+    fail('save_request_authored_status', { actual: saveRequest?.hasStatusFields });
+  }
+  if (
+    !Number.isInteger(Number(saveResponse?.httpStatus)) ||
+    Number(saveResponse.httpStatus) < 200 ||
+    Number(saveResponse.httpStatus) >= 300
+  ) fail('save_response_http_invalid', { actual: saveResponse?.httpStatus });
+  if (saveResponse?.success !== true) {
+    fail('save_response_success_invalid', { actual: saveResponse?.success });
   }
   const selectedBeforeComparable = { ...before.selected };
   const selectedAfterComparable = { ...afterSave.selected };
@@ -2853,6 +3144,9 @@ function remoteRunner() {
     .catch(async error => {
       fail('remote runner completed without crashing', {
         error: error && error.stack ? error.stack : String(error),
+        errorCode: error?.code || null,
+        errorDetails: serializeTransportCause(error?.details || null),
+        errorCause: serializeTransportCause(error?.cause || null),
         transportDiagnostics: error?.transportDiagnostics || null,
       });
       const schemaSafetyFailureCodes = new Set([
@@ -3781,7 +4075,8 @@ function remoteRunner() {
     page,
     caseId,
     applicationId,
-    readyText
+    readyText,
+    onExchangeCaptured = null
   ) {
     const gate = await page.waitForFunction(expectedText => {
       const body = document.body?.innerText || '';
@@ -3801,8 +4096,10 @@ function remoteRunner() {
     }, { timeout: 60_000 });
     await clickVisibleButton(page, 'Sign and Continue');
     const response = await responsePromise;
-    const requestBody = JSON.parse(response.request().postData() || '{}');
-    const responseText = await response.text().catch(() => '');
+    const exchange = await captureAssessmentStartBrowserExchange(response);
+    if (typeof onExchangeCaptured === 'function') onExchangeCaptured(exchange);
+    const requestBody = JSON.parse(exchange.request.bodyText || '{}');
+    const responseText = exchange.response.bodyText || '';
     if (!response.ok()) {
       throw new Error(`Conflict declaration returned ${response.status()}: ${responseText.slice(0, 500)}`);
     }
@@ -3812,7 +4109,13 @@ function remoteRunner() {
       requestBody.assessment_conflict_declaration_choice === 'no_conflict'
     ), { caseId, applicationId, requestBody, status: response.status() });
     await waitForBodyText(page, readyText);
-    return { reused: false, requestBody, httpStatus: response.status() };
+    return {
+      reused: false,
+      requestBody,
+      responseBody: parseJsonObject(responseText),
+      httpStatus: response.status(),
+      exchange,
+    };
   }
 
   async function ensureNoConflictDeclarationThroughBrowser(page, caseId, applicationId) {
@@ -6778,11 +7081,22 @@ function remoteRunner() {
     );
     const page = await authedPage(auth.manager);
     const routePath = `/application-case/${caseId}?applicationId=${applicationId}`;
+    const rawArtifact = {
+      schemaVersion: ASSESSMENT_START_JOURNEY_ARTIFACT_VERSION,
+      kind: ASSESSMENT_START_JOURNEY_ARTIFACT_KIND,
+      phase: 'before-declaration',
+      attemptStamp: config.stamp,
+      routePath,
+      actor: {
+        staffProfileId: fixture.staff.manager.staffProfileId,
+        role: fixture.staff.manager.role,
+      },
+      prerequisites,
+      snapshots: { before },
+      exchanges: {},
+    };
+    result.evidence.assessmentStartApplicationRaw = rawArtifact;
     let declarationResult = null;
-    let saveRequestBody = null;
-    let saveResponseBody = null;
-    let saveHttpStatus = null;
-    let revisedOverview = null;
     let afterDeclaration = null;
     try {
       await page.goto(`${config.localBaseUrl}${routePath}`, { waitUntil: 'domcontentloaded' });
@@ -6791,23 +7105,29 @@ function remoteRunner() {
         page,
         caseId,
         applicationId,
-        'Assess Eligibility'
+        'Assess Eligibility',
+        exchange => {
+          rawArtifact.exchanges.declaration = exchange;
+          rawArtifact.phase = 'declaration-captured';
+        }
       );
       requireInvariant('assessment start: attempt-owned case signs a new exact assigned-manager declaration', (
-        declarationResult?.reused === false
+        declarationResult?.reused === false && Boolean(declarationResult?.exchange)
       ), { routePath, declarationResult });
       afterDeclaration = await captureAssessmentStartJourneyState(
         caseId,
         applicationId,
         siblingApplicationId
       );
+      rawArtifact.snapshots.afterDeclaration = afterDeclaration;
+      rawArtifact.phase = 'after-declaration-captured';
 
       await waitForAssessmentWizardStep(page, 'eligibility');
       await clickAssessmentWizardButton(page, 'Next');
       await waitForAssessmentWizardStep(page, 'framing');
       await clickAssessmentWizardButton(page, 'Next');
       await waitForAssessmentWizardStep(page, 'rationale');
-      revisedOverview = `ASSESSMENT-START-${config.stamp}`;
+      const revisedOverview = `ASSESSMENT-START-${config.stamp}`;
       await fillFirstVisibleTextarea(page, revisedOverview);
       const responsePromise = page.waitForResponse(response => (
         response.request().method() === 'PUT' &&
@@ -6815,13 +7135,13 @@ function remoteRunner() {
       ), { timeout: 60_000 });
       await clickVisibleButton(page, 'Save Progress');
       const response = await responsePromise;
-      saveHttpStatus = response.status();
-      saveRequestBody = JSON.parse(response.request().postData() || '{}');
-      const responseText = await response.text().catch(() => '');
+      const saveExchange = await captureAssessmentStartBrowserExchange(response);
+      rawArtifact.exchanges.assessmentSave = saveExchange;
+      rawArtifact.phase = 'assessment-save-captured';
+      const responseText = saveExchange.response.bodyText || '';
       if (!response.ok()) {
         throw new Error(`First assessment Save Progress returned ${response.status()}: ${responseText.slice(0, 500)}`);
       }
-      saveResponseBody = parseJsonObject(responseText);
       await waitForBodyText(page, 'Assessment saved successfully');
     } catch (error) {
       await addBrowserFailureDiagnostics(page, 'assessment-start-application', error);
@@ -6835,44 +7155,36 @@ function remoteRunner() {
       applicationId,
       siblingApplicationId
     );
-    const hasStatusFields = body => [
-      'status',
-      'applicationStatus',
-      'application_status',
-      'applicationLifecycleStatus',
-      'application_lifecycle_status',
-    ].some(key => Object.prototype.hasOwnProperty.call(body || {}, key));
-    const evidence = {
-      attemptStamp: config.stamp,
-      actor: {
-        staffProfileId: fixture.staff.manager.staffProfileId,
-        role: fixture.staff.manager.role,
-      },
-      declarationRequest: {
-        applicationId: declarationResult?.requestBody?.applicationId,
-        expectedRowVersion: declarationResult?.requestBody?.expectedRowVersion,
-        signed: declarationResult?.requestBody?.assessment_conflict_declaration_signed,
-        choice: declarationResult?.requestBody?.assessment_conflict_declaration_choice,
-        hasStatusFields: hasStatusFields(declarationResult?.requestBody),
-        httpStatus: declarationResult?.httpStatus,
-      },
-      saveRequest: {
-        applicationId: saveRequestBody?.applicationId,
-        expectedRowVersion: saveRequestBody?.expectedRowVersion,
-        overview: saveRequestBody?.case_summary,
-        hasStatusFields: hasStatusFields(saveRequestBody),
-      },
-      saveResponse: {
-        httpStatus: saveHttpStatus,
-        success: saveResponseBody?.success,
-      },
-      prerequisites,
-      before,
-      afterDeclaration,
-      afterSave,
+    rawArtifact.snapshots.afterSave = afterSave;
+    rawArtifact.phase = 'after-save-captured';
+    const artifact = createAssessmentStartJourneyArtifact(rawArtifact);
+    const serializedArtifact = JSON.stringify(artifact);
+    const artifactSha256 = nodeCrypto.createHash('sha256').update(serializedArtifact).digest('hex');
+    result.evidence.assessmentStartApplicationRaw = artifact;
+    result.evidence.assessmentStartApplicationValidation = {
+      status: 'pending',
+      artifactSha256,
+      serializedBytes: Buffer.byteLength(serializedArtifact),
     };
-    const summary = validateAssessmentStartJourneyEvidence(evidence);
-    result.evidence.assessmentStartApplication = { ...summary, routePath };
+    let summary;
+    try {
+      summary = replayAssessmentStartJourneyArtifact(serializedArtifact);
+      result.evidence.assessmentStartApplicationValidation = {
+        ...result.evidence.assessmentStartApplicationValidation,
+        status: 'passed',
+        summary,
+      };
+    } catch (error) {
+      result.evidence.assessmentStartApplicationValidation = {
+        ...result.evidence.assessmentStartApplicationValidation,
+        status: 'failed',
+        code: error?.code || null,
+        message: error?.message || String(error),
+        details: cloneAssessmentStartEvidence(error?.details || null, 'validation_failure'),
+      };
+      throw error;
+    }
+    result.evidence.assessmentStartApplication = { ...summary, routePath, artifactSha256 };
     pass('assessment start: selected and sibling applications begin submitted under the exact assigned Regional Manager', {
       caseId,
       applicationId,
@@ -9446,6 +9758,10 @@ if (require.main === module && process.argv.includes('--remote-runner')) {
 }
 
 module.exports = {
+  ASSESSMENT_START_JOURNEY_ARTIFACT_KIND,
+  ASSESSMENT_START_JOURNEY_ARTIFACT_VERSION,
+  captureAssessmentStartBrowserExchange,
+  createAssessmentStartJourneyArtifact,
   createEncryptedFixtureEnvelope,
   createFreshLoopbackDispatcher,
   createTransferredHarnessDescriptor,
@@ -9454,9 +9770,11 @@ module.exports = {
   fetchAndReadBoundedFreshLoopback,
   fetchAndReadBoundedTransport,
   orderSelfReferencingVersionDeleteBatches,
+  replayAssessmentStartJourneyArtifact,
   sameExactRecord,
   serializeTransportCause,
   validateAssessmentStartFocusedControlEvidence,
+  validateAssessmentStartJourneyArtifact,
   validateAssessmentStartPrerequisiteEvidence,
   validateAssessmentStartJourneyEvidence,
 };

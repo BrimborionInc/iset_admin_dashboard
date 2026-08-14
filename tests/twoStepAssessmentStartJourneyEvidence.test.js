@@ -4,9 +4,15 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const {
+  ASSESSMENT_START_JOURNEY_ARTIFACT_KIND,
+  ASSESSMENT_START_JOURNEY_ARTIFACT_VERSION,
+  captureAssessmentStartBrowserExchange,
+  createAssessmentStartJourneyArtifact,
   createTransferredHarnessDescriptor,
   establishAssessmentStartFocusedControl,
+  replayAssessmentStartJourneyArtifact,
   validateAssessmentStartPrerequisiteEvidence,
+  validateAssessmentStartJourneyArtifact,
   validateAssessmentStartJourneyEvidence,
 } = require('../scripts/two-step-review-test-smoke');
 
@@ -376,6 +382,7 @@ function buildValidEvidence() {
       choice: 'no_conflict',
       hasStatusFields: false,
       httpStatus: 200,
+      responseSuccess: true,
     },
     saveRequest: {
       applicationId: 101,
@@ -389,6 +396,59 @@ function buildValidEvidence() {
     afterDeclaration,
     afterSave,
   };
+}
+
+function fakeBrowserResponse({ method = 'PUT', target, requestBody, httpStatus = 200, responseBody }) {
+  const requestBodyText = typeof requestBody === 'string' ? requestBody : JSON.stringify(requestBody);
+  const responseBodyText = typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody);
+  return {
+    request: () => ({
+      method: () => method,
+      postData: () => requestBodyText,
+    }),
+    status: () => httpStatus,
+    url: () => target,
+    text: async () => responseBodyText,
+  };
+}
+
+async function buildValidArtifact() {
+  const semantic = buildValidEvidence();
+  const target = 'http://127.0.0.1:5001/api/cases/77';
+  const declaration = await captureAssessmentStartBrowserExchange(fakeBrowserResponse({
+    target,
+    requestBody: {
+      applicationId: 101,
+      expectedRowVersion: 1,
+      assessment_conflict_declaration_signed: true,
+      assessment_conflict_declaration_choice: 'no_conflict',
+    },
+    responseBody: { success: true },
+  }));
+  const assessmentSave = await captureAssessmentStartBrowserExchange(fakeBrowserResponse({
+    target,
+    requestBody: {
+      applicationId: 101,
+      expectedRowVersion: 1,
+      case_summary: semantic.saveRequest.overview,
+    },
+    responseBody: { success: true },
+  }));
+  return createAssessmentStartJourneyArtifact({
+    schemaVersion: ASSESSMENT_START_JOURNEY_ARTIFACT_VERSION,
+    kind: ASSESSMENT_START_JOURNEY_ARTIFACT_KIND,
+    phase: 'after-save-captured',
+    attemptStamp: semantic.attemptStamp,
+    routePath: '/application-case/77?applicationId=101',
+    actor: semantic.actor,
+    prerequisites: semantic.prerequisites,
+    snapshots: {
+      before: semantic.before,
+      afterDeclaration: semantic.afterDeclaration,
+      afterSave: semantic.afterSave,
+    },
+    exchanges: { declaration, assessmentSave },
+  });
 }
 
 describe('two-step TEST assessment-start prerequisite evidence', () => {
@@ -460,7 +520,7 @@ describe('two-step TEST assessment-start prerequisite evidence', () => {
 });
 
 describe('two-step TEST assessment-start journey evidence', () => {
-  test('composes the exact focused-mode seed, capture, and full journey-validator boundary', async () => {
+  test('composes the exact focused-mode seed with captured browser bytes through serialization and replay', async () => {
     const calls = [];
     const seeded = {
       workflowId: 900,
@@ -502,11 +562,15 @@ describe('two-step TEST assessment-start journey evidence', () => {
       capturedRows: [{ id: 900, current_stage: 'rm_review' }],
     });
 
-    const evidence = buildValidEvidence();
+    const artifact = await buildValidArtifact();
     for (const key of ['before', 'afterDeclaration', 'afterSave']) {
-      evidence[key].unrelatedWorkflows = clone(control.capturedRows);
+      artifact.snapshots[key].unrelatedWorkflows = clone(control.capturedRows);
     }
-    expect(validateAssessmentStartJourneyEvidence(evidence).unrelatedWorkflowCount).toBe(1);
+    const serializedArtifact = JSON.stringify(artifact);
+    expect(replayAssessmentStartJourneyArtifact(serializedArtifact)).toEqual(
+      validateAssessmentStartJourneyArtifact(artifact)
+    );
+    expect(replayAssessmentStartJourneyArtifact(serializedArtifact).unrelatedWorkflowCount).toBe(1);
   });
 
   test('focused composition rejects a missing captured control and non-focused mode has no fixture effect', async () => {
@@ -553,6 +617,113 @@ describe('two-step TEST assessment-start journey evidence', () => {
     });
   });
 
+  test('accepts only the two documented raw exchanges and rejects ambiguous or malformed capture', async () => {
+    const extraExchange = await buildValidArtifact();
+    extraExchange.exchanges.unexpected = clone(extraExchange.exchanges.declaration);
+    expect(() => validateAssessmentStartJourneyArtifact(extraExchange)).toThrow(
+      'assessment_start_artifact_invalid:exchange_keys_invalid'
+    );
+
+    const malformedBody = await buildValidArtifact();
+    malformedBody.exchanges.assessmentSave.request.bodyText = '{not-json';
+    expect(() => validateAssessmentStartJourneyArtifact(malformedBody)).toThrow(
+      'assessment_start_artifact_invalid:assessmentSave_request_body_malformed'
+    );
+
+    const unreadableBody = await buildValidArtifact();
+    unreadableBody.exchanges.assessmentSave.response.bodyReadError = {
+      name: 'ProtocolError',
+      message: 'synthetic response body unavailable',
+    };
+    expect(() => validateAssessmentStartJourneyArtifact(unreadableBody)).toThrow(
+      'assessment_start_artifact_invalid:assessmentSave_response_body_unreadable'
+    );
+
+    const wrongOrigin = await buildValidArtifact();
+    wrongOrigin.exchanges.declaration.request.target = 'http://127.0.0.1:5000/api/cases/77';
+    expect(() => validateAssessmentStartJourneyArtifact(wrongOrigin)).toThrow(
+      'assessment_start_artifact_invalid:declaration_request_target_invalid'
+    );
+
+    const reversedOrder = await buildValidArtifact();
+    reversedOrder.exchanges.declaration.capturedAt = '2026-08-14T12:00:01.000Z';
+    reversedOrder.exchanges.assessmentSave.capturedAt = '2026-08-14T12:00:00.000Z';
+    expect(() => validateAssessmentStartJourneyArtifact(reversedOrder)).toThrow(
+      'assessment_start_artifact_invalid:exchange_order_invalid'
+    );
+  });
+
+  test('reports the exact raw field responsible for native HTTP and semantic failures', async () => {
+    const nativeFailure = await buildValidArtifact();
+    nativeFailure.exchanges.assessmentSave.response.httpStatus = 409;
+    nativeFailure.exchanges.assessmentSave.response.bodyText = JSON.stringify({ success: false });
+    expect(() => validateAssessmentStartJourneyArtifact(nativeFailure)).toThrow(
+      'assessment_start_journey_evidence_invalid:save_response_http_invalid'
+    );
+
+    const conflictingSuccess = await buildValidArtifact();
+    conflictingSuccess.exchanges.assessmentSave.response.bodyText = JSON.stringify({ success: false });
+    expect(() => validateAssessmentStartJourneyArtifact(conflictingSuccess)).toThrow(
+      'assessment_start_journey_evidence_invalid:save_response_success_invalid'
+    );
+
+    const wrongVersion = await buildValidArtifact();
+    const body = JSON.parse(wrongVersion.exchanges.assessmentSave.request.bodyText);
+    body.expectedRowVersion = 99;
+    wrongVersion.exchanges.assessmentSave.request.bodyText = JSON.stringify(body);
+    try {
+      validateAssessmentStartJourneyArtifact(wrongVersion);
+      throw new Error('expected validator rejection');
+    } catch (error) {
+      expect(error.message).toBe('assessment_start_journey_evidence_invalid:save_request_row_version_invalid');
+      expect(error.details).toEqual({ expected: 1, actual: 99 });
+    }
+  });
+
+  test('rejects malformed serialized artifacts before semantic validation', async () => {
+    expect(() => replayAssessmentStartJourneyArtifact('')).toThrow(
+      'assessment_start_artifact_invalid:serialized_artifact_missing'
+    );
+    expect(() => replayAssessmentStartJourneyArtifact('{')).toThrow(
+      'assessment_start_artifact_invalid:serialized_artifact_malformed'
+    );
+
+    const wrongRoute = await buildValidArtifact();
+    wrongRoute.routePath = '/application-case/77?applicationId=102';
+    expect(() => replayAssessmentStartJourneyArtifact(JSON.stringify(wrongRoute))).toThrow(
+      'assessment_start_artifact_invalid:route_scope_invalid'
+    );
+
+    const duplicateRouteScope = await buildValidArtifact();
+    duplicateRouteScope.routePath = '/application-case/77?applicationId=101&applicationId=101';
+    expect(() => replayAssessmentStartJourneyArtifact(JSON.stringify(duplicateRouteScope))).toThrow(
+      'assessment_start_artifact_invalid:route_scope_invalid'
+    );
+  });
+
+  test('live journey retains partial raw capture before replay and records validation detail', () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '..', 'scripts', 'two-step-review-test-smoke.js'),
+      'utf8'
+    );
+    const rawAssignment = source.indexOf('result.evidence.assessmentStartApplicationRaw = rawArtifact;');
+    const declarationCapture = source.indexOf('rawArtifact.exchanges.declaration = exchange;');
+    const saveCapture = source.indexOf('rawArtifact.exchanges.assessmentSave = saveExchange;');
+    const replay = source.indexOf('summary = replayAssessmentStartJourneyArtifact(serializedArtifact);');
+    const declarationExchangeCapture = source.indexOf('const exchange = await captureAssessmentStartBrowserExchange(response);');
+    const declarationRetentionCallback = source.indexOf("if (typeof onExchangeCaptured === 'function') onExchangeCaptured(exchange);");
+    const declarationParse = source.indexOf("const requestBody = JSON.parse(exchange.request.bodyText || '{}');");
+    expect(rawAssignment).toBeGreaterThan(-1);
+    expect(declarationCapture).toBeGreaterThan(rawAssignment);
+    expect(saveCapture).toBeGreaterThan(declarationCapture);
+    expect(replay).toBeGreaterThan(saveCapture);
+    expect(declarationExchangeCapture).toBeGreaterThan(-1);
+    expect(declarationRetentionCallback).toBeGreaterThan(declarationExchangeCapture);
+    expect(declarationParse).toBeGreaterThan(declarationRetentionCallback);
+    expect(source).toContain("status: 'failed',\n        code: error?.code || null,");
+    expect(source).toContain('errorDetails: serializeTransportCause(error?.details || null)');
+  });
+
   test('admits the other product-authorized assigned role only when its exact profile owns the case', () => {
     const evidence = buildValidEvidence();
     evidence.actor.role = 'ISET Coordinator';
@@ -582,13 +753,13 @@ describe('two-step TEST assessment-start journey evidence', () => {
     const failedResponse = buildValidEvidence();
     failedResponse.saveResponse = { httpStatus: 409, success: false };
     expect(() => validateAssessmentStartJourneyEvidence(failedResponse)).toThrow(
-      'assessment_start_journey_evidence_invalid:assessment_save_request_invalid'
+      'assessment_start_journey_evidence_invalid:save_response_http_invalid'
     );
 
     const authoredStatus = buildValidEvidence();
     authoredStatus.saveRequest.hasStatusFields = true;
     expect(() => validateAssessmentStartJourneyEvidence(authoredStatus)).toThrow(
-      'assessment_start_journey_evidence_invalid:assessment_save_request_invalid'
+      'assessment_start_journey_evidence_invalid:save_request_authored_status'
     );
   });
 
