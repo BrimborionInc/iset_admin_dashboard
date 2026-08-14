@@ -539,7 +539,7 @@ async function establishAssessmentStartFocusedControl({
   });
 }
 
-const ASSESSMENT_START_JOURNEY_ARTIFACT_VERSION = 1;
+const ASSESSMENT_START_JOURNEY_ARTIFACT_VERSION = 2;
 const ASSESSMENT_START_JOURNEY_ARTIFACT_KIND = 'assessment-start-application-status';
 
 function cloneAssessmentStartEvidence(value, label) {
@@ -621,19 +621,19 @@ function createAssessmentStartJourneyArtifact(rawCapture) {
     fail('prerequisites_invalid');
   }
   const snapshotKeys = Object.keys(artifact?.snapshots || {}).sort();
-  if (!sameSerializedValue(snapshotKeys, ['afterDeclaration', 'afterSave', 'before'])) {
+  if (!sameSerializedValue(snapshotKeys, ['afterDeclaration', 'afterFirstSave', 'before'])) {
     fail('snapshot_keys_invalid', { actual: snapshotKeys });
   }
-  for (const key of ['before', 'afterDeclaration', 'afterSave']) {
+  for (const key of ['before', 'afterDeclaration', 'afterFirstSave']) {
     if (!artifact?.snapshots?.[key] || typeof artifact.snapshots[key] !== 'object' || Array.isArray(artifact.snapshots[key])) {
       fail('snapshot_missing', { key });
     }
   }
   const exchangeKeys = Object.keys(artifact?.exchanges || {}).sort();
-  if (!sameSerializedValue(exchangeKeys, ['assessmentSave', 'declaration'])) {
+  if (!sameSerializedValue(exchangeKeys, ['declaration', 'firstAssessmentSave'])) {
     fail('exchange_keys_invalid', { actual: exchangeKeys });
   }
-  for (const key of ['declaration', 'assessmentSave']) {
+  for (const key of ['declaration', 'firstAssessmentSave']) {
     if (!artifact?.exchanges?.[key] || typeof artifact.exchanges[key] !== 'object' || Array.isArray(artifact.exchanges[key])) {
       fail('exchange_missing', { key });
     }
@@ -679,6 +679,23 @@ function assessmentStartRequestHasStatusFields(body) {
   ].some(key => Object.prototype.hasOwnProperty.call(body || {}, key));
 }
 
+function isAssessmentStartCaseMutationResponse(response, expectedTarget) {
+  if (
+    !response ||
+    typeof response.request !== 'function' ||
+    typeof response.url !== 'function' ||
+    response.url() !== expectedTarget
+  ) return false;
+  const request = response.request();
+  if (
+    !request ||
+    typeof request.method !== 'function' ||
+    typeof request.postData !== 'function' ||
+    request.method() !== 'PUT'
+  ) return false;
+  return true;
+}
+
 function validateAssessmentStartJourneyArtifact(artifactInput) {
   const artifact = createAssessmentStartJourneyArtifact(artifactInput);
   const fail = (code, details = {}) => {
@@ -712,7 +729,7 @@ function validateAssessmentStartJourneyArtifact(artifactInput) {
   }
   const expectedTarget = `/api/cases/${caseId}`;
   const parsedExchanges = {};
-  for (const key of ['declaration', 'assessmentSave']) {
+  for (const key of ['declaration', 'firstAssessmentSave']) {
     const exchange = artifact.exchanges[key];
     if (typeof exchange?.capturedAt !== 'string' || !Number.isFinite(Date.parse(exchange.capturedAt))) {
       fail(`${key}_captured_at_invalid`, { actual: exchange?.capturedAt });
@@ -743,15 +760,15 @@ function validateAssessmentStartJourneyArtifact(artifactInput) {
     };
   }
   const declarationCapturedAt = Date.parse(artifact.exchanges.declaration.capturedAt);
-  const saveCapturedAt = Date.parse(artifact.exchanges.assessmentSave.capturedAt);
+  const saveCapturedAt = Date.parse(artifact.exchanges.firstAssessmentSave.capturedAt);
   if (declarationCapturedAt > saveCapturedAt) {
     fail('exchange_order_invalid', {
       declarationCapturedAt: artifact.exchanges.declaration.capturedAt,
-      assessmentSaveCapturedAt: artifact.exchanges.assessmentSave.capturedAt,
+      firstAssessmentSaveCapturedAt: artifact.exchanges.firstAssessmentSave.capturedAt,
     });
   }
   const declaration = parsedExchanges.declaration;
-  const assessmentSave = parsedExchanges.assessmentSave;
+  const assessmentSave = parsedExchanges.firstAssessmentSave;
   return validateAssessmentStartJourneyEvidence({
     attemptStamp: artifact.attemptStamp,
     actor: artifact.actor,
@@ -769,15 +786,31 @@ function validateAssessmentStartJourneyArtifact(artifactInput) {
       expectedRowVersion: assessmentSave.requestBody.expectedRowVersion,
       overview: assessmentSave.requestBody.case_summary,
       hasStatusFields: assessmentStartRequestHasStatusFields(assessmentSave.requestBody),
+      hasAssessmentFields: [
+        'case_summary',
+        'assessment_date_of_assessment',
+        'assessment_esdc_eligibility',
+      ].every(key => Object.prototype.hasOwnProperty.call(assessmentSave.requestBody, key)),
+      hasDeclarationFields: [
+        'assessment_conflict_declaration_signed',
+        'assessment_conflict_declaration_choice',
+        'assessment_conflict_declaration_details',
+      ].some(key => Object.prototype.hasOwnProperty.call(assessmentSave.requestBody, key)),
     },
     saveResponse: {
       httpStatus: assessmentSave.httpStatus,
       success: assessmentSave.responseBody.success,
+      applicationStatus:
+        assessmentSave.responseBody.applicationStatus ?? assessmentSave.responseBody.application_status,
+      lifecycleStatus:
+        assessmentSave.responseBody.applicationLifecycleStatus ??
+        assessmentSave.responseBody.application_lifecycle_status,
+      rowVersion: assessmentSave.responseBody.application_row_version,
     },
     prerequisites: artifact.prerequisites,
     before: artifact.snapshots.before,
     afterDeclaration: artifact.snapshots.afterDeclaration,
-    afterSave: artifact.snapshots.afterSave,
+    afterSave: artifact.snapshots.afterFirstSave,
   });
 }
 
@@ -927,6 +960,12 @@ function validateAssessmentStartJourneyEvidence(evidence) {
   if (Number(saveRequest?.applicationId) !== selectedId) {
     fail('save_request_application_id_invalid', { expected: selectedId, actual: saveRequest?.applicationId });
   }
+  if (saveRequest?.hasAssessmentFields !== true || saveRequest?.hasDeclarationFields !== false) {
+    fail('save_request_contract_invalid', {
+      hasAssessmentFields: saveRequest?.hasAssessmentFields,
+      hasDeclarationFields: saveRequest?.hasDeclarationFields,
+    });
+  }
   if (Number(saveRequest?.expectedRowVersion) !== Number(afterDeclaration.selected.row_version)) {
     fail('save_request_row_version_invalid', {
       expected: Number(afterDeclaration.selected.row_version),
@@ -951,6 +990,20 @@ function validateAssessmentStartJourneyEvidence(evidence) {
   ) fail('save_response_http_invalid', { actual: saveResponse?.httpStatus });
   if (saveResponse?.success !== true) {
     fail('save_response_success_invalid', { actual: saveResponse?.success });
+  }
+  if (
+    saveResponse?.applicationStatus !== 'in_review' ||
+    saveResponse?.lifecycleStatus !== 'in_review' ||
+    Number(saveResponse?.rowVersion) !== Number(afterDeclaration.selected.row_version) + 1
+  ) {
+    fail('save_response_transition_invalid', {
+      expected: {
+        applicationStatus: 'in_review',
+        lifecycleStatus: 'in_review',
+        rowVersion: Number(afterDeclaration.selected.row_version) + 1,
+      },
+      actual: saveResponse,
+    });
   }
   const selectedBeforeComparable = { ...before.selected };
   const selectedAfterComparable = { ...afterSave.selected };
@@ -5918,6 +5971,7 @@ function remoteRunner() {
       await seedApplicationAssessmentCase('assessmentStartApplication', {
         assignedStaffProfileId: fixture.staff.manager.staffProfileId,
         includeEiConsent: true,
+        overview: `ASSESSMENT-START-${config.stamp}`,
       });
       await seedRepeatApplicationSibling('assessmentStartSibling', 'assessmentStartApplication');
       await query(
@@ -6042,6 +6096,9 @@ function remoteRunner() {
        VALUES (?, ?, ?, CAST(? AS JSON), 'in_review', 'in_review', NULL, NULL, NOW(), NOW(), 1)`,
       [submissionId, fixture.client, caseId, json(payload)]
     );
+    const assessmentOverview = typeof options.overview === 'string' && options.overview.trim()
+      ? options.overview.trim()
+      : 'Synthetic assessment case for two-step review smoke.';
     await query(
       `INSERT INTO iset_application_assessment
          (application_id, case_id, date_of_assessment, overview, employment_goals,
@@ -6058,7 +6115,7 @@ function remoteRunner() {
       [
         applicationId,
         caseId,
-        'Synthetic assessment case for two-step review smoke.',
+        assessmentOverview,
         'Complete short training and move into employment.',
         json(['Lack of Marketable Skills']),
         json(['Off Reserve']),
@@ -7123,26 +7180,20 @@ function remoteRunner() {
       rawArtifact.phase = 'after-declaration-captured';
 
       await waitForAssessmentWizardStep(page, 'eligibility');
-      await clickAssessmentWizardButton(page, 'Next');
-      await waitForAssessmentWizardStep(page, 'framing');
-      await clickAssessmentWizardButton(page, 'Next');
-      await waitForAssessmentWizardStep(page, 'rationale');
-      const revisedOverview = `ASSESSMENT-START-${config.stamp}`;
-      await fillFirstVisibleTextarea(page, revisedOverview);
-      const responsePromise = page.waitForResponse(response => (
-        response.request().method() === 'PUT' &&
-        response.url() === `${config.localBaseUrl}/api/cases/${caseId}`
+      const firstSaveTarget = `${config.localBaseUrl}/api/cases/${caseId}`;
+      const firstSaveResponsePromise = page.waitForResponse(response => (
+        isAssessmentStartCaseMutationResponse(response, firstSaveTarget)
       ), { timeout: 60_000 });
-      await clickVisibleButton(page, 'Save Progress');
-      const response = await responsePromise;
+      await clickAssessmentWizardButton(page, 'Next');
+      const response = await firstSaveResponsePromise;
       const saveExchange = await captureAssessmentStartBrowserExchange(response);
-      rawArtifact.exchanges.assessmentSave = saveExchange;
-      rawArtifact.phase = 'assessment-save-captured';
+      rawArtifact.exchanges.firstAssessmentSave = saveExchange;
+      rawArtifact.phase = 'first-assessment-save-captured';
       const responseText = saveExchange.response.bodyText || '';
       if (!response.ok()) {
-        throw new Error(`First assessment Save Progress returned ${response.status()}: ${responseText.slice(0, 500)}`);
+        throw new Error(`First assessment navigation save returned ${response.status()}: ${responseText.slice(0, 500)}`);
       }
-      await waitForBodyText(page, 'Assessment saved successfully');
+      await waitForAssessmentWizardStep(page, 'framing');
     } catch (error) {
       await addBrowserFailureDiagnostics(page, 'assessment-start-application', error);
       throw error;
@@ -7155,8 +7206,8 @@ function remoteRunner() {
       applicationId,
       siblingApplicationId
     );
-    rawArtifact.snapshots.afterSave = afterSave;
-    rawArtifact.phase = 'after-save-captured';
+    rawArtifact.snapshots.afterFirstSave = afterSave;
+    rawArtifact.phase = 'after-first-save-captured';
     const artifact = createAssessmentStartJourneyArtifact(rawArtifact);
     const serializedArtifact = JSON.stringify(artifact);
     const artifactSha256 = nodeCrypto.createHash('sha256').update(serializedArtifact).digest('hex');
@@ -9769,6 +9820,7 @@ module.exports = {
   establishAssessmentStartFocusedControl,
   fetchAndReadBoundedFreshLoopback,
   fetchAndReadBoundedTransport,
+  isAssessmentStartCaseMutationResponse,
   orderSelfReferencingVersionDeleteBatches,
   replayAssessmentStartJourneyArtifact,
   sameExactRecord,

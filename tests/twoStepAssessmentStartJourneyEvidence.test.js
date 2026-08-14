@@ -10,6 +10,7 @@ const {
   createAssessmentStartJourneyArtifact,
   createTransferredHarnessDescriptor,
   establishAssessmentStartFocusedControl,
+  isAssessmentStartCaseMutationResponse,
   replayAssessmentStartJourneyArtifact,
   validateAssessmentStartPrerequisiteEvidence,
   validateAssessmentStartJourneyArtifact,
@@ -389,8 +390,16 @@ function buildValidEvidence() {
       expectedRowVersion: 1,
       overview: `ASSESSMENT-START-${attemptStamp}`,
       hasStatusFields: false,
+      hasAssessmentFields: true,
+      hasDeclarationFields: false,
     },
-    saveResponse: { httpStatus: 200, success: true },
+    saveResponse: {
+      httpStatus: 200,
+      success: true,
+      applicationStatus: 'in_review',
+      lifecycleStatus: 'in_review',
+      rowVersion: 2,
+    },
     prerequisites,
     before,
     afterDeclaration,
@@ -425,19 +434,26 @@ async function buildValidArtifact() {
     },
     responseBody: { success: true },
   }));
-  const assessmentSave = await captureAssessmentStartBrowserExchange(fakeBrowserResponse({
+  const firstAssessmentSave = await captureAssessmentStartBrowserExchange(fakeBrowserResponse({
     target,
     requestBody: {
       applicationId: 101,
       expectedRowVersion: 1,
+      assessment_date_of_assessment: '2026-08-13',
+      assessment_esdc_eligibility: 'CRF',
       case_summary: semantic.saveRequest.overview,
     },
-    responseBody: { success: true },
+    responseBody: {
+      success: true,
+      applicationStatus: 'in_review',
+      application_lifecycle_status: 'in_review',
+      application_row_version: 2,
+    },
   }));
   return createAssessmentStartJourneyArtifact({
     schemaVersion: ASSESSMENT_START_JOURNEY_ARTIFACT_VERSION,
     kind: ASSESSMENT_START_JOURNEY_ARTIFACT_KIND,
-    phase: 'after-save-captured',
+    phase: 'after-first-save-captured',
     attemptStamp: semantic.attemptStamp,
     routePath: '/application-case/77?applicationId=101',
     actor: semantic.actor,
@@ -445,9 +461,9 @@ async function buildValidArtifact() {
     snapshots: {
       before: semantic.before,
       afterDeclaration: semantic.afterDeclaration,
-      afterSave: semantic.afterSave,
+      afterFirstSave: semantic.afterSave,
     },
-    exchanges: { declaration, assessmentSave },
+    exchanges: { declaration, firstAssessmentSave },
   });
 }
 
@@ -520,6 +536,53 @@ describe('two-step TEST assessment-start prerequisite evidence', () => {
 });
 
 describe('two-step TEST assessment-start journey evidence', () => {
+  test('captures the first exact case mutation without pre-validating away malformed evidence', () => {
+    const target = 'http://127.0.0.1:5001/api/cases/77';
+    const valid = fakeBrowserResponse({
+      target,
+      requestBody: {
+        applicationId: 101,
+        expectedRowVersion: 1,
+        assessment_date_of_assessment: '2026-08-13',
+        assessment_esdc_eligibility: 'CRF',
+        case_summary: 'ASSESSMENT-START-attempt-r4',
+      },
+      responseBody: { success: true },
+    });
+    expect(isAssessmentStartCaseMutationResponse(valid, target)).toBe(true);
+
+    const declaration = fakeBrowserResponse({
+      target,
+      requestBody: {
+        applicationId: 101,
+        assessment_conflict_declaration_signed: true,
+        assessment_conflict_declaration_choice: 'no_conflict',
+      },
+      responseBody: { success: true },
+    });
+    expect(isAssessmentStartCaseMutationResponse(declaration, target)).toBe(true);
+
+    const wrongApplication = fakeBrowserResponse({
+      target,
+      requestBody: {
+        applicationId: 102,
+        assessment_date_of_assessment: '2026-08-13',
+        assessment_esdc_eligibility: 'CRF',
+        case_summary: 'ASSESSMENT-START-attempt-r4',
+      },
+      responseBody: { success: true },
+    });
+    expect(isAssessmentStartCaseMutationResponse(wrongApplication, target)).toBe(true);
+    expect(isAssessmentStartCaseMutationResponse(valid, 'http://127.0.0.1:5001/api/cases/78')).toBe(false);
+    const wrongMethod = fakeBrowserResponse({
+      method: 'POST',
+      target,
+      requestBody: '{malformed',
+      responseBody: { success: false },
+    });
+    expect(isAssessmentStartCaseMutationResponse(wrongMethod, target)).toBe(false);
+  });
+
   test('composes the exact focused-mode seed with captured browser bytes through serialization and replay', async () => {
     const calls = [];
     const seeded = {
@@ -563,7 +626,7 @@ describe('two-step TEST assessment-start journey evidence', () => {
     });
 
     const artifact = await buildValidArtifact();
-    for (const key of ['before', 'afterDeclaration', 'afterSave']) {
+    for (const key of ['before', 'afterDeclaration', 'afterFirstSave']) {
       artifact.snapshots[key].unrelatedWorkflows = clone(control.capturedRows);
     }
     const serializedArtifact = JSON.stringify(artifact);
@@ -625,18 +688,18 @@ describe('two-step TEST assessment-start journey evidence', () => {
     );
 
     const malformedBody = await buildValidArtifact();
-    malformedBody.exchanges.assessmentSave.request.bodyText = '{not-json';
+    malformedBody.exchanges.firstAssessmentSave.request.bodyText = '{not-json';
     expect(() => validateAssessmentStartJourneyArtifact(malformedBody)).toThrow(
-      'assessment_start_artifact_invalid:assessmentSave_request_body_malformed'
+      'assessment_start_artifact_invalid:firstAssessmentSave_request_body_malformed'
     );
 
     const unreadableBody = await buildValidArtifact();
-    unreadableBody.exchanges.assessmentSave.response.bodyReadError = {
+    unreadableBody.exchanges.firstAssessmentSave.response.bodyReadError = {
       name: 'ProtocolError',
       message: 'synthetic response body unavailable',
     };
     expect(() => validateAssessmentStartJourneyArtifact(unreadableBody)).toThrow(
-      'assessment_start_artifact_invalid:assessmentSave_response_body_unreadable'
+      'assessment_start_artifact_invalid:firstAssessmentSave_response_body_unreadable'
     );
 
     const wrongOrigin = await buildValidArtifact();
@@ -647,7 +710,7 @@ describe('two-step TEST assessment-start journey evidence', () => {
 
     const reversedOrder = await buildValidArtifact();
     reversedOrder.exchanges.declaration.capturedAt = '2026-08-14T12:00:01.000Z';
-    reversedOrder.exchanges.assessmentSave.capturedAt = '2026-08-14T12:00:00.000Z';
+    reversedOrder.exchanges.firstAssessmentSave.capturedAt = '2026-08-14T12:00:00.000Z';
     expect(() => validateAssessmentStartJourneyArtifact(reversedOrder)).toThrow(
       'assessment_start_artifact_invalid:exchange_order_invalid'
     );
@@ -655,22 +718,34 @@ describe('two-step TEST assessment-start journey evidence', () => {
 
   test('reports the exact raw field responsible for native HTTP and semantic failures', async () => {
     const nativeFailure = await buildValidArtifact();
-    nativeFailure.exchanges.assessmentSave.response.httpStatus = 409;
-    nativeFailure.exchanges.assessmentSave.response.bodyText = JSON.stringify({ success: false });
+    nativeFailure.exchanges.firstAssessmentSave.response.httpStatus = 409;
+    nativeFailure.exchanges.firstAssessmentSave.response.bodyText = JSON.stringify({ success: false });
     expect(() => validateAssessmentStartJourneyArtifact(nativeFailure)).toThrow(
       'assessment_start_journey_evidence_invalid:save_response_http_invalid'
     );
 
     const conflictingSuccess = await buildValidArtifact();
-    conflictingSuccess.exchanges.assessmentSave.response.bodyText = JSON.stringify({ success: false });
+    conflictingSuccess.exchanges.firstAssessmentSave.response.bodyText = JSON.stringify({ success: false });
     expect(() => validateAssessmentStartJourneyArtifact(conflictingSuccess)).toThrow(
       'assessment_start_journey_evidence_invalid:save_response_success_invalid'
     );
 
+    const contradictoryTransition = await buildValidArtifact();
+    const contradictoryResponse = JSON.parse(
+      contradictoryTransition.exchanges.firstAssessmentSave.response.bodyText
+    );
+    contradictoryResponse.applicationStatus = 'submitted';
+    contradictoryTransition.exchanges.firstAssessmentSave.response.bodyText = JSON.stringify(
+      contradictoryResponse
+    );
+    expect(() => validateAssessmentStartJourneyArtifact(contradictoryTransition)).toThrow(
+      'assessment_start_journey_evidence_invalid:save_response_transition_invalid'
+    );
+
     const wrongVersion = await buildValidArtifact();
-    const body = JSON.parse(wrongVersion.exchanges.assessmentSave.request.bodyText);
+    const body = JSON.parse(wrongVersion.exchanges.firstAssessmentSave.request.bodyText);
     body.expectedRowVersion = 99;
-    wrongVersion.exchanges.assessmentSave.request.bodyText = JSON.stringify(body);
+    wrongVersion.exchanges.firstAssessmentSave.request.bodyText = JSON.stringify(body);
     try {
       validateAssessmentStartJourneyArtifact(wrongVersion);
       throw new Error('expected validator rejection');
@@ -708,7 +783,7 @@ describe('two-step TEST assessment-start journey evidence', () => {
     );
     const rawAssignment = source.indexOf('result.evidence.assessmentStartApplicationRaw = rawArtifact;');
     const declarationCapture = source.indexOf('rawArtifact.exchanges.declaration = exchange;');
-    const saveCapture = source.indexOf('rawArtifact.exchanges.assessmentSave = saveExchange;');
+    const saveCapture = source.indexOf('rawArtifact.exchanges.firstAssessmentSave = saveExchange;');
     const replay = source.indexOf('summary = replayAssessmentStartJourneyArtifact(serializedArtifact);');
     const declarationExchangeCapture = source.indexOf('const exchange = await captureAssessmentStartBrowserExchange(response);');
     const declarationRetentionCallback = source.indexOf("if (typeof onExchangeCaptured === 'function') onExchangeCaptured(exchange);");
@@ -722,6 +797,43 @@ describe('two-step TEST assessment-start journey evidence', () => {
     expect(declarationParse).toBeGreaterThan(declarationRetentionCallback);
     expect(source).toContain("status: 'failed',\n        code: error?.code || null,");
     expect(source).toContain('errorDetails: serializeTransportCause(error?.details || null)');
+    const journeyStart = source.indexOf('async function runAssessmentStartApplicationWorkflow(auth)');
+    const journeyEnd = source.indexOf('async function runApplicationAssessmentWorkflow(auth)');
+    const journeySource = source.slice(journeyStart, journeyEnd);
+    const waitForFirstSave = journeySource.indexOf('const firstSaveResponsePromise = page.waitForResponse');
+    const firstNext = journeySource.indexOf("await clickAssessmentWizardButton(page, 'Next');");
+    const captureFirstSave = journeySource.indexOf('const response = await firstSaveResponsePromise;');
+    expect(waitForFirstSave).toBeGreaterThan(-1);
+    expect(firstNext).toBeGreaterThan(waitForFirstSave);
+    expect(captureFirstSave).toBeGreaterThan(firstNext);
+    expect(journeySource.match(/clickAssessmentWizardButton\(page, 'Next'\)/g)).toHaveLength(1);
+    expect(journeySource).not.toContain("clickVisibleButton(page, 'Save Progress')");
+  });
+
+  test('follows the product-owned navigation auto-save and row-version lifecycle', () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '..', 'src', 'widgets', 'CoordinatorAssessmentWidget.js'),
+      'utf8'
+    );
+    const navigationStart = source.indexOf('const handleWizardNavigate = async ({ detail }) => {');
+    const navigationEnd = source.indexOf('const canRecallAssessmentSubmission', navigationStart);
+    const navigation = source.slice(navigationStart, navigationEnd);
+    const silentSave = navigation.indexOf('const autoSaveResult = await handleSave({ silent: true });');
+    const stepChange = navigation.indexOf('setCurrentStep(requestedStepId);');
+    expect(navigationStart).toBeGreaterThan(-1);
+    expect(silentSave).toBeGreaterThan(-1);
+    expect(stepChange).toBeGreaterThan(silentSave);
+
+    const saveStart = source.indexOf('const handleSave = async ({ silent = false } = {}) => {');
+    const saveEnd = source.indexOf('// Lock editing state if final decision has been recorded', saveStart);
+    const save = source.slice(saveStart, saveEnd);
+    const versionRead = save.indexOf('const versionToken = Number(applicationRowVersionState');
+    const requestDispatch = save.indexOf("const res = await apiFetch(`/api/cases/${caseData.id}`");
+    const versionUpdate = save.indexOf('updateRowVersion(updatedRowVersion);');
+    expect(saveStart).toBeGreaterThan(-1);
+    expect(versionRead).toBeGreaterThan(-1);
+    expect(requestDispatch).toBeGreaterThan(versionRead);
+    expect(versionUpdate).toBeGreaterThan(requestDispatch);
   });
 
   test('admits the other product-authorized assigned role only when its exact profile owns the case', () => {
@@ -760,6 +872,13 @@ describe('two-step TEST assessment-start journey evidence', () => {
     authoredStatus.saveRequest.hasStatusFields = true;
     expect(() => validateAssessmentStartJourneyEvidence(authoredStatus)).toThrow(
       'assessment_start_journey_evidence_invalid:save_request_authored_status'
+    );
+
+    const declarationShapedSave = buildValidEvidence();
+    declarationShapedSave.saveRequest.hasAssessmentFields = false;
+    declarationShapedSave.saveRequest.hasDeclarationFields = true;
+    expect(() => validateAssessmentStartJourneyEvidence(declarationShapedSave)).toThrow(
+      'assessment_start_journey_evidence_invalid:save_request_contract_invalid'
     );
   });
 
