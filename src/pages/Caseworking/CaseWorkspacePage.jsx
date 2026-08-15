@@ -525,6 +525,7 @@ const CaseWorkspacePage = ({
         <WidgetComponent
           actions={enhancedActions}
           metadata={item.data}
+          workspaceMode="case"
           workspaceEntry={workspaceEntry}
           toggleHelpPanel={toggleHelpPanel}
         />

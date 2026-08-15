@@ -28,7 +28,7 @@ const ApplicationEventsHelp = () => (
     <ul>
       <li>Use the search box to filter for keywords such as "approved" or a specific team member.</li>
       <li>Sort the Date/Time column to review the most recent activity or replay events in order.</li>
-      <li>Reminder events include an action to acknowledge and clear the reminder.</li>
+      <li>Reminder events are read-only here. Use Case Calendar or Notes and Tasks to acknowledge them.</li>
       <li>Use the download action to export the timeline as CSV when needed.</li>
     </ul>
 
@@ -43,7 +43,8 @@ const ApplicationEventsHelp = () => (
 
 ApplicationEventsHelp.aiContext = `
 You are assisting an ISET program user reviewing the Events widget. Explain how to interpret event messages, filter the
-list, sort by date, acknowledge reminders, and export CSV when needed. Focus on operational awareness and audit readiness.
+list, sort by date, and export CSV when needed. The timeline is audit-only; direct users to Case Calendar or Notes and
+Tasks to acknowledge reminders. Focus on operational awareness and audit readiness.
 `;
 
 export default ApplicationEventsHelp;

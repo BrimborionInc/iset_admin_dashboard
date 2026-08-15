@@ -16,6 +16,7 @@ import {
   Table
 } from '@cloudscape-design/components';
 import HomeWorkQueueHelp from '../../../helpPanelContents/homeWorkQueueHelp';
+import { preserveWorkQueueApplicationScope } from '../workQueueWorkspacePath';
 
 export const PROGRAM_ADMIN_BUCKETS = [
   {
@@ -293,15 +294,17 @@ const storeBucketPreferences = ({ storageKey, visibleContent }) => {
   }
 };
 
-const getWorkspacePath = item => {
-  if (item?.workspacePath) return item.workspacePath;
+export const getWorkspacePath = item => {
   const caseId = item?.case_id || item?.caseId || null;
+  if (item?.workspacePath) {
+    return preserveWorkQueueApplicationScope(item.workspacePath, item);
+  }
   if (!caseId) return null;
   const type = (item?.type || '').toString().trim().toLowerCase();
   if (type.includes('intervention') || type.includes('case')) {
-    return `/cases/${caseId}`;
+    return preserveWorkQueueApplicationScope(`/cases/${caseId}`, item);
   }
-  return `/application-case/${caseId}`;
+  return preserveWorkQueueApplicationScope(`/application-case/${caseId}`, item);
 };
 
 const toBoardItemI18n = () => ({

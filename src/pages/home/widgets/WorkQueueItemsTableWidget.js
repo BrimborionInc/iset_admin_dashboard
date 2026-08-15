@@ -54,6 +54,7 @@ import {
   sortWorkQueueItems,
   toSortTimestamp,
 } from './workQueueItemsSorting';
+import { preserveWorkQueueApplicationScope } from '../workQueueWorkspacePath';
 
 const COLUMN_WIDTHS_STORAGE_KEY = 'work-queue-items-column-widths-v1';
 const WATCHLIST_REFRESH_EVENT = 'watchlist:refresh';
@@ -148,35 +149,38 @@ const toDate = value => {
 };
 
 export const getWorkspacePath = item => {
-  if (item?.workspacePath) return item.workspacePath;
   const caseId = item?.case_id || item?.caseId || null;
+  if (item?.workspacePath) {
+    return preserveWorkQueueApplicationScope(item.workspacePath, item);
+  }
   if (!caseId) return null;
   const applicationId = item?.application_id || item?.applicationId || null;
   const type = (item?.type || '').toString().trim().toLowerCase();
   if (type.includes('interventionapproval')) {
-    return buildApprovalWorkspacePath({
+    return preserveWorkQueueApplicationScope(buildApprovalWorkspacePath({
       basePath: `/cases/${caseId}`,
       approvalType: 'intervention',
       step: 'decision',
       applicationId,
       interventionId: item?.interventionId || item?.intervention_id || null,
       planId: item?.actionPlanId || item?.action_plan_id || null,
-    });
+    }), item);
   }
   if (type.includes('awaitingapproval')) {
-    return buildApprovalWorkspacePath({
+    return preserveWorkQueueApplicationScope(buildApprovalWorkspacePath({
       basePath: `/application-case/${caseId}`,
       approvalType: 'application',
       step: 'decision',
       applicationId,
-    });
+    }), item);
   }
   if (type.includes('intervention') || type.includes('case')) {
-    return `/cases/${caseId}`;
+    return preserveWorkQueueApplicationScope(`/cases/${caseId}`, item);
   }
-  return applicationId
+  const fallbackPath = applicationId
     ? `/application-case/${caseId}?applicationId=${encodeURIComponent(applicationId)}`
     : `/application-case/${caseId}`;
+  return preserveWorkQueueApplicationScope(fallbackPath, item);
 };
 
 const hasAssignedOwner = item =>

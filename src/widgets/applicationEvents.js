@@ -335,7 +335,6 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel, metadata = {} }
   const [filteringText, setFilteringText] = useState('');
   const [sortingColumn, setSortingColumn] = useState({ sortingField: 'created_at' });
   const [isDescending, setIsDescending] = useState(true);
-  const [ackLoadingId, setAckLoadingId] = useState(null);
   const [csvGenerating, setCsvGenerating] = useState(false);
 
   const caseId = caseData?.id || caseData?.case_id || null;
@@ -387,25 +386,6 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel, metadata = {} }
       }
     };
   }, [caseId, loadEvents]);
-
-  const handleAcknowledgeReminder = async reminderId => {
-    if (!reminderId || !caseId) return;
-    setAckLoadingId(reminderId);
-    try {
-      const res = await apiFetch(`/api/reminders/${reminderId}/acknowledge`, { method: 'POST' });
-      if (!res.ok) throw res;
-      loadEvents({ silent: true });
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('case-reminders-refresh', { detail: { caseId } }));
-        window.dispatchEvent(new CustomEvent('case-notes-refresh', { detail: { caseId } }));
-      }
-    } catch (err) {
-      // surface minimal error inline
-      console.error('Failed to acknowledge reminder', err);
-    } finally {
-      setAckLoadingId(null);
-    }
-  };
 
   const parseEventDate = useCallback((value) => {
     if (!value) return null;
@@ -486,28 +466,6 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel, metadata = {} }
       id: 'actor',
       header: 'Actor',
       cell: item => item.actorDisplay || ''
-    },
-    {
-      id: 'actions',
-      header: 'Actions',
-      cell: item => {
-        const reminderId = item?.event_data?.reminder_id;
-        const isReminderEvent = item?.event_type?.startsWith('reminder_') && reminderId;
-        const isCompleted =
-          item?.event_type === 'reminder_completed' ||
-          (item?.event_data?.status || '').toLowerCase() === 'completed' ||
-          (item?.event_data?.status || '').toLowerCase() === 'cancelled';
-        if (!isReminderEvent || isCompleted) return '';
-        return (
-          <Button
-            variant="inline-link"
-            onClick={() => handleAcknowledgeReminder(reminderId)}
-            loading={ackLoadingId === reminderId}
-          >
-            Acknowledge reminder
-          </Button>
-        );
-      }
     }
   ];
 

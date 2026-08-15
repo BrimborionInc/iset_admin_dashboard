@@ -32,7 +32,7 @@ describe('application assessment EI correction', () => {
     expect(assessmentWidgetSource).toContain("res.status === 409 && result?.error === 'row_version_conflict'");
   });
 
-  test('backend blocks changed EI eligibility once plan or intervention dependencies exist', () => {
+  test('backend blocks changed EI eligibility only for exact or unresolved application dependencies', () => {
     const guardBlock = extractBetween(
       serverSource,
       'if (eligibilityUpdateRequested) {',
@@ -43,6 +43,10 @@ describe('application assessment EI correction', () => {
     expect(guardBlock).toContain('const eligibilityChanged = existingKey !== incomingKey;');
     expect(guardBlock).toContain('FROM iset_case_action_plan');
     expect(guardBlock).toContain('FROM iset_case_intervention');
+    expect(guardBlock).toContain('(ap.application_id = ? OR ap.application_id IS NULL)');
+    expect(guardBlock).toContain('LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id');
+    expect(guardBlock).toContain('ci.action_plan_id IS NULL');
+    expect(guardBlock).toContain('[caseId, applicationId, caseId, caseId, applicationId]');
     expect(guardBlock).toContain("error: 'ei_eligibility_dependency_blocked'");
     expect(guardBlock).toContain('EI status cannot be changed here because an action plan or intervention already exists.');
   });

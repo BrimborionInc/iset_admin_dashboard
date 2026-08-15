@@ -51,6 +51,77 @@ const SEVERITY_LABEL = {
 
 const NOT_RECORDED = 'Not recorded';
 
+const normalizeCalendarScopeId = value => {
+  if (typeof value === 'string' && !/^[0-9]+$/.test(value.trim())) return null;
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : null;
+};
+
+export const resolveCaseCalendarReminderScope = ({
+  caseId,
+  applicationId = null,
+  workspaceMode = null,
+} = {}) => {
+  const normalizedCaseId = normalizeCalendarScopeId(caseId);
+  const normalizedApplicationId = normalizeCalendarScopeId(applicationId);
+  const scopeMode = workspaceMode === 'application' || workspaceMode === 'case'
+    ? workspaceMode
+    : null;
+  return {
+    scopeMode,
+    caseId: normalizedCaseId,
+    applicationId: scopeMode === 'application' ? normalizedApplicationId : null,
+    valid: Boolean(
+      scopeMode && normalizedCaseId && (scopeMode === 'case' || normalizedApplicationId)
+    ),
+  };
+};
+
+export const buildCaseCalendarRemindersUrl = scope => {
+  if (!scope?.valid) return null;
+  const params = [
+    `caseId=${encodeURIComponent(scope.caseId)}`,
+    `scopeMode=${encodeURIComponent(scope.scopeMode)}`,
+  ];
+  if (scope.scopeMode === 'application') {
+    params.push(`applicationId=${encodeURIComponent(scope.applicationId)}`);
+  }
+  return `/api/reminders?${params.join('&')}`;
+};
+
+export const reminderMatchesCaseCalendarScope = (reminder, scope) => {
+  if (!scope?.valid || !reminder) return false;
+  const reminderCaseId = normalizeCalendarScopeId(reminder.caseId ?? reminder.case_id);
+  if (reminderCaseId !== scope.caseId) return false;
+  if (scope.scopeMode === 'case') return true;
+
+  const reminderApplicationId = normalizeCalendarScopeId(
+    reminder.applicationId ?? reminder.application_id
+  );
+  if (reminderApplicationId === scope.applicationId) return true;
+  const actionPlanId = normalizeCalendarScopeId(reminder.actionPlanId ?? reminder.action_plan_id);
+  const interventionId = normalizeCalendarScopeId(
+    reminder.interventionId ?? reminder.intervention_id
+  );
+  return !reminderApplicationId && !actionPlanId && !interventionId;
+};
+
+export const buildCaseCalendarAcknowledgementRequest = scope => {
+  if (!scope?.valid) return null;
+  const expectedScope = {
+    scopeMode: scope.scopeMode,
+    expectedCaseId: scope.caseId,
+  };
+  if (scope.scopeMode === 'application') {
+    expectedScope.expectedApplicationId = scope.applicationId;
+  }
+  return {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(expectedScope),
+  };
+};
+
 const deriveReminderSeverity = reminder => {
   if (!reminder || !reminder.dueAt) return 'info';
   const diffDays = getReminderBusinessDayDiffDays(reminder.dueAt, new Date());
@@ -140,7 +211,14 @@ const buildMonthGrid = anchorDate => {
   });
 };
 
-const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData: propCaseData }) => {
+const CaseCalendarWidget = ({
+  actions = {},
+  toggleHelpPanel,
+  metadata,
+  caseData: propCaseData,
+  application_id: propApplicationId,
+  workspaceMode: requestedWorkspaceMode,
+}) => {
   const workspace = useCaseWorkspace();
   const workspaceCaseData = workspace && typeof workspace === 'object' ? workspace.caseData || null : null;
   const caseData = propCaseData || workspaceCaseData || (metadata && metadata.caseData) || null;
@@ -162,10 +240,29 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
     workspace?.caseId ??
     workspace?.case_id ??
     null;
+  const workspaceMode = requestedWorkspaceMode === 'application' || requestedWorkspaceMode === 'case'
+    ? requestedWorkspaceMode
+    : null;
+  const applicationId = workspaceMode === 'application'
+    ? (
+        propApplicationId ??
+        caseData?.applicationId ??
+        caseData?.application_id ??
+        null
+      )
+    : null;
+  const reminderScope = useMemo(
+    () => resolveCaseCalendarReminderScope({ caseId, applicationId, workspaceMode }),
+    [applicationId, caseId, workspaceMode]
+  );
+  const remindersUrl = useMemo(
+    () => buildCaseCalendarRemindersUrl(reminderScope),
+    [reminderScope]
+  );
 
   useEffect(() => {
     let cancelled = false;
-    if (!caseId) {
+    if (!remindersUrl) {
       setRemindersState({ items: [], isLoading: false, error: null });
       return () => {
         cancelled = true;
@@ -174,7 +271,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
     const fetchReminders = async () => {
       setRemindersState(prev => ({ ...prev, isLoading: true, error: null }));
       try {
-        const response = await apiFetch(`/api/reminders?caseId=${caseId}`);
+        const response = await apiFetch(remindersUrl);
         if (!response.ok) {
           let message = `Failed to load reminders (${response.status})`;
           try {
@@ -190,7 +287,9 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
         const payload = await response.json();
         if (cancelled) return;
         setRemindersState({
-          items: Array.isArray(payload) ? payload : [],
+          items: Array.isArray(payload)
+            ? payload.filter(reminder => reminderMatchesCaseCalendarScope(reminder, reminderScope))
+            : [],
           isLoading: false,
           error: null
         });
@@ -208,22 +307,24 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
     return () => {
       cancelled = true;
     };
-  }, [caseId]);
+  }, [reminderScope, remindersUrl]);
 
   useEffect(() => {
     const handler = event => {
       const targetCaseId = event?.detail?.caseId;
-      if (!caseId || (targetCaseId && Number(targetCaseId) !== Number(caseId))) {
+      if (!remindersUrl || (targetCaseId && Number(targetCaseId) !== Number(reminderScope.caseId))) {
         return;
       }
       // Re-trigger by toggling the state to refetch
       (async () => {
         try {
-          const response = await apiFetch(`/api/reminders?caseId=${caseId}`);
+          const response = await apiFetch(remindersUrl);
           if (!response.ok) throw new Error(`Failed to load reminders (${response.status})`);
           const payload = await response.json();
           setRemindersState({
-            items: Array.isArray(payload) ? payload : [],
+            items: Array.isArray(payload)
+              ? payload.filter(reminder => reminderMatchesCaseCalendarScope(reminder, reminderScope))
+              : [],
             isLoading: false,
             error: null
           });
@@ -244,7 +345,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
         window.removeEventListener('case-reminders-refresh', handler);
       }
     };
-  }, [caseId]);
+  }, [reminderScope, remindersUrl]);
 
   const monthLabel = useMemo(
     () =>
@@ -356,13 +457,6 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
     reminders.forEach(reminder => {
       if (!reminder?.dueAt || reminder.status === 'cancelled') return;
       const severity = deriveReminderSeverity(reminder);
-      const metadata = reminder.metadata || reminder.metadata_json || reminder.metadataJson || {};
-      const noteId =
-        metadata?.case_note_id ||
-        metadata?.caseNoteId ||
-        metadata?.noteId ||
-        metadata?.note_id ||
-        null;
       const reminderDateKey = getReminderBusinessDayKey(reminder.dueAt);
       const reminderDate = getReminderBusinessDate(reminder.dueAt);
       if (!reminderDateKey || !reminderDate) return;
@@ -376,8 +470,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
         source: resolveReminderSource(reminder),
         date: reminderDate,
         reminderId: reminder.id,
-        reminderStatus: reminder.status || null,
-        noteId
+        reminderStatus: reminder.status || null
       });
     });
 
@@ -398,12 +491,19 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
   const selectedDay = selectedDayKey ? days.find(day => day.key === selectedDayKey) : null;
 
   const acknowledgeReminder = useCallback(
-    async (reminderId, noteId = null) => {
+    async reminderId => {
     if (!reminderId) return;
     if (acknowledgingId) return;
     setAcknowledgingId(reminderId);
     try {
-      const response = await apiFetch(`/api/reminders/${reminderId}/acknowledge`, { method: 'POST' });
+      const acknowledgementRequest = buildCaseCalendarAcknowledgementRequest(reminderScope);
+      if (!acknowledgementRequest) {
+        throw new Error('The calendar workspace scope is unavailable.');
+      }
+      const response = await apiFetch(
+        `/api/reminders/${reminderId}/acknowledge`,
+        acknowledgementRequest
+      );
         if (!response.ok) {
           let message = `Failed to acknowledge reminder (${response.status})`;
           try {
@@ -420,13 +520,6 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
           ...prev,
           items: Array.isArray(prev.items) ? prev.items.filter(item => item.id !== reminderId) : []
         }));
-        if (noteId && caseId) {
-          try {
-            await apiFetch(`/api/cases/${caseId}/notes/${noteId}`, { method: 'DELETE' });
-          } catch (noteErr) {
-            console.error('Failed to delete note after acknowledging reminder:', noteErr?.message || noteErr);
-          }
-        }
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('case-reminders-refresh', { detail: { caseId } }));
           window.dispatchEvent(new CustomEvent('case-notes-refresh', { detail: { caseId } }));
@@ -438,7 +531,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
         setAcknowledgingId(null);
       }
     },
-    [acknowledgingId, caseId]
+    [acknowledgingId, caseId, reminderScope]
   );
 
   const adjustMonth = useCallback(delta => {
@@ -724,7 +817,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
                       <Box margin={{ top: 'xs' }}>
                         <Button
                           size='small'
-                          onClick={() => acknowledgeReminder(event.reminderId, event.noteId)}
+                          onClick={() => acknowledgeReminder(event.reminderId)}
                           loading={acknowledgingId === event.reminderId}
                         >
                           Acknowledge &amp; Close

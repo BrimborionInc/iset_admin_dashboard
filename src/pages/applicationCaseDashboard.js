@@ -640,6 +640,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       <WidgetComponent
         actions={actions}
         application_id={caseData?.application_id ?? null}
+        workspaceMode="application"
         caseData={caseData}
         workspaceEntry={workspaceEntry}
         toggleHelpPanel={toggleHelpPanel}

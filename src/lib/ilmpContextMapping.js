@@ -9,16 +9,17 @@ function normalisePositiveInteger(value) {
 function chooseIlmpApplicationId({
   submissionApplicationId = null,
   actionPlanApplicationId = null,
-  legacyCaseApplicationId = null,
-  primaryApplicationId = null,
+  uniqueCaseApplicationId = null,
 } = {}) {
-  return (
-    normalisePositiveInteger(submissionApplicationId) ||
-    normalisePositiveInteger(actionPlanApplicationId) ||
-    normalisePositiveInteger(legacyCaseApplicationId) ||
-    normalisePositiveInteger(primaryApplicationId) ||
-    null
-  );
+  const submissionId = normalisePositiveInteger(submissionApplicationId);
+  const planId = normalisePositiveInteger(actionPlanApplicationId);
+  if (submissionId && planId && submissionId !== planId) {
+    const error = new Error('ilmp_application_scope_mismatch');
+    error.code = 'ilmp_application_scope_mismatch';
+    error.statusCode = 409;
+    throw error;
+  }
+  return submissionId || planId || normalisePositiveInteger(uniqueCaseApplicationId) || null;
 }
 
 function asPlainObject(value) {

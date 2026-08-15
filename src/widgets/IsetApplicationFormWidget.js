@@ -37,9 +37,15 @@ const NOT_PROVIDED = <Box color="text-body-secondary">Not provided</Box>;
 
 function getApplicationReportingArtifact(caseContext, applicationId) {
   const artifacts = caseContext?.applicationReportingArtifacts;
-  if (!artifacts || typeof artifacts !== 'object' || !applicationId) return null;
-  const direct = artifacts[String(applicationId)] || artifacts[Number(applicationId)];
-  return direct && typeof direct === 'object' ? direct : null;
+  if (!applicationId) return null;
+  const direct = artifacts && typeof artifacts === 'object'
+    ? artifacts[String(applicationId)] || artifacts[Number(applicationId)]
+    : null;
+  if (direct && typeof direct === 'object') return direct;
+  const legacyApplicationId = Number(caseContext?.applicationId);
+  return Number.isInteger(legacyApplicationId) && legacyApplicationId === Number(applicationId)
+    ? caseContext
+    : null;
 }
 
 const EDUCATION_LEVEL_OPTIONS = {
@@ -1550,17 +1556,13 @@ const IsetApplicationFormWidget = ({
     selectedReportingTrigger === 'withdrawal' ||
     selectedReportingArtifact?.reportingSeedSource === 'withdrawn_reporting';
   const reportingCorrectionAllowed = Boolean(
-    reportingCaseContext?.reportingOnlyDenied ||
-    reportingCaseContext?.reportingOnlyDeniedIneligible ||
-    reportingCaseContext?.reportingOnlyWithdrawal ||
-    reportingCaseContext?.reportingCorrectionAllowed ||
     selectedReportingArtifact?.reportingCorrectionAllowed
   );
-  const reportingApplicationLabel = reportingCaseContext?.reportingOnlyWithdrawal || isSelectedReportingWithdrawal
+  const reportingApplicationLabel = isSelectedReportingWithdrawal
     ? 'withdrawn application record'
     : 'denied application record';
   const suppressReportingStatusBanner =
-    reportingCaseContext?.reportingOnlyWithdrawal || isSelectedReportingWithdrawal;
+    isSelectedReportingWithdrawal;
   const isDecisionFinal =
     Boolean(resolvedApplicationState.decisionOutcome) ||
     ['decision_ready', 'completed', 'closed', 'archived'].includes(decisionStatusSource.toLowerCase());
