@@ -2,7 +2,7 @@
 
 Purpose: plan the new Regional Manager review stage for assessment and intervention approval workflows.
 Audience: product, engineering, operations, training, and future AI-assisted development threads.
-Last Updated: 2026-08-10
+Last Updated: 2026-08-13
 
 ## Status
 
@@ -398,8 +398,31 @@ Guide should be written as a job aid, not implementation notes.
 - Configurable per-region review routing.
 - Reporting widgets for RM review throughput and returned-work reasons.
 
+## Cross-workflow assessment-start contract
+
+Conflict declarations remain case-and-staff scoped, while assessment start is
+application scoped. Merely opening the page or signing or reusing a declaration
+must not advance an application. On the first successful assessment write to a
+`submitted` application, the transactional backend boundary requires the exact
+assigned ISET Coordinator or Regional Manager and an active no-conflict or
+cleared-conflict declaration, then moves only that application to `in_review`.
+Direct submission can move directly to its review-owned state. A draft save does
+not create a review workflow or change the case lifecycle, sibling applications,
+decisions, letters, CFA state, or prior assessments.
+
+The broader composed-workflow review must continue to model exact application,
+business role or capacity, application lifecycle, review stage, conflict
+declaration, participant-form and signing state, generated-document version,
+Action Plan and intervention lineage, decision outcome, and post-decision
+communication. Every transition needs one authoritative owner and caller
+boundary; an unrelated prerequisite must never be the only way another state
+machine advances.
+
 ## Open Business Watchpoints
 
 - Confirm remaining stakeholder UAT/training gaps after the early 2026-06-20 PROD activation; do not use the older July 13 target as evidence that PROD is still disabled.
 - Confirm whether the Decision Maker role should be described as permanent in user-facing training, or as a current approval-routing process.
 - Confirm whether final PDFs should include full RM notes or only RM name/date/sign-off plus a reference to internal notes.
+- Keep training and support guidance clear that a valid case-level declaration
+  carries across that staff member's applications on the case, while each
+  application's assessment begins independently on its first successful save.
