@@ -2,6 +2,13 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-08-15
+- Fix/Core workflow integrity/Repeat applications: Completed a bounded cross-workflow containment pass for assessment decisions, letters, case lifecycle, Action Plans and interventions, EI evidence, ESDC submissions, ready-to-close, documents, secure messages, reminders, notifications, and application work queues. Exact application and plan lineage now wins over case-primary fallbacks; denial and closure derive aggregate case state only after sibling work is considered; immutable reporting and workflow documents are preserved; ambiguous legacy ownership fails closed. Exact-candidate qualification and historical anomaly inventory or repair remain separate.
+- Fix/Denied reporting/Repeat intake: Completed application-boundary containment for repeated denials. Version saves and restores resynchronize only the selected denied or withdrawn application's artifact; case-level routing applies only when no ordinary plan or meaningful sibling application exists; workspace ESDC status, validation and export, correction permission, and EI dependency checks follow the selected application. Portal, manual, and submission-backed staff intake reopen a reused terminal case without deleting historical application reporting artifacts, while already active cases keep their lifecycle.
+
+## 2026-08-14
+- Fix/Denied reporting: Made denial-generated Action Plans, interventions, and ESDC validation exact-application safe for repeat applicants. Denial idempotency now matches both case and application, canonical assessment eligibility maps `EI Active Claim` to claimant `1` / `EI`, `EI Reach Back` to `2` / `EI`, and `CRF` to `3` / `CRF`, and submission readiness blocks mismatched or unset stored intervention funding. The source change is preventive only and does not repair historical records.
+
 ## 2026-08-13
 - Fix/Application Assessment: Decoupled case-and-staff conflict declarations from application-scoped assessment start. Signing or reusing a declaration no longer changes status. The first successful assessment save on a `submitted` application now requires the exact assigned ISET Coordinator or Regional Manager and an active no-conflict or cleared-conflict declaration, then atomically moves only that application to `in_review`; direct submission can proceed directly to review. Existing records are not migrated by this source change.
 

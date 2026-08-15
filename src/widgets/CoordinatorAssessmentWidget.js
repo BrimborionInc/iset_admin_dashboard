@@ -7196,11 +7196,18 @@ const CoordinatorAssessmentWidget = forwardRef(
   );
 
   const persistLetterContext = useCallback(
-    async ({ silent = false, contextUpdates = null, letterDraftsOverride = null } = {}) => {
+    async ({
+      silent = false,
+      contextUpdates = null,
+      letterDraftsOverride = null,
+      expectedRowVersion = null
+    } = {}) => {
       if (!caseId) return { ok: false };
       const lockCheck = await ensureLockForOperation();
       if (!lockCheck.ok) return { ok: false };
-      const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
+      const versionToken = Number(
+        expectedRowVersion || applicationRowVersionState || caseData?.application_row_version || 0
+      );
       const baseContext = caseData?.caseContext && typeof caseData.caseContext === 'object' ? caseData.caseContext : {};
       const nextDecisionLetterSent =
         (contextUpdates && contextUpdates.decisionLetterSent) ||
@@ -7780,7 +7787,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
   };
 
   const markDecisionLetterSent = useCallback(
-    async (letterKey) => {
+    async (letterKey, { expectedRowVersion = null, letterDraftsOverride = null } = {}) => {
       if (!letterKey) return { ok: false };
       const timestamp = new Date().toISOString();
       const existing = decisionLetterSent && typeof decisionLetterSent === 'object' ? decisionLetterSent : {};
@@ -7790,7 +7797,9 @@ ${JSON.stringify(aiContext, null, 2)}`;
       const mergedSent = { ...baseSent, ...nextSent };
       const result = await persistLetterContext({
         silent: true,
-        contextUpdates: { decisionLetterSent: mergedSent }
+        contextUpdates: { decisionLetterSent: mergedSent },
+        letterDraftsOverride,
+        expectedRowVersion
       });
       if (!result.ok) {
         setAlert({
@@ -7868,24 +7877,27 @@ ${JSON.stringify(aiContext, null, 2)}`;
       if (applicationId) {
         payload.applicationId = applicationId;
       }
+      if (saved.updatedRowVersion) {
+        payload.expectedApplicationRowVersion = saved.updatedRowVersion;
+      }
       const response = await apiFetch(`/api/cases/${caseId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      const responseData = await response.json().catch(() => ({}));
       if (!response.ok) {
         let detail = '';
-        try {
-          const data = await response.json();
-          if (data && typeof data === 'object') {
-            if (data.error === 'funding_forms_workflows_missing' && Array.isArray(data.missing) && data.missing.length) {
-              detail = `Required funding-form workflows are missing: ${data.missing.join(', ')}.`;
-            } else {
-              detail = data.message || data.error || '';
-            }
+        if (responseData && typeof responseData === 'object') {
+          if (
+            responseData.error === 'funding_forms_workflows_missing' &&
+            Array.isArray(responseData.missing) &&
+            responseData.missing.length
+          ) {
+            detail = `Required funding-form workflows are missing: ${responseData.missing.join(', ')}.`;
+          } else {
+            detail = responseData.message || responseData.error || '';
           }
-        } catch (_) {
-          detail = await response.text().catch(() => '');
         }
         throw new Error(detail || 'Failed to send the decision letter.');
       }
@@ -7897,8 +7909,37 @@ ${JSON.stringify(aiContext, null, 2)}`;
       });
       dispatchSupportingDocsRefresh();
       await loadDocumentChecklist();
-      const sentResult = await markDecisionLetterSent(activeLetterKey);
-      return { ok: true, updatedRowVersion: sentResult.updatedRowVersion || null };
+      const serverPersistence =
+        responseData?.decisionLetterPersistence || responseData?.denialLetterCompletion || null;
+      if (serverPersistence?.letterKey === activeLetterKey) {
+        const sentAt = serverPersistence.sentAt || new Date().toISOString();
+        const nextSent = { ...(decisionLetterSent || {}), [activeLetterKey]: sentAt };
+        setDecisionLetterSent(nextSent);
+        const persistedRowVersion = Number(serverPersistence.applicationRowVersion || 0) || null;
+        if (persistedRowVersion) updateRowVersion(persistedRowVersion);
+        const applicationCompleted =
+          activeLetterKey === 'denial' && serverPersistence.status === 'completed';
+        if (applicationCompleted && typeof onCaseUpdate === 'function') {
+          onCaseUpdate({
+            applicationStatus: 'completed',
+            application_row_version: persistedRowVersion || undefined
+          });
+        }
+        return {
+          ok: true,
+          updatedRowVersion: persistedRowVersion,
+          applicationCompleted
+        };
+      }
+      const sentResult = await markDecisionLetterSent(activeLetterKey, {
+        expectedRowVersion: saved.updatedRowVersion || null,
+        letterDraftsOverride: refreshedLetterDrafts
+      });
+      return {
+        ok: true,
+        updatedRowVersion: sentResult.updatedRowVersion || null,
+        applicationCompleted: false
+      };
     } catch (err) {
       setSendingLetterError(err?.message || 'Failed to send the decision letter.');
       return { ok: false, error: err };
@@ -8376,7 +8417,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
     const decision = assessment.nwacReviewStatus;
     const isOutcomeApproved = decision === 'approve';
     const isOutcomePushBack = decision === 'push_back';
-    const nextCaseStatus = isOutcomeApproved ? 'initiated' : (isOutcomePushBack ? 'intake' : 'closed');
+    const nextCaseStatus = isOutcomeApproved ? 'initiated' : (isOutcomePushBack ? 'intake' : null);
     const nextApplicationStatus = isOutcomePushBack
       ? (twoStepReviewEnabled && hasReviewWorkflow ? 'pending_approval' : 'in_review')
       : (isOutcomeApproved ? 'approved' : 'rejected');
@@ -8416,8 +8457,8 @@ ${JSON.stringify(aiContext, null, 2)}`;
         assessment_intervention_pot_id: completeAssessmentPayload.assessment_intervention_pot_id,
         postingContext: completeAssessmentPayload.postingContext,
         assessment_submit_action: true,
-        status: nextCaseStatus,
-        applicationStatus: nextApplicationStatus
+        applicationStatus: nextApplicationStatus,
+        ...(nextCaseStatus ? { status: nextCaseStatus } : {})
       };
       const requestBody = { ...payload };
       if (versionToken > 0) {
@@ -8741,6 +8782,15 @@ ${JSON.stringify(aiContext, null, 2)}`;
     const letterResult = await handleSendDecisionLetter();
     if (!letterResult.ok) return;
     if (decisionOutcome === 'denied') {
+      if (letterResult.applicationCompleted) {
+        setHasSubmitted(false);
+        if (typeof actions?.refreshCaseData === 'function') {
+          try {
+            await actions.refreshCaseData();
+          } catch (_) {}
+        }
+        return;
+      }
       await markApplicationCompleted({
         successMessage: 'Denial letter sent. Application marked as completed.',
         expectedRowVersion: letterResult.updatedRowVersion || null

@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-08-13
+Last Updated: 2026-08-15
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-08-15 | Release TBD | Fix/Denied reporting | Repeat-application lifecycle and reporting scope | A new application can reuse a case from an earlier denial without remaining closed, hidden, or tied to the earlier application's reporting records. | PATH reopens only a terminal reused case, preserves the earlier application's reporting history, and scopes correction permissions, EI dependencies, Action Plans, interventions, and ESDC validation and export to the selected application. Historical data repair is separate.
+- 2026-08-15 | Release TBD | Fix/Core workflows | Repeat-application isolation | Work on one application no longer silently closes, edits, validates, reports, or navigates to a sibling application on the same long-lived client file. | Assessment decisions and letters, Action Plans and interventions, EI evidence, ESDC records, closure, documents, messages, reminders, notifications, portal history, and application queues now preserve exact ownership; ambiguous historical records stop for review instead of borrowing the newest application.
+- 2026-08-14 | Release TBD | Fix/Denied reporting | Repeat applications and EI funding | A denied repeat application now keeps its reporting Action Plan, interventions, and ESDC record separate from earlier applications. | PATH uses the selected application assessment consistently: EI Active Claim and EI Reach Back use EI funding with claimant codes 1 and 2, while CRF uses code 3. Conflicting or missing stored funding values block reporting until corrected. Historical records require a separate repair.
 - 2026-08-13 | Release TBD | Fix/Application Assessment | Repeat applications | An assigned ISET Coordinator or Regional Manager can now begin the assessment for a new application on an existing case without signing the same conflict declaration again. | A valid case-level declaration carries forward for that staff member, while the first successful assessment save starts only the selected application. Signing the declaration alone no longer changes application status; case status, earlier applications, review workflows, decisions, letters, and funding agreements are unchanged.
 - 2026-08-10 | Release 20260810-feedback-182-letter-hotfix-r1 | Fix/Application Assessment | Approval and denial letters | Fixed a bug that prevented assigned staff from saving or sending an application decision letter after the final decision was recorded. | Letter drafting, letter-pack preparation, denial explanation, and sent-status tracking now remain available as post-decision follow-up without granting staff permission to alter the Decision Maker's recorded outcome. Active review-stage and case-access controls remain enforced. The actual case-route regression, complete 850-test aggregate, changed-file lint/syntax checks, production build, exact deployed provenance, healthy target, and normal-routing smoke passed; the admin-only emergency hotfix deployed to PROD on 2026-08-10.
 - 2026-08-09 | Release TBD | Fix/Workflow integrity | Two-step assessment and intervention review | Strengthened returned-work ownership, final decisions, and final review records across application assessments, new intervention proposals, and intervention revisions. | Only the recorded submitter can correct returned work; a Regional Manager who is also the submitter must resubmit before using a separate RM sign-off. Final approval/denial packets preserve the submitter, Regional Manager, Decision Maker, outcome, and required notes. Exact application/EI/document lineage is enforced, zero-funded approvals remain letter-only, and applied revisions remain audit evidence without appearing as duplicate operational interventions.
@@ -491,6 +494,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- New applications now reopen a terminal case left by an earlier denial without losing the earlier reporting history; denied repeat applications keep separate Action Plans, interventions, and ESDC records, and PATH blocks reporting when the selected application's assessment and funding records do not agree.
 - Returned assessments and intervention requests can now be corrected only by their recorded submitter, then move through a separate Regional Manager review before reaching the Decision Maker.
 - Final approval and denial records now preserve the exact submitter, Regional Manager, Decision Maker, outcome, notes, application, and submitted version.
 - PATH help and AI guidance now explain the complete two-step review, EI evidence, funding-alignment, and post-approval agreement workflow.
@@ -522,6 +526,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
+- Une nouvelle demande rouvre maintenant un dossier terminal laissé par un refus antérieur sans perdre l'historique de déclaration; les demandes répétées refusées conservent des plans d'action, des interventions et des dossiers EDSC distincts, et PATH bloque la déclaration lorsque l'évaluation et le financement de la demande sélectionnée ne concordent pas.
 - Les évaluations et demandes d'intervention retournées peuvent maintenant être corrigées uniquement par la personne enregistrée comme les ayant soumises, puis elles passent par une révision distincte du gestionnaire régional avant d'atteindre le décideur.
 - Les dossiers finaux d'approbation et de refus conservent maintenant la personne ayant soumis le dossier, le gestionnaire régional, le décideur, le résultat, les notes, la demande et la version soumise exacts.
 - L'aide de PATH et les conseils de l'IA expliquent maintenant la révision complète en deux étapes, les preuves d'assurance-emploi, l'harmonisation du financement et le processus d'entente après l'approbation.

@@ -35,4 +35,14 @@ describe('SecureMessageComposePanel application scope', () => {
       interventionId: null,
     })).toEqual({});
   });
+
+  it('sends the explicit reply target using the established reply_to convention', () => {
+    expect(buildSecureMessageScopePayload({
+      applicationId: 124,
+      replyToMessageId: 991,
+    })).toEqual({
+      applicationId: 124,
+      reply_to: 991,
+    });
+  });
 });

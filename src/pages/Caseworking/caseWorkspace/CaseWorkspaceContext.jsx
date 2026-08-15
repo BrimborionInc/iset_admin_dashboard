@@ -1124,7 +1124,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
 
         const payload = {
           caseId,
-          applicationId: state.caseData?.applicationId ?? state.caseData?.application_id ?? null,
+          applicationId: plan.applicationId ?? plan.application_id ?? null,
           actionPlanId: plan.id,
           title: reminderTitle,
           description: description || null,
@@ -1442,7 +1442,10 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       };
     }
 
-    const response = await apiFetch(`/api/cases/${caseId}/validate-ilmp`, { method: "POST" });
+    const applicationScope = applicationId
+      ? `?applicationId=${encodeURIComponent(applicationId)}`
+      : "";
+    const response = await apiFetch(`/api/cases/${caseId}/validate-ilmp${applicationScope}`, { method: "POST" });
     if (!response.ok) {
       let detail = null;
       try {
@@ -1496,7 +1499,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     }
 
     return mappedCompliance;
-  }, [caseId, loadCase]);
+  }, [applicationId, caseId, loadCase]);
 
   const prepareIlmpExport = useCallback(async () => {
     if (!caseId) {
@@ -1505,7 +1508,10 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       throw error;
     }
 
-    const response = await apiFetch(`/api/cases/${caseId}/prepare-ilmp`, { method: "POST" });
+    const applicationScope = applicationId
+      ? `?applicationId=${encodeURIComponent(applicationId)}`
+      : "";
+    const response = await apiFetch(`/api/cases/${caseId}/prepare-ilmp${applicationScope}`, { method: "POST" });
 
     const parseDetail = async () => {
       try {
@@ -1559,7 +1565,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     });
 
     return { compliance: compliancePayload, payload: exportPayload };
-  }, [caseId]);
+  }, [applicationId, caseId]);
 
   const markReadyToClose = useCallback(async () => {
     if (!caseId) {

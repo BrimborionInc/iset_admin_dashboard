@@ -1372,8 +1372,8 @@ For each indexed thread/topic, keep:
   - `isetadminserver.js`
   - `src/widgets/ApplicationOverviewWidget.js`
   - `src/widgets/IsetApplicationFormWidget.js`
-- Status: implemented forward-only in DEV on 2026-05-20; existing denied applications still need a separate backfill plan.
-- Notes: The denial seed now runs when an application first moves to raw status `rejected`, not when the denial letter is sent. It creates or updates one closed reporting-only action plan named `Actions leading to denial`, creates/updates completed interventions for codes `1` (`Career Research and Exploration`) and `3` (`Employment Counselling`), sets start/end/closed dates to the denial decision date, and flags the case with generic `reportingOnlyDenied: true` plus `excludeFromCaseworkQueues: true`. Legacy `reportingOnlyDeniedIneligible` and `denied_ineligible_reporting` records remain recognized so existing records do not duplicate if staff edit them later.
+- Status: implemented forward-only in DEV on 2026-05-20; application-lineage and EI-funding hardening was prepared in source on 2026-08-14 but is not yet deployed. Existing incorrect denied-reporting records still require a separate guarded repair plan.
+- Notes: The denial seed runs when an application first moves to raw status `rejected`, not when the denial letter is sent. It creates or updates one exact-application closed reporting-only action plan named `Actions leading to denial`, creates or updates completed interventions for codes `1` (`Career Research and Exploration`) and `3` (`Employment Counselling`), sets start, end, and closed dates to the denial decision date, and flags the case with generic `reportingOnlyDenied: true` plus `excludeFromCaseworkQueues: true`. Reuse is keyed by case plus application; the application assessment maps `EI Active Claim` to claimant `1` / `EI`, `EI Reach Back` to `2` / `EI`, and `CRF` to `3` / `CRF`; plan and intervention disagreement blocks ESDC readiness. Legacy `reportingOnlyDeniedIneligible` and `denied_ineligible_reporting` records remain recognized within the same application.
 
 ### Withdrawn application ILMP reporting seed
 

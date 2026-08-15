@@ -4,7 +4,7 @@ Purpose: define the agreed PATH entity model for `client`, `case`, and `applicat
 
 Audience: product, engineering, reporting/data, and migration planning.
 
-Last Updated: 2026-05-08
+Last Updated: 2026-08-15
 
 ## Status
 
@@ -40,6 +40,8 @@ Last Updated: 2026-05-08
 - Successful application submission/receipt must resolve or create the `client` and resolve or create that client's single `case`.
 - A submitted `application` must be created with both `client_id` and `case_id`.
 - Manual application intake follows the same rule.
+- When a new application reuses a terminal case, the case returns to intake and its terminal closure fields are cleared. Historical application-specific reporting and decision artifacts remain attached to their original applications; obsolete case-wide reporting exclusion, correction permission, and application snapshot fields do not carry into the new application.
+- Receiving a new application on an already active case must not reset that case's lifecycle. Any stale case-wide reporting markers are removed independently of the active lifecycle.
 - Client Batch Import resolves or creates `client` and `case`, but does not create an `application` unless the imported row truly represents an application event.
 - Imported historical client files may validly be case-backed and application-less.
 
@@ -63,6 +65,7 @@ Verified from current schema and code:
 
 - Public portal `POST /api/intake/complete` resolves or creates `client`, resolves or creates the client's `case`, then inserts or updates the working `application` with `client_id` and `case_id`.
 - Manual application intake creates `client`, resolves or creates `iset_case`, then inserts `iset_application` with `client_id` and `case_id`.
+- Public and manual repeat intake now reopen a reused terminal case to `submitted` / `intake`, clear `closure_reason` / `closed_at`, and remove obsolete case-wide reporting state while preserving `applicationReportingArtifacts` and application-scoped decision history. Active reused cases retain their existing lifecycle.
 - Client Batch Import supports `client` plus application-less `iset_case`. Its commit boundary now claims an idempotent run and hashed import identity, then reloads case cardinality after locking the client so concurrent commits cannot create parallel imported client files.
 - Case-level "primary application" joins now prefer non-terminal application rows before terminal rows (`approved`, `completed`, denied/withdrawn/cancelled/closed/archived states), so late client-file or document updates on historical completed applications do not make those applications the current queue target when a newer active application exists.
 - `PUT /api/cases/:id` rejects attempts to move a terminal application back into review or document-request queues; the approved-to-completed finish transition remains allowed.

@@ -12,7 +12,7 @@ const CaseWorkspaceTimelineHelp = () => (
     <ul>
       <li>Use the search box to filter for keywords such as a status, event type, or staff member name.</li>
       <li>Sort by Date/Time to replay the file in order or focus on the latest activity first.</li>
-      <li>Reminder rows include an action to acknowledge and clear the reminder when appropriate.</li>
+      <li>Reminder rows are read-only here. Use Case Calendar or Notes and Tasks to acknowledge them.</li>
       <li>Use the download action when you need a CSV copy of the timeline for review or audit support.</li>
     </ul>
 
@@ -25,6 +25,6 @@ const CaseWorkspaceTimelineHelp = () => (
   </div>
 );
 
-CaseWorkspaceTimelineHelp.aiContext = `You are assisting a PATH case manager using the Events Timeline widget in the Case Workspace. Explain it as the case audit trail: how to read event messages, filter and sort the table, acknowledge reminders, and export CSV when needed. Focus on operational awareness, documentation quality, and audit readiness.`;
+CaseWorkspaceTimelineHelp.aiContext = `You are assisting a PATH case manager using the Events Timeline widget in the Case Workspace. Explain it as the case audit trail: how to read event messages, filter and sort the table, and export CSV when needed. The timeline is audit-only; direct users to Case Calendar or Notes and Tasks to acknowledge reminders. Focus on operational awareness, documentation quality, and audit readiness.`;
 
 export default CaseWorkspaceTimelineHelp;

@@ -22,6 +22,17 @@ import SecureMessagesHelpPanelContent from '../helpPanelContents/secureMessagesH
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
 import { openSecureMessageCompose, SECURE_MESSAGE_REFRESH_EVENT } from './SecureMessageComposePanel.jsx';
 
+const toPositiveIntegerOrNull = value => {
+  if (value === null || typeof value === 'undefined' || value === '') return null;
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+};
+
+export const resolveSecureMessageReplyScope = message => ({
+  applicationId: toPositiveIntegerOrNull(message?.application_id ?? message?.applicationId),
+  replyToMessageId: toPositiveIntegerOrNull(message?.id),
+});
+
 const TAB_IDS = {
   inbox: 'inbox',
   sent: 'sent',
@@ -310,10 +321,13 @@ const SecureMessagingWidget = ({
   }, [caseId, loadMessages]);
 
   const createComposeContext = useCallback(
-    ({ mode = 'new', toName = null } = {}) => ({
+    ({ mode = 'new', toName = null, ...scopeOverrides } = {}) => ({
       mode,
       caseId,
-      applicationId,
+      applicationId: Object.prototype.hasOwnProperty.call(scopeOverrides, 'applicationId')
+        ? scopeOverrides.applicationId
+        : applicationId,
+      replyToMessageId: scopeOverrides.replyToMessageId ?? null,
       applicantUserId,
       applicantName: applicantName || 'Applicant',
       toName: toName || applicantName || 'Applicant',
@@ -635,7 +649,11 @@ const SecureMessagingWidget = ({
           .join('\n')
       : '';
     const replyToName = getSenderName(selectedMessage) || applicantName || 'Applicant';
-    const nextContext = createComposeContext({ mode: 'reply', toName: replyToName });
+    const nextContext = createComposeContext({
+      mode: 'reply',
+      toName: replyToName,
+      ...resolveSecureMessageReplyScope(selectedMessage),
+    });
     const opened = openSecureMessageCompose({
       ...nextContext,
       subject,

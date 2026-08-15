@@ -30,19 +30,19 @@ describe('Supporting Documents update route', () => {
     expect(routeSource).toContain("console.error('[admin:documents:update-label] error', err)");
   });
 
-  test('full edits preserve application-submission lineage when resolving client scope', () => {
+  test('full edits validate immutable workflow provenance before resolving destination scope', () => {
     const routeSource = extractRouteBlock('put', '/api/documents/:id');
     const duplicateRouteSource = extractRouteBlock('post', '/api/documents/:id/duplicate');
-    const sourceLookup = routeSource.indexOf('applicant_user_id, source FROM iset_document');
-    const lineagePreservation = routeSource.indexOf('preserveDocumentSourceLineage');
+    const sourceLookup = routeSource.indexOf(
+      'applicant_user_id, source, origin_message_id, signing_request_id, updated_at FROM iset_document'
+    );
+    const integrityGuard = routeSource.indexOf('validateGenericDocumentMutationIntegrity(existingRow)');
     const targetAccessCheck = routeSource.indexOf('validateDocumentAttachmentContextAccess');
 
-    expect(serverSource).toContain('function documentSourceRequiresApplicationLineage(source)');
-    expect(serverSource).toContain("normaliseString(source).toLowerCase() === 'application_submission'");
     expect(sourceLookup).toBeGreaterThanOrEqual(0);
-    expect(lineagePreservation).toBeGreaterThan(sourceLookup);
-    expect(targetAccessCheck).toBeGreaterThan(lineagePreservation);
-    expect(duplicateRouteSource).toContain('preserveDocumentSourceLineage');
+    expect(integrityGuard).toBeGreaterThan(sourceLookup);
+    expect(targetAccessCheck).toBeGreaterThan(integrityGuard);
+    expect(duplicateRouteSource).toContain('validateGenericDocumentMutationIntegrity(doc)');
   });
 
   test('modal and duplicate saves send context for client-scoped documents', () => {
