@@ -8040,6 +8040,15 @@ function normalizeConflictResolutionOutcome(value) {
   return null;
 }
 
+function normalizeConflictChoice(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (['no_conflict', 'no-conflict', 'none', 'no'].includes(normalized)) return 'no_conflict';
+  if (['conflict', 'has_conflict', 'potential_conflict', 'possible_conflict', 'yes'].includes(normalized)) return 'conflict';
+  return null;
+}
+
 function buildApplicantNameFromRow(row = {}, fallback = 'Applicant') {
   const preferred = normaliseString(row.submission_preferred_name);
   const first = normaliseString(row.submission_first_name);
@@ -14391,6 +14400,105 @@ function classifyApplicationAssessmentMutationRequest({
     assessmentDecisionMutationRequested,
     assessmentCommunicationMutationRequested,
     conflictDeclarationMutationRequested: Boolean(conflictSignatureRequested),
+  };
+}
+
+async function resolveApplicationAssessmentDraftStart(connection, {
+  caseId,
+  applicationId,
+  beforeApplicationStatus = null,
+  assessmentWriteRequested = false,
+  assessmentSubmittedForWorkflow = false,
+  reviewWorkflow = null,
+  actorStaffProfileId = null,
+  actorRole = null,
+  assignedStaffProfileId = null,
+} = {}) {
+  if (!assessmentWriteRequested || normaliseApplicationStatusValue(beforeApplicationStatus) !== 'submitted') {
+    return { shouldStart: false, reason: 'application_not_waiting_to_start' };
+  }
+
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedActorStaffProfileId = normalisePositiveInteger(actorStaffProfileId);
+  const normalizedAssignedStaffProfileId = normalisePositiveInteger(assignedStaffProfileId);
+  const canonicalActorRole = canonicaliseAccessRole(actorRole);
+  const permittedActorRole = new Set(['ISET Coordinator', 'Regional Manager']).has(canonicalActorRole);
+
+  if (
+    !normalizedCaseId ||
+    !normalizedApplicationId ||
+    !normalizedActorStaffProfileId ||
+    !normalizedAssignedStaffProfileId ||
+    !permittedActorRole ||
+    normalizedActorStaffProfileId !== normalizedAssignedStaffProfileId
+  ) {
+    const error = new Error('assessment_start_forbidden');
+    error.code = 'assessment_start_forbidden';
+    error.status = 403;
+    error.publicMessage =
+      'Only the assigned ISET Coordinator or Regional Manager can start this application assessment.';
+    throw error;
+  }
+
+  if (reviewWorkflow) {
+    const error = new Error('assessment_start_workflow_conflict');
+    error.code = 'assessment_start_workflow_conflict';
+    error.status = 409;
+    error.publicMessage =
+      'This application already has an assessment review workflow. Refresh the application before continuing.';
+    throw error;
+  }
+
+  const [declarationRows] = await connection.query(
+    `SELECT id, declaration_choice, resolution_outcome
+       FROM iset_case_conflict_declaration
+      WHERE case_id = ?
+        AND staff_profile_id = ?
+        AND revoked_at IS NULL
+      ORDER BY signed_at DESC
+      LIMIT 1 FOR UPDATE`,
+    [normalizedCaseId, normalizedActorStaffProfileId]
+  );
+  const declaration = Array.isArray(declarationRows) && declarationRows.length
+    ? declarationRows[0]
+    : null;
+  const declarationChoice = normalizeConflictChoice(declaration?.declaration_choice);
+  const resolutionOutcome = normalizeConflictResolutionOutcome(declaration?.resolution_outcome);
+
+  if (!declaration || !declarationChoice) {
+    const error = new Error('conflict_declaration_required');
+    error.code = 'conflict_declaration_required';
+    error.status = 409;
+    error.publicMessage =
+      'Complete your conflict of interest declaration before starting this application assessment.';
+    throw error;
+  }
+
+  if (declarationChoice === 'conflict' && resolutionOutcome !== 'cleared') {
+    const error = new Error('conflict_declaration_unresolved');
+    error.code = 'conflict_declaration_unresolved';
+    error.status = 409;
+    error.publicMessage =
+      'This assessment cannot start until the declared conflict is resolved or the case is reassigned.';
+    throw error;
+  }
+
+  if (declarationChoice !== 'no_conflict' && declarationChoice !== 'conflict') {
+    const error = new Error('conflict_declaration_required');
+    error.code = 'conflict_declaration_required';
+    error.status = 409;
+    error.publicMessage =
+      'Complete your conflict of interest declaration before starting this application assessment.';
+    throw error;
+  }
+
+  return {
+    shouldStart: !assessmentSubmittedForWorkflow,
+    reason: assessmentSubmittedForWorkflow
+      ? 'assessment_submits_directly_to_review'
+      : 'first_assessment_write',
+    declarationId: normalisePositiveInteger(declaration.id),
   };
 }
 
@@ -97841,14 +97949,6 @@ app.put('/api/cases/:id', async (req, res) => {
     if (max !== null && rounded > max) return null;
     return rounded;
   };
-  const normalizeConflictChoice = (val) => {
-    if (typeof val !== 'string') return null;
-    const normalized = val.trim().toLowerCase();
-    if (!normalized) return null;
-    if (['no_conflict', 'no-conflict', 'none', 'no'].includes(normalized)) return 'no_conflict';
-    if (['conflict', 'has_conflict', 'potential_conflict', 'possible_conflict', 'yes'].includes(normalized)) return 'conflict';
-    return null;
-  };
   const sanitizeConflictDetails = (val) => {
     if (typeof val !== 'string') return null;
     const trimmed = val.trim();
@@ -98545,6 +98645,43 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
             assessmentSubmittedForWorkflow,
         }
       );
+    }
+
+    try {
+      const assessmentDraftStart = await resolveApplicationAssessmentDraftStart(conn, {
+        caseId,
+        applicationId,
+        beforeApplicationStatus,
+        assessmentWriteRequested: hasAssessmentPayload,
+        assessmentSubmittedForWorkflow,
+        reviewWorkflow: applicationAssessmentReviewWorkflow,
+        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+        actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+        assignedStaffProfileId: existingCase.assigned_to_user_id || null,
+      });
+      if (assessmentDraftStart.shouldStart) {
+        const applicationStatusPersistence = buildApplicationStatusPersistence('in_review', {
+          lifecycleStatus: beforeApplicationLifecycleStatus,
+          decisionOutcome: beforeApplicationDecisionOutcome,
+          awaitingReason: beforeApplicationAwaitingReason,
+          closureReason: beforeApplicationClosureReason,
+        });
+        applicationStatusToPersist = applicationStatusPersistence.legacyStatus;
+        applicationLifecycleStatusToPersist = applicationStatusPersistence.lifecycleStatus;
+        applicationDecisionOutcomeToPersist = applicationStatusPersistence.decisionOutcome;
+        applicationAwaitingReasonToPersist = applicationStatusPersistence.awaitingReason;
+        applicationClosureReasonToPersist = applicationStatusPersistence.closureReason;
+      }
+    } catch (error) {
+      await conn.rollback();
+      return res.status(Number(error?.status) || 409).json({
+        success: false,
+        error: error?.code || error?.message || 'assessment_start_forbidden',
+        message:
+          error?.publicMessage ||
+          'This application assessment cannot be started by the current staff member.',
+        lock: lockCheck.lock || null,
+      });
     }
 
     if (assessmentSubmittedForWorkflow) {
@@ -102470,6 +102607,7 @@ const adminRepairExports = {
   applyApplicationAssessmentReviewWorkflowAction,
   applicationAssessmentCaseContextMutationKinds,
   classifyApplicationAssessmentMutationRequest,
+  resolveApplicationAssessmentDraftStart,
   projectApplicationAssessmentCaseContextPatch,
   assertApplicationAssessmentReviewOwnedStatusMutationAllowed,
   assertApplicationAssessmentMutationStageAllowed,
