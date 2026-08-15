@@ -501,6 +501,13 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What Changed Packages (draft - EN)
 
+#### Release 20260815-core-workflow-integrity-prod-r1
+
+- Repeat applications now keep assessments, decisions, letters, Action Plans, interventions, EI evidence, ESDC submissions, documents, messages, reminders, notifications, and work-queue links attached to the exact application being worked on.
+- A new application can begin assessment using the staff member's valid case-level conflict declaration. The first successful save advances only that application, while an earlier application and the overall client file remain unchanged.
+- Denying one application no longer closes a client file that still has another open application or active service plan. Decision letters and intervention approval letters now commit their exact message, document, signing and lifecycle records together.
+- Ambiguous historical records now stop for review instead of borrowing the newest application. Historical PROD data correction is a separate controlled operation and is not part of this code release.
+
 #### Release 20260810-two-step-review-assurance-r34
 
 - Returned Application Assessments, new intervention proposals, and intervention revisions can be edited and resubmitted only by the staff member recorded as their submitter. A Regional Manager who submitted the work must resubmit it first, then complete a separate Regional Manager sign-off before it reaches the Decision Maker.
@@ -515,11 +522,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Client Funding Agreement signing now commits the exact application, agreement version, signed document, request, message, and audit event as one protected operation, with safe retry and rollback behavior.
 - Signed CFA and Financial Overview PDFs now finish before the PDF browser closes, use the required byte format, and retain the exact secure-message link. The portal consumes retryable conflicts with the unchanged signing details and keeps completed forms on the submitted screen after reload; changed signing details remain rejected. Queued review notifications continue processing after startup, retain the exact record scope, and reach an explicitly targeted dual-role submitter without notifying the wider role.
 
-#### Release 20260805-cfa-signing-hotfix-r3
-
-- Fixed Client Funding Agreement signing so PATH carries the agreement's verified application link into the signed PDF, agreement version, document record, and case event.
-- Repeated submission of an already signed agreement remains safe and does not create duplicate documents or events.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
@@ -532,6 +534,13 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - L'aide de PATH et les conseils de l'IA expliquent maintenant la révision complète en deux étapes, les preuves d'assurance-emploi, l'harmonisation du financement et le processus d'entente après l'approbation.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260815-core-workflow-integrity-prod-r1
+
+- Les demandes répétées conservent maintenant leurs évaluations, décisions, lettres, plans d'action, interventions, preuves d'assurance-emploi, soumissions EDSC, documents, messages, rappels, notifications et liens de file de travail associés à la demande exacte en cours de traitement.
+- Une nouvelle demande peut commencer son évaluation en utilisant la déclaration de conflit valide du membre du personnel pour le dossier. La première sauvegarde réussie fait avancer uniquement cette demande, sans modifier une demande antérieure ni l'ensemble du dossier client.
+- Le refus d'une demande ne ferme plus un dossier client lorsqu'une autre demande ou un plan de services demeure actif. Les lettres de décision et d'approbation d'intervention enregistrent maintenant ensemble leurs messages, documents, demandes de signature et états de cycle de vie exacts.
+- Les dossiers historiques ambigus sont maintenant bloqués pour révision au lieu d'être associés à la demande la plus récente. La correction des données historiques de PROD constitue une opération contrôlée distincte et ne fait pas partie de cette mise en production du code.
 
 #### Release 20260810-two-step-review-assurance-r34
 
@@ -546,11 +555,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Une évaluation retournée peut être modifiée et soumise de nouveau uniquement par la personne enregistrée comme l'ayant soumise initialement. Une ancienne évaluation peut conserver sa valeur d'assurance-emploi déjà acceptée sans exiger rétroactivement un nouveau document; toute modification de cette valeur exige encore une preuve actuelle. Les sauvegardes de correction ne renvoient pas les champs réservés au décideur. Une évaluation rouverte pour correction doit être retournée avant de pouvoir progresser de nouveau.
 - La signature d'une entente de financement du client enregistre maintenant la demande exacte, la version de l'entente, le document signé, la demande de signature, le message et l'événement d'audit dans une seule opération protégée, avec une reprise et une annulation sécuritaires.
 - La création des PDF signés des ententes de financement et des aperçus financiers se termine maintenant avant la fermeture du navigateur PDF, utilise le format d'octets requis et conserve le lien exact avec le message sécurisé. Le portail reprend automatiquement les conflits temporaires avec les mêmes données de signature et conserve l'écran de confirmation après le rechargement; les données de signature modifiées restent refusées. Les notifications de révision continuent aussi après le démarrage, conservent le dossier exact visé et atteignent la personne explicitement ciblée même lorsqu'elle occupe aussi le rôle de gestionnaire régional, sans aviser tout ce rôle.
-
-#### Release 20260805-cfa-signing-hotfix-r3
-
-- Correction de la signature des ententes de financement du client : PATH transmet maintenant le lien vérifié de la demande au PDF signé, à la version de l'entente, au document et à l'événement du dossier.
-- Une nouvelle soumission d'une entente déjà signée demeure sans danger et ne crée pas de documents ni d'événements en double.
 
 ### Problemes connus (brouillon - FR)
 
