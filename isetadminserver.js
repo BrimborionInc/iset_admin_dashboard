@@ -31141,22 +31141,15 @@ const generateGUID = () => {
   return Math.random().toString(36).substring(2, 11).toUpperCase();
 };
 
-// Use dynamic path based on the environment
-// Prefer the repo/deploy-local `.env` next to this script when present.
-// This avoids confusing "production path" resolution in dev environments where NODE_ENV may be set externally.
-const localDotenvPath = path.resolve(__dirname, '.env');
-const legacyProdDotenvPath = '/home/ec2-user/admin-dashboard/.env'; // legacy deploy location (still supported)
-let dotenvPath = localDotenvPath;
-try {
-  if (!fs.existsSync(localDotenvPath) && process.env.NODE_ENV === 'production') {
-    dotenvPath = legacyProdDotenvPath;
-  }
-} catch (_) {
-  // ignore fs errors; fall back to local path
-  dotenvPath = localDotenvPath;
+const { resolveAdminEnvironmentFile } = require('./src/server/adminEnvironment');
+
+// DEV and PROD retain their existing repo-local/legacy resolution. Tests must
+// use an explicit, attempt-owned synthetic environment instead of a real `.env`.
+const dotenvPath = resolveAdminEnvironmentFile({ serverRoot: __dirname });
+const dotenvResult = require('dotenv').config({ path: dotenvPath, override: true });
+if (process.env.NODE_ENV === 'test' && dotenvResult.error) {
+  throw new Error(`Unable to load the explicit admin test environment: ${dotenvResult.error.message}`);
 }
-// Use `.env` as source of truth for this app; override any inherited process env values.
-require('dotenv').config({ path: dotenvPath, override: true });
 
 console.log("Loaded .env from:", dotenvPath);  // Debugging log
 console.log("CORS Allowed Origin:", process.env.ALLOWED_ORIGIN);
