@@ -49,6 +49,12 @@ const {
   mergeIlmpAnswers,
 } = require('./src/lib/ilmpContextMapping');
 const {
+  classifyIlmpBatchOwnership,
+} = require('./src/lib/ilmpBatchOwnership');
+const {
+  resolvePaymentPacketApplicationScope,
+} = require('./src/lib/paymentQueueApplicationScope');
+const {
   buildDecisionLetterSchemaFromMessageBody,
 } = require('./src/lib/decisionLetterMessageBody');
 const {
@@ -61,6 +67,15 @@ const {
   getNoReportableInterventionsMessage,
   summariseIlmpActionPlanStatuses,
 } = require('./src/lib/ilmpActionPlanReadiness');
+const {
+  collectDeniedReportingEiAlignmentIssues,
+  normalizeEiClaimantCode,
+  resolveEiFundingClassification,
+} = require('./src/lib/deniedReportingEiAlignment');
+const {
+  clearCaseLevelReportingContext,
+  prepareCaseForNewApplication,
+} = require('./src/lib/caseApplicationLifecycle');
 const {
   APPENDIX_A: ILMP_APPENDIX_A,
   APPENDIX_B: ILMP_APPENDIX_B,
@@ -829,9 +844,10 @@ function buildApplicationTerminalRankSql(applicationAlias = 'a') {
   const normalisedStatus = buildNormalisedStatusSql(`${applicationAlias}.status`);
   const normalisedLifecycleStatus = buildNormalisedStatusSql(`${applicationAlias}.lifecycle_status`);
   return `CASE
-      WHEN ${normalisedStatus} IN (${APPLICATION_TERMINAL_STATUS_SQL_LIST})
-        OR ${normalisedLifecycleStatus} IN ('closed', 'archived')
-      THEN 1 ELSE 0
+      WHEN ${normalisedLifecycleStatus} <> ''
+        THEN CASE WHEN ${normalisedLifecycleStatus} IN ('closed', 'archived') THEN 1 ELSE 0 END
+      WHEN ${normalisedStatus} IN (${APPLICATION_TERMINAL_STATUS_SQL_LIST}) THEN 1
+      ELSE 0
     END`;
 }
 
@@ -1179,6 +1195,8 @@ async function resolveDocumentAttachmentContext({
   let nextInterventionIds = normalizeIdList(interventionIds);
   let effectiveStorageScope = normalizedScope;
   let usedApplicationFallback = false;
+  let actionPlanOwnershipResolved = false;
+  let actionPlanOwnership = null;
 
   const ensureActionPlanId = async () => {
     if (!nextActionPlanId && nextInterventionIds.length) {
@@ -1188,6 +1206,49 @@ async function resolveDocumentAttachmentContext({
       });
     }
     return nextActionPlanId;
+  };
+
+  const ensureActionPlanOwnership = async () => {
+    const planId = await ensureActionPlanId();
+    if (!planId) return null;
+    if (actionPlanOwnershipResolved) return actionPlanOwnership;
+    const [[planRow]] = await connection.query(
+      `SELECT ap.case_id,
+              ap.application_id
+         FROM iset_case_action_plan ap
+        WHERE ap.id = ?
+        LIMIT 1`,
+      [planId]
+    );
+    if (!planRow) {
+      const err = new Error('action_plan_not_found');
+      err.code = 'action_plan_not_found';
+      err.details = { actionPlanId: planId };
+      throw err;
+    }
+    actionPlanOwnership = {
+      caseId: normalisePositiveInteger(planRow.case_id),
+      applicationId: normalisePositiveInteger(planRow.application_id),
+    };
+    actionPlanOwnershipResolved = true;
+    if (!actionPlanOwnership.caseId) {
+      const err = new Error('action_plan_case_required');
+      err.code = 'action_plan_case_required';
+      err.details = { actionPlanId: planId };
+      throw err;
+    }
+    if (nextCaseId && nextCaseId !== actionPlanOwnership.caseId) {
+      const err = new Error('action_plan_case_mismatch');
+      err.code = 'action_plan_case_mismatch';
+      err.details = {
+        caseId: nextCaseId,
+        actionPlanId: planId,
+        actionPlanCaseId: actionPlanOwnership.caseId,
+      };
+      throw err;
+    }
+    nextCaseId = actionPlanOwnership.caseId;
+    return actionPlanOwnership;
   };
 
   const ensureCaseIdForApplication = async () => {
@@ -1205,19 +1266,7 @@ async function resolveDocumentAttachmentContext({
   };
 
   const ensureCaseId = async () => {
-    const planId = await ensureActionPlanId();
-    if (planId) {
-      const planCaseId = await resolveCaseIdForActionPlan(planId, connection);
-      if (planCaseId && nextCaseId && Number(nextCaseId) !== Number(planCaseId)) {
-        const err = new Error('action_plan_case_mismatch');
-        err.code = 'action_plan_case_mismatch';
-        err.details = { caseId: nextCaseId, actionPlanId: planId, actionPlanCaseId: planCaseId };
-        throw err;
-      }
-      if (planCaseId) {
-        nextCaseId = planCaseId;
-      }
-    }
+    await ensureActionPlanOwnership();
     if (nextApplicationId) {
       await ensureCaseIdForApplication();
     }
@@ -1298,9 +1347,23 @@ async function resolveDocumentAttachmentContext({
   }
 
   if (normalizedScope === 'application') {
+    const planOwnership = await ensureActionPlanOwnership();
+    if (planOwnership?.applicationId) {
+      if (nextApplicationId && nextApplicationId !== planOwnership.applicationId) {
+        const err = new Error('action_plan_application_mismatch');
+        err.code = 'action_plan_application_mismatch';
+        err.details = {
+          applicationId: nextApplicationId,
+          actionPlanId: nextActionPlanId,
+          actionPlanApplicationId: planOwnership.applicationId,
+        };
+        throw err;
+      }
+      nextApplicationId = planOwnership.applicationId;
+    }
     if (!nextApplicationId) {
       const resolvedCaseId = await ensureCaseId();
-      if (resolvedCaseId) {
+      if (resolvedCaseId && !nextActionPlanId) {
         nextApplicationId = await resolveApplicationIdForCaseId(resolvedCaseId, connection);
       }
     }
@@ -2883,12 +2946,24 @@ async function archiveRecalledAssessmentDocuments(connection, {
   if (includeApplicationCompanionDocuments && normalizedApplicationId) {
     const companionPlaceholders = APPLICATION_ASSESSMENT_RECALL_COMPANION_DOCUMENT_TYPES.map(() => '?').join(',');
     const [rows] = await connection.query(
-      `SELECT id
-         FROM iset_document
-        WHERE application_id = ?
-          AND document_category IN (${companionPlaceholders})
-          AND status = 'active'
-          AND source = 'system_generated'`,
+      `SELECT d.id
+         FROM iset_document d
+        WHERE d.application_id = ?
+          AND d.document_category IN (${companionPlaceholders})
+          AND d.status = 'active'
+          AND d.source = 'system_generated'
+          AND (
+            d.document_category <> 'financial_overview'
+            OR (
+              d.signing_request_id IS NULL
+              AND JSON_EXTRACT(d.metadata, '$.funding_overview_version_id') IS NULL
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM funding_overview_version_documents vd
+                 WHERE vd.document_id = d.id
+              )
+            )
+          )`,
       [normalizedApplicationId, ...APPLICATION_ASSESSMENT_RECALL_COMPANION_DOCUMENT_TYPES]
     );
     (Array.isArray(rows) ? rows : []).forEach(row => {
@@ -4119,6 +4194,64 @@ async function storeFundingOverviewPdfDocument({
   return result?.insertId || null;
 }
 
+function normaliseDecisionLetterOwnerContext({ applicationId, ownerContext = null } = {}) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const requestedKind = (normaliseString(ownerContext?.kind) || 'application').toLowerCase();
+  if (requestedKind === 'application') {
+    const ownerApplicationId = normalisePositiveInteger(ownerContext?.applicationId);
+    if (ownerApplicationId && ownerApplicationId !== normalizedApplicationId) {
+      const error = new Error('decision_letter_owner_application_mismatch');
+      error.code = 'decision_letter_owner_application_mismatch';
+      throw error;
+    }
+    return {
+      kind: 'application',
+      applicationId: normalizedApplicationId,
+    };
+  }
+  if (requestedKind !== 'intervention') {
+    const error = new Error('decision_letter_owner_kind_invalid');
+    error.code = 'decision_letter_owner_kind_invalid';
+    throw error;
+  }
+  const normalizedOwner = {
+    kind: 'intervention',
+    applicationId: normalisePositiveInteger(ownerContext?.applicationId),
+    actionPlanId: normalisePositiveInteger(ownerContext?.actionPlanId),
+    interventionId: normalisePositiveInteger(ownerContext?.interventionId),
+    proposalId: normalisePositiveInteger(ownerContext?.proposalId),
+    workflowId: normalisePositiveInteger(ownerContext?.workflowId),
+    proposalKind: (normaliseString(ownerContext?.proposalKind) || '').toLowerCase(),
+    revisionDraftInterventionId: normalisePositiveInteger(
+      ownerContext?.revisionDraftInterventionId
+    ),
+    sourceInterventionId: normalisePositiveInteger(ownerContext?.sourceInterventionId),
+    sourceItemId: normaliseString(ownerContext?.sourceItemId),
+  };
+  if (
+    !normalizedApplicationId ||
+    normalizedOwner.applicationId !== normalizedApplicationId ||
+    !normalizedOwner.actionPlanId ||
+    !normalizedOwner.interventionId ||
+    !normalizedOwner.proposalId ||
+    !normalizedOwner.workflowId ||
+    !new Set(['new', 'revision']).has(normalizedOwner.proposalKind)
+  ) {
+    const error = new Error('decision_letter_intervention_owner_scope_invalid');
+    error.code = 'decision_letter_intervention_owner_scope_invalid';
+    throw error;
+  }
+  if (
+    normalizedOwner.proposalKind === 'revision' &&
+    !normalizedOwner.revisionDraftInterventionId
+  ) {
+    const error = new Error('decision_letter_revision_owner_scope_invalid');
+    error.code = 'decision_letter_revision_owner_scope_invalid';
+    throw error;
+  }
+  return normalizedOwner;
+}
+
 async function storeDecisionLetterPdfDocument({
   docType,
   caseId,
@@ -4128,12 +4261,43 @@ async function storeDecisionLetterPdfDocument({
   clientId,
   trackingId,
   signingRequestId,
-  pdfBuffer
+  pdfBuffer,
+  connection = null,
+  uploadedObjectKeys = null,
+  ownerContext = null,
+  uploadPdfObjectFn = uploadAssessmentGeneratedPdfObject,
 }) {
-  if (!docType || !applicationId || !pdfBuffer) return null;
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!docType || !normalizedApplicationId || !pdfBuffer) {
+    const error = new Error('decision_letter_document_scope_invalid');
+    error.code = 'decision_letter_document_scope_invalid';
+    throw error;
+  }
+  if (!connection || typeof connection.query !== 'function') {
+    const error = new Error('decision_letter_document_connection_required');
+    error.code = 'decision_letter_document_connection_required';
+    throw error;
+  }
+  if (!Array.isArray(uploadedObjectKeys)) {
+    const error = new Error('decision_letter_document_compensation_required');
+    error.code = 'decision_letter_document_compensation_required';
+    throw error;
+  }
+  const normalizedOwner = normaliseDecisionLetterOwnerContext({
+    applicationId: normalizedApplicationId,
+    ownerContext,
+  });
+  if (
+    normalizedOwner.kind === 'intervention' &&
+    docType !== 'assessment_approval_letter'
+  ) {
+    const error = new Error('decision_letter_intervention_document_type_invalid');
+    error.code = 'decision_letter_intervention_document_type_invalid';
+    throw error;
+  }
   const label = DECISION_LETTER_LABELS[docType] || 'Decision letter';
   const docSlug = String(docType).toLowerCase().replace(/[^a-z0-9]+/g, '-');
-  const baseRef = normaliseString(trackingId) || String(applicationId);
+  const baseRef = normaliseString(trackingId) || String(normalizedApplicationId);
   const timestamp = Date.now();
   const displayName = `${docSlug}-${baseRef}-${signingRequestId || timestamp}.pdf`;
   const sizeBytes = Number.isFinite(Number(pdfBuffer?.length)) ? Number(pdfBuffer.length) : null;
@@ -4142,8 +4306,11 @@ async function storeDecisionLetterPdfDocument({
   const normalizedActorUserId = normalisePositiveInteger(actorUserId);
   const normalizedClientId = normalisePositiveInteger(clientId);
   let normalizedCaseId = normalisePositiveInteger(caseId);
-  if (!normalizedCaseId && applicationId) {
-    normalizedCaseId = await resolveCaseIdFromApplicationId(applicationId);
+  if (!normalizedCaseId) {
+    normalizedCaseId = await resolveCaseIdFromApplicationId(
+      normalizedApplicationId,
+      connection
+    );
   }
   if (!normalizedClientId) {
     throw new Error('client_id_required');
@@ -4151,39 +4318,46 @@ async function storeDecisionLetterPdfDocument({
   if (!normalizedCaseId) {
     throw new Error('case_id_required');
   }
-  let relativePath = null;
-  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-  if (DRIVER !== 's3') {
-    throw new Error('s3_upload_unavailable');
-  }
-  const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
-  const presigned = await presignPut({ key, contentType: 'application/pdf' });
-  await axios.put(presigned.url, pdfBuffer, {
-    headers: {
-      ...(presigned.headers || {}),
-      'Content-Type': 'application/pdf',
-      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-    }
+  const relativePath = await uploadPdfObjectFn({
+    ownerId: applicantUserId || actorUserId || 'admin',
+    displayName,
+    pdfBuffer,
+    sizeBytes,
+    checksumSha256: checksum,
+    uploadedObjects: uploadedObjectKeys,
   });
-  relativePath = key;
   if (!relativePath) {
     throw new Error('path_resolution_failed');
   }
 
-  await pool.query(
-    `UPDATE iset_document
-        SET status = 'archived', updated_at = NOW()
-      WHERE application_id = ?
-        AND document_category = ?
-        AND status = 'active'`,
-    [applicationId, docType]
-  );
-
-  const metadata = JSON.stringify({ label, document_type: docType });
+  const metadata = JSON.stringify(pruneNullish({
+    label,
+    document_type: docType,
+    decision_letter_owner: normalizedOwner.kind,
+    application_id: normalizedOwner.applicationId,
+    action_plan_id:
+      normalizedOwner.kind === 'intervention' ? normalizedOwner.actionPlanId : null,
+    intervention_id:
+      normalizedOwner.kind === 'intervention' ? normalizedOwner.interventionId : null,
+    proposal_id:
+      normalizedOwner.kind === 'intervention' ? normalizedOwner.proposalId : null,
+    review_workflow_id:
+      normalizedOwner.kind === 'intervention' ? normalizedOwner.workflowId : null,
+    proposal_kind:
+      normalizedOwner.kind === 'intervention' ? normalizedOwner.proposalKind : null,
+    revision_draft_intervention_id:
+      normalizedOwner.kind === 'intervention'
+        ? normalizedOwner.revisionDraftInterventionId
+        : null,
+    source_intervention_id:
+      normalizedOwner.kind === 'intervention' ? normalizedOwner.sourceInterventionId : null,
+    source_item_id:
+      normalizedOwner.kind === 'intervention' ? normalizedOwner.sourceItemId : null,
+  }));
   const insertPayload = [
     normalizedCaseId,
-    applicationId,
-    null,
+    normalizedApplicationId,
+    normalizedOwner.kind === 'intervention' ? normalizedOwner.actionPlanId : null,
     normalizedClientId,
     normalizedApplicantUserId,
     normalizedActorUserId,
@@ -4196,13 +4370,108 @@ async function storeDecisionLetterPdfDocument({
     checksum,
     docType
   ];
-  const [result] = await pool.query(
+  // Insert first in a non-active state. The previous active letter is not
+  // archived unless a durable replacement row now exists in this transaction.
+  const [result] = await connection.query(
     `INSERT INTO iset_document
        (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
-     VALUES (?,?,?,?,?,?,'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+     VALUES (?,?,?,?,?,?,'system_generated', ?, ?, ?, ?, ?, ?, ?, 'archived', ?)`,
     insertPayload
   );
-  return result?.insertId || null;
+  const replacementDocumentId = normalisePositiveInteger(result?.insertId);
+  if (!replacementDocumentId) {
+    const error = new Error('decision_letter_document_insert_failed');
+    error.code = 'decision_letter_document_insert_failed';
+    throw error;
+  }
+  attachAssessmentGeneratedDocumentIdentity(uploadedObjectKeys, relativePath, {
+    documentId: replacementDocumentId,
+    caseId: normalizedCaseId,
+    applicationId: normalizedApplicationId,
+    documentCategory: docType,
+    checksumSha256: checksum,
+  });
+
+  if (normalizedOwner.kind === 'intervention') {
+    await updateDocumentInterventionLinks({
+      documentId: replacementDocumentId,
+      interventionIds: [normalizedOwner.interventionId],
+      connection,
+    });
+    await connection.query(
+      `UPDATE iset_document d
+       JOIN iset_document_intervention di
+         ON di.document_id = d.id
+        AND di.intervention_id = ?
+          SET d.status = 'archived', d.updated_at = NOW()
+        WHERE d.application_id = ?
+          AND d.action_plan_id = ?
+          AND d.document_category = ?
+          AND d.status = 'active'
+          AND d.id <> ?`,
+      [
+        normalizedOwner.interventionId,
+        normalizedApplicationId,
+        normalizedOwner.actionPlanId,
+        docType,
+        replacementDocumentId,
+      ]
+    );
+  } else {
+    await connection.query(
+      `UPDATE iset_document d
+          SET d.status = 'archived', d.updated_at = NOW()
+        WHERE d.application_id = ?
+          AND d.action_plan_id IS NULL
+          AND d.document_category = ?
+          AND d.status = 'active'
+          AND d.id <> ?
+          AND JSON_UNQUOTE(JSON_EXTRACT(d.metadata, '$.decision_letter_owner')) = 'application'
+          AND NOT EXISTS (
+            SELECT 1
+              FROM iset_document_intervention di
+             WHERE di.document_id = d.id
+          )`,
+      [normalizedApplicationId, docType, replacementDocumentId]
+    );
+  }
+  const activationSql = normalizedOwner.kind === 'intervention'
+    ? `UPDATE iset_document d
+          SET d.status = 'active', d.updated_at = NOW()
+        WHERE d.id = ?
+          AND d.application_id = ?
+          AND d.action_plan_id = ?
+          AND d.document_category = ?
+          AND d.status = 'archived'
+          AND EXISTS (
+            SELECT 1
+              FROM iset_document_intervention di
+             WHERE di.document_id = d.id
+               AND di.intervention_id = ?
+          )`
+    : `UPDATE iset_document
+          SET status = 'active', updated_at = NOW()
+        WHERE id = ?
+          AND application_id = ?
+          AND action_plan_id IS NULL
+          AND document_category = ?
+          AND status = 'archived'`;
+  const activationParams = normalizedOwner.kind === 'intervention'
+    ? [
+        replacementDocumentId,
+        normalizedApplicationId,
+        normalizedOwner.actionPlanId,
+        docType,
+        normalizedOwner.interventionId,
+      ]
+    : [replacementDocumentId, normalizedApplicationId, docType];
+  const [activationResult] = await connection.query(activationSql, activationParams);
+  if (Number(activationResult?.affectedRows || 0) !== 1) {
+    const error = new Error('decision_letter_document_activation_failed');
+    error.code = 'decision_letter_document_activation_failed';
+    throw error;
+  }
+  return replacementDocumentId;
 }
 
 async function storeFundingAgreementPdfDocument({
@@ -7686,7 +7955,7 @@ async function ensureEsdcPreparedHistoryEventType(connection) {
   ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared = true;
 }
 
-async function findPreferredActionPlanIdForCase(executor, caseId) {
+async function findPreferredActionPlanIdForCase(executor, caseId, options = {}) {
   const db = executor && typeof executor.query === 'function' ? executor : pool;
   if (!db || !Number.isInteger(Number(caseId)) || Number(caseId) <= 0) return null;
   try {
@@ -7707,7 +7976,40 @@ async function findPreferredActionPlanIdForCase(executor, caseId) {
     );
     return row?.id || null;
   } catch (err) {
+    if (options.throwOnError === true) throw err;
     console.warn('[esdc] failed to find preferred action plan for case', caseId, err?.message || err);
+    return null;
+  }
+}
+
+async function findPreferredActionPlanIdForApplication(executor, caseId, applicationId, options = {}) {
+  const db = executor && typeof executor.query === 'function' ? executor : pool;
+  const numericCaseId = normalisePositiveInteger(caseId);
+  const numericApplicationId = normalisePositiveInteger(applicationId);
+  if (!db || !numericCaseId || !numericApplicationId) return null;
+  try {
+    const [[row]] = await db.query(
+      `SELECT ap.id
+         FROM iset_case_action_plan ap
+        WHERE ap.case_id = ?
+          AND ap.application_id = ?
+          AND ap.archived_at IS NULL
+          AND LOWER(COALESCE(ap.status, '')) <> 'archived'
+        ORDER BY
+          (LOWER(COALESCE(ap.status, '')) = 'active') DESC,
+          ap.updated_at DESC,
+          ap.id DESC
+        LIMIT 1`,
+      [numericCaseId, numericApplicationId]
+    );
+    return row?.id || null;
+  } catch (err) {
+    if (options.throwOnError === true) throw err;
+    console.warn(
+      '[esdc] failed to find preferred action plan for application',
+      numericApplicationId,
+      err?.message || err
+    );
     return null;
   }
 }
@@ -7743,6 +8045,47 @@ async function findEsdcSubmissionIdForCase(executor, caseId) {
     return row?.id || null;
   } catch (err) {
     console.warn('[esdc] failed to find submission for case', caseId, err?.message || err);
+    return null;
+  }
+}
+
+async function findEsdcSubmissionIdForApplication(executor, caseId, applicationId) {
+  const db = executor && typeof executor.query === 'function' ? executor : pool;
+  const numericCaseId = normalisePositiveInteger(caseId);
+  const numericApplicationId = normalisePositiveInteger(applicationId);
+  if (!db || !numericCaseId || !numericApplicationId) return null;
+  try {
+    const [[row]] = await db.query(
+      `SELECT eps.id
+         FROM esdc_participant_submission eps
+         LEFT JOIN iset_case_action_plan ap ON ap.id = eps.action_plan_id
+        WHERE eps.case_id = ?
+          AND eps.application_id = ?
+          AND (
+            eps.action_plan_id IS NULL
+            OR ap.id IS NULL
+            OR (
+              ap.case_id = eps.case_id
+              AND ap.application_id = eps.application_id
+              AND ap.archived_at IS NULL
+              AND LOWER(COALESCE(ap.status, '')) <> 'archived'
+            )
+          )
+        ORDER BY
+          (LOWER(COALESCE(ap.status, '')) = 'active') DESC,
+          ap.updated_at DESC,
+          eps.updated_at DESC,
+          eps.id DESC
+        LIMIT 1`,
+      [numericCaseId, numericApplicationId]
+    );
+    return row?.id || null;
+  } catch (err) {
+    console.warn(
+      '[esdc] failed to find submission for application',
+      numericApplicationId,
+      err?.message || err
+    );
     return null;
   }
 }
@@ -7787,6 +8130,135 @@ async function resolvePrimaryApplicationIdForCase(executor, caseId) {
   }
 }
 
+async function resolveUniqueApplicationIdForCase(executor, caseId) {
+  const db = executor && typeof executor.query === 'function' ? executor : pool;
+  const numericCaseId = normalisePositiveInteger(caseId);
+  if (!db || !numericCaseId) return null;
+  const [rows] = await db.query(
+    `SELECT a.id
+       FROM iset_application a
+      WHERE a.case_id = ?
+      ORDER BY a.id ASC
+      LIMIT 2`,
+    [numericCaseId]
+  );
+  const applicationIds = (Array.isArray(rows) ? rows : [])
+    .map(row => normalisePositiveInteger(row?.id))
+    .filter(Boolean);
+  if (applicationIds.length > 1) {
+    const error = new Error('ilmp_application_scope_ambiguous');
+    error.code = 'ilmp_application_scope_ambiguous';
+    error.statusCode = 409;
+    throw error;
+  }
+  return applicationIds[0] || null;
+}
+
+async function resolveActionPlanScope(executor, actionPlanId, options = {}) {
+  const db = executor && typeof executor.query === 'function' ? executor : pool;
+  const numericPlanId = normalisePositiveInteger(actionPlanId);
+  if (!db || !numericPlanId) return null;
+  try {
+    const [[row]] = await db.query(
+      `SELECT case_id, application_id
+         FROM iset_case_action_plan
+        WHERE id = ?
+        LIMIT 1`,
+      [numericPlanId]
+    );
+    if (!row) return null;
+    return {
+      caseId: normalisePositiveInteger(row.case_id),
+      applicationId: normalisePositiveInteger(row.application_id),
+    };
+  } catch (err) {
+    if (options.throwOnError === true) throw err;
+    if (err?.code && err.code !== 'ER_BAD_FIELD_ERROR' && err.code !== 'ER_NO_SUCH_TABLE') {
+      console.warn('[esdc] failed to resolve action-plan scope', numericPlanId, err?.message || err);
+    }
+    return null;
+  }
+}
+
+function buildEsdcSubmissionScopeError(code, details = {}) {
+  return Object.assign(new Error(code), {
+    code,
+    statusCode: 409,
+    ...details,
+  });
+}
+
+async function findExactEsdcSubmissionForScope(executor, {
+  caseId,
+  applicationId = null,
+  actionPlanId = null,
+} = {}) {
+  const db = executor && typeof executor.query === 'function' ? executor : pool;
+  const numericCaseId = normalisePositiveInteger(caseId);
+  const numericApplicationId = normalisePositiveInteger(applicationId);
+  const numericActionPlanId = normalisePositiveInteger(actionPlanId);
+  if (!db || !numericCaseId) return null;
+
+  const scopeClauses = [];
+  const params = [];
+  if (numericActionPlanId) {
+    scopeClauses.push('eps.action_plan_id = ?');
+    params.push(numericActionPlanId);
+  } else {
+    scopeClauses.push('eps.case_id = ?', 'eps.action_plan_id IS NULL');
+    params.push(numericCaseId);
+    if (numericApplicationId) {
+      scopeClauses.push('eps.application_id = ?');
+      params.push(numericApplicationId);
+    } else {
+      scopeClauses.push('eps.application_id IS NULL');
+    }
+  }
+
+  const [rows] = await db.query(
+    `SELECT eps.id,
+            eps.case_id,
+            eps.action_plan_id,
+            eps.application_id
+       FROM esdc_participant_submission eps
+      WHERE ${scopeClauses.join('\n        AND ')}
+      ORDER BY eps.updated_at DESC, eps.id DESC
+      LIMIT 2`,
+    params
+  );
+  const matches = Array.isArray(rows) ? rows : [];
+  if (matches.length > 1) {
+    throw buildEsdcSubmissionScopeError('esdc_submission_scope_duplicate', {
+      caseId: numericCaseId,
+      actionPlanId: numericActionPlanId,
+      applicationId: numericApplicationId,
+      submissionIds: matches.map(row => normalisePositiveInteger(row?.id)).filter(Boolean),
+    });
+  }
+  const row = matches[0] || null;
+  if (!row) return null;
+
+  const rowCaseId = normalisePositiveInteger(row.case_id);
+  const rowActionPlanId = normalisePositiveInteger(row.action_plan_id);
+  const rowApplicationId = normalisePositiveInteger(row.application_id);
+  const details = {
+    submissionId: normalisePositiveInteger(row.id),
+    caseId: rowCaseId,
+    actionPlanId: rowActionPlanId,
+    applicationId: rowApplicationId,
+  };
+  if (rowCaseId !== numericCaseId) {
+    throw buildEsdcSubmissionScopeError('esdc_submission_case_scope_mismatch', details);
+  }
+  if (rowActionPlanId !== numericActionPlanId) {
+    throw buildEsdcSubmissionScopeError('esdc_submission_action_plan_scope_mismatch', details);
+  }
+  if (rowApplicationId !== numericApplicationId) {
+    throw buildEsdcSubmissionScopeError('esdc_submission_application_scope_mismatch', details);
+  }
+  return row;
+}
+
 async function resolveActionPlanApplicationId(executor, actionPlanId) {
   const db = executor && typeof executor.query === 'function' ? executor : pool;
   const numericPlanId = normalisePositiveInteger(actionPlanId);
@@ -7809,28 +8281,70 @@ async function resolveActionPlanApplicationId(executor, actionPlanId) {
 }
 
 async function ensureEsdcParticipantSubmissionRecord(db, caseId, applicationId, actionPlanId) {
-  if (!caseId) return;
+  const numericCaseId = normalisePositiveInteger(caseId);
+  if (!numericCaseId) return null;
   const executor = db && typeof db.query === 'function' ? db : pool;
-  if (!executor) return;
-  const resolvedPlanId = Number.isInteger(Number(actionPlanId)) && Number(actionPlanId) > 0
-    ? Number(actionPlanId)
-    : await findPreferredActionPlanIdForCase(executor, Number(caseId));
-  const planApplicationId = resolvedPlanId
-    ? await resolveActionPlanApplicationId(executor, resolvedPlanId)
-    : null;
-  let resolvedApplicationId = chooseIlmpApplicationId({
-    actionPlanApplicationId: planApplicationId,
-  });
-  if (!resolvedPlanId && !resolvedApplicationId) {
-    resolvedApplicationId = chooseIlmpApplicationId({ submissionApplicationId: applicationId });
-  }
-  if (!resolvedPlanId && !resolvedApplicationId) {
-    resolvedApplicationId = chooseIlmpApplicationId({
-      primaryApplicationId: await resolvePrimaryApplicationIdForCase(executor, Number(caseId)),
+  if (!executor) return null;
+  const requestedApplicationId = normalisePositiveInteger(applicationId);
+  const requestedActionPlanId = normalisePositiveInteger(actionPlanId);
+  const applicationScopeWasProvided = applicationId !== null && typeof applicationId !== 'undefined' && String(applicationId).trim() !== '';
+  const actionPlanScopeWasProvided = actionPlanId !== null && typeof actionPlanId !== 'undefined' && String(actionPlanId).trim() !== '';
+  if (applicationScopeWasProvided && !requestedApplicationId) {
+    throw Object.assign(new Error('invalid_application_id'), {
+      code: 'invalid_application_id',
+      statusCode: 400,
     });
   }
+  if (actionPlanScopeWasProvided && !requestedActionPlanId) {
+    throw Object.assign(new Error('invalid_action_plan_id'), {
+      code: 'invalid_action_plan_id',
+      statusCode: 400,
+    });
+  }
+  const resolvedPlanId = requestedActionPlanId
+    ? requestedActionPlanId
+    : requestedApplicationId
+      ? await findPreferredActionPlanIdForApplication(
+        executor,
+        numericCaseId,
+        requestedApplicationId,
+        { throwOnError: true }
+      )
+      : await findPreferredActionPlanIdForCase(executor, numericCaseId, { throwOnError: true });
+  const planScope = resolvedPlanId
+    ? await resolveActionPlanScope(executor, resolvedPlanId, { throwOnError: true })
+    : null;
+  const planApplicationId = planScope?.applicationId || null;
+  if (
+    resolvedPlanId &&
+    (
+      planScope?.caseId !== normalisePositiveInteger(caseId) ||
+      (requestedApplicationId && planApplicationId !== requestedApplicationId)
+    )
+  ) {
+    const scopeError = new Error('esdc_action_plan_scope_mismatch');
+    scopeError.code = 'esdc_action_plan_scope_mismatch';
+    scopeError.statusCode = 409;
+    throw scopeError;
+  }
+  let resolvedApplicationId = chooseIlmpApplicationId({
+    submissionApplicationId: requestedApplicationId,
+    actionPlanApplicationId: planApplicationId,
+  });
+  if (!resolvedApplicationId) {
+    resolvedApplicationId = chooseIlmpApplicationId({
+      uniqueCaseApplicationId: await resolveUniqueApplicationIdForCase(executor, numericCaseId),
+    });
+  }
+  const existingSubmission = await findExactEsdcSubmissionForScope(executor, {
+    caseId: numericCaseId,
+    applicationId: resolvedApplicationId,
+    actionPlanId: resolvedPlanId,
+  });
+  if (existingSubmission) return normalisePositiveInteger(existingSubmission.id);
+
   try {
-    await executor.query(
+    const [insertResult] = await executor.query(
       `INSERT INTO esdc_participant_submission (
          case_id,
          action_plan_id,
@@ -7847,76 +8361,95 @@ async function ensureEsdcParticipantSubmissionRecord(db, caseId, applicationId, 
          payload_storage_key,
          payload_checksum,
          rejection_reason
-       ) VALUES (?, ?, ?, 'needs_review', NULL, NULL, NULL, NULL, 'pending', NULL, NULL, NULL, NULL, NULL, NULL)
-       ON DUPLICATE KEY UPDATE
-         application_id = COALESCE(VALUES(application_id), esdc_participant_submission.application_id),
-         action_plan_id = VALUES(action_plan_id),
-         readiness_status = 'needs_review',
-         readiness_summary = NULL,
-         warnings = NULL,
-         blocking_issues = NULL,
-         last_validated_at = NULL,
-         submission_status = 'pending',
-         submitted_at = NULL,
-         submitted_by_user_id = NULL,
-         payload_snapshot = NULL,
-         payload_storage_key = NULL,
-         payload_checksum = NULL,
-         rejection_reason = NULL,
-         updated_at = NOW()`,
-      [caseId, resolvedPlanId || null, resolvedApplicationId || null]
+       ) VALUES (?, ?, ?, 'needs_review', NULL, NULL, NULL, NULL, 'pending', NULL, NULL, NULL, NULL, NULL, NULL)`,
+      [numericCaseId, resolvedPlanId || null, resolvedApplicationId || null]
     );
+    return normalisePositiveInteger(insertResult?.insertId);
   } catch (err) {
-    console.error('[esdc] ensure participant submission failed', err);
+    if (err?.code === 'ER_DUP_ENTRY') {
+      const concurrentSubmission = await findExactEsdcSubmissionForScope(executor, {
+        caseId: numericCaseId,
+        applicationId: resolvedApplicationId,
+        actionPlanId: resolvedPlanId,
+      });
+      if (concurrentSubmission) return normalisePositiveInteger(concurrentSubmission.id);
+    }
+    throw err;
   }
 }
 
 async function markEsdcParticipantSubmissionNeedsReview(db, caseId, options = {}) {
-  if (!caseId) return;
+  const numericCaseId = normalisePositiveInteger(caseId);
+  if (!numericCaseId) return;
   const executor = db && typeof db.query === 'function' ? db : pool;
   if (!executor) return;
-  const { resetSnapshot = true, resetSubmissionStatus = true } = options;
+  const { actionPlanId = null, applicationId = null } = options;
+  const numericActionPlanId = normalisePositiveInteger(actionPlanId);
+  const numericApplicationId = normalisePositiveInteger(applicationId);
+  if (numericActionPlanId && numericApplicationId) {
+    throw new Error('ilmp_invalidation_scope_conflict');
+  }
+  if (!numericActionPlanId && !numericApplicationId) {
+    throw new Error('ilmp_invalidation_scope_required');
+  }
   const assignments = [
     "readiness_status = 'needs_review'",
     'readiness_summary = NULL',
     'warnings = NULL',
     'blocking_issues = NULL',
     'last_validated_at = NULL',
+    `payload_snapshot = CASE
+       WHEN LOWER(COALESCE(eps.submission_status, 'pending')) IN ('submitted', 'accepted')
+         THEN eps.payload_snapshot
+       ELSE NULL
+     END`,
+    `payload_storage_key = CASE
+       WHEN LOWER(COALESCE(eps.submission_status, 'pending')) IN ('submitted', 'accepted')
+         THEN eps.payload_storage_key
+       ELSE NULL
+     END`,
+    `payload_checksum = CASE
+       WHEN LOWER(COALESCE(eps.submission_status, 'pending')) IN ('submitted', 'accepted')
+         THEN eps.payload_checksum
+       ELSE NULL
+     END`,
     'updated_at = NOW()'
   ];
-  if (resetSnapshot) {
-    assignments.push(
-      'payload_snapshot = NULL',
-      'payload_storage_key = NULL',
-      'payload_checksum = NULL',
-      'rejection_reason = NULL'
-    );
+  const scopeClauses = ['eps.case_id = ?'];
+  const params = [numericCaseId];
+  if (numericActionPlanId) {
+    scopeClauses.push('eps.action_plan_id = ?', 'ap.case_id = ?');
+    params.push(numericActionPlanId, numericCaseId);
+  } else if (numericApplicationId) {
+    scopeClauses.push(`(
+        eps.application_id = ?
+        OR (
+          eps.application_id IS NULL
+          AND ap.case_id = ?
+          AND ap.application_id = ?
+        )
+      )`);
+    params.push(numericApplicationId, numericCaseId, numericApplicationId);
   }
-  if (resetSubmissionStatus) {
-    assignments.push(
-      "submission_status = 'pending'",
-      'submitted_at = NULL',
-      'submitted_by_user_id = NULL'
-    );
+  if (!numericActionPlanId) {
+    scopeClauses.push(`(
+        eps.action_plan_id IS NULL
+        OR ap.id IS NULL
+        OR (
+          ap.archived_at IS NULL
+          AND LOWER(COALESCE(ap.status, '')) <> 'archived'
+        )
+      )`);
   }
-  try {
-    const sql = `
+  const sql = `
       UPDATE esdc_participant_submission eps
       LEFT JOIN iset_case_action_plan ap ON ap.id = eps.action_plan_id
          SET ${assignments.map(assignment => `eps.${assignment}`).join(', ')}
-       WHERE eps.case_id = ?
-         AND (
-           eps.action_plan_id IS NULL
-           OR ap.id IS NULL
-           OR (
-             ap.archived_at IS NULL
-             AND LOWER(COALESCE(ap.status, '')) <> 'archived'
-           )
-         )`;
-    await executor.query(sql, [caseId]);
-  } catch (err) {
-    console.error('[esdc] mark participant submission needs review failed', err);
-  }
+       WHERE ${scopeClauses.join('\n         AND ')}`;
+  // Source edits invalidate mutable prepared evidence. A submitted/accepted
+  // snapshot is historical evidence and may only be replaced after the
+  // explicit requeue workflow returns the row to a mutable state.
+  await executor.query(sql, params);
 }
 
 const { ILMP_PARTICIPANT_RULES, PROVINCE_CODES } = require('./src/server/esdcIlmpParticipantRules');
@@ -8037,6 +8570,15 @@ function normalizeConflictResolutionOutcome(value) {
   if (!normalized) return null;
   if (['cleared', 'clear', 'resolved', 'approved_to_continue'].includes(normalized)) return 'cleared';
   if (['reassigned', 'reassign', 'routed'].includes(normalized)) return 'reassigned';
+  return null;
+}
+
+function normalizeConflictChoice(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (['no_conflict', 'no-conflict', 'none', 'no'].includes(normalized)) return 'no_conflict';
+  if (['conflict', 'has_conflict', 'potential_conflict', 'possible_conflict', 'yes'].includes(normalized)) return 'conflict';
   return null;
 }
 
@@ -10209,19 +10751,6 @@ function runIlmpValidation(context) {
       true: '1',
       '1': '1'
     },
-    eiClaimant: {
-      'ei claimant': '1',
-      'employment insurance claimant': '1',
-      'reach-back / former claimant': '2',
-      'reach-back client/former claimant': '2',
-      'reach-back client': '2',
-      'former claimant': '2',
-      'non-insured client': '3',
-      'non insured client': '3',
-      '1': '1',
-      '2': '2',
-      '3': '3'
-    },
     prevEmployment: {
       unemployed: '1',
       underemployed: '1',
@@ -10353,7 +10882,7 @@ function runIlmpValidation(context) {
   const eiClaimantStatus =
     (primaryDerivedPlan && primaryDerivedPlan.eiClaimant) ||
     extractEiClaimant(context);
-  const eiClaimantCode = toCode(eiClaimantStatus, CODE_LOOKUP.eiClaimant);
+  const eiClaimantCode = normalizeEiClaimantCode(eiClaimantStatus);
   const isMissingIlmpValue = value =>
     value === null ||
     typeof value === 'undefined' ||
@@ -10540,6 +11069,19 @@ function runIlmpValidation(context) {
       detail: eiClaimantStatus
     });
   }
+
+  collectDeniedReportingEiAlignmentIssues(context).forEach(issue => {
+    const issueSuffix = [issue.planId || 'plan', issue.interventionId || null]
+      .filter(Boolean)
+      .join('-');
+    addMandatoryBlocker({
+      key: issue.fieldKey,
+      id: `denied-reporting-ei-alignment-${issue.type}-${issueSuffix}`,
+      label: 'Denied reporting EI alignment',
+      message: issue.message,
+      detail: issue,
+    });
+  });
 
   const streetLower = typeof extracted.addressStreet === 'string' ? extracted.addressStreet.trim().toLowerCase() : '';
   if (streetLower === 'no address') {
@@ -14288,6 +14830,173 @@ async function assertInterventionEiEvidenceLink(connection, {
   };
 }
 
+function createEiDocumentInterventionLineageError(reason, publicMessage, details = null, status = 409) {
+  const error = createReviewEiValidationError(
+    'ei_verification_lineage_mismatch',
+    publicMessage || 'The EI verification document does not belong to the selected intervention scope.',
+    status
+  );
+  error.reason = reason;
+  if (details && typeof details === 'object') {
+    error.details = details;
+  }
+  return error;
+}
+
+function validateEiDocumentInterventionLineage({
+  documentRow = null,
+  interventionRows = [],
+  interventionIds = [],
+} = {}) {
+  const targetIds = Array.from(new Set(
+    (Array.isArray(interventionIds) ? interventionIds : [interventionIds])
+      .map(value => normalisePositiveInteger(value))
+      .filter(Boolean)
+  ));
+  if (!targetIds.length) {
+    return { enforced: false, reason: 'no_intervention_targets', interventionIds: [] };
+  }
+
+  const documentId = normalisePositiveInteger(documentRow?.id);
+  const documentCaseId = normalisePositiveInteger(documentRow?.case_id);
+  const documentApplicationId = normalisePositiveInteger(documentRow?.application_id);
+  const documentActionPlanId = normalisePositiveInteger(documentRow?.action_plan_id);
+  if (!documentId || !documentCaseId || (!documentApplicationId && !documentActionPlanId)) {
+    throw createEiDocumentInterventionLineageError(
+      'document_owner_scope_missing',
+      'The EI verification document must belong to an application or an exact Action Plan before it can be linked.',
+      { documentId }
+    );
+  }
+
+  const rowMap = new Map();
+  for (const row of Array.isArray(interventionRows) ? interventionRows : []) {
+    const interventionId = normalisePositiveInteger(row?.intervention_id ?? row?.id);
+    if (interventionId) rowMap.set(interventionId, row);
+  }
+  const missingIds = targetIds.filter(interventionId => !rowMap.has(interventionId));
+  if (missingIds.length) {
+    const error = new Error('interventions_not_found');
+    error.code = 'interventions_not_found';
+    error.status = 400;
+    error.publicMessage = 'One or more selected interventions no longer exist.';
+    error.details = { missingIds };
+    throw error;
+  }
+
+  const resolvedTargets = targetIds.map(interventionId => {
+    const row = rowMap.get(interventionId);
+    const interventionCaseId = normalisePositiveInteger(row?.intervention_case_id ?? row?.case_id);
+    const interventionActionPlanId = normalisePositiveInteger(
+      row?.intervention_action_plan_id ?? row?.action_plan_id
+    );
+    const actionPlanId = normalisePositiveInteger(row?.owner_action_plan_id ?? row?.action_plan_id);
+    const actionPlanCaseId = normalisePositiveInteger(row?.action_plan_case_id);
+    const actionPlanApplicationId = normalisePositiveInteger(row?.action_plan_application_id);
+    if (!interventionActionPlanId || !actionPlanId || interventionActionPlanId !== actionPlanId) {
+      throw createEiDocumentInterventionLineageError(
+        'intervention_action_plan_missing',
+        'Every selected intervention must belong to an existing Action Plan.',
+        { interventionId }
+      );
+    }
+    if (!interventionCaseId || !actionPlanCaseId || interventionCaseId !== actionPlanCaseId) {
+      throw createEiDocumentInterventionLineageError(
+        'intervention_case_action_plan_mismatch',
+        'A selected intervention does not belong to the same case as its Action Plan.',
+        { interventionId, actionPlanId }
+      );
+    }
+    if (actionPlanApplicationId) {
+      const ownerApplicationId = normalisePositiveInteger(row?.owner_application_id);
+      const applicationCaseId = normalisePositiveInteger(row?.application_case_id);
+      if (!ownerApplicationId || ownerApplicationId !== actionPlanApplicationId) {
+        throw createEiDocumentInterventionLineageError(
+          'action_plan_application_missing',
+          'A selected intervention\'s Action Plan does not belong to an existing application.',
+          { interventionId, actionPlanId, applicationId: actionPlanApplicationId }
+        );
+      }
+      if (!applicationCaseId || applicationCaseId !== actionPlanCaseId) {
+        throw createEiDocumentInterventionLineageError(
+          'action_plan_application_case_mismatch',
+          'A selected intervention\'s Action Plan and application do not belong to the same case.',
+          { interventionId, actionPlanId, applicationId: actionPlanApplicationId }
+        );
+      }
+    }
+    return {
+      interventionId,
+      caseId: actionPlanCaseId,
+      actionPlanId,
+      applicationId: actionPlanApplicationId || null,
+    };
+  });
+
+  const targetCaseIds = Array.from(new Set(resolvedTargets.map(target => target.caseId)));
+  if (targetCaseIds.length !== 1) {
+    throw createEiDocumentInterventionLineageError(
+      'mixed_case_targets',
+      'EI verification evidence cannot be linked to interventions from different cases.',
+      { interventionIds: targetIds }
+    );
+  }
+  const targetActionPlanIds = Array.from(new Set(resolvedTargets.map(target => target.actionPlanId)));
+  if (targetActionPlanIds.length !== 1) {
+    throw createEiDocumentInterventionLineageError(
+      'mixed_action_plan_targets',
+      'Link EI verification evidence to one Action Plan at a time.',
+      { interventionIds: targetIds }
+    );
+  }
+
+  const [targetCaseId] = targetCaseIds;
+  const [targetActionPlanId] = targetActionPlanIds;
+  const targetApplicationIds = Array.from(new Set(
+    resolvedTargets.map(target => target.applicationId || null)
+  ));
+  if (targetApplicationIds.length !== 1) {
+    throw createEiDocumentInterventionLineageError(
+      'mixed_application_targets',
+      'EI verification evidence cannot be linked across application ownership.',
+      { interventionIds: targetIds, actionPlanId: targetActionPlanId }
+    );
+  }
+  const [targetApplicationId] = targetApplicationIds;
+
+  if (documentCaseId !== targetCaseId) {
+    throw createEiDocumentInterventionLineageError(
+      'document_case_mismatch',
+      'The EI verification document and selected interventions belong to different cases.',
+      { documentId, documentCaseId, targetCaseId }
+    );
+  }
+  if (documentActionPlanId && documentActionPlanId !== targetActionPlanId) {
+    throw createEiDocumentInterventionLineageError(
+      'document_action_plan_mismatch',
+      'This Action Plan-scoped EI verification document cannot be linked to another Action Plan.',
+      { documentId, documentActionPlanId, targetActionPlanId }
+    );
+  }
+  if (documentApplicationId && documentApplicationId !== targetApplicationId) {
+    throw createEiDocumentInterventionLineageError(
+      'document_application_mismatch',
+      'The EI verification document belongs to a different application than the selected interventions.',
+      { documentId, documentApplicationId, targetApplicationId }
+    );
+  }
+
+  return {
+    enforced: true,
+    reason: documentActionPlanId ? 'exact_action_plan_lineage' : 'application_action_plan_lineage',
+    documentId,
+    caseId: targetCaseId,
+    applicationId: targetApplicationId,
+    actionPlanId: targetActionPlanId,
+    interventionIds: targetIds,
+  };
+}
+
 function assertApplicationAssessmentMutationStageAllowed({
   reviewWorkflow,
   assessmentMutationRequested = false,
@@ -14391,6 +15100,105 @@ function classifyApplicationAssessmentMutationRequest({
     assessmentDecisionMutationRequested,
     assessmentCommunicationMutationRequested,
     conflictDeclarationMutationRequested: Boolean(conflictSignatureRequested),
+  };
+}
+
+async function resolveApplicationAssessmentDraftStart(connection, {
+  caseId,
+  applicationId,
+  beforeApplicationStatus = null,
+  assessmentWriteRequested = false,
+  assessmentSubmittedForWorkflow = false,
+  reviewWorkflow = null,
+  actorStaffProfileId = null,
+  actorRole = null,
+  assignedStaffProfileId = null,
+} = {}) {
+  if (!assessmentWriteRequested || normaliseApplicationStatusValue(beforeApplicationStatus) !== 'submitted') {
+    return { shouldStart: false, reason: 'application_not_waiting_to_start' };
+  }
+
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedActorStaffProfileId = normalisePositiveInteger(actorStaffProfileId);
+  const normalizedAssignedStaffProfileId = normalisePositiveInteger(assignedStaffProfileId);
+  const canonicalActorRole = canonicaliseAccessRole(actorRole);
+  const permittedActorRole = new Set(['ISET Coordinator', 'Regional Manager']).has(canonicalActorRole);
+
+  if (
+    !normalizedCaseId ||
+    !normalizedApplicationId ||
+    !normalizedActorStaffProfileId ||
+    !normalizedAssignedStaffProfileId ||
+    !permittedActorRole ||
+    normalizedActorStaffProfileId !== normalizedAssignedStaffProfileId
+  ) {
+    const error = new Error('assessment_start_forbidden');
+    error.code = 'assessment_start_forbidden';
+    error.status = 403;
+    error.publicMessage =
+      'Only the assigned ISET Coordinator or Regional Manager can start this application assessment.';
+    throw error;
+  }
+
+  if (reviewWorkflow) {
+    const error = new Error('assessment_start_workflow_conflict');
+    error.code = 'assessment_start_workflow_conflict';
+    error.status = 409;
+    error.publicMessage =
+      'This application already has an assessment review workflow. Refresh the application before continuing.';
+    throw error;
+  }
+
+  const [declarationRows] = await connection.query(
+    `SELECT id, declaration_choice, resolution_outcome
+       FROM iset_case_conflict_declaration
+      WHERE case_id = ?
+        AND staff_profile_id = ?
+        AND revoked_at IS NULL
+      ORDER BY signed_at DESC
+      LIMIT 1 FOR UPDATE`,
+    [normalizedCaseId, normalizedActorStaffProfileId]
+  );
+  const declaration = Array.isArray(declarationRows) && declarationRows.length
+    ? declarationRows[0]
+    : null;
+  const declarationChoice = normalizeConflictChoice(declaration?.declaration_choice);
+  const resolutionOutcome = normalizeConflictResolutionOutcome(declaration?.resolution_outcome);
+
+  if (!declaration || !declarationChoice) {
+    const error = new Error('conflict_declaration_required');
+    error.code = 'conflict_declaration_required';
+    error.status = 409;
+    error.publicMessage =
+      'Complete your conflict of interest declaration before starting this application assessment.';
+    throw error;
+  }
+
+  if (declarationChoice === 'conflict' && resolutionOutcome !== 'cleared') {
+    const error = new Error('conflict_declaration_unresolved');
+    error.code = 'conflict_declaration_unresolved';
+    error.status = 409;
+    error.publicMessage =
+      'This assessment cannot start until the declared conflict is resolved or the case is reassigned.';
+    throw error;
+  }
+
+  if (declarationChoice !== 'no_conflict' && declarationChoice !== 'conflict') {
+    const error = new Error('conflict_declaration_required');
+    error.code = 'conflict_declaration_required';
+    error.status = 409;
+    error.publicMessage =
+      'Complete your conflict of interest declaration before starting this application assessment.';
+    throw error;
+  }
+
+  return {
+    shouldStart: !assessmentSubmittedForWorkflow,
+    reason: assessmentSubmittedForWorkflow
+      ? 'assessment_submits_directly_to_review'
+      : 'first_assessment_write',
+    declarationId: normalisePositiveInteger(declaration.id),
   };
 }
 
@@ -20375,26 +21183,15 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   }
 
   const planStatus = 'draft';
-  const mapEiClaimant = value => {
-    if (!value) return null;
-    const key = String(value).trim().toLowerCase();
-    if (['ei active claim', 'employment insurance claimant', 'ei claimant', 'ei active'].includes(key)) return 1;
-    if (['ei reach back', 'reach-back', 'reach back', 'former claimant', 'reach-back client/former claimant'].includes(key)) return 2;
-    if (['crf', 'non-insured client', 'non insured client'].includes(key)) return 3;
-    return null;
-  };
   const eligibilityValue =
     assessmentRow.esdc_eligibility ||
     caseRow?.assessment_esdc_eligibility ||
     caseRow?.esdc_eligibility ||
     caseRow?.eligibility ||
     null;
-  const eiClaimantCode = mapEiClaimant(eligibilityValue);
-  const fundingStream = (() => {
-    if (eiClaimantCode === 1 || eiClaimantCode === 2 || eiClaimantCode === '1' || eiClaimantCode === '2') return 'EI';
-    if (eiClaimantCode === 3 || eiClaimantCode === '3') return 'CRF';
-    return null;
-  })();
+  const eiFundingClassification = resolveEiFundingClassification(eligibilityValue);
+  const eiClaimantCode = eiFundingClassification?.claimantCode || null;
+  const fundingStream = eiFundingClassification?.fundingStream || null;
   const agreementNumber = deriveAgreementNumberFromFundingStream(fundingStream);
   const CODE_SETS = {
     yesNo: new Set(['0', '1']),
@@ -21135,16 +21932,6 @@ function buildIlmpParticipantPayload(context) {
       "university - doctorate": '12'
     },
     socialAssistance: { no: '0', yes: '1' },
-    eiClaimant: {
-      'ei claimant': '1',
-      'employment insurance claimant': '1',
-      'reach-back / former claimant': '2',
-      'reach-back client/former claimant': '2',
-      'reach-back client': '2',
-      'former claimant': '2',
-      'non-insured client': '3',
-      'non insured client': '3'
-    },
     barrier: ILMP_BARRIER_CODE_LOOKUP,
     prevEmployment: {
       unemployed: '1',
@@ -21253,7 +22040,7 @@ function buildIlmpParticipantPayload(context) {
     if (coerced === null) return null;
     return coerced ? '1' : '0';
   })();
-  const eiClaimantCode = eiClaimant ? toCode(eiClaimant, CODE_MAPS.eiClaimant) : null;
+  const eiClaimantCode = normalizeEiClaimantCode(eiClaimant);
   const barrierCodes = mapIlmpBarrierCodes(barriers);
   const actionPlanBarrierCodes = Array.from(new Set(
     actionPlans.flatMap(plan => mapIlmpBarrierCodes(extractActionPlanBarrierValues(plan)) || [])
@@ -21425,7 +22212,7 @@ function buildIlmpParticipantPayload(context) {
         } = plan;
         const childcareNeedCode = toCode(childcareNeed, CODE_MAPS.childcareNeed);
         const childcareFundingCode = toCode(childcareFunding, CODE_MAPS.childcareFunding);
-        const actionPlanEiClaimantCode = toCode(eiClaimant, CODE_MAPS.eiClaimant) || (Number.isInteger(eiClaimant) ? String(eiClaimant) : null);
+        const actionPlanEiClaimantCode = normalizeEiClaimantCode(eiClaimant);
         const hasInterventions = Array.isArray(interventions) && interventions.length > 0;
         const interventionNode = hasInterventions
           ? {
@@ -21614,24 +22401,11 @@ function buildIlmpParticipantPayload(context) {
     if (!plan) return;
     const pad = '  '.repeat(indent);
     const planIsTerminal = isIlmpTerminalActionPlanStatus(plan.status || plan.Status || '');
-    const resolveEiClaimant = value => {
-      const coded = toCode(value, CODE_MAPS.eiClaimant);
-      if (coded) return coded;
-      if (Number.isInteger(value)) return String(value);
-      if (typeof value === 'string') {
-        const trimmed = value.trim();
-        if (!trimmed) return null;
-        if (CODE_MAPS.eiClaimant[trimmed.toLowerCase()]) return CODE_MAPS.eiClaimant[trimmed.toLowerCase()];
-        const numeric = Number(trimmed);
-        if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 3) return String(numeric);
-      }
-      return null;
-    };
     const resolvedEiClaimant =
-      resolveEiClaimant(plan.eiClaimant) ||
-      resolveEiClaimant(plan.EIClaimant) ||
-      resolveEiClaimant(plan.EIClaimantCode) ||
-      resolveEiClaimant(plan.eiClaimantCode) ||
+      normalizeEiClaimantCode(plan.eiClaimant) ||
+      normalizeEiClaimantCode(plan.EIClaimant) ||
+      normalizeEiClaimantCode(plan.EIClaimantCode) ||
+      normalizeEiClaimantCode(plan.eiClaimantCode) ||
       eiClaimantCode ||
       null;
     lines.push(`${pad}<actionPlan>`);
@@ -21815,6 +22589,27 @@ function buildIlmpParticipantPayload(context) {
   };
 }
 
+function normaliseEsdcParticipantSubmissionStatus(rowOrStatus) {
+  const value = rowOrStatus && typeof rowOrStatus === 'object'
+    ? rowOrStatus.submission_status
+    : rowOrStatus;
+  return (normaliseString(value) || 'pending').toLowerCase();
+}
+
+function isImmutableEsdcParticipantSubmission(rowOrStatus) {
+  return ['submitted', 'accepted'].includes(normaliseEsdcParticipantSubmissionStatus(rowOrStatus));
+}
+
+function assertEsdcParticipantSubmissionCanRegenerateEvidence(submissionRow) {
+  if (!isImmutableEsdcParticipantSubmission(submissionRow)) return;
+  const err = new Error('esdc_submission_requeue_required');
+  err.code = 'esdc_submission_requeue_required';
+  err.statusCode = 409;
+  err.submissionId = normalisePositiveInteger(submissionRow?.id);
+  err.submissionStatus = normaliseEsdcParticipantSubmissionStatus(submissionRow);
+  throw err;
+}
+
 async function loadEsdcParticipantSubmissionContext(connection, submissionId, options = {}) {
   const numericId = Number(submissionId);
   if (!Number.isInteger(numericId) || numericId <= 0) {
@@ -21840,10 +22635,22 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       err.statusCode = 404;
       throw err;
     }
+    if (options.requireMutableEvidence === true) {
+      assertEsdcParticipantSubmissionCanRegenerateEvidence(submissionRow);
+    }
 
     const effectiveCaseId = options.caseId || submissionRow.case_id;
     if (!effectiveCaseId) {
       const err = new Error('Participant submission is not linked to a case');
+      err.statusCode = 409;
+      throw err;
+    }
+    if (
+      options.caseId &&
+      normalisePositiveInteger(submissionRow.case_id) !== normalisePositiveInteger(options.caseId)
+    ) {
+      const err = new Error('esdc_submission_case_scope_mismatch');
+      err.code = 'esdc_submission_case_scope_mismatch';
       err.statusCode = 409;
       throw err;
     }
@@ -21859,6 +22666,39 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
         ? safeJsonParse(caseRow.case_context_json, null)
         : caseRow.case_context_json || null;
 
+    const submissionActionPlanId = normalisePositiveInteger(submissionRow.action_plan_id);
+    const actionPlanScope = submissionActionPlanId
+      ? await resolveActionPlanScope(conn, submissionActionPlanId)
+      : null;
+    if (submissionActionPlanId && (!actionPlanScope || actionPlanScope.caseId !== normalisePositiveInteger(caseRow.id))) {
+      const err = new Error('esdc_action_plan_case_scope_mismatch');
+      err.code = 'esdc_action_plan_case_scope_mismatch';
+      err.statusCode = 409;
+      throw err;
+    }
+    let applicationId = chooseIlmpApplicationId({
+      submissionApplicationId: submissionRow.application_id,
+      actionPlanApplicationId: actionPlanScope?.applicationId,
+    });
+    let applicationScopeWasCaseInferred = false;
+    if (!applicationId) {
+      applicationId = await resolveUniqueApplicationIdForCase(conn, caseRow.id);
+      applicationScopeWasCaseInferred = Boolean(applicationId);
+    }
+
+    const actionPlanScopeClause = submissionActionPlanId
+      ? 'AND id = ?'
+      : applicationId
+        ? applicationScopeWasCaseInferred
+          ? 'AND (application_id = ? OR application_id IS NULL)'
+          : 'AND application_id = ?'
+        : 'AND application_id IS NULL';
+    const actionPlanScopeParams = submissionActionPlanId
+      ? [submissionActionPlanId]
+      : applicationId
+        ? [applicationId]
+        : [];
+
     let caseActionPlans = [];
     try {
       const [planRows] = await conn.query(
@@ -21866,15 +22706,11 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
            FROM iset_case_action_plan
            WHERE case_id = ?
              AND archived_at IS NULL
-             AND (? IS NULL OR id = ?)
+             ${actionPlanScopeClause}
            ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 WHEN 'closed' THEN 2 ELSE 3 END,
                     COALESCE(activated_at, effective_date, created_at) DESC,
                     id DESC`,
-        [
-          caseRow.id,
-          normalisePositiveInteger(submissionRow.action_plan_id) || null,
-          normalisePositiveInteger(submissionRow.action_plan_id) || null,
-        ]
+        [caseRow.id, ...actionPlanScopeParams]
       );
       if (planRows && planRows.length) {
     const planMap = new Map();
@@ -21886,8 +22722,10 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       planMap.set(planRow.id, {
         id: planRow.id,
         caseId: planRow.case_id,
+        applicationId: planRow.application_id,
         name: planRow.name,
         status: planRow.status,
+        storedFundingStream: planRow.funding_stream || null,
         fundingStream: planRow.funding_stream || planRow.fundingStream || metadata.fundingStream || null,
         agreementNumber:
           planRow.agreement_number ||
@@ -21977,22 +22815,15 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       }
     } catch (err) {
       console.warn('[esdc] failed to load case action plans', err);
+      throw err;
+    }
+    if (submissionActionPlanId && caseActionPlans.length !== 1) {
+      const err = new Error('esdc_action_plan_scope_unavailable');
+      err.code = 'esdc_action_plan_scope_unavailable';
+      err.statusCode = 409;
+      throw err;
     }
 
-    let applicationId = chooseIlmpApplicationId({
-      submissionApplicationId: submissionRow.application_id,
-    });
-    if (!applicationId) {
-      applicationId = chooseIlmpApplicationId({
-        actionPlanApplicationId: await resolveActionPlanApplicationId(conn, submissionRow.action_plan_id),
-      });
-    }
-    if (!applicationId) {
-      applicationId = chooseIlmpApplicationId({
-        legacyCaseApplicationId: caseRow.application_id,
-        primaryApplicationId: await resolvePrimaryApplicationIdForCase(conn, caseRow.id),
-      });
-    }
     let caseAssessmentRow = null;
     try {
       caseAssessmentRow = await fetchApplicationAssessmentRow(conn, {
@@ -22011,6 +22842,12 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
         applicationId,
         { forUpdate: useForUpdate }
       );
+      if (normalisePositiveInteger(applicationPayload?.row?.case_id) !== normalisePositiveInteger(caseRow.id)) {
+        const err = new Error('esdc_application_case_scope_mismatch');
+        err.code = 'esdc_application_case_scope_mismatch';
+        err.statusCode = 409;
+        throw err;
+      }
     }
     const mergedAnswers = mergeIlmpAnswers({
       caseContext,
@@ -22081,7 +22918,8 @@ async function validateEsdcParticipantSubmission({ submissionId, caseId } = {}, 
 
     const context = await loadEsdcParticipantSubmissionContext(connection, submissionId, {
       caseId,
-      forUpdate: true
+      forUpdate: true,
+      requireMutableEvidence: true,
     });
 
     const evaluation = runIlmpValidation(context);
@@ -22151,7 +22989,8 @@ async function prepareEsdcParticipantSubmission({ submissionId, caseId } = {}, o
 
     const context = await loadEsdcParticipantSubmissionContext(connection, submissionId, {
       caseId,
-      forUpdate: true
+      forUpdate: true,
+      requireMutableEvidence: true,
     });
     const evaluation = runIlmpValidation(context);
 
@@ -22264,6 +23103,273 @@ async function prepareEsdcParticipantSubmission({ submissionId, caseId } = {}, o
     throw err;
   } finally {
     if (releaseConnection) connection.release();
+  }
+}
+
+const ESDC_PARTICIPANT_SUBMISSION_TRANSITIONS = Object.freeze({
+  pending: new Set(['submitted']),
+  rejected: new Set(['submitted']),
+  submitted: new Set(['accepted', 'rejected']),
+  accepted: new Set(),
+});
+
+function assertEsdcParticipantSubmissionPreparedEvidence(submission, { requireStoredClean = false } = {}) {
+  const evidenceFailures = [];
+  const hasPayloadSnapshot = typeof submission?.payload_snapshot === 'string'
+    ? submission.payload_snapshot.trim().length > 0
+    : Boolean(submission?.payload_snapshot);
+  const hasPayloadChecksum = Boolean(normaliseString(submission?.payload_checksum));
+  if (!hasPayloadSnapshot) evidenceFailures.push('payload_snapshot_missing');
+  if (!hasPayloadChecksum) evidenceFailures.push('payload_checksum_missing');
+  if (requireStoredClean && mapIlmpComplianceFromSubmission(submission).status !== 'clean') {
+    evidenceFailures.push('stored_readiness_not_clean');
+  }
+  if (!evidenceFailures.length) return;
+  const err = new Error('esdc_submission_prepared_evidence_required');
+  err.code = 'esdc_submission_prepared_evidence_required';
+  err.statusCode = 409;
+  err.submissionId = normalisePositiveInteger(submission?.id);
+  err.submissionStatus = normaliseEsdcParticipantSubmissionStatus(submission);
+  err.evidenceFailures = evidenceFailures;
+  throw err;
+}
+
+async function transitionEsdcParticipantSubmission({
+  submissionId,
+  status,
+  rejectionReason = null,
+  actorUserId = null,
+  connection = null,
+} = {}) {
+  const numericSubmissionId = normalisePositiveInteger(submissionId);
+  if (!numericSubmissionId) {
+    const err = new Error('invalid_participant_id');
+    err.code = 'invalid_participant_id';
+    err.statusCode = 400;
+    throw err;
+  }
+  const nextStatus = (normaliseString(status) || '').toLowerCase();
+  if (!['submitted', 'accepted', 'rejected'].includes(nextStatus)) {
+    const err = new Error('invalid_submission_status');
+    err.code = 'invalid_submission_status';
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const conn = connection || await pool.getConnection();
+  const shouldRelease = !connection;
+  let transactionStarted = false;
+  try {
+    await conn.beginTransaction();
+    transactionStarted = true;
+    const [[submission]] = await conn.query(
+      `SELECT eps.id,
+              eps.submission_status,
+              eps.readiness_status,
+              eps.readiness_summary,
+              eps.warnings,
+              eps.blocking_issues,
+              eps.payload_snapshot,
+              eps.payload_checksum
+         FROM esdc_participant_submission eps
+        WHERE eps.id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [numericSubmissionId]
+    );
+    if (!submission) {
+      const err = new Error('Participant submission not found');
+      err.code = 'esdc_submission_not_found';
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const currentStatus = normaliseEsdcParticipantSubmissionStatus(submission);
+    const isIdempotentReplay = currentStatus === nextStatus;
+    if (!isIdempotentReplay && !ESDC_PARTICIPANT_SUBMISSION_TRANSITIONS[currentStatus]?.has(nextStatus)) {
+      const err = new Error('esdc_submission_status_transition_forbidden');
+      err.code = 'esdc_submission_status_transition_forbidden';
+      err.statusCode = 409;
+      err.submissionId = numericSubmissionId;
+      err.currentStatus = currentStatus;
+      err.nextStatus = nextStatus;
+      throw err;
+    }
+
+    assertEsdcParticipantSubmissionPreparedEvidence(submission, {
+      requireStoredClean: nextStatus === 'submitted',
+    });
+
+    if (isIdempotentReplay) {
+      await conn.commit();
+      return {
+        ok: true,
+        submissionId: numericSubmissionId,
+        previousStatus: currentStatus,
+        status: nextStatus,
+        unchanged: true,
+      };
+    }
+
+    const normalizedRejectionReason = nextStatus === 'rejected'
+      ? normaliseString(rejectionReason)
+      : null;
+    let updateResult;
+    if (nextStatus === 'submitted') {
+      [updateResult] = await conn.query(
+        `UPDATE esdc_participant_submission eps
+            SET eps.submission_status = 'submitted',
+                eps.submitted_at = NOW(),
+                eps.submitted_by_user_id = ?,
+                eps.rejection_reason = NULL,
+                eps.updated_at = NOW()
+          WHERE eps.id = ?`,
+        [actorUserId || null, numericSubmissionId]
+      );
+    } else {
+      [updateResult] = await conn.query(
+        `UPDATE esdc_participant_submission eps
+            SET eps.submission_status = ?,
+                eps.rejection_reason = ?,
+                eps.updated_at = NOW()
+          WHERE eps.id = ?`,
+        [nextStatus, normalizedRejectionReason, numericSubmissionId]
+      );
+    }
+    if (Number(updateResult?.affectedRows) !== 1) {
+      const err = new Error('esdc_submission_status_write_conflict');
+      err.code = 'esdc_submission_status_write_conflict';
+      err.statusCode = 409;
+      err.submissionId = numericSubmissionId;
+      throw err;
+    }
+
+    await conn.query(
+      `INSERT INTO esdc_participant_submission_history
+         (participant_submission_id, event_type, actor_user_id, event_details)
+       VALUES (?, ?, ?, CAST(? AS JSON))`,
+      [
+        numericSubmissionId,
+        nextStatus,
+        actorUserId || null,
+        JSON.stringify({
+          previousStatus: currentStatus,
+          status: nextStatus,
+          rejectionReason: normalizedRejectionReason,
+        }),
+      ]
+    );
+
+    await conn.commit();
+    return {
+      ok: true,
+      submissionId: numericSubmissionId,
+      previousStatus: currentStatus,
+      status: nextStatus,
+      unchanged: false,
+    };
+  } catch (err) {
+    if (transactionStarted) {
+      try { await conn.rollback(); } catch (_) {}
+    }
+    throw err;
+  } finally {
+    if (shouldRelease) conn.release();
+  }
+}
+
+async function requeueEsdcParticipantSubmissions({
+  submissionIds,
+  actorUserId = null,
+  connection = null,
+} = {}) {
+  const numericIds = [...new Set(
+    (Array.isArray(submissionIds) ? submissionIds : [])
+      .map(normalisePositiveInteger)
+      .filter(Boolean)
+  )].sort((left, right) => left - right);
+  if (!numericIds.length) {
+    const err = new Error('no_ids');
+    err.code = 'no_ids';
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const conn = connection || await pool.getConnection();
+  const shouldRelease = !connection;
+  let transactionStarted = false;
+  try {
+    await conn.beginTransaction();
+    transactionStarted = true;
+    const placeholders = numericIds.map(() => '?').join(',');
+    const [lockedRows] = await conn.query(
+      `SELECT eps.id,
+              eps.submission_status
+         FROM esdc_participant_submission eps
+        WHERE eps.id IN (${placeholders})
+        ORDER BY eps.id ASC
+        FOR UPDATE`,
+      numericIds
+    );
+    const lockedById = new Map(
+      (Array.isArray(lockedRows) ? lockedRows : [])
+        .map(row => [normalisePositiveInteger(row?.id), row])
+        .filter(([submissionId]) => Boolean(submissionId))
+    );
+    const missingSubmissionIds = numericIds.filter(submissionId => !lockedById.has(submissionId));
+    if (missingSubmissionIds.length) {
+      const err = new Error('esdc_submission_not_found');
+      err.code = 'esdc_submission_not_found';
+      err.statusCode = 404;
+      err.missingSubmissionIds = missingSubmissionIds;
+      throw err;
+    }
+
+    await conn.query(
+      `UPDATE esdc_participant_submission eps
+          SET eps.submission_status = 'pending',
+              eps.readiness_status = 'needs_review',
+              eps.readiness_summary = NULL,
+              eps.warnings = NULL,
+              eps.blocking_issues = NULL,
+              eps.last_validated_at = NULL,
+              eps.submitted_at = NULL,
+              eps.submitted_by_user_id = NULL,
+              eps.payload_snapshot = NULL,
+              eps.payload_storage_key = NULL,
+              eps.payload_checksum = NULL,
+              eps.rejection_reason = NULL,
+              eps.updated_at = NOW()
+        WHERE eps.id IN (${placeholders})`,
+      numericIds
+    );
+
+    const historyDetails = (Array.isArray(lockedRows) ? lockedRows : []).map(row => JSON.stringify({
+      reset: true,
+      reason: 'explicit_requeue',
+      previousStatus: normaliseEsdcParticipantSubmissionStatus(row),
+      status: 'pending',
+    }));
+    await conn.query(
+      `INSERT INTO esdc_participant_submission_history
+         (participant_submission_id, event_type, actor_user_id, event_details)
+       VALUES ${numericIds.map(() => "(?, 'validated', ?, CAST(? AS JSON))").join(',')}`,
+      numericIds.flatMap((submissionId, index) => [
+        submissionId,
+        actorUserId || null,
+        historyDetails[index],
+      ])
+    );
+
+    await conn.commit();
+    return { ok: true, count: numericIds.length, submissionIds: numericIds };
+  } catch (err) {
+    if (transactionStarted) {
+      try { await conn.rollback(); } catch (_) {}
+    }
+    throw err;
+  } finally {
+    if (shouldRelease) conn.release();
   }
 }
 
@@ -22781,6 +23887,7 @@ async function resolveOrCreateCaseForClient(
     createdByStaffProfileId = null,
     updatedByStaffProfileId = null,
     generateCaseNumberIfMissing = false,
+    reopenForNewApplication = false,
   } = {}
 ) {
   const normalizedClientId = normalisePositiveInteger(clientId);
@@ -22808,6 +23915,8 @@ async function resolveOrCreateCaseForClient(
     'case_context_json',
     'status',
     'lifecycle_status',
+    'closure_reason',
+    'closed_at',
     'assigned_to_user_id',
     'assigned_staff_profile_id',
     'portfolio_region_id',
@@ -22840,6 +23949,9 @@ async function resolveOrCreateCaseForClient(
     const updates = [];
     const params = [];
     const previousAssignedToUserId = resolveCaseAssignedStaffProfileId(targetCase);
+    const newApplicationTransition = reopenForNewApplication
+      ? prepareCaseForNewApplication(targetCase)
+      : null;
 
     if (Number(targetCase.client_id || 0) !== normalizedClientId) {
       updates.push('client_id = ?');
@@ -22864,6 +23976,18 @@ async function resolveOrCreateCaseForClient(
     if (normalizedUpdatedByStaffProfileId) {
       updates.push('updated_by_staff_profile_id = ?');
       params.push(normalizedUpdatedByStaffProfileId);
+    }
+    if (newApplicationTransition?.contextChanged) {
+      updates.push('case_context_json = ?');
+      params.push(JSON.stringify(newApplicationTransition.caseContext));
+    }
+    if (newApplicationTransition?.shouldReopen) {
+      updates.push('status = ?');
+      params.push(status || 'submitted');
+      updates.push('lifecycle_status = ?');
+      params.push(lifecycleStatus || 'intake');
+      updates.push('closure_reason = NULL');
+      updates.push('closed_at = NULL');
     }
 
     if (updates.length) {
@@ -22896,8 +24020,10 @@ async function resolveOrCreateCaseForClient(
       assigned_staff_profile_id: resolvedAssignedStaffProfileId,
       previousAssignedToUserId: previousAssignedToUserId || null,
       previousAssignedStaffProfileId: previousAssignedToUserId || null,
-      status: targetCase.status || null,
-      lifecycleStatus: targetCase.lifecycle_status || null,
+      status: newApplicationTransition?.shouldReopen ? (status || 'submitted') : (targetCase.status || null),
+      lifecycleStatus: newApplicationTransition?.shouldReopen
+        ? (lifecycleStatus || 'intake')
+        : (targetCase.lifecycle_status || null),
     };
   }
 
@@ -23707,6 +24833,126 @@ async function fetchDocumentPaymentLinkCount(documentId, connection = pool) {
     [normalizedDocumentId]
   );
   return Number(packetDocRow?.count || 0) + Number(proofDocRow?.count || 0);
+}
+
+const GENERICALLY_MUTABLE_DOCUMENT_SOURCES = new Set([
+  'manual_upload',
+  'legacy_intake_upload',
+]);
+
+function buildImmutableDocumentMutationError(reason) {
+  return {
+    status: 409,
+    body: {
+      error: 'document_immutable',
+      reason,
+      message:
+        'This document is an authoritative workflow record and cannot be edited, duplicated, or deleted through Supporting Documents.',
+    },
+  };
+}
+
+async function validateGenericDocumentMutationIntegrity(documentRow, connection = pool) {
+  if (!documentRow) {
+    return { status: 404, body: { error: 'document_not_found' } };
+  }
+
+  if (normalisePositiveInteger(documentRow.signing_request_id)) {
+    return buildImmutableDocumentMutationError('signing_request_link');
+  }
+  if (normalisePositiveInteger(documentRow.origin_message_id)) {
+    return buildImmutableDocumentMutationError('secure_message_origin');
+  }
+
+  const normalizedDocumentId = normalisePositiveInteger(documentRow.id);
+  if (!normalizedDocumentId) {
+    return buildImmutableDocumentMutationError('invalid_document_identity');
+  }
+
+  const source = (normaliseString(documentRow.source) || '').toLowerCase();
+  if (!GENERICALLY_MUTABLE_DOCUMENT_SOURCES.has(source)) {
+    return buildImmutableDocumentMutationError('authoritative_source');
+  }
+
+  const [[cfaVersionLink]] = await connection.query(
+    `SELECT cvd.document_id
+       FROM cfa_version_documents cvd
+      WHERE cvd.document_id = ?
+      LIMIT 1`,
+    [normalizedDocumentId]
+  );
+  if (normalisePositiveInteger(cfaVersionLink?.document_id)) {
+    return buildImmutableDocumentMutationError('cfa_version_link');
+  }
+
+  const [[fundingOverviewVersionLink]] = await connection.query(
+    `SELECT fvd.document_id
+       FROM funding_overview_version_documents fvd
+      WHERE fvd.document_id = ?
+      LIMIT 1`,
+    [normalizedDocumentId]
+  );
+  if (normalisePositiveInteger(fundingOverviewVersionLink?.document_id)) {
+    return buildImmutableDocumentMutationError('funding_overview_version_link');
+  }
+
+  const paymentLinkCount = await fetchDocumentPaymentLinkCount(normalizedDocumentId, connection);
+  if (paymentLinkCount > 0) {
+    return buildImmutableDocumentMutationError('payment_evidence_link');
+  }
+
+  return null;
+}
+
+function documentMutationTimestamp(value) {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.getTime();
+}
+
+async function lockGenericDocumentMutationContext({
+  documentId,
+  req,
+  expectedUpdatedAt,
+  connection,
+} = {}) {
+  const normalizedDocumentId = normalisePositiveInteger(documentId);
+  if (!normalizedDocumentId || !connection || typeof connection.query !== 'function') {
+    return { error: { status: 400, body: { error: 'invalid_document_id' } } };
+  }
+  const [[documentRow]] = await connection.query(
+    `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id,
+            origin_message_id, signing_request_id, source, file_name, file_path, mime_type, label,
+            metadata, document_category, size_bytes, checksum_sha256, status, updated_at
+       FROM iset_document
+      WHERE id = ?
+        AND status = 'active'
+      LIMIT 1
+      FOR UPDATE`,
+    [normalizedDocumentId]
+  );
+  if (!documentRow) {
+    return { error: { status: 404, body: { error: 'document_not_found' } } };
+  }
+  if (
+    typeof expectedUpdatedAt !== 'undefined' &&
+    documentMutationTimestamp(documentRow.updated_at) !== documentMutationTimestamp(expectedUpdatedAt)
+  ) {
+    return {
+      error: {
+        status: 409,
+        body: {
+          error: 'document_changed_retry',
+          message: 'This document changed while it was being edited. Reload it and try again.',
+        },
+      },
+    };
+  }
+  const accessError = await validateDocumentAccess(req, documentRow, { connection });
+  if (accessError) return { error: accessError };
+  const mutationError = await validateGenericDocumentMutationIntegrity(documentRow, connection);
+  if (mutationError) return { error: mutationError };
+  return { documentRow };
 }
 
 async function fetchCaseAccessRowsForDocument(documentRow, connection = pool) {
@@ -25009,6 +26255,17 @@ function isDeniedApplicationState(row = {}) {
   return ['rejected', 'declined', 'denied'].includes(status);
 }
 
+function isWithdrawnApplicationState(row = {}) {
+  const status = normaliseApplicationStatusValue(
+    row.status ?? row.application_status ?? row.applicationStatus
+  );
+  if (status === 'withdrawn') return true;
+  const closureReason = normaliseString(
+    row.closure_reason ?? row.application_closure_reason ?? row.applicationClosureReason
+  );
+  return closureReason ? closureReason.toLowerCase() === 'withdrawn' : false;
+}
+
 function mergeDecisionLetterSentIntoCaseContext(caseContext = {}, applicationId = null, letterKey = null, sentAt = null) {
   if (!letterKey || !sentAt) return caseContext;
   const baseContext = isPlainObject(caseContext) ? caseContext : {};
@@ -25051,15 +26308,17 @@ function mergeDecisionLetterSentIntoCaseContext(caseContext = {}, applicationId 
   };
 }
 
-async function completeDeniedApplicationAfterDenialLetterSent({
+async function recordApplicationDecisionLetterSent({
   caseId,
   applicationId,
+  letterKey,
   sentAt = null,
   connection = null,
 } = {}) {
   const numericCaseId = normalisePositiveInteger(caseId);
   const numericApplicationId = normalisePositiveInteger(applicationId);
-  if (!numericCaseId || !numericApplicationId) {
+  const normalizedLetterKey = normaliseString(letterKey)?.toLowerCase() || null;
+  if (!numericCaseId || !numericApplicationId || !['approval', 'denial'].includes(normalizedLetterKey)) {
     return { updated: false, reason: 'missing_scope' };
   }
 
@@ -25097,9 +26356,13 @@ async function completeDeniedApplicationAfterDenialLetterSent({
       if (startedTransaction) await conn.rollback();
       return { updated: false, reason: 'application_not_found' };
     }
-    if (!isDeniedApplicationState(row)) {
+    const decisionOutcome = normaliseApplicationDecisionOutcomeValue(row.decision_outcome);
+    const letterMatchesDecision = normalizedLetterKey === 'denial'
+      ? isDeniedApplicationState(row)
+      : decisionOutcome === 'approved';
+    if (!letterMatchesDecision) {
       if (startedTransaction) await conn.rollback();
-      return { updated: false, reason: 'not_denied' };
+      return { updated: false, reason: 'decision_outcome_mismatch' };
     }
 
     const completedSentAt = sentAt || new Date().toISOString();
@@ -25107,48 +26370,90 @@ async function completeDeniedApplicationAfterDenialLetterSent({
     const nextContext = mergeDecisionLetterSentIntoCaseContext(
       existingContext,
       numericApplicationId,
-      'denial',
+      normalizedLetterKey,
       completedSentAt
     );
     const contextChanged = JSON.stringify(nextContext) !== JSON.stringify(existingContext);
     if (contextChanged) {
-      await conn.query(
+      const [caseContextUpdate] = await conn.query(
         'UPDATE iset_case SET case_context_json = ?, updated_at = NOW() WHERE id = ?',
         [JSON.stringify(nextContext), numericCaseId]
       );
+      if (Number(caseContextUpdate?.affectedRows || 0) !== 1) {
+        throw new Error('decision_letter_case_context_update_conflict');
+      }
     }
 
     const currentStatus = normaliseApplicationStatusValue(row.status);
     const currentLifecycle = normaliseApplicationLifecycleStatusValue(row.lifecycle_status, { preserveUnknown: true });
-    const currentDecisionOutcome = normaliseApplicationDecisionOutcomeValue(row.decision_outcome);
+    const currentDecisionOutcome = decisionOutcome;
+    const currentClosureReason = normaliseString(row.closure_reason) || null;
     const needsApplicationUpdate =
-      currentStatus !== 'completed' ||
-      currentLifecycle !== 'closed' ||
-      currentDecisionOutcome !== 'denied';
+      normalizedLetterKey === 'denial' &&
+      (
+        currentStatus !== 'completed' ||
+        currentLifecycle !== 'closed' ||
+        currentDecisionOutcome !== 'denied' ||
+        currentClosureReason !== null
+      );
 
     if (needsApplicationUpdate) {
-      await conn.query(
+      const [applicationUpdate] = await conn.query(
         `UPDATE iset_application
             SET status = 'completed',
                 lifecycle_status = 'closed',
                 decision_outcome = 'denied',
                 awaiting_reason = 'none',
+                closure_reason = NULL,
                 row_version = row_version + 1,
                 updated_at = NOW()
           WHERE id = ?
             AND case_id = ?`,
         [numericApplicationId, numericCaseId]
       );
+      if (Number(applicationUpdate?.affectedRows || 0) !== 1) {
+        throw new Error('decision_letter_application_update_conflict');
+      }
+    } else if (contextChanged) {
+      const [applicationVersionUpdate] = await conn.query(
+        `UPDATE iset_application
+            SET row_version = row_version + 1,
+                updated_at = NOW()
+          WHERE id = ?
+            AND case_id = ?`,
+        [numericApplicationId, numericCaseId]
+      );
+      if (Number(applicationVersionUpdate?.affectedRows || 0) !== 1) {
+        throw new Error('decision_letter_application_version_update_conflict');
+      }
+    }
+
+    let caseLifecycleResult = null;
+    if (normalizedLetterKey === 'denial') {
+      caseLifecycleResult = await recomputeCaseStatus(numericCaseId, conn, {
+        allowReopenFinal: true,
+      });
+      if (!normaliseString(caseLifecycleResult?.status)) {
+        throw new Error('decision_letter_case_lifecycle_recompute_failed');
+      }
     }
 
     if (startedTransaction) await conn.commit();
+    const rowVersionBumped = needsApplicationUpdate || contextChanged;
+    const persistedDecisionOutcome = needsApplicationUpdate ? 'denied' : currentDecisionOutcome;
     return {
-      updated: needsApplicationUpdate || contextChanged,
+      updated: rowVersionBumped,
       applicationUpdated: needsApplicationUpdate,
       contextUpdated: contextChanged,
-      status: 'completed',
-      lifecycleStatus: 'closed',
-      decisionOutcome: 'denied',
+      letterKey: normalizedLetterKey,
+      sentAt: completedSentAt,
+      status: needsApplicationUpdate ? 'completed' : currentStatus,
+      lifecycleStatus: needsApplicationUpdate ? 'closed' : currentLifecycle,
+      decisionOutcome: persistedDecisionOutcome,
+      closureReason: needsApplicationUpdate ? null : currentClosureReason,
+      caseStatus: caseLifecycleResult?.status || null,
+      caseStatusChanged: Boolean(caseLifecycleResult?.changed),
+      applicationRowVersion: Number(row.row_version || 1) + (rowVersionBumped ? 1 : 0),
     };
   } catch (err) {
     if (startedTransaction && conn) {
@@ -25163,6 +26468,10 @@ async function completeDeniedApplicationAfterDenialLetterSent({
     }
   }
 }
+
+async function completeDeniedApplicationAfterDenialLetterSent(options = {}) {
+  return recordApplicationDecisionLetterSent({ ...options, letterKey: 'denial' });
+}
 function isTerminalApplicationStatus(status) {
   const key = normaliseApplicationStatusValue(status);
   return key ? TERMINAL_APPLICATION_STATUSES.has(key) : false;
@@ -25174,7 +26483,9 @@ function isTerminalApplicationLifecycleStatus(status) {
   return key === 'closed' || key === 'archived';
 }
 function isTerminalApplicationState(status, lifecycleStatus) {
-  return isTerminalApplicationStatus(status) || isTerminalApplicationLifecycleStatus(lifecycleStatus);
+  const lifecycleKey = normaliseApplicationLifecycleStatusValue(lifecycleStatus, { preserveUnknown: true });
+  if (lifecycleKey) return lifecycleKey === 'closed' || lifecycleKey === 'archived';
+  return isTerminalApplicationStatus(status);
 }
 function isReopenableApplicationState(status, lifecycleStatus, closureReason) {
   const statusKey = normaliseApplicationStatusValue(status);
@@ -26803,8 +28114,12 @@ function mergeApprovalLetterFollowUpSent(metadata, details = {}) {
     ...existing,
     status: 'sent',
     completed: true,
-    kind: existing.kind || (appliedRevision ? 'revision' : 'new'),
+    kind:
+      normaliseString(details.proposalKind) ||
+      existing.kind ||
+      (appliedRevision ? 'revision' : 'new'),
     revisionDraftInterventionId:
+      normalisePositiveInteger(details.revisionDraftInterventionId) ||
       existing.revisionDraftInterventionId ||
       existing.revision_draft_intervention_id ||
       appliedRevision?.draftInterventionId ||
@@ -26820,82 +28135,315 @@ function mergeApprovalLetterFollowUpSent(metadata, details = {}) {
       : existing.signingRequestIds || null,
     actorStaffProfileId: normalisePositiveInteger(details.actorStaffProfileId) || existing.actorStaffProfileId || null,
     actorUserId: normalisePositiveInteger(details.actorUserId) || existing.actorUserId || null,
+    caseId: normalisePositiveInteger(details.caseId) || existing.caseId || null,
+    applicationId:
+      normalisePositiveInteger(details.applicationId) || existing.applicationId || null,
+    actionPlanId:
+      normalisePositiveInteger(details.actionPlanId) || existing.actionPlanId || null,
+    interventionId:
+      normalisePositiveInteger(details.interventionId) || existing.interventionId || null,
+    proposalId: normalisePositiveInteger(details.proposalId) || existing.proposalId || null,
+    reviewWorkflowId:
+      normalisePositiveInteger(details.workflowId) || existing.reviewWorkflowId || null,
+    sourceInterventionId:
+      normalisePositiveInteger(details.sourceInterventionId) ||
+      existing.sourceInterventionId ||
+      null,
+    sourceItemId: normaliseString(details.sourceItemId) || existing.sourceItemId || null,
   });
   base.approvalLetterFollowUp = next;
   return base;
 }
 
 async function markApprovedInterventionProposalLetterSent({
-  connection = pool,
+  connection = null,
   caseId,
+  applicationId,
   interventionId,
+  eligibility = null,
   messageId,
   signingRequestIds = [],
   actorStaffProfileId = null,
   actorUserId = null,
 } = {}) {
   const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
   const normalizedInterventionId = normalisePositiveInteger(interventionId);
-  if (!normalizedCaseId || !normalizedInterventionId) return false;
-  const sentAt = new Date().toISOString();
+  const normalizedMessageId = normalisePositiveInteger(messageId);
+  if (!connection || typeof connection.query !== 'function') {
+    throw createCaseMessageHttpError(
+      500,
+      'intervention_letter_transaction_required',
+      'The intervention approval letter could not be recorded safely.'
+    );
+  }
+  let owner;
   try {
-    const [[row]] = await connection.query(
-      `SELECT id, metadata_json
-         FROM iset_case_intervention
-        WHERE id = ?
-          AND case_id = ?
-        LIMIT 1`,
-      [normalizedInterventionId, normalizedCaseId]
+    owner = normaliseDecisionLetterOwnerContext({
+      applicationId: normalizedApplicationId,
+      ownerContext: {
+        kind: 'intervention',
+        ...(eligibility && typeof eligibility === 'object' ? eligibility : {}),
+      },
+    });
+  } catch (cause) {
+    const error = createCaseMessageHttpError(
+      409,
+      'intervention_letter_scope_conflict',
+      'The approved intervention, proposal, and application no longer match. Please reload and try again.'
     );
-    if (!row) return false;
-
-    const details = {
-      sentAt,
-      messageId,
-      signingRequestIds,
-      actorStaffProfileId,
-      actorUserId,
-    };
-    const interventionMetadata = mergeApprovalLetterFollowUpSent(
-      safeJsonParse(row.metadata_json, {}) || {},
-      details
-    );
-    await connection.query(
-      `UPDATE iset_case_intervention
-          SET metadata_json = ?,
-              updated_at = NOW()
-        WHERE id = ?
-          AND case_id = ?`,
-      [JSON.stringify(interventionMetadata), normalizedInterventionId, normalizedCaseId]
-    );
-
-    const [proposalRows] = await connection.query(
-      `SELECT id, metadata_json
-         FROM iset_intervention_proposal
-        WHERE case_id = ?
-          AND (legacy_intervention_id = ? OR source_intervention_id = ?)`,
-      [normalizedCaseId, normalizedInterventionId, normalizedInterventionId]
-    );
-    for (const proposalRow of proposalRows || []) {
-      const proposalMetadata = mergeApprovalLetterFollowUpSent(
-        safeJsonParse(proposalRow.metadata_json, {}) || {},
-        details
-      );
-      await connection.query(
-        `UPDATE iset_intervention_proposal
-            SET metadata_json = ?,
-                updated_at = NOW()
-          WHERE id = ?`,
-        [JSON.stringify(proposalMetadata), proposalRow.id]
-      );
-    }
-    return true;
-  } catch (error) {
-    if (error?.code === 'ER_NO_SUCH_TABLE' || error?.code === 'ER_BAD_FIELD_ERROR') {
-      return false;
-    }
+    error.cause = cause;
     throw error;
   }
+  if (
+    !normalizedCaseId ||
+    !normalizedMessageId ||
+    normalizedInterventionId !== owner.interventionId
+  ) {
+    throw createCaseMessageHttpError(
+      409,
+      'intervention_letter_scope_conflict',
+      'The approved intervention, proposal, and application no longer match. Please reload and try again.'
+    );
+  }
+  const normalizedSigningRequestIds = Array.from(new Set(
+    (Array.isArray(signingRequestIds) ? signingRequestIds : [])
+      .map(normalisePositiveInteger)
+      .filter(Boolean)
+  ));
+  if (!normalizedSigningRequestIds.length) {
+    throw createCaseMessageHttpError(
+      409,
+      'intervention_letter_signing_request_missing',
+      'The intervention approval letter has no exact signing request. Please reload and try again.'
+    );
+  }
+
+  const subjectInterventionId =
+    owner.proposalKind === 'revision'
+      ? owner.revisionDraftInterventionId
+      : (owner.sourceInterventionId || owner.interventionId);
+  const expectedWorkflowType = owner.proposalKind === 'revision'
+    ? REVIEW_WORKFLOW_TYPES.InterventionRevision
+    : REVIEW_WORKFLOW_TYPES.InterventionProposal;
+  const [[interventionRow]] = await connection.query(
+    `SELECT i.id,
+            i.case_id,
+            i.action_plan_id,
+            i.status,
+            i.delivery_status,
+            i.metadata_json,
+            ap.case_id AS action_plan_case_id,
+            ap.application_id AS action_plan_application_id
+       FROM iset_case_intervention i
+       JOIN iset_case_action_plan ap ON ap.id = i.action_plan_id
+      WHERE i.id = ?
+        AND i.case_id = ?
+        AND i.action_plan_id = ?
+      LIMIT 1
+        FOR UPDATE`,
+    [owner.interventionId, normalizedCaseId, owner.actionPlanId]
+  );
+  const targetState = resolveInterventionStateFields({
+    status: interventionRow?.status,
+    delivery_status: interventionRow?.delivery_status,
+  });
+  if (
+    !interventionRow ||
+    normalisePositiveInteger(interventionRow.action_plan_case_id) !== normalizedCaseId ||
+    normalisePositiveInteger(interventionRow.action_plan_application_id) !== owner.applicationId ||
+    targetState.reviewStatus !== 'approved'
+  ) {
+    throw createCaseMessageHttpError(
+      409,
+      'intervention_letter_target_conflict',
+      'The approved intervention no longer belongs to the selected application and Action Plan.'
+    );
+  }
+
+  const [[proposalRow]] = await connection.query(
+    `SELECT p.id,
+            p.case_id,
+            p.action_plan_id,
+            p.application_id,
+            p.legacy_intervention_id,
+            p.source_intervention_id,
+            p.proposal_kind,
+            p.review_status,
+            p.metadata_json
+       FROM iset_intervention_proposal p
+      WHERE p.id = ?
+        AND p.case_id = ?
+        AND p.archived_at IS NULL
+      LIMIT 1
+        FOR UPDATE`,
+    [owner.proposalId, normalizedCaseId]
+  );
+  const proposalApplicationId = normalisePositiveInteger(proposalRow?.application_id);
+  const proposalSourceInterventionId = normalisePositiveInteger(
+    proposalRow?.source_intervention_id
+  );
+  const proposalKind = (normaliseString(proposalRow?.proposal_kind) || '')
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  const proposalScopeMatches = Boolean(
+    proposalRow &&
+    normalisePositiveInteger(proposalRow.action_plan_id) === owner.actionPlanId &&
+    (!proposalApplicationId || proposalApplicationId === owner.applicationId) &&
+    normalisePositiveInteger(proposalRow.legacy_intervention_id) === subjectInterventionId &&
+    proposalKind === owner.proposalKind &&
+    normaliseInterventionReviewStatus(proposalRow.review_status, null) === 'approved' &&
+    (
+      owner.proposalKind === 'revision'
+        ? proposalSourceInterventionId === owner.interventionId
+        : !proposalSourceInterventionId
+    )
+  );
+  if (!proposalScopeMatches) {
+    throw createCaseMessageHttpError(
+      409,
+      'intervention_letter_proposal_conflict',
+      'The approved proposal no longer matches this intervention and application. Please reload and try again.'
+    );
+  }
+
+  const [[workflowRow]] = await connection.query(
+    `SELECT rw.id,
+            rw.workflow_type,
+            rw.case_id,
+            rw.application_id,
+            rw.action_plan_id,
+            rw.intervention_id,
+            rw.proposal_id,
+            rw.current_stage,
+            rw.nwac_decision
+       FROM iset_review_workflow rw
+      WHERE rw.id = ?
+        AND rw.archived_at IS NULL
+      LIMIT 1
+        FOR UPDATE`,
+    [owner.workflowId]
+  );
+  if (
+    !workflowRow ||
+    workflowRow.workflow_type !== expectedWorkflowType ||
+    normalisePositiveInteger(workflowRow.case_id) !== normalizedCaseId ||
+    normalisePositiveInteger(workflowRow.application_id) !== owner.applicationId ||
+    normalisePositiveInteger(workflowRow.action_plan_id) !== owner.actionPlanId ||
+    normalisePositiveInteger(workflowRow.intervention_id) !== subjectInterventionId ||
+    normalisePositiveInteger(workflowRow.proposal_id) !== owner.proposalId ||
+    workflowRow.current_stage !== REVIEW_STAGES.FinalDecisionRecorded ||
+    normalizeInterventionDecisionValue(workflowRow.nwac_decision) !== 'approved'
+  ) {
+    throw createCaseMessageHttpError(
+      409,
+      'intervention_letter_workflow_conflict',
+      'The exact intervention review is no longer finally approved. Please reload and try again.'
+    );
+  }
+
+  const sentAt = new Date().toISOString();
+  const details = {
+    sentAt,
+    messageId: normalizedMessageId,
+    signingRequestIds: normalizedSigningRequestIds,
+    actorStaffProfileId,
+    actorUserId,
+    caseId: normalizedCaseId,
+    applicationId: owner.applicationId,
+    actionPlanId: owner.actionPlanId,
+    interventionId: owner.interventionId,
+    proposalId: owner.proposalId,
+    workflowId: owner.workflowId,
+    proposalKind: owner.proposalKind,
+    revisionDraftInterventionId: owner.revisionDraftInterventionId,
+    sourceInterventionId: owner.sourceInterventionId,
+    sourceItemId: owner.sourceItemId,
+  };
+  const interventionMetadata = mergeApprovalLetterFollowUpSent(
+    safeJsonParse(interventionRow.metadata_json, {}) || {},
+    details
+  );
+  const [interventionUpdate] = await connection.query(
+    `UPDATE iset_case_intervention
+        SET metadata_json = ?,
+            updated_at = NOW()
+      WHERE id = ?
+        AND case_id = ?
+        AND action_plan_id = ?`,
+    [
+      JSON.stringify(interventionMetadata),
+      owner.interventionId,
+      normalizedCaseId,
+      owner.actionPlanId,
+    ]
+  );
+  if (Number(interventionUpdate?.affectedRows || 0) !== 1) {
+    throw createCaseMessageHttpError(
+      409,
+      'intervention_letter_target_update_conflict',
+      'The intervention changed before its approval letter could be recorded. Please reload and try again.'
+    );
+  }
+
+  const proposalMetadata = mergeApprovalLetterFollowUpSent(
+    safeJsonParse(proposalRow.metadata_json, {}) || {},
+    details
+  );
+  const proposalSourceGuard = owner.proposalKind === 'revision'
+    ? 'AND source_intervention_id = ?'
+    : 'AND source_intervention_id IS NULL';
+  const proposalApplicationGuard = proposalApplicationId
+    ? 'AND application_id = ?'
+    : 'AND application_id IS NULL';
+  const proposalUpdateParams = [
+    JSON.stringify(proposalMetadata),
+    owner.proposalId,
+    normalizedCaseId,
+    owner.actionPlanId,
+    subjectInterventionId,
+    owner.proposalKind,
+  ];
+  if (proposalApplicationId) {
+    proposalUpdateParams.push(owner.applicationId);
+  }
+  if (owner.proposalKind === 'revision') {
+    proposalUpdateParams.push(owner.interventionId);
+  }
+  const [proposalUpdate] = await connection.query(
+    `UPDATE iset_intervention_proposal
+        SET metadata_json = ?,
+            updated_at = NOW()
+      WHERE id = ?
+        AND case_id = ?
+        AND action_plan_id = ?
+        AND legacy_intervention_id = ?
+        AND proposal_kind = ?
+        ${proposalApplicationGuard}
+        ${proposalSourceGuard}
+        AND review_status = 'approved'
+        AND archived_at IS NULL`,
+    proposalUpdateParams
+  );
+  if (Number(proposalUpdate?.affectedRows || 0) !== 1) {
+    throw createCaseMessageHttpError(
+      409,
+      'intervention_letter_proposal_update_conflict',
+      'The proposal changed before its approval letter could be recorded. Please reload and try again.'
+    );
+  }
+  return {
+    updated: true,
+    ownerType: 'intervention',
+    caseId: normalizedCaseId,
+    applicationId: owner.applicationId,
+    actionPlanId: owner.actionPlanId,
+    interventionId: owner.interventionId,
+    proposalId: owner.proposalId,
+    workflowId: owner.workflowId,
+    proposalKind: owner.proposalKind,
+    sentAt,
+  };
 }
 
 const CANONICAL_ACTION_PLAN_STATUSES = new Set([
@@ -27185,6 +28733,8 @@ function mapInterventionRow(row) {
       null,
     outcomeCode: row.outcome_code || esdc.interventionOutcome || null,
     fundingStream: row.funding_stream || planFundingStream || metadata.fundingStream || null,
+    fundingStreamDecision:
+      row.funding_stream_decision || row.fundingStreamDecision || null,
     postingContext: metadata.postingContext || null,
     institution,
     programName,
@@ -27233,10 +28783,81 @@ async function setInterventionComplianceForCase(caseId, status) {
   }
 }
 
-async function markIlmpNeedsReviewForCase(caseId) {
-  if (!caseId) return;
-  await markEsdcParticipantSubmissionNeedsReview(null, caseId, { resetSnapshot: true, resetSubmissionStatus: true });
-  await setInterventionComplianceForCase(caseId, 'pending');
+async function setInterventionComplianceForApplication(caseId, applicationId, status, connection = null) {
+  const numericCaseId = normalisePositiveInteger(caseId);
+  const numericApplicationId = normalisePositiveInteger(applicationId);
+  if (!numericCaseId || !numericApplicationId || !status) return;
+  const executor = connection && typeof connection.query === 'function' ? connection : pool;
+  await executor.query(
+    `UPDATE iset_case_intervention ci
+         JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+          SET ci.metadata_json = JSON_SET(COALESCE(ci.metadata_json, JSON_OBJECT()), '$.compliance.ilmp', ?),
+              ci.updated_at = NOW()
+        WHERE ci.case_id = ?
+          AND ap.case_id = ?
+          AND ap.application_id = ?
+          AND ${buildOperationalInterventionSql('ci')}`,
+    [status, numericCaseId, numericCaseId, numericApplicationId]
+  );
+}
+
+async function setInterventionComplianceForActionPlan(caseId, actionPlanId, status, connection = null) {
+  const numericCaseId = normalisePositiveInteger(caseId);
+  const numericActionPlanId = normalisePositiveInteger(actionPlanId);
+  if (!numericCaseId || !numericActionPlanId || !status) return;
+  const executor = connection && typeof connection.query === 'function' ? connection : pool;
+  await executor.query(
+    `UPDATE iset_case_intervention ci
+          SET ci.metadata_json = JSON_SET(COALESCE(ci.metadata_json, JSON_OBJECT()), '$.compliance.ilmp', ?),
+              ci.updated_at = NOW()
+        WHERE ci.case_id = ?
+          AND ci.action_plan_id = ?
+          AND ${buildOperationalInterventionSql('ci')}`,
+    [status, numericCaseId, numericActionPlanId]
+  );
+}
+
+async function markIlmpNeedsReviewForActionPlan(caseId, actionPlanId, connection = null) {
+  const numericCaseId = normalisePositiveInteger(caseId);
+  const numericActionPlanId = normalisePositiveInteger(actionPlanId);
+  if (!numericCaseId || !numericActionPlanId) return;
+  await markEsdcParticipantSubmissionNeedsReview(connection, numericCaseId, {
+    actionPlanId: numericActionPlanId,
+  });
+  await setInterventionComplianceForActionPlan(
+    numericCaseId,
+    numericActionPlanId,
+    'pending',
+    connection
+  );
+}
+
+async function markIlmpNeedsReviewForActionPlans(caseId, actionPlanIds, connection = null) {
+  const numericCaseId = normalisePositiveInteger(caseId);
+  const normalizedPlanIds = Array.from(new Set(
+    (Array.isArray(actionPlanIds) ? actionPlanIds : [actionPlanIds])
+      .map(normalisePositiveInteger)
+      .filter(Boolean)
+  ));
+  if (!numericCaseId || !normalizedPlanIds.length) return;
+  for (const actionPlanId of normalizedPlanIds) {
+    await markIlmpNeedsReviewForActionPlan(numericCaseId, actionPlanId, connection);
+  }
+}
+
+async function markIlmpNeedsReviewForApplication(caseId, applicationId, connection = null) {
+  const numericCaseId = normalisePositiveInteger(caseId);
+  const numericApplicationId = normalisePositiveInteger(applicationId);
+  if (!numericCaseId || !numericApplicationId) return;
+  await markEsdcParticipantSubmissionNeedsReview(connection, numericCaseId, {
+    applicationId: numericApplicationId,
+  });
+  await setInterventionComplianceForApplication(
+    numericCaseId,
+    numericApplicationId,
+    'pending',
+    connection
+  );
 }
 
 const CASE_STATUS_DERIVED_VALUES = Object.freeze({
@@ -27636,14 +29257,19 @@ async function recomputeCaseStatus(caseId, connection = null, options = {}) {
 
     const [[planSummary]] = await conn.query(
       `SELECT
-          SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_count,
-          SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed_count,
-          SUM(CASE WHEN status = 'archived' THEN 1 ELSE 0 END) AS archived_count,
-          SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft_count,
+          SUM(CASE WHEN ap.status = 'active' THEN 1 ELSE 0 END) AS active_count,
+          SUM(CASE WHEN ap.status = 'closed' THEN 1 ELSE 0 END) AS closed_count,
+          SUM(CASE WHEN ap.status = 'archived' THEN 1 ELSE 0 END) AS archived_count,
+          SUM(CASE WHEN ap.status = 'draft' THEN 1 ELSE 0 END) AS draft_count,
           COUNT(*) AS total_count
-        FROM iset_case_action_plan
-        WHERE case_id = ?`,
-      [numericCaseId]
+        FROM iset_case_action_plan ap
+        WHERE ap.case_id = ?
+          AND (
+            LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ap.metadata_json, '$.source')), '')) = ''
+            OR LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ap.metadata_json, '$.source')), ''))
+              NOT IN (${REPORTING_ARTIFACT_METADATA_SOURCES.map(() => '?').join(', ')})
+          )`,
+      [numericCaseId, ...REPORTING_ARTIFACT_METADATA_SOURCES]
     );
 
     const activePlans = Number(planSummary?.active_count || 0);
@@ -27678,11 +29304,17 @@ async function recomputeCaseStatus(caseId, connection = null, options = {}) {
     if (activePlans > 0) {
       nextStatus = CASE_STATUS_DERIVED_VALUES.active;
       nextClosureReason = null;
-    } else if (closedPlans > 0) {
-      nextStatus = CASE_STATUS_DERIVED_VALUES.dormant;
-      nextClosureReason = null;
     } else if (draftPlans > 0) {
       nextStatus = CASE_STATUS_DERIVED_VALUES.initiated;
+      nextClosureReason = null;
+    } else if (openApplications > 0) {
+      // A newly submitted or returned application reopens the long-lived file even
+      // when an older application has a closed Action Plan. Historical closeout
+      // must not hide current intake work.
+      nextStatus = CASE_STATUS_DERIVED_VALUES.intake;
+      nextClosureReason = null;
+    } else if (closedPlans > 0) {
+      nextStatus = CASE_STATUS_DERIVED_VALUES.dormant;
       nextClosureReason = null;
     } else if (totalPlans > 0) {
       nextStatus = CASE_STATUS_DERIVED_VALUES.initiated;
@@ -27722,6 +29354,12 @@ async function recomputeCaseStatus(caseId, connection = null, options = {}) {
       (nextStatus === currentStatus || !nextStatus) &&
       closureReasonToPersist === currentClosureReason
     ) {
+      if (
+        currentStatus === CASE_STATUS_DERIVED_VALUES.closed ||
+        currentStatus === CASE_STATUS_DERIVED_VALUES.archived
+      ) {
+        await cancelOpenRemindersForTerminalCase(conn, numericCaseId);
+      }
       return { status: currentStatus, previousStatus: currentStatus, changed: false };
     }
 
@@ -27866,6 +29504,32 @@ function isDeniedReportingCaseContext(caseContext) {
     context?.reportingOnlyWithdrawal === true ||
     REPORTING_ARTIFACT_METADATA_SOURCES.includes(reportingSeedSourceKey)
   );
+}
+
+function resolveApplicationReportingArtifact(caseContext, applicationId) {
+  const context =
+    caseContext && typeof caseContext === 'object'
+      ? caseContext
+      : safeJsonParse(caseContext, null);
+  const applicationKey = normalisePositiveInteger(applicationId);
+  if (!context || !applicationKey) return null;
+
+  const artifacts =
+    context.applicationReportingArtifacts &&
+    typeof context.applicationReportingArtifacts === 'object' &&
+    !Array.isArray(context.applicationReportingArtifacts)
+      ? context.applicationReportingArtifacts
+      : null;
+  const exactArtifact = artifacts?.[String(applicationKey)] || null;
+  if (exactArtifact && typeof exactArtifact === 'object' && !Array.isArray(exactArtifact)) {
+    return exactArtifact;
+  }
+
+  const legacyApplicationId = normalisePositiveInteger(context.applicationId);
+  if (legacyApplicationId !== applicationKey || !isDeniedReportingCaseContext(context)) {
+    return null;
+  }
+  return context;
 }
 
 function resolveReportingArtifactTrigger(value, context = null) {
@@ -28021,7 +29685,8 @@ function buildDeniedReportingCaseContext({
     : existingApplicationArtifacts;
 
   if (!caseLevelReportingOnly) {
-    return mergeCaseContext(existingCaseContext || {}, {
+    const clearedCaseContext = clearCaseLevelReportingContext(existingCaseContext || {}).caseContext;
+    return mergeCaseContext(clearedCaseContext, {
       applicationReportingArtifacts,
     });
   }
@@ -28231,17 +29896,7 @@ async function syncCaseClientFromApplication(connection, {
 async function resolveApplicationReportingCaseMode(connection, {
   caseId,
   applicationId,
-  reportingTrigger = 'denial',
 } = {}) {
-  const normalizedReportingTrigger = resolveReportingArtifactTrigger(reportingTrigger);
-  if (normalizedReportingTrigger !== 'withdrawal') {
-    return {
-      caseLevelReportingOnly: true,
-      nonReportingPlanCount: 0,
-      meaningfulOtherApplicationCount: 0,
-    };
-  }
-
   const numericCaseId = Number(caseId);
   const numericApplicationId = Number(applicationId);
   if (!Number.isInteger(numericCaseId) || numericCaseId <= 0) {
@@ -28324,6 +29979,16 @@ async function syncDeniedReportingArtifacts(connection, {
   const existingCaseContext = safeJsonParse(caseRow.case_context_json, null) || {};
   const normalizedReportingTrigger = resolveReportingArtifactTrigger(reportingTrigger, existingCaseContext);
   const reportingConfig = resolveReportingArtifactConfig(normalizedReportingTrigger);
+  const assessmentEiFundingClassification = resolveEiFundingClassification(
+    assessmentRow?.esdc_eligibility
+  );
+  if (normalizedReportingTrigger !== 'withdrawal' && !assessmentEiFundingClassification) {
+    throw createReviewEiValidationError(
+      'denied_reporting_ei_eligibility_required',
+      'Select CRF, EI Active Claim, or EI Reach Back on this application assessment before recording its denial.',
+      409
+    );
+  }
   const reportingCaseMode = await resolveApplicationReportingCaseMode(connection, {
     caseId: numericCaseId,
     applicationId: numericApplicationId,
@@ -28369,20 +30034,28 @@ async function syncDeniedReportingArtifacts(connection, {
   });
 
   if (reportingCaseMode.caseLevelReportingOnly) {
+    const caseClosureReason = normalizedReportingTrigger === 'withdrawal'
+      ? 'withdrawn'
+      : 'application_denied';
     await connection.query(
       `UPDATE iset_case
           SET status = ?,
+              lifecycle_status = ?,
+              closure_reason = ?,
               closed_at = COALESCE(closed_at, ?),
               case_context_json = ?,
               updated_at = NOW()
         WHERE id = ?`,
       [
         CASE_STATUS_DERIVED_VALUES.closed,
+        CASE_STATUS_DERIVED_VALUES.closed,
+        caseClosureReason,
         resolvedDateTime,
         JSON.stringify(nextCaseContext),
         numericCaseId
       ]
     );
+    await cancelOpenRemindersForTerminalCase(connection, numericCaseId);
   } else {
     await connection.query(
       `UPDATE iset_case
@@ -28427,9 +30100,9 @@ async function syncDeniedReportingArtifacts(connection, {
       ? '1'
       : mapChildcareFundingToIlmpCode(childcareFundingValue);
   const barrierCodes = mapBarrierLabelsToIlmpCodes(extractEmploymentBarriers(extractionContext) || []);
-  const explicitEiClaimantCode = (() => {
+  const fallbackEiFundingClassification = (() => {
+    if (normalizedReportingTrigger !== 'withdrawal') return null;
     const candidates = [
-      assessmentRow?.esdc_eligibility,
       nextCaseContext?.eiClaimant,
       answers['ei-claimant'],
       answers['ei_claimant'],
@@ -28439,18 +30112,15 @@ async function syncDeniedReportingArtifacts(connection, {
       answers['employment_insurance_claimant']
     ];
     for (const candidate of candidates) {
-      const normalized = normalizeEiClaimantCode(candidate);
-      if (normalized) return normalized;
+      const classification = resolveEiFundingClassification(candidate);
+      if (classification) return classification;
     }
-    return null;
+    return resolveEiFundingClassification('CRF');
   })();
-  const deniedReportingEiClaimantCode = explicitEiClaimantCode || '3';
-  const fundingStream =
-    deniedReportingEiClaimantCode === '1' || deniedReportingEiClaimantCode === '2'
-      ? 'EI'
-      : deniedReportingEiClaimantCode === '3'
-        ? 'CRF'
-        : null;
+  const deniedReportingEiClassification =
+    assessmentEiFundingClassification || fallbackEiFundingClassification;
+  const deniedReportingEiClaimantCode = deniedReportingEiClassification?.claimantCode || null;
+  const fundingStream = deniedReportingEiClassification?.fundingStream || null;
   const agreementCandidate = fundingStream ? deriveAgreementNumberFromFundingStream(fundingStream) : null;
   const agreementNumber =
     agreementCandidate && agreementCandidate !== ILMP_PLACEHOLDER_AGREEMENT_NUMBER
@@ -28501,23 +30171,14 @@ async function syncDeniedReportingArtifacts(connection, {
     ? [WITHDRAWN_REPORTING_SOURCE]
     : [DENIED_REPORTING_SOURCE, DENIED_INELIGIBLE_REPORTING_SOURCE];
   const [[existingPlan]] = await connection.query(
-    normalizedReportingTrigger === 'withdrawal'
-      ? `SELECT id
-           FROM iset_case_action_plan
-          WHERE case_id = ?
-            AND application_id = ?
-            AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (${planSourceKeys.map(() => '?').join(', ')})
-          LIMIT 1
-          FOR UPDATE`
-      : `SELECT id
-           FROM iset_case_action_plan
-          WHERE case_id = ?
-            AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (${planSourceKeys.map(() => '?').join(', ')})
-          LIMIT 1
-          FOR UPDATE`,
-    normalizedReportingTrigger === 'withdrawal'
-      ? [numericCaseId, numericApplicationId, ...planSourceKeys]
-      : [numericCaseId, ...planSourceKeys]
+    `SELECT id
+       FROM iset_case_action_plan
+      WHERE case_id = ?
+        AND application_id = ?
+        AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (${planSourceKeys.map(() => '?').join(', ')})
+      LIMIT 1
+      FOR UPDATE`,
+    [numericCaseId, numericApplicationId, ...planSourceKeys]
   );
 
   let planId = existingPlan?.id || null;
@@ -28705,18 +30366,13 @@ async function syncDeniedReportingArtifacts(connection, {
   }
 
   await ensureEsdcParticipantSubmissionRecord(connection, numericCaseId, numericApplicationId, planId);
-  const submissionId =
-    await findEsdcSubmissionIdForActionPlan(connection, planId) ||
-    await findEsdcSubmissionIdForCase(connection, numericCaseId);
+  const submissionId = await findEsdcSubmissionIdForActionPlan(connection, planId);
   if (!submissionId) {
-    return {
-      clientId: syncedClientId,
-      planId,
-      interventionId: interventionIds[0] || null,
-      interventionIds,
-      submissionId: null,
-      compliance: null
-    };
+    throw createReviewEiValidationError(
+      'denied_reporting_submission_scope_failed',
+      'PATH could not create or locate the ESDC participant record for this application and Action Plan.',
+      409
+    );
   }
 
   await validateEsdcParticipantSubmission(
@@ -28760,6 +30416,10 @@ async function syncDeniedReportingForApplicationIfNeeded(connection, {
 } = {}) {
   const numericApplicationId = Number(applicationId);
   if (!Number.isInteger(numericApplicationId) || numericApplicationId <= 0) return null;
+  const applicationPayload = await readApplicationPayload(connection, numericApplicationId, {
+    forUpdate: true,
+  });
+  if (!applicationPayload?.row) return null;
   const caseRow = await fetchCaseRowForApplicationId(numericApplicationId, {
     columns: ['id', 'case_context_json'],
     connection,
@@ -28767,14 +30427,18 @@ async function syncDeniedReportingForApplicationIfNeeded(connection, {
   });
   if (!caseRow) return null;
   const caseContext = safeJsonParse(caseRow.case_context_json, null) || {};
-  if (!isDeniedReportingCaseContext(caseContext)) {
-    return null;
-  }
+  const reportingArtifact = resolveApplicationReportingArtifact(caseContext, numericApplicationId);
+  if (!reportingArtifact) return null;
+  const reportingTrigger = resolveReportingArtifactTrigger(null, reportingArtifact);
+  const applicationStateMatchesArtifact = reportingTrigger === 'withdrawal'
+    ? isWithdrawnApplicationState(applicationPayload.row)
+    : isDeniedApplicationState(applicationPayload.row);
+  if (!applicationStateMatchesArtifact) return null;
   return syncDeniedReportingArtifacts(connection, {
     caseId: caseRow.id,
     applicationId: numericApplicationId,
     denialDate,
-    reportingTrigger: resolveReportingArtifactTrigger(null, caseContext),
+    reportingTrigger,
   });
 }
 
@@ -29480,7 +31144,7 @@ const generateGUID = () => {
 const { resolveAdminEnvironmentFile } = require('./src/server/adminEnvironment');
 
 // DEV and PROD retain their existing repo-local/legacy resolution. Tests must
-// use the aggregate runner's explicit, attempt-owned synthetic environment.
+// use an explicit, attempt-owned synthetic environment instead of a real `.env`.
 const dotenvPath = resolveAdminEnvironmentFile({ serverRoot: __dirname });
 const dotenvResult = require('dotenv').config({ path: dotenvPath, override: true });
 if (process.env.NODE_ENV === 'test' && dotenvResult.error) {
@@ -30504,8 +32168,8 @@ async function countProgramAdminNewSubmissions(pool) {
   try {
     const [[row]] = await pool.query(
       `SELECT COUNT(*) AS total
-         FROM iset_case c
-         ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
+         FROM iset_application a
+         JOIN iset_case c ON c.id = a.case_id
         WHERE (c.assigned_staff_profile_id IS NULL OR c.assigned_staff_profile_id = 0)
           AND a.status IS NOT NULL
           AND LOWER(a.status) = 'submitted'`
@@ -32955,7 +34619,297 @@ const METRICS_DRILLDOWN_DEFINITIONS = {
   }
 };
 
-async function markCaseReadyToClose({ caseId, connection = null }) {
+function buildReadyToCloseScopeError(code, details = {}) {
+  return Object.assign(new Error(code), {
+    code,
+    statusCode: 409,
+    ...details,
+  });
+}
+
+function hasDurableEsdcSubmissionEvidence(submission, historySubmissionIds = new Set()) {
+  if (!submission || typeof submission !== 'object') return false;
+  const submissionId = normalisePositiveInteger(submission.id);
+  const submissionStatus = (normaliseString(submission.submission_status) || 'pending').toLowerCase();
+  const readinessStatus = (normaliseString(submission.readiness_status) || 'needs_review').toLowerCase();
+  return Boolean(
+    (submissionId && historySubmissionIds.has(submissionId)) ||
+    submissionStatus !== 'pending' ||
+    !['needs_review', 'pending'].includes(readinessStatus) ||
+    submission.last_validated_at ||
+    submission.submitted_at ||
+    submission.payload_snapshot ||
+    submission.payload_storage_key ||
+    submission.payload_checksum ||
+    submission.rejection_reason ||
+    submission.readiness_summary ||
+    submission.warnings ||
+    submission.blocking_issues
+  );
+}
+
+function classifyReadyToCloseReportingPlans({
+  caseId,
+  applications = [],
+  actionPlans = [],
+  ignoredActionPlanIds = new Set(),
+  interventions = [],
+  submissions = [],
+  historySubmissionIds = new Set(),
+} = {}) {
+  const numericCaseId = normalisePositiveInteger(caseId);
+  const applicationIds = new Set(
+    (Array.isArray(applications) ? applications : [])
+      .map(row => normalisePositiveInteger(row?.id))
+      .filter(Boolean)
+  );
+  const plans = Array.isArray(actionPlans) ? actionPlans : [];
+  const planMap = new Map(
+    plans
+      .map(plan => [normalisePositiveInteger(plan?.id), plan])
+      .filter(([planId]) => Boolean(planId))
+  );
+  const interventionsByPlan = new Map();
+  (Array.isArray(interventions) ? interventions : []).forEach(intervention => {
+    const planId = normalisePositiveInteger(intervention?.action_plan_id);
+    if (!planId || !planMap.has(planId) || isAppliedRevisionEvidenceIntervention(intervention)) return;
+    if (!interventionsByPlan.has(planId)) interventionsByPlan.set(planId, []);
+    interventionsByPlan.get(planId).push(intervention);
+  });
+
+  const submissionsByPlan = new Map();
+  const durableSubmissionIds = new Set();
+  (Array.isArray(submissions) ? submissions : []).forEach(submission => {
+    const submissionId = normalisePositiveInteger(submission?.id);
+    const planId = normalisePositiveInteger(submission?.action_plan_id);
+    const hasDurableEvidence = hasDurableEsdcSubmissionEvidence(submission, historySubmissionIds);
+    if (!planId) {
+      if (!hasDurableEvidence) return;
+      throw buildReadyToCloseScopeError('ready_to_close_submission_plan_scope_ambiguous', {
+        submissionId,
+      });
+    }
+    if (!planMap.has(planId)) {
+      if (ignoredActionPlanIds.has(planId)) return;
+      if (hasDurableEvidence) {
+        throw buildReadyToCloseScopeError('ready_to_close_submission_plan_scope_mismatch', {
+          submissionId,
+          actionPlanId: planId,
+        });
+      }
+      return;
+    }
+    if (!submissionsByPlan.has(planId)) submissionsByPlan.set(planId, []);
+    submissionsByPlan.get(planId).push(submission);
+    if (hasDurableEvidence && submissionId) durableSubmissionIds.add(submissionId);
+  });
+
+  return plans.flatMap(plan => {
+    const planId = normalisePositiveInteger(plan?.id);
+    if (!planId) return [];
+    if (normalisePositiveInteger(plan?.case_id) !== numericCaseId) {
+      throw buildReadyToCloseScopeError('ready_to_close_action_plan_case_scope_mismatch', {
+        actionPlanId: planId,
+      });
+    }
+
+    const metadata = safeJsonParse(plan?.metadata_json, {}) || {};
+    const metadataSource = (normaliseString(metadata.source) || '').toLowerCase();
+    const hasReportingProvenance = REPORTING_ARTIFACT_METADATA_SOURCES.includes(metadataSource);
+    const hasReportableIntervention = (interventionsByPlan.get(planId) || [])
+      .some(intervention => isEsdcReportableIntervention(intervention));
+    const planSubmissions = submissionsByPlan.get(planId) || [];
+    const durableSubmissions = planSubmissions.filter(
+      submission => durableSubmissionIds.has(normalisePositiveInteger(submission?.id))
+    );
+    if (!hasReportingProvenance && !hasReportableIntervention && !durableSubmissions.length) {
+      return [];
+    }
+
+    const planApplicationId = normalisePositiveInteger(plan?.application_id);
+    if (planApplicationId && !applicationIds.has(planApplicationId)) {
+      throw buildReadyToCloseScopeError('ready_to_close_action_plan_application_scope_mismatch', {
+        actionPlanId: planId,
+        applicationId: planApplicationId,
+      });
+    }
+    if (!planApplicationId && applicationIds.size > 1) {
+      throw buildReadyToCloseScopeError('ready_to_close_action_plan_application_scope_ambiguous', {
+        actionPlanId: planId,
+      });
+    }
+    if (planSubmissions.length > 1) {
+      throw buildReadyToCloseScopeError('ready_to_close_duplicate_plan_submissions', {
+        actionPlanId: planId,
+        submissionIds: planSubmissions.map(row => normalisePositiveInteger(row?.id)).filter(Boolean),
+      });
+    }
+
+    const effectiveApplicationId = planApplicationId || (applicationIds.size === 1 ? [...applicationIds][0] : null);
+    const submission = planSubmissions[0] || null;
+    if (submission) {
+      const submissionId = normalisePositiveInteger(submission.id);
+      const submissionCaseId = normalisePositiveInteger(submission.case_id);
+      const submissionPlanId = normalisePositiveInteger(submission.action_plan_id);
+      const submissionApplicationId = normalisePositiveInteger(submission.application_id);
+      if (submissionCaseId !== numericCaseId || submissionPlanId !== planId) {
+        throw buildReadyToCloseScopeError('ready_to_close_submission_plan_scope_mismatch', {
+          actionPlanId: planId,
+          submissionId,
+        });
+      }
+      if (submissionApplicationId && !applicationIds.has(submissionApplicationId)) {
+        throw buildReadyToCloseScopeError('ready_to_close_submission_application_scope_mismatch', {
+          actionPlanId: planId,
+          submissionId,
+          applicationId: submissionApplicationId,
+        });
+      }
+      if (
+        submissionApplicationId &&
+        effectiveApplicationId &&
+        submissionApplicationId !== effectiveApplicationId
+      ) {
+        throw buildReadyToCloseScopeError('ready_to_close_submission_application_scope_mismatch', {
+          actionPlanId: planId,
+          submissionId,
+          applicationId: submissionApplicationId,
+        });
+      }
+    }
+
+    return [{
+      actionPlanId: planId,
+      applicationId: effectiveApplicationId,
+      storedApplicationId: planApplicationId,
+      existingSubmissionId: normalisePositiveInteger(submission?.id),
+      reasons: {
+        reportingProvenance: hasReportingProvenance,
+        reportableIntervention: hasReportableIntervention,
+        durableSubmission: durableSubmissions.length > 0,
+      },
+    }];
+  });
+}
+
+function aggregateReadyToCloseIlmpCompliance(planCompliance = []) {
+  const rows = Array.isArray(planCompliance) ? planCompliance : [];
+  if (!rows.length) {
+    return {
+      status: 'clean',
+      messages: [],
+      warnings: [],
+      blockingIssues: [],
+      summary: { notRequired: true, submissions: [] },
+      lastValidatedAt: null,
+    };
+  }
+
+  const warnings = rows.flatMap(row => Array.isArray(row?.compliance?.warnings) ? row.compliance.warnings : []);
+  const blockingIssues = rows.flatMap(
+    row => Array.isArray(row?.compliance?.blockingIssues) ? row.compliance.blockingIssues : []
+  );
+  const statuses = rows.map(row => row?.compliance?.status || 'pending');
+  const status = blockingIssues.length || statuses.includes('blocked')
+    ? 'blocked'
+    : warnings.length || statuses.includes('warning')
+      ? 'warning'
+      : statuses.every(value => value === 'clean')
+        ? 'clean'
+        : 'pending';
+  const lastValidatedAt = rows
+    .map(row => row?.compliance?.lastValidatedAt)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || null;
+
+  return {
+    status,
+    messages: [...blockingIssues, ...warnings],
+    warnings,
+    blockingIssues,
+    summary: {
+      notRequired: false,
+      submissions: rows.map(row => ({
+        actionPlanId: row.actionPlanId,
+        applicationId: row.applicationId || null,
+        submissionId: row.submissionId,
+        status: row.compliance?.status || 'pending',
+        summary: row.compliance?.summary || null,
+      })),
+    },
+    lastValidatedAt,
+  };
+}
+
+function assertReadyToCloseEsdcSubmissionLineage(submission, {
+  caseId,
+  actionPlanId,
+  applicationId,
+} = {}) {
+  const submissionId = normalisePositiveInteger(submission?.id);
+  const submissionCaseId = normalisePositiveInteger(submission?.case_id);
+  const submissionActionPlanId = normalisePositiveInteger(submission?.action_plan_id);
+  const submissionApplicationId = normalisePositiveInteger(submission?.application_id);
+  const expectedCaseId = normalisePositiveInteger(caseId);
+  const expectedActionPlanId = normalisePositiveInteger(actionPlanId);
+  const expectedApplicationId = normalisePositiveInteger(applicationId);
+  if (submissionCaseId !== expectedCaseId) {
+    throw buildReadyToCloseScopeError('ready_to_close_submission_case_scope_mismatch', {
+      submissionId,
+      caseId: submissionCaseId,
+      actionPlanId: submissionActionPlanId,
+      applicationId: submissionApplicationId,
+    });
+  }
+  if (submissionActionPlanId !== expectedActionPlanId) {
+    throw buildReadyToCloseScopeError('ready_to_close_submission_plan_scope_mismatch', {
+      submissionId,
+      actionPlanId: submissionActionPlanId,
+      expectedActionPlanId,
+      applicationId: submissionApplicationId,
+    });
+  }
+  if (submissionApplicationId !== expectedApplicationId) {
+    throw buildReadyToCloseScopeError('ready_to_close_submission_application_scope_mismatch', {
+      submissionId,
+      actionPlanId: submissionActionPlanId,
+      applicationId: submissionApplicationId,
+      expectedApplicationId,
+    });
+  }
+}
+
+function assertReadyToCloseImmutableEsdcEvidence(submission, details = {}) {
+  if (!isImmutableEsdcParticipantSubmission(submission)) return false;
+  const compliance = mapIlmpComplianceFromSubmission(submission);
+  const hasPayloadSnapshot = typeof submission?.payload_snapshot === 'string'
+    ? submission.payload_snapshot.trim().length > 0
+    : Boolean(submission?.payload_snapshot);
+  const hasPayloadChecksum = Boolean(normaliseString(submission?.payload_checksum));
+  const evidenceFailures = [];
+  if (!['clean', 'warning'].includes(compliance.status)) {
+    evidenceFailures.push('stored_readiness_not_clean');
+  }
+  if (!hasPayloadSnapshot) evidenceFailures.push('payload_snapshot_missing');
+  if (!hasPayloadChecksum) evidenceFailures.push('payload_checksum_missing');
+  if (evidenceFailures.length) {
+    throw buildReadyToCloseScopeError('esdc_submission_requeue_required', {
+      ...details,
+      submissionId: normalisePositiveInteger(submission?.id),
+      submissionStatus: normaliseEsdcParticipantSubmissionStatus(submission),
+      evidenceFailures,
+    });
+  }
+  return true;
+}
+
+async function markCaseReadyToClose({
+  caseId,
+  connection = null,
+  ensureSubmissionRecord = ensureEsdcParticipantSubmissionRecord,
+  validateSubmissionRecord = validateEsdcParticipantSubmission,
+} = {}) {
   const numericCaseId = Number(caseId);
   if (!Number.isInteger(numericCaseId) || numericCaseId <= 0) {
     throw new Error('invalid_case_id');
@@ -32974,11 +34928,9 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
     const [[caseRow]] = await conn.query(
       `SELECT c.id,
               c.status,
-        a.id AS application_id,
               c.case_context_json,
-              c.assigned_staff_profile_id AS assigned_to_user_id
+              c.assigned_staff_profile_id
          FROM iset_case c
-         ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         WHERE c.id = ?
         LIMIT 1 FOR UPDATE`,
       [numericCaseId]
@@ -32987,21 +34939,64 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
       throw Object.assign(new Error('case_not_found'), { statusCode: 404 });
     }
 
-    // Block if any non-closed/non-archived action plans remain
-    const [planRows] = await conn.query(
-      'SELECT status FROM iset_case_action_plan WHERE case_id = ? AND (archived_at IS NULL)',
+    const [applicationRows] = await conn.query(
+      `SELECT a.id,
+              a.status,
+              a.lifecycle_status
+         FROM iset_application a
+        WHERE a.case_id = ?
+        ORDER BY a.id ASC
+        FOR UPDATE`,
       [numericCaseId]
     );
-    const planStatuses = (planRows || []).map(row => (row?.status || '').toLowerCase());
-    const blockingPlans = planStatuses.filter(status => status && !['closed', 'archived'].includes(status));
+    const blockingApplications = (Array.isArray(applicationRows) ? applicationRows : [])
+      .filter(row => !isTerminalApplicationState(row?.status, row?.lifecycle_status));
+
+    // Lock the full plan inventory so an archived historical plan can be
+    // distinguished from a submission that points outside this case.
+    const [allPlanRows] = await conn.query(
+      `SELECT ap.id,
+              ap.case_id,
+              ap.application_id,
+              ap.status,
+              ap.metadata_json,
+              ap.archived_at
+         FROM iset_case_action_plan ap
+        WHERE ap.case_id = ?
+        ORDER BY ap.id ASC
+        FOR UPDATE`,
+      [numericCaseId]
+    );
+    const planRows = (Array.isArray(allPlanRows) ? allPlanRows : []).filter(row => {
+      const status = (normaliseString(row?.status) || '').toLowerCase();
+      return !row?.archived_at && status !== 'archived';
+    });
+    const archivedPlanIds = new Set(
+      (Array.isArray(allPlanRows) ? allPlanRows : [])
+        .filter(row => !planRows.includes(row))
+        .map(row => normalisePositiveInteger(row?.id))
+        .filter(Boolean)
+    );
+    const blockingPlans = planRows.filter(row => {
+      const status = (normaliseString(row?.status) || '').toLowerCase();
+      return status !== 'closed';
+    });
 
     // Block if any non-completed/non-cancelled interventions remain
     const [interventionRows] = await conn.query(
-      'SELECT status, metadata_json FROM iset_case_intervention WHERE case_id = ?',
+      `SELECT ci.id,
+              ci.action_plan_id,
+              ci.status,
+              ci.delivery_status,
+              ci.metadata_json
+         FROM iset_case_intervention ci
+        WHERE ci.case_id = ?
+        ORDER BY ci.id ASC
+        FOR UPDATE`,
       [numericCaseId]
     );
     const blockingInterventions = (interventionRows || []).filter(
-      row => !isAppliedRevisionEvidenceIntervention(row) && !isInterventionClosedStatus(row?.status)
+      row => !isAppliedRevisionEvidenceIntervention(row) && !isInterventionClosedStatus(row)
     );
 
     // Block if any future reminders are open
@@ -33019,6 +35014,7 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
 
     const blockers = {};
     const warnings = {};
+    if (blockingApplications.length) blockers.applications = blockingApplications.length;
     if (blockingPlans.length) blockers.actionPlans = blockingPlans.length;
     if (blockingInterventions.length) blockers.interventions = blockingInterventions.length;
     if (futureReminders > 0) warnings.reminders = futureReminders;
@@ -33031,24 +35027,146 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
       });
     }
 
-    // Run ILMP validation
-    await ensureEsdcParticipantSubmissionRecord(conn, numericCaseId, caseRow.application_id || null);
-    const submissionIdForCase = await findEsdcSubmissionIdForCase(conn, numericCaseId);
-    if (!submissionIdForCase) {
-      throw Object.assign(new Error('submission_initialization_failed'), { statusCode: 500 });
+    const [submissionRows] = await conn.query(
+      `SELECT eps.id,
+              eps.case_id,
+              eps.action_plan_id,
+              eps.application_id,
+              eps.readiness_status,
+              eps.readiness_summary,
+              eps.warnings,
+              eps.blocking_issues,
+              eps.last_validated_at,
+              eps.submission_status,
+              eps.submitted_at,
+              eps.payload_snapshot,
+              eps.payload_storage_key,
+              eps.payload_checksum,
+              eps.rejection_reason
+         FROM esdc_participant_submission eps
+        WHERE eps.case_id = ?
+        ORDER BY eps.id ASC
+        FOR UPDATE`,
+      [numericCaseId]
+    );
+    const lockedSubmissionById = new Map(
+      (Array.isArray(submissionRows) ? submissionRows : [])
+        .map(row => [normalisePositiveInteger(row?.id), row])
+        .filter(([submissionId]) => Boolean(submissionId))
+    );
+    const submissionIds = (Array.isArray(submissionRows) ? submissionRows : [])
+      .map(row => normalisePositiveInteger(row?.id))
+      .filter(Boolean);
+    let historySubmissionIds = new Set();
+    if (submissionIds.length) {
+      const historyPlaceholders = submissionIds.map(() => '?').join(', ');
+      const [historyRows] = await conn.query(
+        `SELECT DISTINCT h.participant_submission_id
+           FROM esdc_participant_submission_history h
+          WHERE h.participant_submission_id IN (${historyPlaceholders})`,
+        submissionIds
+      );
+      historySubmissionIds = new Set(
+        (Array.isArray(historyRows) ? historyRows : [])
+          .map(row => normalisePositiveInteger(row?.participant_submission_id))
+          .filter(Boolean)
+      );
     }
 
-    await validateEsdcParticipantSubmission(
-      { submissionId: submissionIdForCase, caseId: numericCaseId },
-      { connection: conn, transaction: false }
-    );
-    const [[updatedSubmission]] = await conn.query(
-      `SELECT readiness_status, readiness_summary, warnings, blocking_issues, last_validated_at
-         FROM esdc_participant_submission
-        WHERE id = ?`,
-      [submissionIdForCase]
-    );
-    const compliance = { ilmp: mapIlmpComplianceFromSubmission(updatedSubmission), finance: { status: 'pending', messages: [] } };
+    const reportingPlans = classifyReadyToCloseReportingPlans({
+      caseId: numericCaseId,
+      applications: applicationRows,
+      actionPlans: planRows,
+      ignoredActionPlanIds: archivedPlanIds,
+      interventions: interventionRows,
+      submissions: submissionRows,
+      historySubmissionIds,
+    });
+    const planCompliance = [];
+    for (const reportingPlan of reportingPlans) {
+      const submissionId = await ensureSubmissionRecord(
+        conn,
+        numericCaseId,
+        reportingPlan.storedApplicationId || null,
+        reportingPlan.actionPlanId
+      );
+      if (!submissionId) {
+        throw Object.assign(new Error('submission_initialization_failed'), {
+          statusCode: 500,
+          actionPlanId: reportingPlan.actionPlanId,
+        });
+      }
+      if (
+        reportingPlan.existingSubmissionId &&
+        normalisePositiveInteger(submissionId) !== reportingPlan.existingSubmissionId
+      ) {
+        throw buildReadyToCloseScopeError('ready_to_close_submission_identity_mismatch', {
+          actionPlanId: reportingPlan.actionPlanId,
+          submissionId: normalisePositiveInteger(submissionId),
+          expectedSubmissionId: reportingPlan.existingSubmissionId,
+        });
+      }
+
+      let updatedSubmission = lockedSubmissionById.get(normalisePositiveInteger(submissionId)) || null;
+      if (isImmutableEsdcParticipantSubmission(updatedSubmission)) {
+        assertReadyToCloseEsdcSubmissionLineage(updatedSubmission, {
+          caseId: numericCaseId,
+          actionPlanId: reportingPlan.actionPlanId,
+          applicationId: reportingPlan.applicationId,
+        });
+        assertReadyToCloseImmutableEsdcEvidence(updatedSubmission, {
+          actionPlanId: reportingPlan.actionPlanId,
+          applicationId: reportingPlan.applicationId,
+        });
+      } else {
+        await validateSubmissionRecord(
+          { submissionId, caseId: numericCaseId },
+          { connection: conn, transaction: false }
+        );
+        [[updatedSubmission]] = await conn.query(
+          `SELECT eps.id,
+                  eps.case_id,
+                  eps.action_plan_id,
+                  eps.application_id,
+                  eps.submission_status,
+                  eps.readiness_status,
+                  eps.readiness_summary,
+                  eps.warnings,
+                  eps.blocking_issues,
+                  eps.last_validated_at,
+                  eps.payload_snapshot,
+                  eps.payload_storage_key,
+                  eps.payload_checksum
+             FROM esdc_participant_submission eps
+            WHERE eps.id = ?
+            LIMIT 1`,
+          [submissionId]
+        );
+      }
+      if (!updatedSubmission) {
+        throw Object.assign(new Error('submission_validation_result_missing'), {
+          statusCode: 500,
+          actionPlanId: reportingPlan.actionPlanId,
+          submissionId,
+        });
+      }
+      assertReadyToCloseEsdcSubmissionLineage(updatedSubmission, {
+        caseId: numericCaseId,
+        actionPlanId: reportingPlan.actionPlanId,
+        applicationId: reportingPlan.applicationId,
+      });
+      planCompliance.push({
+        actionPlanId: reportingPlan.actionPlanId,
+        applicationId: reportingPlan.applicationId,
+        submissionId: normalisePositiveInteger(submissionId),
+        compliance: mapIlmpComplianceFromSubmission(updatedSubmission),
+      });
+    }
+
+    const compliance = {
+      ilmp: aggregateReadyToCloseIlmpCompliance(planCompliance),
+      finance: { status: 'pending', messages: [] },
+    };
     const ilmpBlockingIssues = Array.isArray(compliance.ilmp.blockingIssues) ? compliance.ilmp.blockingIssues : [];
     const hasIlmpBlocking = compliance.ilmp.status === 'blocked' || ilmpBlockingIssues.length > 0;
     const ilmpWarnings = Array.isArray(compliance.ilmp.warnings) ? compliance.ilmp.warnings : [];
@@ -33073,8 +35191,19 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
     };
 
     await conn.query(
-      'UPDATE iset_case SET status = ?, case_context_json = ?, updated_at = NOW() WHERE id = ?',
-      [CASE_STATUS_READY_TO_CLOSE, JSON.stringify(updatedContext), numericCaseId]
+      `UPDATE iset_case
+          SET status = ?,
+              lifecycle_status = ?,
+              closure_reason = NULL,
+              case_context_json = ?,
+              updated_at = NOW()
+        WHERE id = ?`,
+      [
+        CASE_STATUS_READY_TO_CLOSE,
+        CASE_STATUS_READY_TO_CLOSE,
+        JSON.stringify(updatedContext),
+        numericCaseId,
+      ]
     );
 
     await conn.commit();
@@ -33130,12 +35259,16 @@ async function countRegionalAssignedToRegion(pool, staffIds, context = {}) {
     params.push(...CASE_STATUS_TERMINAL_VALUES_LOWER);
   }
 
-  const sql = `SELECT COUNT(*) AS total
+  const applicationLifecycleStatusExpr = buildApplicationLifecycleStatusExpr('a');
+  params.push('closed', 'archived');
+  const sql = `SELECT COUNT(DISTINCT a.id) AS total
          FROM iset_case c
+         JOIN iset_application a ON c.id = a.case_id
          LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         WHERE c.assigned_staff_profile_id IS NOT NULL
           AND (${filters.join(' OR ')})
-          AND ${statusCondition}`;
+          AND ${statusCondition}
+          AND ${applicationLifecycleStatusExpr} NOT IN (?, ?)`;
   const [[row]] = await pool.query(sql, params);
   return Number(row?.total ?? 0);
 }
@@ -33152,10 +35285,14 @@ async function countRegionalNeedsReassignment(pool, staffProfileId) {
     statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${statusPlaceholders}))`;
     params.push(...CASE_STATUS_TERMINAL_VALUES_LOWER);
   }
-  const sql = `SELECT COUNT(*) AS total
+  const applicationLifecycleStatusExpr = buildApplicationLifecycleStatusExpr('a');
+  params.push('closed', 'archived');
+  const sql = `SELECT COUNT(DISTINCT a.id) AS total
          FROM iset_case c
+         JOIN iset_application a ON c.id = a.case_id
         WHERE c.assigned_staff_profile_id = ?
-          AND ${statusCondition}`;
+          AND ${statusCondition}
+          AND ${applicationLifecycleStatusExpr} NOT IN (?, ?)`;
   const [[row]] = await pool.query(sql, params);
   return Number(row?.total ?? 0);
 }
@@ -33163,15 +35300,21 @@ async function countRegionalNeedsReassignment(pool, staffProfileId) {
 async function countRegionalAwaitingApplicantInfo(pool, staffIds) {
   const ids = normalizeStaffIdList(staffIds);
   if (!ids.length) return 0;
-  if (!CASE_STATUS_HOLD_VALUES_LOWER.length) return 0;
+  if (!APPLICATION_STATUS_HOLD_VALUES_LOWER.length) return 0;
   const staffPlaceholders = ids.map(() => '?').join(',');
-  const holdPlaceholders = CASE_STATUS_HOLD_VALUES_LOWER.map(() => '?').join(',');
-  const params = [...ids, ...CASE_STATUS_HOLD_VALUES_LOWER];
-  const sql = `SELECT COUNT(*) AS total
+  const holdPlaceholders = APPLICATION_STATUS_HOLD_VALUES_LOWER.map(() => '?').join(',');
+  const normalizedApplicationStatusExpr = `REPLACE(REPLACE(LOWER(TRIM(COALESCE(a.status, ''))), '-', '_'), ' ', '_')`;
+  const applicationLifecycleStatusExpr = buildApplicationLifecycleStatusExpr('a');
+  const params = [
+    ...ids,
+    'awaiting_applicant',
+    ...APPLICATION_STATUS_HOLD_VALUES_LOWER.map(normaliseApplicationStatusValue),
+  ];
+  const sql = `SELECT COUNT(DISTINCT a.id) AS total
          FROM iset_case c
+         JOIN iset_application a ON c.id = a.case_id
         WHERE c.assigned_staff_profile_id IN (${staffPlaceholders})
-          AND c.status IS NOT NULL
-          AND LOWER(c.status) IN (${holdPlaceholders})`;
+          AND (${applicationLifecycleStatusExpr} = ? OR ${normalizedApplicationStatusExpr} IN (${holdPlaceholders}))`;
   const [[row]] = await pool.query(sql, params);
   return Number(row?.total ?? 0);
 }
@@ -33188,8 +35331,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
          COALESCE(s.created_at, a.created_at) AS submitted_at,
          a.created_at,
          ca.esdc_eligibility AS assessment_esdc_eligibility
-       FROM iset_case c
-       ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
+       FROM iset_application a
+       JOIN iset_case c ON c.id = a.case_id
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
        LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id
       WHERE c.assigned_staff_profile_id IN (${placeholders})`;
@@ -33213,8 +35356,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
          COALESCE(s.created_at, a.created_at) AS submitted_at,
          a.created_at,
          ca.esdc_eligibility AS assessment_esdc_eligibility
-       FROM iset_case c
-       ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
+       FROM iset_application a
+       JOIN iset_case c ON c.id = a.case_id
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
        LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id
       WHERE c.assigned_staff_profile_id IS NOT NULL
@@ -33373,10 +35516,14 @@ async function countAssessorAssignedToMe(pool, staffProfileId) {
     statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
     params.push(...CASE_STATUS_TERMINAL_VALUES_LOWER);
   }
-  const sql = `SELECT COUNT(*) AS total
+  const applicationLifecycleStatusExpr = buildApplicationLifecycleStatusExpr('a');
+  params.push('closed', 'archived');
+  const sql = `SELECT COUNT(DISTINCT a.id) AS total
          FROM iset_case c
+         JOIN iset_application a ON c.id = a.case_id
         WHERE c.assigned_staff_profile_id = ?
-          AND ${statusCondition}`;
+          AND ${statusCondition}
+          AND ${applicationLifecycleStatusExpr} NOT IN (?, ?)`;
   const [[row]] = await pool.query(sql, params);
   return Number(row?.total ?? 0);
 }
@@ -33387,8 +35534,8 @@ async function countAssessorAwaitingApplicantResponse(pool, staffProfileId) {
   if (!APPLICATION_STATUS_HOLD_VALUES_LOWER.length) return 0;
   const statusPlaceholders = APPLICATION_STATUS_HOLD_VALUES_LOWER.map(() => '?').join(',');
   const sql = `SELECT COUNT(*) AS total
-         FROM iset_case c
-         ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
+         FROM iset_application a
+         JOIN iset_case c ON c.id = a.case_id
         WHERE c.assigned_staff_profile_id = ?
           AND a.status IS NOT NULL
           AND LOWER(a.status) IN (${statusPlaceholders})`;
@@ -34462,6 +36609,7 @@ esdcRouter.get('/participants', async (req, res, next) => {
       SELECT
         eps.id,
         eps.case_id,
+        eps.application_id,
         eps.action_plan_id,
         eps.readiness_status,
         eps.warnings,
@@ -34641,6 +36789,8 @@ esdcRouter.get('/participants', async (req, res, next) => {
       const items = rows.map(row => ({
         id: row.id,
         case_id: row.case_id,
+        application_id: row.application_id,
+        applicationId: row.application_id,
         action_plan_id: row.action_plan_id,
         readiness_status: normalizeReadiness(row.readiness_status || 'needs_review'),
         warnings: row.warnings,
@@ -34698,6 +36848,8 @@ esdcRouter.get('/participants', async (req, res, next) => {
       group.children.push({
         id: row.id,
         case_id: row.case_id,
+        application_id: row.application_id,
+        applicationId: row.application_id,
         action_plan_id: row.action_plan_id,
         readiness_status: readiness,
         warnings: row.warnings,
@@ -34824,7 +36976,7 @@ esdcRouter.post('/participants/validate-all', async (req, res, next) => {
     let validated = 0;
     for (const id of ids) {
       try {
-        await validateEsdcParticipantSubmission({ submissionId: id }, { transaction: false });
+        await validateEsdcParticipantSubmission({ submissionId: id });
         validated += 1;
       } catch (err) {
         failures.push({ id, error: err?.message || 'validation_failed' });
@@ -34856,19 +37008,38 @@ const normalisePlanStatusShort = status => {
   return key || '';
 };
 
-async function buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings = false } = {}) {
+async function buildGroupedIlmpClientPayload(clientRows, {
+  ignoreWarnings = false,
+  connection = null,
+  forUpdate = false,
+} = {}) {
   if (!Array.isArray(clientRows) || !clientRows.length) {
     return { error: 'no_rows' };
   }
-  const connection = await pool.getConnection();
+  const conn = connection || await pool.getConnection();
+  const shouldRelease = !connection;
   try {
     const contexts = [];
     for (const row of clientRows) {
-      const ctx = await loadEsdcParticipantSubmissionContext(connection, row.id, {
+      const ctx = await loadEsdcParticipantSubmissionContext(conn, row.id, {
         caseId: row.case_id,
-        forUpdate: false
+        forUpdate,
       });
       contexts.push(ctx);
+    }
+    const batchOwnership = classifyIlmpBatchOwnership(contexts);
+    if (!batchOwnership.compatible) {
+      return {
+        blockingIssues: [buildIlmpIssueMessage({
+          location: 'Participant batch',
+          issue: 'The client group contains action plans owned by different cases or applications.',
+          esdcRule: ILMP_PATH_REVIEW,
+          fix: 'prepare each application-scoped submission separately; do not reuse one application assessment across the client group.'
+        })],
+        warnings: [],
+        readinessStatus: 'blocked',
+        evaluation: null
+      };
     }
     const combinedPlansRaw = contexts.flatMap(ctx => ctx.caseActionPlans || []);
     const planKey = plan => {
@@ -34933,17 +37104,61 @@ async function buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings = fals
         : (evaluation.readinessStatus || 'ready')
     };
   } finally {
-    connection.release();
+    if (shouldRelease) conn.release();
   }
 }
 
-async function collectReadyEsdcBatchParticipants() {
+function normaliseEsdcBatchCandidateFingerprint(row) {
+  const updatedAtValue = row?.updated_at ?? row?.updatedAt ?? null;
+  const updatedAt = updatedAtValue instanceof Date
+    ? updatedAtValue.toISOString()
+    : String(updatedAtValue || '');
+  return {
+    id: normalisePositiveInteger(row?.id),
+    submissionStatus: normaliseEsdcParticipantSubmissionStatus(
+      row?.submission_status ?? row?.submissionStatus
+    ),
+    readinessStatus: (
+      normaliseString(row?.readiness_status ?? row?.readinessStatus) || 'needs_review'
+    ).toLowerCase(),
+    updatedAt,
+  };
+}
+
+function assertEsdcBatchCandidateUnchanged(expectedRow, lockedRow) {
+  const expected = normaliseEsdcBatchCandidateFingerprint(expectedRow);
+  const actual = normaliseEsdcBatchCandidateFingerprint(lockedRow);
+  if (
+    expected.id !== actual.id ||
+    expected.submissionStatus !== actual.submissionStatus ||
+    expected.readinessStatus !== actual.readinessStatus ||
+    expected.updatedAt !== actual.updatedAt
+  ) {
+    const err = new Error('esdc_batch_candidate_changed');
+    err.code = 'esdc_batch_candidate_changed';
+    err.statusCode = 409;
+    err.submissionId = expected.id || actual.id;
+    err.expected = expected;
+    err.actual = actual;
+    throw err;
+  }
+}
+
+async function collectReadyEsdcBatchParticipants({
+  connection = null,
+  lockSubmissions = false,
+} = {}) {
+  if (lockSubmissions && !connection) {
+    throw new Error('esdc_batch_lock_connection_required');
+  }
+  const executor = connection || pool;
   const startedInterventionStatuses = Array.from(ESDC_REPORTABLE_INTERVENTION_DELIVERY_STATUSES);
   const terminalInterventionStatuses = Array.from(ESDC_TERMINAL_INTERVENTION_DELIVERY_STATUSES);
   const esdcInterventionDeliveryStatusExpr = buildInterventionDeliveryStatusSql('ci');
-  const [rows] = await pool.query(
+  const [rows] = await executor.query(
     `
-    SELECT eps.id, eps.case_id, eps.readiness_status, eps.action_plan_id,
+    SELECT eps.id, eps.case_id, eps.readiness_status, eps.submission_status,
+           eps.updated_at, eps.action_plan_id,
            c.case_number,
            c.client_id,
            COALESCE(cl.first_name, '') AS first_name,
@@ -35000,6 +37215,40 @@ async function collectReadyEsdcBatchParticipants() {
     [...startedInterventionStatuses, ...terminalInterventionStatuses]
   );
 
+  if (lockSubmissions && rows.length) {
+    const candidateIds = [...new Set(rows.map(row => normalisePositiveInteger(row?.id)).filter(Boolean))]
+      .sort((left, right) => left - right);
+    const candidatePlaceholders = candidateIds.map(() => '?').join(',');
+    const [lockedRows] = await connection.query(
+      `SELECT eps.id,
+              eps.submission_status,
+              eps.readiness_status,
+              eps.updated_at
+         FROM esdc_participant_submission eps
+        WHERE eps.id IN (${candidatePlaceholders})
+        ORDER BY eps.id ASC
+        FOR UPDATE`,
+      candidateIds
+    );
+    const lockedById = new Map(
+      (Array.isArray(lockedRows) ? lockedRows : [])
+        .map(row => [normalisePositiveInteger(row?.id), row])
+        .filter(([submissionId]) => Boolean(submissionId))
+    );
+    for (const candidateRow of rows) {
+      const candidateId = normalisePositiveInteger(candidateRow?.id);
+      const lockedRow = lockedById.get(candidateId);
+      if (!lockedRow) {
+        const err = new Error('esdc_batch_candidate_changed');
+        err.code = 'esdc_batch_candidate_changed';
+        err.statusCode = 409;
+        err.submissionId = candidateId;
+        throw err;
+      }
+      assertEsdcBatchCandidateUnchanged(candidateRow, lockedRow);
+    }
+  }
+
   const clientGroups = new Map();
   rows.forEach(row => {
     const key = row.client_id || `case-${row.case_id}`;
@@ -35024,10 +37273,15 @@ async function collectReadyEsdcBatchParticipants() {
       tracking_id: clientRows[0]?.tracking_id || null,
       participant_name: displayName,
       submission_ids: clientRows.map(row => row.id).filter(Boolean),
+      submission_versions: clientRows.map(normaliseEsdcBatchCandidateFingerprint),
     };
 
     try {
-      const aggregated = await buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings: true });
+      const aggregated = await buildGroupedIlmpClientPayload(clientRows, {
+        ignoreWarnings: true,
+        connection,
+        forUpdate: lockSubmissions,
+      });
       const readiness = (aggregated?.readinessStatus || '').toLowerCase() || 'needs_review';
       const blockingIssues = Array.isArray(aggregated?.blockingIssues) ? aggregated.blockingIssues : [];
       const warningList = Array.isArray(aggregated?.warnings) ? aggregated.warnings : [];
@@ -35040,15 +37294,24 @@ async function collectReadyEsdcBatchParticipants() {
         continue;
       }
 
+      const fragment = aggregated?.snapshot?.xml
+        ? extractClientFragment(aggregated.snapshot.xml)
+        : null;
+      if (!fragment) {
+        skipped.push({
+          ...baseDetail,
+          readiness_status: 'blocked',
+          detail: 'Generated ILMP XML did not contain a client fragment.',
+        });
+        continue;
+      }
       participants.push({
         ...baseDetail,
         readiness_status: warningList.length ? 'needs_review' : 'ready',
+        readiness_summary: aggregated?.evaluation?.readinessSummary || null,
         warnings: warningList,
       });
-      if (aggregated?.snapshot?.xml) {
-        const fragment = extractClientFragment(aggregated.snapshot.xml);
-        if (fragment) clientFragments.push(fragment);
-      }
+      clientFragments.push(fragment);
     } catch (err) {
       skipped.push({
         ...baseDetail,
@@ -35061,20 +37324,234 @@ async function collectReadyEsdcBatchParticipants() {
   return { participants, skipped, clientFragments };
 }
 
+function buildEsdcBatchXml(clientFragments) {
+  const agreementHolderName = process.env.ESDC_AGREEMENT_HOLDER || 'NWAC ISET';
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<ALMP:contentALMP xmlns:ALMP="http://servicecanada.gc.ca/ALMP/contentExchange" xmlns:p="http://servicecanada.gc.ca/ALMP/contentTypes" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
+    '  <SchemaVersion>1.4</SchemaVersion>',
+    `  <agreementHolderName>${agreementHolderName}</agreementHolderName>`,
+    '  <sysComment>Awentech nForm System</sysComment>',
+    ...clientFragments.map(fragment => `  ${fragment}`),
+    '</ALMP:contentALMP>'
+  ].join('\n');
+}
+
+async function submitReadyEsdcBatch({
+  actorUserId = null,
+  downloadedByDisplayName = null,
+  batchId,
+  filename,
+  downloadPath = null,
+  connection = null,
+  collectParticipants = collectReadyEsdcBatchParticipants,
+} = {}) {
+  const conn = connection || await pool.getConnection();
+  const shouldRelease = !connection;
+  let transactionStarted = false;
+  try {
+    await conn.beginTransaction();
+    transactionStarted = true;
+    const { participants, skipped, clientFragments } = await collectParticipants({
+      connection: conn,
+      lockSubmissions: true,
+    });
+    if (!participants.length) {
+      const err = new Error('no_ready_participants');
+      err.code = 'no_ready_participants';
+      err.statusCode = 400;
+      err.skipped = skipped;
+      throw err;
+    }
+    if (clientFragments.length !== participants.length) {
+      const err = new Error('esdc_batch_fragment_count_mismatch');
+      err.code = 'esdc_batch_fragment_count_mismatch';
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const expectedVersionById = new Map();
+    const participantSubmissionIds = new Set();
+    for (const participant of participants) {
+      const groupIds = [...new Set(
+        (Array.isArray(participant?.submission_ids) ? participant.submission_ids : [participant?.id])
+          .map(normalisePositiveInteger)
+          .filter(Boolean)
+      )];
+      if (!groupIds.length) {
+        const err = new Error('esdc_batch_participant_scope_missing');
+        err.code = 'esdc_batch_participant_scope_missing';
+        err.statusCode = 409;
+        throw err;
+      }
+      const groupVersions = Array.isArray(participant?.submission_versions)
+        ? participant.submission_versions
+        : [];
+      const groupVersionById = new Map(
+        groupVersions
+          .map(row => [normalisePositiveInteger(row?.id), row])
+          .filter(([submissionId]) => Boolean(submissionId))
+      );
+      for (const submissionId of groupIds) {
+        if (participantSubmissionIds.has(submissionId) || !groupVersionById.has(submissionId)) {
+          const err = new Error('esdc_batch_participant_scope_mismatch');
+          err.code = 'esdc_batch_participant_scope_mismatch';
+          err.statusCode = 409;
+          err.submissionId = submissionId;
+          throw err;
+        }
+        participantSubmissionIds.add(submissionId);
+        expectedVersionById.set(submissionId, groupVersionById.get(submissionId));
+      }
+    }
+    const ids = [...participantSubmissionIds].sort((left, right) => left - right);
+    const placeholders = ids.map(() => '?').join(',');
+    const [lockedRows] = await conn.query(
+      `SELECT eps.id,
+              eps.submission_status,
+              eps.readiness_status,
+              eps.updated_at
+         FROM esdc_participant_submission eps
+        WHERE eps.id IN (${placeholders})
+        ORDER BY eps.id ASC
+        FOR UPDATE`,
+      ids
+    );
+    const lockedById = new Map(
+      (Array.isArray(lockedRows) ? lockedRows : [])
+        .map(row => [normalisePositiveInteger(row?.id), row])
+        .filter(([submissionId]) => Boolean(submissionId))
+    );
+    for (const submissionId of ids) {
+      const lockedRow = lockedById.get(submissionId);
+      if (!lockedRow) {
+        const err = new Error('esdc_batch_candidate_changed');
+        err.code = 'esdc_batch_candidate_changed';
+        err.statusCode = 409;
+        err.submissionId = submissionId;
+        throw err;
+      }
+      assertEsdcBatchCandidateUnchanged(expectedVersionById.get(submissionId), lockedRow);
+      if (!['pending', 'rejected'].includes(normaliseEsdcParticipantSubmissionStatus(lockedRow))) {
+        const err = new Error('esdc_batch_submission_status_changed');
+        err.code = 'esdc_batch_submission_status_changed';
+        err.statusCode = 409;
+        err.submissionId = submissionId;
+        throw err;
+      }
+    }
+
+    const batchXml = buildEsdcBatchXml(clientFragments);
+    const xmlChecksum = crypto.createHash('sha256').update(batchXml, 'utf8').digest('hex');
+    const xmlSize = Buffer.byteLength(batchXml, 'utf8');
+    const generatedAt = new Date().toISOString();
+    const payloadSnapshot = JSON.stringify({
+      schema: 'esdc-ilmp-batch-v1',
+      generatedAt,
+      batchId,
+      filename,
+      downloadPath,
+      checksum: xmlChecksum,
+      submissionIds: ids,
+      participantCount: participants.length,
+      xml: batchXml,
+    });
+
+    for (const participant of participants) {
+      const groupIds = [...new Set(
+        (Array.isArray(participant?.submission_ids) ? participant.submission_ids : [participant?.id])
+          .map(normalisePositiveInteger)
+          .filter(Boolean)
+      )].sort((left, right) => left - right);
+      const groupPlaceholders = groupIds.map(() => '?').join(',');
+      const readinessStatus = participant?.readiness_status === 'ready' ? 'ready' : 'needs_review';
+      const readinessSummary = participant?.readiness_summary
+        ? JSON.stringify(participant.readiness_summary)
+        : null;
+      const warningList = Array.isArray(participant?.warnings) ? participant.warnings : [];
+      const [updateResult] = await conn.query(
+        `UPDATE esdc_participant_submission eps
+            SET eps.submission_status = 'submitted',
+                eps.readiness_status = ?,
+                eps.readiness_summary = ?,
+                eps.warnings = ?,
+                eps.blocking_issues = ?,
+                eps.last_validated_at = NOW(),
+                eps.submitted_at = NOW(),
+                eps.submitted_by_user_id = ?,
+                eps.payload_snapshot = ?,
+                eps.payload_storage_key = ?,
+                eps.payload_checksum = ?,
+                eps.rejection_reason = NULL,
+                eps.updated_at = NOW()
+          WHERE eps.id IN (${groupPlaceholders})
+            AND LOWER(COALESCE(eps.submission_status, '')) IN ('pending', 'rejected')`,
+        [
+          readinessStatus,
+          readinessSummary,
+          JSON.stringify(warningList),
+          JSON.stringify([]),
+          actorUserId || null,
+          payloadSnapshot,
+          downloadPath || null,
+          xmlChecksum,
+          ...groupIds,
+        ]
+      );
+      if (Number(updateResult?.affectedRows) !== groupIds.length) {
+        const err = new Error('esdc_batch_submission_write_conflict');
+        err.code = 'esdc_batch_submission_write_conflict';
+        err.statusCode = 409;
+        err.submissionIds = groupIds;
+        throw err;
+      }
+    }
+
+    const historyDetails = JSON.stringify({
+      batchId,
+      filename,
+      downloadPath,
+      xmlChecksum,
+      xmlSize,
+      participantCount: participants.length,
+      downloadedByDisplayName,
+      xml: batchXml,
+    });
+    await conn.query(
+      `INSERT INTO esdc_participant_submission_history
+         (participant_submission_id, event_type, actor_user_id, event_details)
+       VALUES ${ids.map(() => "(?, 'submitted', ?, CAST(? AS JSON))").join(',')}`,
+      ids.flatMap(submissionId => [submissionId, actorUserId || null, historyDetails])
+    );
+
+    await conn.commit();
+    return {
+      ok: true,
+      participants,
+      skipped,
+      xml: batchXml,
+      batchId,
+      filename,
+      downloadPath,
+      downloadedByDisplayName,
+      xmlChecksum,
+      xmlSize,
+    };
+  } catch (err) {
+    if (transactionStarted) {
+      try { await conn.rollback(); } catch (_) {}
+    }
+    throw err;
+  } finally {
+    if (shouldRelease) conn.release();
+  }
+}
+
 esdcRouter.post('/participants/batch-prepare', async (_req, res, next) => {
   try {
     const { participants, skipped, clientFragments } = await collectReadyEsdcBatchParticipants();
-    const agreementHolderName = process.env.ESDC_AGREEMENT_HOLDER || 'NWAC ISET';
     const batchXml = participants.length
-      ? [
-          '<?xml version="1.0" encoding="UTF-8"?>',
-          '<ALMP:contentALMP xmlns:ALMP="http://servicecanada.gc.ca/ALMP/contentExchange" xmlns:p="http://servicecanada.gc.ca/ALMP/contentTypes" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
-          '  <SchemaVersion>1.4</SchemaVersion>',
-          `  <agreementHolderName>${agreementHolderName}</agreementHolderName>`,
-          '  <sysComment>Awentech nForm System</sysComment>',
-          ...clientFragments.map(fragment => `  ${fragment}`),
-          '</ALMP:contentALMP>'
-        ].join('\n')
+      ? buildEsdcBatchXml(clientFragments)
       : '';
 
     res.json({
@@ -35111,70 +37588,27 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
       req?.staffProfile?.email ||
       null
     );
-    const { participants, skipped, clientFragments } = await collectReadyEsdcBatchParticipants();
-    if (!participants.length) {
-      return res.status(400).json({
-        error: 'no_ready_participants',
-        skipped,
-        message: 'There are no ready participants available for batch submission.',
-      });
-    }
-
-    const agreementHolderName = process.env.ESDC_AGREEMENT_HOLDER || 'NWAC ISET';
-    const batchXml = [
-      '<?xml version="1.0" encoding="UTF-8"?>',
-      '<ALMP:contentALMP xmlns:ALMP="http://servicecanada.gc.ca/ALMP/contentExchange" xmlns:p="http://servicecanada.gc.ca/ALMP/contentTypes" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
-      '  <SchemaVersion>1.4</SchemaVersion>',
-      `  <agreementHolderName>${agreementHolderName}</agreementHolderName>`,
-      '  <sysComment>Awentech nForm System</sysComment>',
-      ...clientFragments.map(fragment => `  ${fragment}`),
-      '</ALMP:contentALMP>'
-    ].join('\n');
-    const xmlChecksum = crypto.createHash('sha256').update(batchXml, 'utf8').digest('hex');
-    const xmlSize = Buffer.byteLength(batchXml, 'utf8');
-
-    if (participants.length) {
-      const ids = participants.flatMap(p => Array.isArray(p.submission_ids) ? p.submission_ids : [p.id]);
-      await pool.query(
-        `
-        UPDATE esdc_participant_submission
-        SET submission_status = 'submitted', submitted_at = NOW(), submitted_by_user_id = ?, updated_at = NOW()
-        WHERE id IN (${ids.map(() => '?').join(',')})
-        `,
-        [actorUserId, ...ids]
-      );
-      const historyDetails = JSON.stringify({
-        batchId,
-        filename: downloadFilename,
-        downloadPath,
-        xmlChecksum,
-        xmlSize,
-        participantCount: participants.length,
-        downloadedByDisplayName,
-        xml: batchXml
-      });
-      await pool.query(
-        `
-        INSERT INTO esdc_participant_submission_history (participant_submission_id, event_type, actor_user_id, event_details)
-        VALUES ${ids.map(() => '(?, "submitted", ?, ?)').join(',')}
-        `,
-        ids.flatMap(id => [id, actorUserId, historyDetails])
-      );
-    }
-
-    res.json({
-      ok: true,
-      participants,
-      skipped,
-      xml: batchXml,
+    const result = await submitReadyEsdcBatch({
+      actorUserId,
+      downloadedByDisplayName,
       batchId,
       filename: downloadFilename,
       downloadPath,
-      downloadedByDisplayName,
-      xmlChecksum,
-      xmlSize
     });
+    res.json(result);
   } catch (err) {
+    if (err?.code === 'no_ready_participants') {
+      return res.status(400).json({
+        error: 'no_ready_participants',
+        skipped: err.skipped || [],
+        message: 'There are no ready participants available for batch submission.',
+      });
+    }
+    if (err?.statusCode) {
+      return res.status(err.statusCode).json({
+        error: err.code || err.message || 'batch_submission_failed',
+      });
+    }
     next(err);
   }
 });
@@ -35312,23 +37746,17 @@ esdcRouter.post('/participants/batch-reset', async (req, res, next) => {
     return res.status(400).json({ error: 'no_ids', message: 'No participant submission ids provided.' });
   }
   try {
-    await pool.query(
-      `
-      UPDATE esdc_participant_submission
-      SET submission_status = 'pending', submitted_at = NULL, rejection_reason = NULL, updated_at = NOW()
-      WHERE id IN (${numericIds.map(() => '?').join(',')})
-      `,
-      numericIds
-    );
-    await pool.query(
-      `
-      INSERT INTO esdc_participant_submission_history (participant_submission_id, event_type, actor_user_id, event_details)
-      VALUES ${numericIds.map(() => '(?, "validated", ?, JSON_OBJECT("reset", true))').join(',')}
-      `,
-      numericIds.flatMap(id => [id, req.user?.id || null])
-    );
-    res.json({ ok: true, count: numericIds.length });
+    const result = await requeueEsdcParticipantSubmissions({
+      submissionIds: numericIds,
+      actorUserId: req.user?.id || null,
+    });
+    res.json(result);
   } catch (err) {
+    if (err?.statusCode) {
+      return res.status(err.statusCode).json({
+        error: err.code || err.message || 'submission_requeue_failed',
+      });
+    }
     next(err);
   }
 });
@@ -35512,39 +37940,32 @@ esdcRouter.get('/participants/:id/payload', async (req, res, next) => {
  * Marks submission as sent and logs history. Body can include rejectionReason or success flag.
  */
 esdcRouter.post('/participants/:id/submit', async (req, res, next) => {
-  const { id } = req.params;
-  const { status = 'submitted', rejectionReason = null } = req.body || {};
+  const numericId = normalisePositiveInteger(req.params.id);
+  const { status: requestedStatus = 'submitted', rejectionReason = null } = req.body || {};
+  const status = (normaliseString(requestedStatus) || '').toLowerCase();
   const actorUserId = req.user?.id || null;
 
+  if (!numericId) {
+    return res.status(400).json({ error: 'invalid_participant_id' });
+  }
   if (!['submitted', 'accepted', 'rejected'].includes(status)) {
-    return res.status(400).json({ error: 'Invalid submission status' });
+    return res.status(400).json({ error: 'invalid_submission_status' });
   }
 
   try {
-    const [result] = await pool.query(
-      `
-      UPDATE esdc_participant_submission
-      SET submission_status = ?, submitted_at = NOW(), submitted_by_user_id = ?, rejection_reason = ?
-      WHERE id = ?
-      `,
-      [status, actorUserId, rejectionReason, id]
-    );
-    if (!result.affectedRows) {
-      return res.status(404).json({ error: 'Participant submission not found' });
-    }
-
-    await pool.query(
-      `
-      INSERT INTO esdc_participant_submission_history
-        (participant_submission_id, event_type, actor_user_id, event_details)
-      VALUES
-        (?, ?, ?, JSON_OBJECT('rejectionReason', ?))
-      `,
-      [id, status, actorUserId, rejectionReason]
-    );
-
-    res.json({ ok: true });
+    const result = await transitionEsdcParticipantSubmission({
+      submissionId: numericId,
+      status,
+      rejectionReason,
+      actorUserId,
+    });
+    res.json(result);
   } catch (err) {
+    if (err?.statusCode) {
+      return res.status(err.statusCode).json({
+        error: err.code || err.message || 'submission_transition_failed',
+      });
+    }
     next(err);
   }
 });
@@ -46619,8 +49040,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"social-insurance-number\"')) AS sin_number
-    FROM iset_case c
-    ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
+    FROM iset_application a
+    JOIN iset_case c ON c.id = a.case_id
     LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
@@ -47058,8 +49479,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')) AS submission_last_name,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."address-province"')) AS submission_address_province
-    FROM iset_case c
-    ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
+    FROM iset_application a
+    JOIN iset_case c ON c.id = a.case_id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     ${where}
@@ -47952,7 +50373,12 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       ic.label AS intervention_label
     FROM iset_case_intervention ci
     JOIN iset_case c ON c.id = ci.case_id
-    ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+    LEFT JOIN iset_case_action_plan ap
+      ON ap.id = ci.action_plan_id
+     AND ap.case_id = ci.case_id
+    LEFT JOIN iset_application a
+      ON a.id = ap.application_id
+     AND a.case_id = ci.case_id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
@@ -48057,9 +50483,16 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     FROM payment_packet pp
     JOIN iset_case c ON c.id = pp.case_id
     JOIN payment_packet_line ppl ON ppl.payment_packet_id = pp.id AND ppl.status <> 'cancelled'
-    LEFT JOIN iset_case_intervention ci ON ci.id = ppl.intervention_id
+    LEFT JOIN iset_case_intervention ci
+      ON ci.id = COALESCE(ppl.intervention_id, pp.intervention_id)
+     AND ci.case_id = pp.case_id
+    LEFT JOIN iset_case_action_plan ap
+      ON ap.id = ci.action_plan_id
+     AND ap.case_id = ci.case_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
-    ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+    LEFT JOIN iset_application a
+      ON a.id = ap.application_id
+     AND a.case_id = ci.case_id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     WHERE c.assigned_staff_profile_id = ?
       AND ${buildOperationalInterventionSql('ci')}
@@ -48087,8 +50520,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           packetId,
           packetStatus: row.payment_packet_status || null,
           caseId: row.case_id || null,
-          applicationId: row.application_id || null,
-          trackingId: row.tracking_id || null,
+          applicationId: null,
+          trackingId: null,
           applicantName,
           address_province: normaliseString(row.submission_address_province) || null,
           updatedAt: row.payment_packet_updated_at ? new Date(row.payment_packet_updated_at).toISOString() : null,
@@ -48096,6 +50529,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         };
         packetMap.set(packetId, entry);
       }
+      const rowApplicationId = normalisePositiveInteger(row.application_id);
       entry.lines.push({
         lineId: row.payment_packet_line_id || null,
         status: row.payment_line_status || null,
@@ -48106,12 +50540,19 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         paymentReference: row.payment_reference || null,
         paymentProofDocumentId: row.payment_proof_document_id || null,
         interventionId: row.intervention_id || null,
+        applicationId: rowApplicationId,
+        trackingId: row.tracking_id || null,
         intervention_code: row.intervention_code || null,
         intervention_label: normaliseString(row.intervention_label) || normaliseString(row.intervention_title) || null
       });
     });
 
     const packetIds = Array.from(packetMap.keys()).slice(0, 120);
+    packetMap.forEach(packet => {
+      const scope = resolvePaymentPacketApplicationScope(packet.lines);
+      packet.applicationId = scope.applicationId;
+      packet.trackingId = scope.trackingId;
+    });
     const missingByPacket = new Map();
     for (const packetId of packetIds) {
       try {
@@ -48169,8 +50610,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           packetId: String(packetId),
           packetStatus: packet.packetStatus || null,
           caseId: packet.caseId || null,
-          applicationId: packet.applicationId || null,
-          trackingId: packet.trackingId || null,
+          applicationId: line?.applicationId || null,
+          trackingId: line?.trackingId || null,
           applicantName: packet.applicantName,
           applicant_name: packet.applicantName,
           address_province: packet.address_province,
@@ -49479,8 +51920,108 @@ const fetchCaseNoteById = async (caseId, noteId) => {
 };
 
 const REMINDER_ALLOWED_STATUSES = new Set(['open', 'completed', 'cancelled']);
+const REMINDER_SCOPE_MODES = new Set(['case', 'application']);
 const REMINDER_METADATA_ERROR = 'ERR_INVALID_REMINDER_METADATA';
 const REMINDER_DATE_ERROR = 'ERR_INVALID_REMINDER_DATE';
+
+function parseReminderScopeMode(value) {
+  if (typeof value === 'undefined') return { valid: true, scopeMode: null };
+  if (typeof value !== 'string') return { valid: false, scopeMode: null };
+  const scopeMode = value.trim().toLowerCase();
+  if (!REMINDER_SCOPE_MODES.has(scopeMode)) {
+    return { valid: false, scopeMode: null };
+  }
+  return { valid: true, scopeMode };
+}
+
+function parseOptionalReminderScopeId(value) {
+  if (value === null || typeof value === 'undefined') {
+    return { valid: true, id: null };
+  }
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return { valid: false, id: null };
+  }
+  const token = typeof value === 'string' ? value.trim() : value;
+  if (token === '' || (typeof token === 'string' && !/^[0-9]+$/.test(token))) {
+    return { valid: false, id: null };
+  }
+  const id = Number(token);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    return { valid: false, id: null };
+  }
+  return { valid: true, id };
+}
+
+function resolveReminderMutationScopeExpectation(body = {}) {
+  const modeResolution = parseReminderScopeMode(body.scopeMode ?? body.scope_mode);
+  if (!modeResolution.valid) {
+    return { error: { status: 400, body: { error: 'invalid_reminder_scope_mode' } } };
+  }
+  const caseResolution = parseOptionalReminderScopeId(
+    body.expectedCaseId ?? body.expected_case_id
+  );
+  if (!caseResolution.valid) {
+    return { error: { status: 400, body: { error: 'invalid_expected_case_id' } } };
+  }
+  const applicationResolution = parseOptionalReminderScopeId(
+    body.expectedApplicationId ?? body.expected_application_id
+  );
+  if (!applicationResolution.valid) {
+    return { error: { status: 400, body: { error: 'invalid_expected_application_id' } } };
+  }
+
+  const scopeMode = modeResolution.scopeMode;
+  if (!scopeMode) {
+    return {
+      error: {
+        status: 400,
+        body: { error: 'reminder_scope_expectation_required' },
+      },
+    };
+  }
+  if (!caseResolution.id) {
+    return { error: { status: 400, body: { error: 'expected_case_id_required' } } };
+  }
+  if (scopeMode === 'application' && !applicationResolution.id) {
+    return { error: { status: 400, body: { error: 'expected_application_id_required' } } };
+  }
+  if (scopeMode === 'case' && applicationResolution.id) {
+    return { error: { status: 400, body: { error: 'expected_application_id_not_allowed' } } };
+  }
+  return {
+    scopeMode,
+    expectedCaseId: caseResolution.id,
+    expectedApplicationId: applicationResolution.id,
+  };
+}
+
+function reminderScopeIsCaseOnly(scope = {}) {
+  return !normalisePositiveInteger(scope.applicationId ?? scope.application_id) &&
+    !normalisePositiveInteger(scope.actionPlanId ?? scope.action_plan_id) &&
+    !normalisePositiveInteger(scope.interventionId ?? scope.intervention_id);
+}
+
+function validateReminderMutationScopeExpectation(reminderScope, expectation = {}) {
+  if (!expectation?.scopeMode) {
+    return { status: 400, body: { error: 'reminder_scope_expectation_required' } };
+  }
+  const reminderCaseId = normalisePositiveInteger(reminderScope?.caseId ?? reminderScope?.case_id);
+  if (reminderCaseId !== normalisePositiveInteger(expectation.expectedCaseId)) {
+    return { status: 409, body: { error: 'reminder_workspace_case_scope_mismatch' } };
+  }
+  if (expectation.scopeMode === 'case') return null;
+
+  const reminderApplicationId = normalisePositiveInteger(
+    reminderScope?.applicationId ?? reminderScope?.application_id
+  );
+  if (
+    reminderApplicationId === normalisePositiveInteger(expectation.expectedApplicationId) ||
+    reminderScopeIsCaseOnly(reminderScope)
+  ) {
+    return null;
+  }
+  return { status: 409, body: { error: 'reminder_workspace_application_scope_mismatch' } };
+}
 
 const coerceOptionalPositiveInt = (value) => {
   if (typeof value === 'undefined') return undefined;
@@ -49697,7 +52238,7 @@ const fetchReminderById = async (reminderId) => {
   return rows.length ? mapReminderRow(rows[0]) : null;
 };
 
-async function validateReminderTargetAccess(req, {
+async function resolveReminderTargetScope(req, {
   caseId = null,
   applicationId = null,
   actionPlanId = null,
@@ -49710,41 +52251,117 @@ async function validateReminderTargetAccess(req, {
   const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
   const normalizedInterventionId = normalisePositiveInteger(interventionId);
 
-  let hasScopedTarget = false;
+  const conflict = error => ({ error: { status: 409, body: { error } } });
+  let resolvedCaseId = normalizedCaseId;
+  let resolvedApplicationId = normalizedApplicationId;
+  let resolvedActionPlanId = normalizedActionPlanId;
+
   if (normalizedInterventionId) {
-    hasScopedTarget = true;
-    const accessError = await validateCaseAccessByInterventionId(req, normalizedInterventionId, connection);
-    if (accessError) return accessError;
+    const [[interventionRow]] = await connection.query(
+      `SELECT ci.id,
+              ci.case_id,
+              ci.action_plan_id,
+              ap.case_id AS action_plan_case_id,
+              ap.application_id AS action_plan_application_id
+         FROM iset_case_intervention ci
+         LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+        WHERE ci.id = ?
+        LIMIT 1`,
+      [normalizedInterventionId]
+    );
+    if (!interventionRow) {
+      return { error: { status: 404, body: { error: 'intervention_not_found' } } };
+    }
+    const interventionCaseId = normalisePositiveInteger(interventionRow.case_id);
+    const interventionActionPlanId = normalisePositiveInteger(interventionRow.action_plan_id);
+    const planCaseId = normalisePositiveInteger(interventionRow.action_plan_case_id);
+    const planApplicationId = normalisePositiveInteger(interventionRow.action_plan_application_id);
+    if (interventionActionPlanId && (!planCaseId || planCaseId !== interventionCaseId)) {
+      return conflict('reminder_intervention_plan_scope_mismatch');
+    }
+    if (resolvedCaseId && resolvedCaseId !== interventionCaseId) {
+      return conflict('reminder_intervention_case_scope_mismatch');
+    }
+    if (resolvedActionPlanId && resolvedActionPlanId !== interventionActionPlanId) {
+      return conflict('reminder_intervention_action_plan_scope_mismatch');
+    }
+    if (resolvedApplicationId && resolvedApplicationId !== planApplicationId) {
+      return conflict('reminder_intervention_application_scope_mismatch');
+    }
+    resolvedCaseId = interventionCaseId;
+    resolvedActionPlanId = interventionActionPlanId;
+    resolvedApplicationId = planApplicationId;
   }
-  if (normalizedActionPlanId) {
-    hasScopedTarget = true;
-    const accessError = await validateCaseAccessByActionPlanId(req, normalizedActionPlanId, connection);
-    if (accessError) return accessError;
+
+  if (resolvedActionPlanId) {
+    const [[planRow]] = await connection.query(
+      `SELECT ap.id, ap.case_id, ap.application_id
+         FROM iset_case_action_plan ap
+        WHERE ap.id = ?
+        LIMIT 1`,
+      [resolvedActionPlanId]
+    );
+    if (!planRow) {
+      return { error: { status: 404, body: { error: 'action_plan_not_found' } } };
+    }
+    const planCaseId = normalisePositiveInteger(planRow.case_id);
+    const planApplicationId = normalisePositiveInteger(planRow.application_id);
+    if (resolvedCaseId && resolvedCaseId !== planCaseId) {
+      return conflict('reminder_action_plan_case_scope_mismatch');
+    }
+    if (resolvedApplicationId && resolvedApplicationId !== planApplicationId) {
+      return conflict('reminder_action_plan_application_scope_mismatch');
+    }
+    resolvedCaseId = planCaseId;
+    resolvedApplicationId = planApplicationId;
   }
-  if (normalizedCaseId) {
-    hasScopedTarget = true;
-    const accessError = await validateCaseAccessByCaseId(req, normalizedCaseId, connection);
-    if (accessError) return accessError;
+
+  if (resolvedApplicationId) {
+    const [[applicationRow]] = await connection.query(
+      `SELECT a.id, a.case_id
+         FROM iset_application a
+        WHERE a.id = ?
+        LIMIT 1`,
+      [resolvedApplicationId]
+    );
+    if (!applicationRow) {
+      return { error: { status: 404, body: { error: 'application_not_found' } } };
+    }
+    const applicationCaseId = normalisePositiveInteger(applicationRow.case_id);
+    if (resolvedCaseId && resolvedCaseId !== applicationCaseId) {
+      return conflict('reminder_application_case_scope_mismatch');
+    }
+    resolvedCaseId = applicationCaseId;
   }
-  if (normalizedApplicationId) {
-    hasScopedTarget = true;
-    const accessError = await validateCaseAccessByApplicationId(req, normalizedApplicationId, connection);
-    if (accessError) return accessError;
-  }
-  if (hasScopedTarget) {
-    return null;
+
+  if (resolvedCaseId) {
+    const accessError = await validateCaseAccessByCaseId(req, resolvedCaseId, connection);
+    if (accessError) return { error: accessError };
+    return {
+      scope: {
+        caseId: resolvedCaseId,
+        applicationId: resolvedApplicationId,
+        actionPlanId: resolvedActionPlanId,
+        interventionId: normalizedInterventionId,
+      },
+    };
   }
   if (allowGlobal && hasSystemOrNwacAdminAccess(req)) {
-    return null;
+    return { scope: { caseId: null, applicationId: null, actionPlanId: null, interventionId: null } };
   }
-  return { status: allowGlobal ? 403 : 400, body: { error: allowGlobal ? 'forbidden' : 'case_or_application_scope_required' } };
+  return {
+    error: {
+      status: allowGlobal ? 403 : 400,
+      body: { error: allowGlobal ? 'forbidden' : 'case_or_application_scope_required' },
+    },
+  };
 }
 
-async function validateReminderAccess(req, reminder, { allowGlobal = false, connection = pool } = {}) {
+async function resolveReminderAccess(req, reminder, { allowGlobal = false, connection = pool } = {}) {
   if (!reminder) {
-    return { status: 404, body: { error: 'reminder_not_found' } };
+    return { error: { status: 404, body: { error: 'reminder_not_found' } } };
   }
-  return validateReminderTargetAccess(req, {
+  return resolveReminderTargetScope(req, {
     caseId: reminder.caseId ?? reminder.case_id ?? null,
     applicationId: reminder.applicationId ?? reminder.application_id ?? null,
     actionPlanId: reminder.actionPlanId ?? reminder.action_plan_id ?? null,
@@ -49754,10 +52371,19 @@ async function validateReminderAccess(req, reminder, { allowGlobal = false, conn
   });
 }
 
+async function validateReminderAccess(req, reminder, options = {}) {
+  const result = await resolveReminderAccess(req, reminder, options);
+  return result.error || null;
+}
+
 const emitReminderEvent = async ({ eventId = null, type, reminder, actorId, actorName }) => {
   if (!reminder || !reminder.caseId) return;
   const payload = {
     reminder_id: reminder.id,
+    case_id: reminder.caseId || null,
+    application_id: reminder.applicationId || null,
+    action_plan_id: reminder.actionPlanId || null,
+    intervention_id: reminder.interventionId || null,
     title: reminder.title || null,
     description: reminder.description || null,
     category: reminder.category || null,
@@ -49772,7 +52398,7 @@ const emitReminderEvent = async ({ eventId = null, type, reminder, actorId, acto
     type,
     caseId: reminder.caseId,
     payload,
-    trackingId: reminder.applicationId || null,
+    trackingId: null,
     actorId: actorId || null,
     actorName: actorName || null,
   });
@@ -50542,26 +53168,75 @@ const setDocsRequestedFromSecureMessage = async ({
 };
 
 
-const listReminders = async (options = {}) => {
-  const { caseId, applicationId, includeGlobal = false, statuses = [], limit, offset } = options;
-  const conditions = ['r.deleted_at IS NULL'];
+function buildReminderListScopeFilter({
+  caseId = null,
+  applicationId = null,
+  includeGlobal = false,
+  scopeMode = null,
+} = {}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const resolvedScopeMode = scopeMode || (
+    normalizedCaseId && normalizedApplicationId
+      ? 'application'
+      : normalizedCaseId
+        ? 'case'
+        : normalizedApplicationId
+          ? 'application_only'
+          : null
+  );
+  const clauses = [];
   const params = [];
-  const scopeClauses = [];
 
-  if (Number.isInteger(caseId) && caseId > 0) {
-    scopeClauses.push('r.case_id = ?');
-    params.push(caseId);
-  }
-  if (Number.isInteger(applicationId) && applicationId > 0) {
-    scopeClauses.push('r.application_id = ?');
-    params.push(applicationId);
+  if (resolvedScopeMode === 'application' && normalizedCaseId && normalizedApplicationId) {
+    clauses.push(`(
+      r.case_id = ?
+      AND (
+        r.application_id = ?
+        OR (
+          r.application_id IS NULL
+          AND r.action_plan_id IS NULL
+          AND r.intervention_id IS NULL
+        )
+      )
+    )`);
+    params.push(normalizedCaseId, normalizedApplicationId);
+  } else if (resolvedScopeMode === 'case' && normalizedCaseId) {
+    clauses.push('r.case_id = ?');
+    params.push(normalizedCaseId);
+  } else if (resolvedScopeMode === 'application_only' && normalizedApplicationId) {
+    clauses.push('r.application_id = ?');
+    params.push(normalizedApplicationId);
   }
   if (includeGlobal) {
-    scopeClauses.push('(r.case_id IS NULL AND r.application_id IS NULL)');
+    clauses.push('(r.case_id IS NULL AND r.application_id IS NULL)');
   }
-  if (scopeClauses.length) {
-    conditions.push(`(${scopeClauses.join(' OR ')})`);
-  }
+  return {
+    clause: clauses.length ? `(${clauses.join(' OR ')})` : null,
+    params,
+    scopeMode: resolvedScopeMode,
+  };
+}
+
+const listReminders = async (options = {}) => {
+  const {
+    caseId,
+    applicationId,
+    includeGlobal = false,
+    scopeMode = null,
+    statuses = [],
+    limit,
+    offset,
+  } = options;
+  const conditions = ['r.deleted_at IS NULL'];
+  const scopeFilter = buildReminderListScopeFilter({
+    caseId,
+    applicationId,
+    includeGlobal,
+    scopeMode,
+  });
+  const params = [...scopeFilter.params];
+  if (scopeFilter.clause) conditions.push(scopeFilter.clause);
   if (Array.isArray(statuses) && statuses.length) {
     const placeholders = statuses.map(() => '?').join(',');
     conditions.push(`r.status IN (${placeholders})`);
@@ -50616,10 +53291,8 @@ const buildNoteReminderMetadata = (noteId) =>
 
 const loadCaseIdentifiers = async (connection, caseId) => {
   const [[row]] = await connection.query(
-    `SELECT c.id,
-            a.id AS application_id
+    `SELECT c.id
        FROM iset_case c
-       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       WHERE c.id = ?
       LIMIT 1`,
     [caseId]
@@ -54532,6 +57205,7 @@ app.post('/api/cases', async (req, res) => {
         lifecycleStatus: normalizedLifecycleStatus,
         portfolioRegionId,
         generateCaseNumberIfMissing: !hasApplicationContext,
+        reopenForNewApplication: Boolean(pendingApplicationSubmissionId),
       });
     } catch (caseErr) {
       await conn.rollback();
@@ -54702,17 +57376,35 @@ const generateSystemTasks = async () => {
 };
 
 // Unified applicant documents endpoint now sources from iset_document (generalized store)
-async function emitDocumentUploadedEvent({ req, caseId, applicationId, applicantUserId, fileName, source, sizeBytes, message }) {
+async function emitDocumentUploadedEvent({
+  req,
+  caseId,
+  applicationId,
+  actionPlanId = null,
+  interventionId = null,
+  applicantUserId,
+  fileName,
+  source,
+  sizeBytes,
+  message,
+}) {
   const normalizedCaseId = normalisePositiveInteger(caseId);
   if (!normalizedCaseId) return;
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
   const { actorId, actorName } = resolveRequestActor(req) || {};
   let trackingId = null;
-  try {
-    trackingId = await fetchTrackingIdForCase(applicationId, normalizedCaseId);
-  } catch (err) {
-    console.warn('[events] failed to resolve tracking id for document upload', err?.message || err);
+  if (normalizedApplicationId) {
+    try {
+      trackingId = await fetchTrackingIdForCase(normalizedApplicationId, normalizedCaseId);
+    } catch (err) {
+      console.warn('[events] failed to resolve tracking id for document upload', err?.message || err);
+    }
   }
   const payload = {
+    case_id: normalizedCaseId,
+    application_id: normalizedApplicationId,
+    action_plan_id: normalisePositiveInteger(actionPlanId),
+    intervention_id: normalisePositiveInteger(interventionId),
     file_name: fileName || null,
     source: source || null,
     size_bytes: typeof sizeBytes === 'number' && Number.isFinite(sizeBytes) ? sizeBytes : null,
@@ -55961,22 +58653,13 @@ function handleAdminDocumentUpload(
       });
     }
 
-    let eventApplicationId = manifest.applicationId || applicationIdRaw || null;
-    if (!eventApplicationId && manifest.caseId) {
-      try {
-        eventApplicationId = await resolveApplicationIdForCaseId(manifest.caseId);
-      } catch (eventScopeError) {
-        console.warn(
-          '[admin:documents:upload] event application resolution failed',
-          eventScopeError?.message || eventScopeError
-        );
-      }
-    }
     if (manifest.caseId) {
       await emitDocumentUploadedEvent({
         req,
         caseId: manifest.caseId,
-        applicationId: eventApplicationId,
+        applicationId: manifest.applicationId || null,
+        actionPlanId: manifest.actionPlanId || null,
+        interventionId: manifest.interventionIds[0] || null,
         applicantUserId: applicantId,
         fileName: documentRow.file_name || label || fileNameForDb,
         source,
@@ -56379,7 +59062,7 @@ app.put('/api/documents/:id', async (req, res) => {
   let existingRow = null;
   try {
     const [rows] = await pool.query(
-      'SELECT id, metadata, document_category, client_id, application_id, case_id, action_plan_id, applicant_user_id, source FROM iset_document WHERE id = ? LIMIT 1',
+      "SELECT id, metadata, document_category, client_id, application_id, case_id, action_plan_id, applicant_user_id, source, origin_message_id, signing_request_id, updated_at FROM iset_document WHERE id = ? AND status = 'active' LIMIT 1",
       [documentId]
     );
     if (rows && rows[0]) {
@@ -56407,23 +59090,46 @@ app.put('/api/documents/:id', async (req, res) => {
     console.error('[admin:documents:update] access check failed', err);
     return res.status(500).json({ error: 'document_access_check_failed' });
   }
+  try {
+    const mutationError = await validateGenericDocumentMutationIntegrity(existingRow);
+    if (mutationError) {
+      return res.status(mutationError.status).json(mutationError.body);
+    }
+  } catch (err) {
+    console.error('[admin:documents:update] integrity check failed', err);
+    return res.status(500).json({ error: 'document_integrity_check_failed' });
+  }
   if (!metadataObj || typeof metadataObj !== 'object') metadataObj = {};
   metadataObj.label = label;
   if (docType) metadataObj.document_type = docType;
 
   if (isLabelOnlyUpdate) {
     const metadata = JSON.stringify(metadataObj);
+    let connection;
     try {
-      const [result] = await pool.query(
+      connection = await pool.getConnection();
+      await connection.beginTransaction();
+      const locked = await lockGenericDocumentMutationContext({
+        documentId,
+        req,
+        expectedUpdatedAt: existingRow.updated_at,
+        connection,
+      });
+      if (locked.error) {
+        await connection.rollback();
+        return res.status(locked.error.status).json(locked.error.body);
+      }
+      const [result] = await connection.query(
         `UPDATE iset_document
             SET label = ?, metadata = ?, updated_at = NOW()
-          WHERE id = ?`,
+          WHERE id = ? AND status = 'active'`,
         [label, metadata, documentId]
       );
       if (!result || result.affectedRows === 0) {
+        await connection.rollback();
         return res.status(404).json({ error: 'document_not_found' });
       }
-      const [[row]] = await pool.query(
+      const [[row]] = await connection.query(
         `SELECT id, case_id, application_id, action_plan_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
            FROM iset_document
           WHERE id = ?
@@ -56431,13 +59137,19 @@ app.put('/api/documents/:id', async (req, res) => {
         [documentId]
       );
       if (row) {
-        const map = await fetchDocumentInterventionMap({ documentIds: [documentId] });
+        const map = await fetchDocumentInterventionMap({ documentIds: [documentId], connection });
         row.intervention_ids = map.get(documentId) || [];
       }
+      await connection.commit();
       return res.json({ ok: true, document: row });
     } catch (err) {
+      if (connection) {
+        try { await connection.rollback(); } catch (_) {}
+      }
       console.error('[admin:documents:update-label] error', err);
       return res.status(500).json({ error: 'failed_to_update_document_label' });
+    } finally {
+      if (connection) connection.release();
     }
   }
 
@@ -56575,7 +59287,20 @@ app.put('/api/documents/:id', async (req, res) => {
     return res.status(400).json({ error: errorCode });
   }
 
+  let updateConnection;
   try {
+    updateConnection = await pool.getConnection();
+    await updateConnection.beginTransaction();
+    const locked = await lockGenericDocumentMutationContext({
+      documentId,
+      req,
+      expectedUpdatedAt: existingRow.updated_at,
+      connection: updateConnection,
+    });
+    if (locked.error) {
+      await updateConnection.rollback();
+      return res.status(locked.error.status).json(locked.error.body);
+    }
     const updateFields = [
       'label = ?',
       'metadata = ?',
@@ -56594,24 +59319,30 @@ app.put('/api/documents/:id', async (req, res) => {
       nextActionPlanId,
       resolvedClientId,
     ];
-    const [result] = await pool.query(
+    const [result] = await updateConnection.query(
       `UPDATE iset_document
          SET ${updateFields.join(', ')}, updated_at = NOW()
-       WHERE id = ?`,
+       WHERE id = ? AND status = 'active'`,
       [...updateParams, documentId]
     );
     if (!result || result.affectedRows === 0) {
+      await updateConnection.rollback();
       return res.status(404).json({ error: 'document_not_found' });
     }
     if (nextActionPlanId) {
       await updateDocumentInterventionLinks({
         documentId,
         interventionIds: nextInterventionIds,
+        connection: updateConnection,
       });
     } else {
-      await updateDocumentInterventionLinks({ documentId, interventionIds: [] });
+      await updateDocumentInterventionLinks({
+        documentId,
+        interventionIds: [],
+        connection: updateConnection,
+      });
     }
-    const [[row]] = await pool.query(
+    const [[row]] = await updateConnection.query(
       `SELECT id, case_id, application_id, action_plan_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
          FROM iset_document
         WHERE id = ?
@@ -56619,13 +59350,22 @@ app.put('/api/documents/:id', async (req, res) => {
       [documentId]
     );
     if (row) {
-      const map = await fetchDocumentInterventionMap({ documentIds: [documentId] });
+      const map = await fetchDocumentInterventionMap({
+        documentIds: [documentId],
+        connection: updateConnection,
+      });
       row.intervention_ids = map.get(documentId) || [];
     }
+    await updateConnection.commit();
     return res.json({ ok: true, document: row });
   } catch (err) {
+    if (updateConnection) {
+      try { await updateConnection.rollback(); } catch (_) {}
+    }
     console.error('[admin:documents:update] error', err);
     return res.status(500).json({ error: 'failed_to_update_document' });
+  } finally {
+    if (updateConnection) updateConnection.release();
   }
 });
 
@@ -56641,104 +59381,143 @@ app.post('/api/documents/:id/link-interventions', async (req, res) => {
     ].filter(Boolean))
   );
 
-  let documentRow = null;
+  let linkConnection = null;
+  let transactionStarted = false;
   try {
-    const [rows] = await pool.query(
-      `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id, document_category
-         FROM iset_document
-        WHERE id = ? AND status = 'active'
-        LIMIT 1`,
+    linkConnection = await pool.getConnection();
+    await linkConnection.beginTransaction();
+    transactionStarted = true;
+
+    const [[documentRow]] = await linkConnection.query(
+      `SELECT d.id,
+              d.case_id,
+              d.application_id,
+              d.action_plan_id,
+              d.client_id,
+              d.applicant_user_id,
+              d.document_category
+         FROM iset_document d
+        WHERE d.id = ?
+          AND d.status = 'active'
+        LIMIT 1
+        FOR UPDATE`,
       [documentId]
     );
-    if (rows && rows[0]) documentRow = rows[0];
-  } catch (err) {
-    console.error('[admin:documents:link-interventions] lookup failed', err);
-    return res.status(500).json({ error: 'document_lookup_failed' });
-  }
-  if (!documentRow) {
-    return res.status(404).json({ error: 'document_not_found' });
-  }
-  try {
-    const accessError = await validateDocumentAccess(req, documentRow);
+    if (!documentRow) {
+      await linkConnection.rollback();
+      transactionStarted = false;
+      return res.status(404).json({ error: 'document_not_found' });
+    }
+
+    const accessError = await validateDocumentAccess(req, documentRow, {
+      connection: linkConnection,
+    });
     if (accessError) {
+      await linkConnection.rollback();
+      transactionStarted = false;
       return res.status(accessError.status).json(accessError.body);
     }
-  } catch (err) {
-    console.error('[admin:documents:link-interventions] document access check failed', err);
-    return res.status(500).json({ error: 'document_access_check_failed' });
-  }
 
-  const docType = normaliseString(documentRow.document_category);
-  if (!docType || docType.toLowerCase() !== 'ei_verification') {
-    return res.status(400).json({ error: 'document_type_not_supported' });
-  }
+    const docType = normaliseString(documentRow.document_category);
+    if (!docType || docType.toLowerCase() !== 'ei_verification') {
+      await linkConnection.rollback();
+      transactionStarted = false;
+      return res.status(400).json({ error: 'document_type_not_supported' });
+    }
 
-  const eligibilityRoleAllowlist = new Set([
-    'systemadministrator',
-    'nwacadministrator',
-    'regionalmanager'
-  ]);
-  const identity = getRequesterIdentity(req);
-  const roleKeyRaw = normaliseString(identity?.role);
-  const roleKey = roleKeyRaw ? roleKeyRaw.toLowerCase().replace(/[\s_-]+/g, '') : '';
-  if (!eligibilityRoleAllowlist.has(roleKey)) {
-    return res.status(403).json({
-      error: 'ei_verification_forbidden',
-      message: 'You do not have permission to link EI verification documents.'
+    const eligibilityRoleAllowlist = new Set([
+      'systemadministrator',
+      'nwacadministrator',
+      'regionalmanager'
+    ]);
+    const identity = getRequesterIdentity(req);
+    const roleKeyRaw = normaliseString(identity?.role);
+    const roleKey = roleKeyRaw ? roleKeyRaw.toLowerCase().replace(/[\s_-]+/g, '') : '';
+    if (!eligibilityRoleAllowlist.has(roleKey)) {
+      await linkConnection.rollback();
+      transactionStarted = false;
+      return res.status(403).json({
+        error: 'ei_verification_forbidden',
+        message: 'You do not have permission to link EI verification documents.'
+      });
+    }
+
+    const existingMap = await fetchDocumentInterventionMap({
+      documentIds: [documentId],
+      connection: linkConnection,
     });
-  }
+    const existingLinks = Array.from(new Set(existingMap.get(documentId) || []));
+    const mergedIds = Array.from(new Set([...existingLinks, ...interventionIds]));
 
-  if (interventionIds.length) {
-    try {
-      const placeholders = interventionIds.map(() => '?').join(',');
-      const [rows] = await pool.query(
-        `SELECT id, metadata_json
-           FROM iset_case_intervention
-          WHERE id IN (${placeholders})`,
-        interventionIds
+    if (mergedIds.length) {
+      const placeholders = mergedIds.map(() => '?').join(',');
+      const [rows] = await linkConnection.query(
+        `SELECT i.id AS intervention_id,
+                i.case_id AS intervention_case_id,
+                i.action_plan_id AS intervention_action_plan_id,
+                i.metadata_json,
+                ap.id AS owner_action_plan_id,
+                ap.case_id AS action_plan_case_id,
+                ap.application_id AS action_plan_application_id,
+                a.id AS owner_application_id,
+                a.case_id AS application_case_id
+           FROM iset_case_intervention i
+           LEFT JOIN iset_case_action_plan ap ON ap.id = i.action_plan_id
+           LEFT JOIN iset_application a ON a.id = ap.application_id
+          WHERE i.id IN (${placeholders})
+          FOR UPDATE`,
+        mergedIds
       );
-      const rowMap = new Map(rows.map(row => [Number(row.id), row]));
-      const missing = interventionIds.filter(id => !rowMap.has(Number(id)));
-      if (missing.length) {
-        return res.status(400).json({ error: 'interventions_not_found', missingIds: missing });
-      }
-      try {
-        rows.forEach(row => {
-          assertOperationalInterventionRow(row, { operation: 'link an EI verification document to' });
-        });
-      } catch (error) {
-        return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
-          error: error?.code || 'applied_revision_evidence_read_only',
-          message: error?.publicMessage || error?.message,
-        });
-      }
+
+      validateEiDocumentInterventionLineage({
+        documentRow,
+        interventionRows: rows,
+        interventionIds: mergedIds,
+      });
+      rows.forEach(row => {
+        assertOperationalInterventionRow(row, { operation: 'link an EI verification document to' });
+      });
       const targetAccessError = await validateDocumentAttachmentContextAccess(req, {
-        interventionIds,
+        interventionIds: mergedIds,
         requireScopedContext: true,
+        connection: linkConnection,
       });
       if (targetAccessError) {
+        await linkConnection.rollback();
+        transactionStarted = false;
         return res.status(targetAccessError.status).json(targetAccessError.body);
       }
-    } catch (err) {
-      console.error('[admin:documents:link-interventions] intervention lookup failed', err);
-      return res.status(500).json({ error: 'intervention_lookup_failed' });
     }
-  }
 
-  try {
-    const existingMap = await fetchDocumentInterventionMap({ documentIds: [documentId] });
-    const existingLinks = existingMap.get(documentId) || [];
-    const mergedIds = interventionIds.length
-      ? Array.from(new Set([...existingLinks, ...interventionIds]))
-      : existingLinks;
-    await updateDocumentInterventionLinks({
-      documentId,
-      interventionIds: mergedIds,
-    });
+    if (mergedIds.length !== existingLinks.length) {
+      await updateDocumentInterventionLinks({
+        documentId,
+        interventionIds: mergedIds,
+        connection: linkConnection,
+      });
+    }
+    await linkConnection.commit();
+    transactionStarted = false;
     return res.json({ ok: true, documentId, interventionIds: mergedIds });
   } catch (err) {
+    if (transactionStarted && linkConnection) {
+      try {
+        await linkConnection.rollback();
+      } catch (_) {}
+      transactionStarted = false;
+    }
+    if (Number.isInteger(err?.status) && err?.code) {
+      return res.status(err.status).json({
+        error: err.code,
+        ...(err.reason ? { reason: err.reason } : {}),
+        ...(err.publicMessage ? { message: err.publicMessage } : {}),
+        ...(err.details && typeof err.details === 'object' ? err.details : {}),
+      });
+    }
     console.error('[admin:documents:link-interventions] update failed', err);
     return res.status(500).json({ error: 'document_link_failed' });
+  } finally {
+    if (linkConnection) linkConnection.release();
   }
 });
 
@@ -56779,10 +59558,11 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
       ].filter(Boolean)))
     : undefined;
 
+  let duplicateConnection;
   try {
     const [[doc]] = await pool.query(
       `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, origin_message_id,
-              source, file_name, file_path, mime_type, label, metadata, document_category, size_bytes, checksum_sha256
+              signing_request_id, source, file_name, file_path, mime_type, label, metadata, document_category, size_bytes, checksum_sha256, updated_at
          FROM iset_document
         WHERE id = ? AND status = 'active'
         LIMIT 1`,
@@ -56794,6 +59574,10 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
     const sourceAccessError = await validateDocumentAccess(req, doc);
     if (sourceAccessError) {
       return res.status(sourceAccessError.status).json(sourceAccessError.body);
+    }
+    const mutationError = await validateGenericDocumentMutationIntegrity(doc);
+    if (mutationError) {
+      return res.status(mutationError.status).json(mutationError.body);
     }
 
     const docType = docTypeOverride || doc.document_category || parseMetadata(doc.metadata)?.document_type || null;
@@ -56901,12 +59685,24 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
     if (docType) metadataObj.document_type = docType;
     const metadata = JSON.stringify(metadataObj);
     const uploaderUserId = await resolveAdminActorUserId(req, pool);
+    duplicateConnection = await pool.getConnection();
+    await duplicateConnection.beginTransaction();
+    const locked = await lockGenericDocumentMutationContext({
+      documentId,
+      req,
+      expectedUpdatedAt: doc.updated_at,
+      connection: duplicateConnection,
+    });
+    if (locked.error) {
+      await duplicateConnection.rollback();
+      return res.status(locked.error.status).json(locked.error.body);
+    }
     const nextPath = await duplicateDocumentFile({
       filePath: doc.file_path,
       fileName: doc.file_name,
       applicantUserId: doc.applicant_user_id || uploaderUserId || null,
     });
-    const [result] = await pool.query(
+    const [result] = await duplicateConnection.query(
       `INSERT INTO iset_document
          (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?)`,
@@ -56934,12 +59730,17 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
         await updateDocumentInterventionLinks({
           documentId: insertId,
           interventionIds: nextInterventionIds,
+          connection: duplicateConnection,
         });
       } else {
-        await updateDocumentInterventionLinks({ documentId: insertId, interventionIds: [] });
+        await updateDocumentInterventionLinks({
+          documentId: insertId,
+          interventionIds: [],
+          connection: duplicateConnection,
+        });
       }
     }
-    const [[row]] = await pool.query(
+    const [[row]] = await duplicateConnection.query(
       `SELECT id, case_id, application_id, action_plan_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
          FROM iset_document
         WHERE id = ?
@@ -56947,13 +59748,22 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
       [insertId]
     );
     if (row) {
-      const map = await fetchDocumentInterventionMap({ documentIds: [insertId] });
+      const map = await fetchDocumentInterventionMap({
+        documentIds: [insertId],
+        connection: duplicateConnection,
+      });
       row.intervention_ids = map.get(insertId) || [];
     }
+    await duplicateConnection.commit();
     return res.json({ ok: true, document: row });
   } catch (err) {
+    if (duplicateConnection) {
+      try { await duplicateConnection.rollback(); } catch (_) {}
+    }
     console.error('[admin:documents:duplicate] error', err);
     return res.status(500).json({ error: 'failed_to_duplicate_document' });
+  } finally {
+    if (duplicateConnection) duplicateConnection.release();
   }
 });
 
@@ -56962,9 +59772,11 @@ app.delete('/api/documents/:id', async (req, res) => {
   if (!Number.isFinite(documentId) || documentId <= 0) {
     return res.status(400).json({ error: 'invalid_document_id' });
   }
+  let connection;
   try {
     const [[doc]] = await pool.query(
-      `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id
+      `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id,
+              source, origin_message_id, signing_request_id, updated_at
          FROM iset_document
         WHERE id = ? AND status = 'active'
         LIMIT 1`,
@@ -56977,19 +59789,42 @@ app.delete('/api/documents/:id', async (req, res) => {
     if (accessError) {
       return res.status(accessError.status).json(accessError.body);
     }
-    const [result] = await pool.query(
+    const mutationError = await validateGenericDocumentMutationIntegrity(doc);
+    if (mutationError) {
+      return res.status(mutationError.status).json(mutationError.body);
+    }
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const locked = await lockGenericDocumentMutationContext({
+      documentId,
+      req,
+      expectedUpdatedAt: doc.updated_at,
+      connection,
+    });
+    if (locked.error) {
+      await connection.rollback();
+      return res.status(locked.error.status).json(locked.error.body);
+    }
+    const [result] = await connection.query(
       `UPDATE iset_document
          SET status = 'deleted', updated_at = NOW()
        WHERE id = ? AND status = 'active'`,
       [documentId]
     );
     if (!result || result.affectedRows === 0) {
+      await connection.rollback();
       return res.status(404).json({ error: 'document_not_found' });
     }
+    await connection.commit();
     return res.json({ ok: true, deleted: true });
   } catch (err) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
+    }
     console.error('[admin:documents:delete] error', err);
     return res.status(500).json({ error: 'failed_to_delete_document' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -57993,7 +60828,7 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
       const matchedFilePaths = Array.from(applicationDocumentScope.submissionPayloadFilePaths);
       if (matchedFilePaths.length) {
         whereClauses.push(
-          `(d.application_id = ? OR ${buildCasePrimaryApplicationIdSql('ac')} = ? OR (
+          `(d.application_id = ? OR ap.application_id = ? OR (
               d.application_id IS NULL
               AND d.case_id IS NULL
               AND d.action_plan_id IS NULL
@@ -58003,7 +60838,7 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
         );
         params.push(applicationFilterId, applicationFilterId, ...matchedFilePaths);
       } else {
-        whereClauses.push(`(d.application_id = ? OR ${buildCasePrimaryApplicationIdSql('ac')} = ?)`);
+        whereClauses.push('(d.application_id = ? OR ap.application_id = ?)');
         params.push(applicationFilterId, applicationFilterId);
       }
     }
@@ -58033,6 +60868,7 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
        LEFT JOIN iset_application a
          ON a.id = COALESCE(
            d.application_id,
+           ap.application_id,
            ${buildCasePrimaryApplicationIdSql('c')},
            ${buildCasePrimaryApplicationIdSql('ac')}
          )
@@ -58976,7 +61812,11 @@ app.get('/api/cases/:case_id/application/current', sendRetiredCaseApplicationVer
 app.post('/api/cases/:case_id/application/versions', sendRetiredCaseApplicationVersionResponse);
 
 
-async function resolveCaseApplicantMessagingContext(caseId, { applicationId = null } = {}) {
+async function resolveCaseApplicantMessagingContext(caseId, {
+  applicationId = null,
+  connection = pool,
+  forUpdate = false,
+} = {}) {
   const numericCaseId = Number.parseInt(caseId, 10);
   if (!Number.isInteger(numericCaseId) || numericCaseId < 1) {
     return null;
@@ -58986,7 +61826,7 @@ async function resolveCaseApplicantMessagingContext(caseId, { applicationId = nu
     ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
     : buildCasePrimaryApplicationJoinSql('c', 'a');
 
-  const [[row] = []] = await pool.query(
+  const [[row] = []] = await connection.query(
     `SELECT
        c.id AS case_id,
        c.client_id,
@@ -59030,7 +61870,7 @@ async function resolveCaseApplicantMessagingContext(caseId, { applicationId = nu
 	     LEFT JOIN client applicant_submission_client ON applicant_submission_client.applicant_cognito_sub = applicant_submission.cognito_sub
 	     LEFT JOIN user applicant_client_sub ON applicant_client_sub.cognito_sub = cl.applicant_cognito_sub
 	     WHERE c.id = ?
-	     LIMIT 1`,
+	     LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
     requestedApplicationId ? [requestedApplicationId, numericCaseId] : [numericCaseId]
   );
 
@@ -60290,14 +63130,16 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       response.review_workflow = null;
     }
 
-    const submissionIdForCase = await findEsdcSubmissionIdForCase(pool, caseId);
-    const [[ilmpComplianceRow]] = submissionIdForCase
+    const submissionIdForApplication = row.application_id
+      ? await findEsdcSubmissionIdForApplication(pool, caseId, row.application_id)
+      : await findEsdcSubmissionIdForCase(pool, caseId);
+    const [[ilmpComplianceRow]] = submissionIdForApplication
       ? await pool.query(
           `SELECT readiness_status, readiness_summary, warnings, blocking_issues, last_validated_at, payload_snapshot, payload_checksum, payload_storage_key
              FROM esdc_participant_submission
              WHERE id = ?
              LIMIT 1`,
-          [submissionIdForCase]
+          [submissionIdForApplication]
         )
       : [[]];
     response.compliance = {
@@ -60341,10 +63183,8 @@ app.post('/api/cases/:id/validate-ilmp', async (req, res) => {
     if (accessError) return res.status(accessError.status).json(accessError.body);
 
     const [[caseRow]] = await pool.query(
-      `SELECT c.id,
-              a.id AS application_id
+      `SELECT c.id
          FROM iset_case c
-         ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         WHERE c.id = ?
         LIMIT 1`,
       [caseId]
@@ -60353,9 +63193,32 @@ app.post('/api/cases/:id/validate-ilmp', async (req, res) => {
       return res.status(404).json({ error: 'case_not_found' });
     }
 
-    await ensureEsdcParticipantSubmissionRecord(null, caseId, caseRow.application_id || null);
+    const requestedApplicationId = normalisePositiveInteger(
+      req.query.applicationId ?? req.body?.applicationId ?? null
+    );
+    if ((req.query.applicationId ?? req.body?.applicationId) && !requestedApplicationId) {
+      return res.status(400).json({ error: 'invalid_application_id' });
+    }
+    if (requestedApplicationId) {
+      const requestedCaseRow = await fetchCaseRowForApplicationId(requestedApplicationId, {
+        columns: ['id'],
+        connection: pool,
+      });
+      if (Number(requestedCaseRow?.id) !== caseId) {
+        return res.status(404).json({ error: 'application_not_found' });
+      }
+    }
+    const targetApplicationId = requestedApplicationId || await resolveUniqueApplicationIdForCase(pool, caseId);
+    const targetActionPlanId = targetApplicationId
+      ? await findPreferredActionPlanIdForApplication(pool, caseId, targetApplicationId)
+      : null;
 
-    const submissionId = await findEsdcSubmissionIdForCase(pool, caseId);
+    const submissionId = await ensureEsdcParticipantSubmissionRecord(
+      null,
+      caseId,
+      targetApplicationId,
+      targetActionPlanId
+    );
     if (!submissionId) {
       return res.status(500).json({ error: 'submission_initialization_failed' });
     }
@@ -60374,7 +63237,11 @@ app.post('/api/cases/:id/validate-ilmp', async (req, res) => {
       finance: { status: 'pending', messages: [] },
     };
 
-    await setInterventionComplianceForCase(caseId, compliance.ilmp.status);
+    if (targetApplicationId) {
+      await setInterventionComplianceForApplication(caseId, targetApplicationId, compliance.ilmp.status);
+    } else {
+      await setInterventionComplianceForCase(caseId, compliance.ilmp.status);
+    }
 
     res.json({ compliance });
   } catch (error) {
@@ -60426,10 +63293,8 @@ app.post('/api/cases/:id/prepare-ilmp', async (req, res) => {
     if (accessError) return res.status(accessError.status).json(accessError.body);
 
     const [[caseRow]] = await pool.query(
-      `SELECT c.id,
-              a.id AS application_id
+      `SELECT c.id
          FROM iset_case c
-         ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         WHERE c.id = ?
         LIMIT 1`,
       [caseId]
@@ -60438,9 +63303,32 @@ app.post('/api/cases/:id/prepare-ilmp', async (req, res) => {
       return res.status(404).json({ error: 'case_not_found' });
     }
 
-    await ensureEsdcParticipantSubmissionRecord(null, caseId, caseRow.application_id || null);
+    const requestedApplicationId = normalisePositiveInteger(
+      req.query.applicationId ?? req.body?.applicationId ?? null
+    );
+    if ((req.query.applicationId ?? req.body?.applicationId) && !requestedApplicationId) {
+      return res.status(400).json({ error: 'invalid_application_id' });
+    }
+    if (requestedApplicationId) {
+      const requestedCaseRow = await fetchCaseRowForApplicationId(requestedApplicationId, {
+        columns: ['id'],
+        connection: pool,
+      });
+      if (Number(requestedCaseRow?.id) !== caseId) {
+        return res.status(404).json({ error: 'application_not_found' });
+      }
+    }
+    const targetApplicationId = requestedApplicationId || await resolveUniqueApplicationIdForCase(pool, caseId);
+    const targetActionPlanId = targetApplicationId
+      ? await findPreferredActionPlanIdForApplication(pool, caseId, targetApplicationId)
+      : null;
 
-    const submissionId = await findEsdcSubmissionIdForCase(pool, caseId);
+    const submissionId = await ensureEsdcParticipantSubmissionRecord(
+      null,
+      caseId,
+      targetApplicationId,
+      targetActionPlanId
+    );
     if (!submissionId) {
       return res.status(500).json({ error: 'submission_initialization_failed' });
     }
@@ -61762,7 +64650,13 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 
     await connection.commit();
     await recomputeCaseStatus(caseId, connection, { allowReopenFinal: true });
-    await markIlmpNeedsReviewForCase(caseId);
+    await ensureEsdcParticipantSubmissionRecord(
+      null,
+      caseId,
+      actionPlanApplicationId,
+      result.insertId
+    );
+    await markIlmpNeedsReviewForActionPlan(caseId, result.insertId);
 
     const planRow = await fetchActionPlanWithCase(result.insertId);
     const payload =
@@ -63040,7 +65934,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       }
     }
     await refreshFinancePotSums();
-    await markIlmpNeedsReviewForCase(planRow.case_id);
+    await markIlmpNeedsReviewForActionPlan(planRow.case_id, planId);
     if (
       !isBackloadMode &&
       shouldIncludeFundedInterventionForCfa(
@@ -65637,7 +68531,10 @@ app.patch('/api/interventions/:id', async (req, res) => {
       }
     }
     await refreshFinancePotSums();
-    await markIlmpNeedsReviewForCase(interventionRow.case_id || planRow?.case_id || null);
+    await markIlmpNeedsReviewForActionPlans(
+      interventionRow.case_id || planRow?.case_id || null,
+      [originalPlanId, planId]
+    );
     if (!isManualBackloadRecord && cfaTargets.length) {
       const actorUserId = await resolveOrCreateUserIdFromAuth(req);
       const staffProfileId = resolveActiveStaffProfileId(req);
@@ -65870,7 +68767,7 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     await syncInterventionProposalCompatibility(updatedRow);
     const payload = mapInterventionRow(updatedRow);
     await refreshFinancePotSums();
-    await markIlmpNeedsReviewForCase(interventionRow.case_id);
+    await markIlmpNeedsReviewForActionPlan(interventionRow.case_id, planId);
     const historicalBackloadPotId =
       payload.potId ||
       normalisePositiveInteger(planRow?.budget_pot) ||
@@ -65996,7 +68893,10 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
     if (interventionRow.case_id) {
       await recomputeCaseStatus(interventionRow.case_id, null, { allowReopenFinal: true });
     }
-    await markIlmpNeedsReviewForCase(interventionRow.case_id || null);
+    await markIlmpNeedsReviewForActionPlan(
+      interventionRow.case_id || null,
+      interventionRow.action_plan_id || null
+    );
     if (wasIncludedInCfa && !isManualBackloadRecord && interventionRow.action_plan_id) {
       try {
         const actorUserId = await resolveOrCreateUserIdFromAuth(req);
@@ -66377,10 +69277,7 @@ app.post('/api/cases/:id/reopen-recovery', async (req, res) => {
       planRow.application_id || null,
       actionPlanId
     );
-    await markEsdcParticipantSubmissionNeedsReview(connection, caseId, {
-      resetSnapshot: true,
-      resetSubmissionStatus: true,
-    });
+    await markIlmpNeedsReviewForActionPlan(caseId, actionPlanId, connection);
 
     const eventSummary = `System Administrator reopened closed action plan ${actionPlanId} to ${modeLabel}.`;
     await connection.query(
@@ -66519,7 +69416,7 @@ app.post('/api/action-plans/:id/activate', async (req, res) => {
     }
 
     const updatedRow = await fetchActionPlanWithCase(planId);
-    await markIlmpNeedsReviewForCase(planRow.case_id);
+    await markIlmpNeedsReviewForActionPlan(planRow.case_id, planId);
     await recomputeCaseStatus(planRow.case_id, null, { allowReopenFinal: true });
     res.status(200).json(mapActionPlanRow(updatedRow));
   } catch (error) {
@@ -66730,7 +69627,7 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
     );
 
     const updatedRow = await fetchActionPlanWithCase(planId);
-    await markIlmpNeedsReviewForCase(planRow.case_id);
+    await markIlmpNeedsReviewForActionPlan(planRow.case_id, planId);
     await recomputeCaseStatus(planRow.case_id);
     res.status(200).json(mapActionPlanRow(updatedRow));
   } catch (error) {
@@ -66779,7 +69676,6 @@ app.post('/api/action-plans/:id/archive', async (req, res) => {
     );
 
     const updatedRow = await fetchActionPlanWithCase(planId);
-    await markIlmpNeedsReviewForCase(planRow.case_id);
     await recomputeCaseStatus(planRow.case_id);
     res.status(200).json(mapActionPlanRow(updatedRow));
   } catch (error) {
@@ -66856,8 +69752,8 @@ app.post('/api/action-plans/:id/delete', async (req, res) => {
       });
     }
 
+    await markIlmpNeedsReviewForActionPlan(planRow.case_id, planId);
     await pool.query('DELETE FROM iset_case_action_plan WHERE id = ? LIMIT 1', [planId]);
-    await markIlmpNeedsReviewForCase(planRow.case_id);
     await recomputeCaseStatus(planRow.case_id, null, { allowReopenFinal: true });
     res.status(200).json({ success: true, deleted: true, id: planId });
   } catch (error) {
@@ -67427,7 +70323,7 @@ app.patch('/api/action-plans/:id', async (req, res) => {
     }
 
     const updatedRow = await fetchActionPlanWithCase(planId);
-    await markIlmpNeedsReviewForCase(planRow.case_id);
+    await markIlmpNeedsReviewForActionPlan(planRow.case_id, planId);
     res.status(200).json(mapActionPlanRow(updatedRow));
   } catch (error) {
     console.error('PATCH /api/action-plans/:id failed:', error);
@@ -67805,15 +70701,17 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 
     row.caseContext = safeJsonParse(row.case_context_json, null) || null;
     try {
-      const submissionIdForCase = await findEsdcSubmissionIdForCase(pool, row.id);
-      row.esdc_submission_id = submissionIdForCase || null;
-      const [[submissionRow]] = submissionIdForCase
+      const submissionIdForApplication = row.application_id
+        ? await findEsdcSubmissionIdForApplication(pool, row.id, row.application_id)
+        : await findEsdcSubmissionIdForCase(pool, row.id);
+      row.esdc_submission_id = submissionIdForApplication || null;
+      const [[submissionRow]] = submissionIdForApplication
         ? await pool.query(
             `SELECT readiness_status, readiness_summary, warnings, blocking_issues, last_validated_at
                FROM esdc_participant_submission
               WHERE id = ?
               LIMIT 1`,
-            [submissionIdForCase]
+            [submissionIdForApplication]
           )
         : [[]];
       row.compliance = {
@@ -68920,6 +71818,7 @@ async function resolveCaseSecureMessageAccess(req, messageRow, {
   ownerUserId = null,
   requireCaseScope = false,
   connection = pool,
+  lockApplicantContext = false,
 } = {}) {
   if (!messageRow) {
     return { error: { status: 404, body: { error: 'message_not_found' } } };
@@ -68938,13 +71837,23 @@ async function resolveCaseSecureMessageAccess(req, messageRow, {
       return { error: accessError };
     }
 
-    const applicantContext = await resolveCaseApplicantMessagingContext(effectiveCaseId);
+    const messageApplicationId = normalisePositiveInteger(messageRow.application_id);
+    const applicantContext = await resolveCaseApplicantMessagingContext(effectiveCaseId, {
+      applicationId: messageApplicationId,
+      connection,
+      forUpdate: lockApplicantContext,
+    });
     if (applicantContext?.applicant_resolution_conflict) {
       return { error: { status: 409, body: { error: 'applicant_identity_conflict' } } };
     }
+    if (
+      messageApplicationId &&
+      normalisePositiveInteger(applicantContext?.application_id) !== messageApplicationId
+    ) {
+      return { error: { status: 409, body: { error: 'message_application_scope_mismatch' } } };
+    }
     const applicantUserId = normalisePositiveInteger(applicantContext?.applicant_user_id);
     if (!messageCaseId) {
-      const messageApplicationId = normalisePositiveInteger(messageRow.application_id);
       const caseApplicationId = normalisePositiveInteger(applicantContext?.application_id);
       if (messageApplicationId && caseApplicationId && messageApplicationId !== caseApplicationId) {
         return { error: { status: 403, body: { error: 'forbidden', detail: 'message_application_scope_mismatch' } } };
@@ -68960,9 +71869,7 @@ async function resolveCaseSecureMessageAccess(req, messageRow, {
 
     return {
       caseId: effectiveCaseId,
-      applicationId:
-        normalisePositiveInteger(applicantContext?.application_id) ||
-        normalisePositiveInteger(messageRow.application_id),
+      applicationId: messageApplicationId,
       applicantUserId,
     };
   }
@@ -68984,6 +71891,147 @@ async function resolveCaseSecureMessageAccess(req, messageRow, {
       },
     },
   };
+}
+
+function isCaseSecureMessageUnavailableForReply(messageRow) {
+  if (!messageRow) return true;
+  if (Number(messageRow.deleted || 0) === 1) return true;
+  const status = (normaliseString(messageRow.status) || '').toLowerCase();
+  if (status === 'archived' || status === 'deleted' || status === 'withdrawn') return true;
+  return (
+    messageRow.subject === WITHDRAWN_SECURE_MESSAGE_SUBJECT &&
+    messageRow.body === WITHDRAWN_SECURE_MESSAGE_BODY
+  );
+}
+
+function caseSecureMessageHasApplicantParticipant(messageRow, applicantUserId) {
+  const numericApplicantUserId = normalisePositiveInteger(applicantUserId);
+  if (!messageRow || !numericApplicantUserId) return false;
+  return (
+    messageActorMatchesUser(messageRow, 'sender', 'applicant_user', numericApplicantUserId) ||
+    messageActorMatchesUser(messageRow, 'recipient', 'applicant_user', numericApplicantUserId)
+  );
+}
+
+async function lockAndValidateCaseMessageReplyTarget({
+  connection,
+  req,
+  replyMessageId,
+  caseId,
+  applicationId = null,
+  applicantUserId,
+  ownerUserId = null,
+} = {}) {
+  if (!connection || typeof connection.query !== 'function') {
+    throw createCaseMessageHttpError(
+      500,
+      'message_transaction_unavailable',
+      'The secure-message transaction is unavailable.'
+    );
+  }
+  const numericReplyMessageId = normalisePositiveInteger(replyMessageId);
+  const numericCaseId = normalisePositiveInteger(caseId);
+  const expectedApplicationId = normalisePositiveInteger(applicationId);
+  const expectedApplicantUserId = normalisePositiveInteger(applicantUserId);
+  if (!numericReplyMessageId || !numericCaseId || !expectedApplicantUserId) {
+    throw createCaseMessageHttpError(
+      400,
+      'invalid_reply_target_scope',
+      'The selected reply target is incomplete.'
+    );
+  }
+
+  const replyTarget = await fetchCaseSecureMessageRow(
+    numericReplyMessageId,
+    connection,
+    { forUpdate: true }
+  );
+  if (!replyTarget) {
+    throw createCaseMessageHttpError(404, 'reply_message_not_found', 'The selected reply message no longer exists.');
+  }
+  if (isCaseSecureMessageUnavailableForReply(replyTarget)) {
+    throw createCaseMessageHttpError(
+      409,
+      'reply_message_unavailable',
+      'The selected message was deleted or withdrawn and cannot be replied to.'
+    );
+  }
+
+  const replyCaseId = normalisePositiveInteger(replyTarget.case_id);
+  const replyApplicationId = normalisePositiveInteger(replyTarget.application_id);
+  if (replyCaseId !== numericCaseId) {
+    throw createCaseMessageHttpError(
+      409,
+      'reply_message_case_scope_mismatch',
+      'The selected reply message belongs to a different case.'
+    );
+  }
+  if (replyApplicationId !== expectedApplicationId) {
+    throw createCaseMessageHttpError(
+      409,
+      'reply_message_application_scope_mismatch',
+      'The selected reply message belongs to a different application.'
+    );
+  }
+
+  const accessResult = await resolveCaseSecureMessageAccess(req, replyTarget, {
+    requestedCaseId: numericCaseId,
+    ownerUserId,
+    requireCaseScope: true,
+    connection,
+    lockApplicantContext: true,
+  });
+  if (accessResult.error) {
+    throw createCaseMessageHttpError(
+      accessResult.error.status,
+      accessResult.error.body?.error || 'reply_message_scope_conflict',
+      accessResult.error.body?.message || 'The selected reply message is no longer available in this case.',
+      accessResult.error.body || null
+    );
+  }
+  if (
+    normalisePositiveInteger(accessResult.applicationId) !== expectedApplicationId ||
+    normalisePositiveInteger(accessResult.applicantUserId) !== expectedApplicantUserId ||
+    !caseSecureMessageHasApplicantParticipant(replyTarget, expectedApplicantUserId)
+  ) {
+    throw createCaseMessageHttpError(
+      409,
+      'reply_message_applicant_scope_mismatch',
+      'The selected reply message does not belong to this applicant.'
+    );
+  }
+  return replyTarget;
+}
+
+async function markCaseMessageReplyTargetReplied({
+  connection,
+  replyMessageId,
+  caseId,
+  applicationId = null,
+  applicantUserId,
+} = {}) {
+  const [result] = await connection.query(
+    `UPDATE messages
+        SET status = 'replied'
+      WHERE id = ?
+        AND case_id = ?
+        AND (application_id = ? OR (application_id IS NULL AND ? IS NULL))
+        AND COALESCE(deleted, 0) = 0
+        AND LOWER(COALESCE(status, '')) NOT IN ('archived', 'deleted', 'withdrawn')
+        AND (
+          (sender_actor_type = 'applicant_user' AND sender_user_id = ?)
+          OR (recipient_actor_type = 'applicant_user' AND recipient_user_id = ?)
+        )`,
+    [replyMessageId, caseId, applicationId, applicationId, applicantUserId, applicantUserId]
+  );
+  if (Number(result?.affectedRows || 0) !== 1) {
+    throw createCaseMessageHttpError(
+      409,
+      'reply_message_state_conflict',
+      'The selected reply message changed before the reply could be saved. Please reload and try again.'
+    );
+  }
+  return { updated: true, replyMessageId: normalisePositiveInteger(replyMessageId) };
 }
 
 app.get('/api/me/staff-profiles', async (req, res) => {
@@ -69505,18 +72553,44 @@ const ensureCaseExists = async (caseId) => {
 app.get('/api/reminders', async (req, res) => {
   const caseIdRaw = req.query.caseId ?? req.query.case_id;
   const applicationIdRaw = req.query.applicationId ?? req.query.application_id;
+  const scopeModeRaw = req.query.scopeMode ?? req.query.scope_mode;
   const includeGlobalRaw = req.query.includeGlobal ?? req.query.include_global ?? false;
   const statusRaw = req.query.status ?? req.query.statuses;
   const limitRaw = req.query.limit;
   const offsetRaw = req.query.offset;
 
-  const caseId = coerceOptionalPositiveInt(caseIdRaw);
-  if (Number.isNaN(caseId)) {
+  const caseIdResolution = parseOptionalReminderScopeId(caseIdRaw);
+  if (!caseIdResolution.valid) {
     return res.status(400).json({ error: 'invalid_case_id' });
   }
-  const applicationId = coerceOptionalPositiveInt(applicationIdRaw);
-  if (Number.isNaN(applicationId)) {
+  const caseId = caseIdResolution.id;
+  const applicationIdResolution = parseOptionalReminderScopeId(applicationIdRaw);
+  if (!applicationIdResolution.valid) {
     return res.status(400).json({ error: 'invalid_application_id' });
+  }
+  const applicationId = applicationIdResolution.id;
+  const scopeModeResolution = parseReminderScopeMode(scopeModeRaw);
+  if (!scopeModeResolution.valid) {
+    return res.status(400).json({
+      error: 'invalid_reminder_scope_mode',
+      allowed: Array.from(REMINDER_SCOPE_MODES),
+    });
+  }
+  const scopeMode = scopeModeResolution.scopeMode || (
+    Number.isInteger(caseId) && Number.isInteger(applicationId)
+      ? 'application'
+      : Number.isInteger(caseId)
+        ? 'case'
+        : null
+  );
+  if (scopeMode === 'application' && (!Number.isInteger(caseId) || !Number.isInteger(applicationId))) {
+    return res.status(400).json({ error: 'case_and_application_scope_required' });
+  }
+  if (scopeMode === 'case' && !Number.isInteger(caseId)) {
+    return res.status(400).json({ error: 'case_scope_required' });
+  }
+  if (scopeMode === 'case' && Number.isInteger(applicationId)) {
+    return res.status(400).json({ error: 'application_id_not_allowed_for_case_scope' });
   }
   const includeGlobal = parseBooleanFlag(includeGlobalRaw, false);
 
@@ -69569,11 +72643,16 @@ app.get('/api/reminders', async (req, res) => {
     if (!Number.isInteger(caseId) && !Number.isInteger(applicationId) && !includeGlobal) {
       return res.status(400).json({ error: 'case_or_application_scope_required' });
     }
-    if (Number.isInteger(caseId) && caseId > 0) {
+    if (scopeMode === 'application') {
+      const scopeResolution = await resolveReminderTargetScope(req, { caseId, applicationId });
+      if (scopeResolution.error) {
+        return res.status(scopeResolution.error.status).json(scopeResolution.error.body);
+      }
+    } else if (Number.isInteger(caseId) && caseId > 0) {
       const accessError = await validateCaseAccessByCaseId(req, caseId);
       if (accessError) return res.status(accessError.status).json(accessError.body);
     }
-    if (Number.isInteger(applicationId) && applicationId > 0) {
+    if (scopeMode !== 'application' && Number.isInteger(applicationId) && applicationId > 0) {
       const accessError = await validateCaseAccessByApplicationId(req, applicationId);
       if (accessError) return res.status(accessError.status).json(accessError.body);
     }
@@ -69582,6 +72661,7 @@ app.get('/api/reminders', async (req, res) => {
       caseId,
       applicationId,
       includeGlobal,
+      scopeMode,
       statuses,
       limit: limitValue,
       offset: offsetValue
@@ -69742,16 +72822,19 @@ app.post('/api/reminders', async (req, res) => {
   }
 
   try {
-    const accessError = await validateReminderTargetAccess(req, {
+    const targetResolution = await resolveReminderTargetScope(req, {
       caseId: caseIdValue,
       applicationId: applicationIdValue,
       actionPlanId: actionPlanIdValue,
       interventionId: interventionIdValue,
       allowGlobal: true,
     });
-    if (accessError) return res.status(accessError.status).json(accessError.body);
-    if (Number.isInteger(interventionIdValue)) {
-      const interventionRow = await fetchInterventionWithCase(interventionIdValue);
+    if (targetResolution.error) {
+      return res.status(targetResolution.error.status).json(targetResolution.error.body);
+    }
+    const reminderScope = targetResolution.scope;
+    if (reminderScope.interventionId) {
+      const interventionRow = await fetchInterventionWithCase(reminderScope.interventionId);
       if (!interventionRow) {
         return res.status(404).json({ error: 'intervention_not_found' });
       }
@@ -69769,10 +72852,10 @@ app.post('/api/reminders', async (req, res) => {
       (case_id, application_id, action_plan_id, intervention_id, title, description, category, status, due_at, completed_at, completed_by_staff_profile_id, assigned_staff_profile_id, metadata_json, created_by_staff_profile_id, updated_by_staff_profile_id)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
     const insertParams = [
-      Number.isInteger(caseIdValue) ? caseIdValue : null,
-      Number.isInteger(applicationIdValue) ? applicationIdValue : null,
-      Number.isInteger(actionPlanIdValue) ? actionPlanIdValue : null,
-      Number.isInteger(interventionIdValue) ? interventionIdValue : null,
+      reminderScope.caseId,
+      reminderScope.applicationId,
+      reminderScope.actionPlanId,
+      reminderScope.interventionId,
       title,
       descriptionValue,
       categoryValue,
@@ -69832,16 +72915,18 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
   if (!existing) {
     return res.status(404).json({ error: 'reminder_not_found' });
   }
-  const existingAccessError = await validateReminderAccess(req, existing, { allowGlobal: true });
-  if (existingAccessError) return res.status(existingAccessError.status).json(existingAccessError.body);
+  const existingScopeResolution = await resolveReminderAccess(req, existing, { allowGlobal: true });
+  if (existingScopeResolution.error) {
+    return res.status(existingScopeResolution.error.status).json(existingScopeResolution.error.body);
+  }
 
   const updates = [];
   const params = [];
   const actingStaffProfileId = req.staffProfile?.id || null;
-  let nextCaseId = normalisePositiveInteger(existing.caseId);
-  let nextApplicationId = normalisePositiveInteger(existing.applicationId);
-  let nextActionPlanId = normalisePositiveInteger(existing.actionPlanId);
-  let nextInterventionId = normalisePositiveInteger(existing.interventionId);
+  let nextCaseId = existingScopeResolution.scope.caseId;
+  let nextApplicationId = existingScopeResolution.scope.applicationId;
+  let nextActionPlanId = existingScopeResolution.scope.actionPlanId;
+  let nextInterventionId = existingScopeResolution.scope.interventionId;
 
   const caseIdProvided = hasOwn(body, 'caseId') || hasOwn(body, 'case_id');
   if (caseIdProvided) {
@@ -69850,8 +72935,6 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
       return res.status(400).json({ error: 'invalid_case_id' });
     }
     nextCaseId = Number.isInteger(caseIdValue) ? caseIdValue : null;
-    updates.push('case_id = ?');
-    params.push(nextCaseId);
   }
 
   const applicationIdProvided = hasOwn(body, 'applicationId') || hasOwn(body, 'application_id');
@@ -69861,8 +72944,6 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
       return res.status(400).json({ error: 'invalid_application_id' });
     }
     nextApplicationId = Number.isInteger(applicationIdValue) ? applicationIdValue : null;
-    updates.push('application_id = ?');
-    params.push(nextApplicationId);
   }
 
   const actionPlanProvided = hasOwn(body, 'actionPlanId') || hasOwn(body, 'action_plan_id');
@@ -69872,8 +72953,6 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
       return res.status(400).json({ error: 'invalid_action_plan_id' });
     }
     nextActionPlanId = Number.isInteger(actionPlanIdValue) ? actionPlanIdValue : null;
-    updates.push('action_plan_id = ?');
-    params.push(nextActionPlanId);
   }
 
   const interventionProvided = hasOwn(body, 'interventionId') || hasOwn(body, 'intervention_id');
@@ -69883,8 +72962,19 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
       return res.status(400).json({ error: 'invalid_intervention_id' });
     }
     nextInterventionId = Number.isInteger(interventionIdValue) ? interventionIdValue : null;
-    updates.push('intervention_id = ?');
-    params.push(nextInterventionId);
+  }
+
+  const scopeUpdateRequested =
+    caseIdProvided || applicationIdProvided || actionPlanProvided || interventionProvided;
+  if (interventionProvided && nextInterventionId) {
+    if (!actionPlanProvided) nextActionPlanId = null;
+    if (!applicationIdProvided) nextApplicationId = null;
+    if (!caseIdProvided) nextCaseId = null;
+  } else if (actionPlanProvided && nextActionPlanId && !nextInterventionId) {
+    if (!applicationIdProvided) nextApplicationId = null;
+    if (!caseIdProvided) nextCaseId = null;
+  } else if (applicationIdProvided && nextApplicationId && !nextActionPlanId && !nextInterventionId) {
+    if (!caseIdProvided) nextCaseId = null;
   }
 
   if (hasOwn(body, 'title')) {
@@ -70066,22 +73156,35 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
     params.push(metadataJsonValue ?? null);
   }
 
-  if (!updates.length) {
+  if (!updates.length && !scopeUpdateRequested) {
     return res.status(400).json({ error: 'no_fields_to_update' });
   }
 
-  if (caseIdProvided || applicationIdProvided || actionPlanProvided || interventionProvided) {
-    const targetAccessError = await validateReminderTargetAccess(req, {
+  let reminderScope = existingScopeResolution.scope;
+  if (scopeUpdateRequested) {
+    const targetResolution = await resolveReminderTargetScope(req, {
       caseId: nextCaseId,
       applicationId: nextApplicationId,
       actionPlanId: nextActionPlanId,
       interventionId: nextInterventionId,
       allowGlobal: true,
     });
-    if (targetAccessError) return res.status(targetAccessError.status).json(targetAccessError.body);
+    if (targetResolution.error) {
+      return res.status(targetResolution.error.status).json(targetResolution.error.body);
+    }
+    reminderScope = targetResolution.scope;
+
+    const explicitScopeMismatch =
+      (caseIdProvided && reminderScope.caseId !== nextCaseId) ||
+      (applicationIdProvided && reminderScope.applicationId !== nextApplicationId) ||
+      (actionPlanProvided && reminderScope.actionPlanId !== nextActionPlanId) ||
+      (interventionProvided && reminderScope.interventionId !== nextInterventionId);
+    if (explicitScopeMismatch) {
+      return res.status(409).json({ error: 'reminder_target_scope_mismatch' });
+    }
   }
-  if (interventionProvided && nextInterventionId) {
-    const interventionRow = await fetchInterventionWithCase(nextInterventionId);
+  if (interventionProvided && reminderScope.interventionId) {
+    const interventionRow = await fetchInterventionWithCase(reminderScope.interventionId);
     if (!interventionRow) {
       return res.status(404).json({ error: 'intervention_not_found' });
     }
@@ -70095,6 +73198,14 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
     }
   }
 
+  updates.push('case_id = ?');
+  params.push(reminderScope.caseId);
+  updates.push('application_id = ?');
+  params.push(reminderScope.applicationId);
+  updates.push('action_plan_id = ?');
+  params.push(reminderScope.actionPlanId);
+  updates.push('intervention_id = ?');
+  params.push(reminderScope.interventionId);
   updates.push('updated_by_staff_profile_id = ?');
   params.push(actingStaffProfileId || null);
   updates.push('updated_at = CURRENT_TIMESTAMP');
@@ -70212,6 +73323,10 @@ app.post('/api/reminders/:reminderId/acknowledge', async (req, res) => {
   if (!Number.isInteger(reminderId) || reminderId <= 0) {
     return res.status(400).json({ error: 'invalid_reminder_id' });
   }
+  const expectedScope = resolveReminderMutationScopeExpectation(req.body || {});
+  if (expectedScope.error) {
+    return res.status(expectedScope.error.status).json(expectedScope.error.body);
+  }
   const actingStaffProfileId = req.staffProfile?.id || null;
   let connection;
   try {
@@ -70233,26 +73348,48 @@ app.post('/api/reminders/:reminderId/acknowledge', async (req, res) => {
       return res.status(404).json({ error: 'reminder_not_found' });
     }
     const reminderRow = rows[0];
-    const accessError = await validateReminderAccess(req, reminderRow, { allowGlobal: true, connection });
-    if (accessError) {
+    const scopeResolution = await resolveReminderAccess(req, reminderRow, { allowGlobal: true, connection });
+    if (scopeResolution.error) {
       await connection.rollback();
-      return res.status(accessError.status).json(accessError.body);
+      return res.status(scopeResolution.error.status).json(scopeResolution.error.body);
+    }
+    const reminderScope = scopeResolution.scope;
+    const expectedScopeError = validateReminderMutationScopeExpectation(
+      reminderScope,
+      expectedScope
+    );
+    if (expectedScopeError) {
+      await connection.rollback();
+      return res.status(expectedScopeError.status).json(expectedScopeError.body);
     }
     const metadata = safeJsonParse(reminderRow.metadata_json, {});
     const noteId = metadata?.case_note_id ? Number(metadata.case_note_id) : null;
-    const caseIdValue = reminderRow.case_id || null;
+    const caseIdValue = reminderScope.caseId;
 
     const completedAt = new Date();
     await connection.query(
       `UPDATE iset_case_reminder
-         SET status = 'completed',
+         SET case_id = ?,
+             application_id = ?,
+             action_plan_id = ?,
+             intervention_id = ?,
+             status = 'completed',
              completed_at = ?,
              completed_by_staff_profile_id = COALESCE(?, completed_by_staff_profile_id),
              updated_by_staff_profile_id = COALESCE(?, updated_by_staff_profile_id),
              deleted_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND deleted_at IS NULL`,
-      [completedAt, actingStaffProfileId || null, actingStaffProfileId || null, reminderId]
+      [
+        reminderScope.caseId,
+        reminderScope.applicationId,
+        reminderScope.actionPlanId,
+        reminderScope.interventionId,
+        completedAt,
+        actingStaffProfileId || null,
+        actingStaffProfileId || null,
+        reminderId,
+      ]
     );
 
     if (noteId && caseIdValue) {
@@ -70275,8 +73412,10 @@ app.post('/api/reminders/:reminderId/acknowledge', async (req, res) => {
       const { actorId, actorName } = resolveRequestActor(req);
       const reminderForEvent = {
         id: reminderRow.id,
-        caseId: reminderRow.case_id || null,
-        applicationId: reminderRow.application_id || null,
+        caseId: reminderScope.caseId,
+        applicationId: reminderScope.applicationId,
+        actionPlanId: reminderScope.actionPlanId,
+        interventionId: reminderScope.interventionId,
         title: reminderRow.title || null,
         description: reminderRow.description || null,
         category: reminderRow.category || null,
@@ -70292,7 +73431,15 @@ app.post('/api/reminders/:reminderId/acknowledge', async (req, res) => {
       console.warn('[reminders] failed to emit reminder_completed (acknowledge)', eventErr?.message || eventErr);
     }
 
-    return res.json({ ok: true, reminderId, noteId, caseId: caseIdValue });
+    return res.json({
+      ok: true,
+      reminderId,
+      noteId,
+      caseId: reminderScope.caseId,
+      applicationId: reminderScope.applicationId,
+      actionPlanId: reminderScope.actionPlanId,
+      interventionId: reminderScope.interventionId,
+    });
   } catch (err) {
     if (connection) {
       try { await connection.rollback(); } catch (_) { /* ignore */ }
@@ -70393,7 +73540,7 @@ app.post('/api/cases/:caseId/notes', async (req, res) => {
       try {
         const reminderId = await createReminderForCaseNote(connection, {
           caseId,
-          applicationId: caseRow.application_id || null,
+          applicationId: null,
           noteId,
           noteBody: trimmed,
           dueAt: followUpDate,
@@ -70747,12 +73894,19 @@ app.delete('/api/cases/:caseId/notes/:noteId', async (req, res) => {
 app.get('/api/cases/:id/messages', async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
-	  try {
-	    const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
-	    if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
-	    await ensureCaseMessageItemTable();
-	    const requestedApplicationId = normalisePositiveInteger(req.query.applicationId || req.query.application_id);
-	    const requesterRole = canonicaliseAccessRole(inferUserRole(req));
+  const requestedApplicationIdResolution = resolveCaseMessageApplicationIdInput(
+    req.query?.applicationId,
+    req.query?.application_id
+  );
+  if (!requestedApplicationIdResolution.valid) {
+    return res.status(400).json({ error: 'invalid_application_id' });
+  }
+  const requestedApplicationId = requestedApplicationIdResolution.applicationId;
+  try {
+    const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
+    if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
+    await ensureCaseMessageItemTable();
+    const requesterRole = canonicaliseAccessRole(inferUserRole(req));
     const isStaffRequester = req?.auth?.subjectType === 'staff' || Boolean(requesterRole);
     if (isStaffRequester) {
       const accessError = await validateCaseAccessByCaseId(req, caseId);
@@ -70980,6 +74134,43 @@ function validateCaseMessageSigningAttachmentRequest(rawAttachments, normalizedA
     return { valid: false, error: 'duplicate_signing_workflow_id' };
   }
   return { valid: true };
+}
+
+function parseOptionalCaseMessageApplicationId(value) {
+  if (value === null || typeof value === 'undefined') {
+    return { valid: true, applicationId: null };
+  }
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return { valid: false, applicationId: null };
+  }
+  const token = typeof value === 'string' ? value.trim() : value;
+  if (token === '' || (typeof token === 'string' && !/^[0-9]+$/.test(token))) {
+    return { valid: false, applicationId: null };
+  }
+  const numeric = Number(token);
+  if (!Number.isSafeInteger(numeric) || numeric <= 0) {
+    return { valid: false, applicationId: null };
+  }
+  return { valid: true, applicationId: numeric };
+}
+
+function resolveCaseMessageApplicationIdInput(primaryValue, fallbackValue) {
+  const primary = parseOptionalCaseMessageApplicationId(primaryValue);
+  const fallback = parseOptionalCaseMessageApplicationId(fallbackValue);
+  if (!primary.valid || !fallback.valid) {
+    return { valid: false, applicationId: null };
+  }
+  if (
+    primary.applicationId &&
+    fallback.applicationId &&
+    primary.applicationId !== fallback.applicationId
+  ) {
+    return { valid: false, applicationId: null };
+  }
+  return {
+    valid: true,
+    applicationId: primary.applicationId || fallback.applicationId || null,
+  };
 }
 
 function createCaseMessageHttpError(status, error, message, details = null) {
@@ -71505,6 +74696,187 @@ function mapCaseMessagePublicError(error) {
   );
 }
 
+async function persistCaseMessageDecisionLetterArtifacts({
+  connection,
+  decisionLetterDocs = [],
+  caseId,
+  applicationId,
+  ownerContext = null,
+  applicantUserId,
+  actorUserId,
+  trackingId = null,
+  uploadedObjectKeys = null,
+  resolveClientIdFn = resolveClientIdForDocument,
+  generatePdfBufferFn = generateDecisionLetterPdfBuffer,
+  storePdfDocumentFn = storeDecisionLetterPdfDocument,
+} = {}) {
+  const letters = (Array.isArray(decisionLetterDocs) ? decisionLetterDocs : [])
+    .filter(letter => Boolean(resolveWorkflowDecisionLetterDocumentType(letter?.docType)));
+  if (!letters.length) {
+    return { documents: [], applicationDecisionLetterTypes: [] };
+  }
+  if (!connection || typeof connection.query !== 'function') {
+    throw createCaseMessageHttpError(
+      500,
+      'decision_letter_transaction_required',
+      'The decision letter could not be sent safely.'
+    );
+  }
+  if (!Array.isArray(uploadedObjectKeys)) {
+    throw createCaseMessageHttpError(
+      503,
+      'decision_letter_compensation_unavailable',
+      'Decision-letter storage is temporarily unavailable. The message was not sent.'
+    );
+  }
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!normalizedCaseId || !normalizedApplicationId) {
+    throw createCaseMessageHttpError(
+      409,
+      'decision_letter_application_scope_required',
+      'The exact application could not be verified for this decision letter.'
+    );
+  }
+  let normalizedOwner;
+  try {
+    normalizedOwner = normaliseDecisionLetterOwnerContext({
+      applicationId: normalizedApplicationId,
+      ownerContext,
+    });
+  } catch (cause) {
+    const error = createCaseMessageHttpError(
+      409,
+      'decision_letter_owner_scope_conflict',
+      'The exact application, Action Plan, intervention, and proposal could not be verified for this letter.'
+    );
+    error.cause = cause;
+    throw error;
+  }
+
+  const applicationDecisionLetterTypes = Array.from(new Set(
+    letters.map(letter => letter.docType)
+  ));
+  if (applicationDecisionLetterTypes.length > 1) {
+    throw createCaseMessageHttpError(
+      409,
+      'decision_letter_scope_conflict',
+      'Only one application decision letter can be sent in a message.'
+    );
+  }
+  if (
+    normalizedOwner.kind === 'intervention' &&
+    applicationDecisionLetterTypes.some(type => type !== 'assessment_approval_letter')
+  ) {
+    throw createCaseMessageHttpError(
+      409,
+      'intervention_letter_document_type_conflict',
+      'Only an approval letter can be sent for an approved intervention or revision.'
+    );
+  }
+
+  let resolvedClientId = null;
+  try {
+    resolvedClientId = await resolveClientIdFn({
+      applicantUserId,
+      caseId: normalizedCaseId,
+      applicationId: normalizedApplicationId,
+      connection,
+    });
+  } catch (cause) {
+    const error = createCaseMessageHttpError(
+      409,
+      'decision_letter_client_scope_conflict',
+      'The decision letter could not be attached to the selected client and application.'
+    );
+    error.cause = cause;
+    throw error;
+  }
+  if (!normalisePositiveInteger(resolvedClientId)) {
+    throw createCaseMessageHttpError(
+      409,
+      'decision_letter_client_scope_missing',
+      'The decision letter could not be attached because its client scope is missing.'
+    );
+  }
+
+  const documents = [];
+  for (const letter of letters) {
+    if (!Array.isArray(letter?.schema?.steps) || !letter.schema.steps.length) {
+      throw createCaseMessageHttpError(
+        409,
+        'decision_letter_schema_invalid',
+        'The selected decision-letter workflow has no valid document content.'
+      );
+    }
+    let pdfBuffer;
+    try {
+      pdfBuffer = await generatePdfBufferFn({
+        workflowName: letter.workflowName,
+        steps: letter.schema.steps,
+        values: {},
+        signedAt: null,
+      });
+    } catch (cause) {
+      const error = createCaseMessageHttpError(
+        503,
+        'decision_letter_pdf_generation_failed',
+        'The decision-letter PDF could not be generated. The message was not sent.'
+      );
+      error.cause = cause;
+      throw error;
+    }
+
+    let documentId;
+    try {
+      documentId = await storePdfDocumentFn({
+        docType: letter.docType,
+        caseId: normalizedCaseId,
+        applicationId: normalizedApplicationId,
+        applicantUserId,
+        actorUserId,
+        clientId: resolvedClientId,
+        trackingId,
+        signingRequestId: letter.signingRequestId,
+        pdfBuffer,
+        connection,
+        uploadedObjectKeys,
+        ownerContext: normalizedOwner,
+      });
+    } catch (cause) {
+      const error = createCaseMessageHttpError(
+        503,
+        'decision_letter_artifact_storage_failed',
+        'The decision letter could not be stored safely. The message was not sent.'
+      );
+      error.cause = cause;
+      error.retrySafe = cause?.retrySafe === true;
+      error.manualReviewRequired = cause?.manualReviewRequired === true;
+      throw error;
+    }
+    const normalizedDocumentId = normalisePositiveInteger(documentId);
+    if (!normalizedDocumentId) {
+      throw createCaseMessageHttpError(
+        503,
+        'decision_letter_artifact_storage_failed',
+        'The decision letter could not be stored safely. The message was not sent.'
+      );
+    }
+    documents.push({
+      documentId: normalizedDocumentId,
+      docType: letter.docType,
+      signingRequestId: normalisePositiveInteger(letter.signingRequestId) || null,
+    });
+  }
+
+  return {
+    documents,
+    applicationDecisionLetterTypes,
+    ownerType: normalizedOwner.kind,
+    ownerContext: normalizedOwner,
+  };
+}
+
 async function resolveEligibleSigningWorkflowRows(
   connection,
   attachmentSpecs,
@@ -71778,7 +75150,11 @@ const handlePostCaseSecureMessage = async (req, res) => {
 	    attachments,
 	    interventionId,
 	    applicationId,
-	    application_id
+	    application_id,
+      expectedApplicationRowVersion,
+      expected_application_row_version,
+      replyTo,
+      reply_to
 	  } = req.body || {};
   if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
   const subjectValue = typeof subject === 'string' ? subject.trim() : '';
@@ -71787,7 +75163,29 @@ const handlePostCaseSecureMessage = async (req, res) => {
   const fromNameValue = typeof fromDisplayName === 'string' ? fromDisplayName.trim() : '';
 	  const attachmentSpecs = normalizeCaseMessageSigningAttachments(attachments);
   const attachmentValidation = validateCaseMessageSigningAttachmentRequest(attachments, attachmentSpecs);
-  const requestedApplicationId = normalisePositiveInteger(applicationId || application_id);
+  const requestedApplicationIdResolution = resolveCaseMessageApplicationIdInput(
+    applicationId,
+    application_id
+  );
+  if (!requestedApplicationIdResolution.valid) {
+    return res.status(400).json({ error: 'invalid_application_id' });
+  }
+  const requestedApplicationId = requestedApplicationIdResolution.applicationId;
+  const requestedReplyToRaw = replyTo ?? reply_to;
+  const requestedReplyToId = requestedReplyToRaw == null
+    ? null
+    : normalisePositiveInteger(requestedReplyToRaw);
+  if (requestedReplyToRaw != null && !requestedReplyToId) {
+    return res.status(400).json({ error: 'invalid_reply_to_message_id' });
+  }
+  const expectedApplicationRowVersionRaw =
+    expectedApplicationRowVersion ?? expected_application_row_version;
+  const expectedApplicationRowVersionNumber = expectedApplicationRowVersionRaw == null
+    ? null
+    : normalisePositiveInteger(expectedApplicationRowVersionRaw);
+  if (expectedApplicationRowVersionRaw != null && !expectedApplicationRowVersionNumber) {
+    return res.status(400).json({ error: 'invalid_expected_application_row_version' });
+  }
   if (!attachmentValidation.valid) {
     return res.status(400).json({ error: attachmentValidation.error });
   }
@@ -71812,8 +75210,31 @@ const handlePostCaseSecureMessage = async (req, res) => {
     const accessError = await validateCaseAccessByCaseId(req, caseId);
     if (accessError) return res.status(accessError.status).json(accessError.body);
 
+	    let replyTargetMessage = null;
+      if (requestedReplyToId) {
+        replyTargetMessage = await fetchCaseSecureMessageRow(requestedReplyToId);
+        if (!replyTargetMessage) {
+          return res.status(404).json({ error: 'reply_message_not_found' });
+        }
+        if (isCaseSecureMessageUnavailableForReply(replyTargetMessage)) {
+          return res.status(409).json({ error: 'reply_message_unavailable' });
+        }
+        const replyCaseId = normalisePositiveInteger(replyTargetMessage.case_id);
+        const replyApplicationId = normalisePositiveInteger(replyTargetMessage.application_id);
+        if (replyCaseId !== caseId) {
+          return res.status(409).json({ error: 'reply_message_case_scope_mismatch' });
+        }
+        if (requestedApplicationId && replyApplicationId !== requestedApplicationId) {
+          return res.status(409).json({ error: 'reply_message_application_scope_mismatch' });
+        }
+      }
+
 	    // Resolve applicant user id
-	    const caseRow = await resolveCaseApplicantMessagingContext(caseId, { applicationId: requestedApplicationId });
+	    const caseRow = await resolveCaseApplicantMessagingContext(caseId, {
+        applicationId: replyTargetMessage
+          ? normalisePositiveInteger(replyTargetMessage.application_id)
+          : requestedApplicationId,
+      });
     if (!caseRow) return res.status(404).json({ error: 'case_not_found' });
     if (caseRow.applicant_resolution_conflict) {
       console.error(
@@ -71828,7 +75249,9 @@ const handlePostCaseSecureMessage = async (req, res) => {
 	    const recipientId = caseRow?.applicant_user_id || null;
 	    if (!recipientId) return res.status(404).json({ error: 'applicant_not_found' });
 	    const caseApplicationId = normalisePositiveInteger(caseRow?.application_id);
-	    const messageApplicationId = caseApplicationId || null;
+	    const messageApplicationId = replyTargetMessage
+        ? normalisePositiveInteger(replyTargetMessage.application_id)
+        : (caseApplicationId || null);
 	    if (requestedApplicationId && requestedApplicationId !== messageApplicationId) {
 	      return res.status(409).json({
 	        error: 'application_scope_conflict',
@@ -71868,6 +75291,9 @@ const handlePostCaseSecureMessage = async (req, res) => {
         message: 'Staff sender identity resolved to the applicant account. Sign in with a distinct staff account or repair the account mapping before sending secure messages.'
       });
     }
+    if (replyTargetMessage && !caseSecureMessageHasApplicantParticipant(replyTargetMessage, recipientId)) {
+      return res.status(409).json({ error: 'reply_message_applicant_scope_mismatch' });
+    }
 
     // Resolve eligible workflow attachments (consent forms only)
     let attachmentRows = [];
@@ -71875,7 +75301,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
     const decisionLetterSchemaOverridesByWorkflowId = new Map();
     const decisionLetterDocs = [];
     const serverDocumentTypeFallbackByWorkflowId = new Map();
-    let denialLetterCompletionResult = null;
+    let decisionLetterPersistenceResult = null;
     const requestedInterventionId = normalisePositiveInteger(interventionId);
     let requestedInterventionLetterEligibility = null;
     if (attachmentSpecs.length) {
@@ -72160,9 +75586,20 @@ const handlePostCaseSecureMessage = async (req, res) => {
     messageWriteConnection = await pool.getConnection();
     await messageWriteConnection.beginTransaction();
     messageWriteTransactionStarted = true;
+    if (requestedReplyToId) {
+      await lockAndValidateCaseMessageReplyTarget({
+        connection: messageWriteConnection,
+        req,
+        replyMessageId: requestedReplyToId,
+        caseId,
+        applicationId: messageApplicationId,
+        applicantUserId: recipientId,
+        ownerUserId: senderId,
+      });
+    }
     if (attachmentRows.length) {
       const [[lockedApplicationRow]] = await messageWriteConnection.query(
-        `SELECT id, status, lifecycle_status, decision_outcome
+        `SELECT id, status, lifecycle_status, decision_outcome, row_version
            FROM iset_application
           WHERE id = ?
             AND case_id = ?
@@ -72174,6 +75611,17 @@ const handlePostCaseSecureMessage = async (req, res) => {
           409,
           'application_scope_conflict',
           'The selected application no longer belongs to this case.'
+        );
+      }
+      if (
+        expectedApplicationRowVersionNumber &&
+        Number(lockedApplicationRow.row_version) !== expectedApplicationRowVersionNumber
+      ) {
+        throw createCaseMessageHttpError(
+          409,
+          'row_version_conflict',
+          'The selected application changed before the message could be sent. Please reload and try again.',
+          { currentRowVersion: Number(lockedApplicationRow.row_version) || null }
         );
       }
       await lockCaseForVersionedSigning(messageWriteConnection, caseId);
@@ -72731,6 +76179,15 @@ const handlePostCaseSecureMessage = async (req, res) => {
         !!urgent,
       ]
     );
+    if (requestedReplyToId) {
+      await markCaseMessageReplyTargetReplied({
+        connection: messageWriteConnection,
+        replyMessageId: requestedReplyToId,
+        caseId,
+        applicationId: messageApplicationId,
+        applicantUserId: recipientId,
+      });
+    }
     messageCommitIdentity = {
       messageId: result.insertId,
       caseId,
@@ -72829,6 +76286,69 @@ const handlePostCaseSecureMessage = async (req, res) => {
             signingRequestId
           });
         }
+      }
+    }
+    if (decisionLetterDocs.length) {
+      const decisionLetterOwnerContext = requestedInterventionId
+        ? {
+            kind: 'intervention',
+            applicationId: requestedInterventionLetterEligibility?.applicationId,
+            actionPlanId: requestedInterventionLetterEligibility?.actionPlanId,
+            interventionId: requestedInterventionLetterEligibility?.interventionId,
+            proposalId: requestedInterventionLetterEligibility?.proposalId,
+            workflowId: requestedInterventionLetterEligibility?.workflowId,
+            proposalKind: requestedInterventionLetterEligibility?.proposalKind,
+            revisionDraftInterventionId:
+              requestedInterventionLetterEligibility?.revisionDraftInterventionId,
+            sourceInterventionId:
+              requestedInterventionLetterEligibility?.sourceInterventionId,
+            sourceItemId: requestedInterventionLetterEligibility?.sourceItemId,
+          }
+        : { kind: 'application', applicationId: caseApplicationId };
+      const persistedDecisionLetterArtifacts = await persistCaseMessageDecisionLetterArtifacts({
+        connection: messageWriteConnection,
+        decisionLetterDocs,
+        caseId,
+        applicationId: caseApplicationId,
+        ownerContext: decisionLetterOwnerContext,
+        applicantUserId: recipientId,
+        actorUserId: senderId,
+        trackingId: trackingReference,
+        uploadedObjectKeys: generatedObjectKeys,
+      });
+      const [applicationDecisionLetterType] =
+        persistedDecisionLetterArtifacts.applicationDecisionLetterTypes;
+      const letterKey = applicationDecisionLetterType === 'assessment_denial_letter'
+        ? 'denial'
+        : 'approval';
+      decisionLetterPersistenceResult = requestedInterventionId
+        ? await markApprovedInterventionProposalLetterSent({
+            connection: messageWriteConnection,
+            caseId,
+            applicationId: caseApplicationId,
+            interventionId: requestedInterventionId,
+            eligibility: requestedInterventionLetterEligibility,
+            messageId: result.insertId,
+            signingRequestIds: decisionLetterDocs
+              .map(letter => normalisePositiveInteger(letter?.signingRequestId))
+              .filter(Boolean),
+            actorStaffProfileId: senderStaffProfileId || null,
+            actorUserId: senderId || null,
+          })
+        : await recordApplicationDecisionLetterSent({
+            caseId,
+            applicationId: caseApplicationId,
+            letterKey,
+            connection: messageWriteConnection,
+          });
+      if (!decisionLetterPersistenceResult?.updated) {
+        throw createCaseMessageHttpError(
+          409,
+          decisionLetterPersistenceResult?.reason || 'decision_letter_persistence_failed',
+          requestedInterventionId
+            ? 'The intervention approval state changed before the letter could be sent. Please reload and try again.'
+            : 'The application decision state changed before the letter could be sent. Please reload and try again.'
+        );
       }
     }
     const hasDocsRequestedSigningForms =
@@ -72939,92 +76459,6 @@ const handlePostCaseSecureMessage = async (req, res) => {
         );
       }
     }
-    if (decisionLetterDocs.length) {
-      const decisionApplicationId = normalisePositiveInteger(caseRow?.application_id) || null;
-      if (decisionApplicationId) {
-        let resolvedClientId = null;
-        try {
-          resolvedClientId = await resolveClientIdForDocument({
-            applicantUserId: recipientId,
-            caseId,
-            applicationId: decisionApplicationId
-          });
-        } catch (err) {
-          console.warn('[decision-letter] client resolution failed', err?.message || err);
-          resolvedClientId = null;
-        }
-        if (resolvedClientId) {
-          for (const letter of decisionLetterDocs) {
-            if (!letter?.schema?.steps?.length) continue;
-            try {
-              const pdfBuffer = await generateDecisionLetterPdfBuffer({
-                workflowName: letter.workflowName,
-                steps: letter.schema.steps,
-                values: {},
-                signedAt: null
-              });
-              await storeDecisionLetterPdfDocument({
-                docType: letter.docType,
-                caseId,
-                applicationId: decisionApplicationId,
-                applicantUserId: recipientId,
-                actorUserId: senderId,
-                clientId: resolvedClientId,
-                trackingId: trackingReference,
-                signingRequestId: letter.signingRequestId,
-                pdfBuffer
-              });
-            } catch (err) {
-              console.warn('[decision-letter] PDF generation failed', err?.message || err);
-            }
-          }
-        } else {
-          console.warn('[decision-letter] missing client id; skipping document insert');
-        }
-      } else {
-        console.warn('[decision-letter] missing application id; skipping document insert');
-      }
-    }
-    if (
-      !requestedInterventionId &&
-      caseApplicationId &&
-      decisionLetterDocs.some(letter => letter?.docType === 'assessment_denial_letter')
-    ) {
-      try {
-        denialLetterCompletionResult = await completeDeniedApplicationAfterDenialLetterSent({
-          caseId,
-          applicationId: caseApplicationId,
-        });
-      } catch (completionError) {
-        console.error(
-          '[decision-letter] committed denial completion failed',
-          completionError?.message || completionError
-        );
-      }
-    }
-    if (
-      requestedInterventionId &&
-      decisionLetterDocs.some(letter => letter?.docType === 'assessment_approval_letter')
-    ) {
-      try {
-        await markApprovedInterventionProposalLetterSent({
-          connection: pool,
-          caseId,
-          interventionId: requestedInterventionId,
-          messageId: result.insertId,
-          signingRequestIds: decisionLetterDocs
-            .map(letter => normalisePositiveInteger(letter?.signingRequestId))
-            .filter(Boolean),
-          actorStaffProfileId: senderStaffProfileId || null,
-          actorUserId: senderId || null,
-        });
-      } catch (proposalLetterError) {
-        console.error(
-          '[decision-letter] committed intervention letter tracking failed',
-          proposalLetterError?.message || proposalLetterError
-        );
-      }
-    }
     const effectiveApplicantName =
       contextApplicantName ||
       resolveApplicantDisplayName({ caseRow: { applicant_name: toNameValue }, fallback: null }) ||
@@ -73041,6 +76475,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
         caseId,
         payload: {
           message_id: result.insertId,
+          reply_to_message_id: requestedReplyToId || null,
           message_subject: subjectValue || null,
           sender_actor_type: senderActorType,
           sender_user_id: senderId,
@@ -73077,8 +76512,14 @@ const handlePostCaseSecureMessage = async (req, res) => {
     res.status(201).json({
       message: 'Message sent',
       messageId: result.insertId,
-      ...(denialLetterCompletionResult
-        ? { denialLetterCompletion: denialLetterCompletionResult }
+      replyToMessageId: requestedReplyToId || null,
+      ...(decisionLetterPersistenceResult
+        ? {
+            decisionLetterPersistence: decisionLetterPersistenceResult,
+            ...(decisionLetterPersistenceResult.letterKey === 'denial'
+              ? { denialLetterCompletion: decisionLetterPersistenceResult }
+              : {}),
+          }
         : {})
     });
   } catch (e) {
@@ -79098,21 +82539,6 @@ const buildRecurringServicePeriods = ({ startDate, endDate, period, occurrences 
     return { periods: [], error: 'invalid_date_range' };
   }
   return { periods, error: null };
-};
-
-const normalizeEiClaimantCode = value => {
-  if (value === null || typeof value === 'undefined') return null;
-  const raw = String(value).trim();
-  if (!raw) return null;
-  const numeric = Number(raw);
-  if (Number.isFinite(numeric) && numeric >= 1 && numeric <= 3) {
-    return String(numeric);
-  }
-  const lowered = raw.toLowerCase();
-  if (['ei claimant', 'employment insurance claimant', 'ei active claim', 'ei active'].includes(lowered)) return '1';
-  if (['reach-back', 'reach back', 'former claimant', 'reach-back client/former claimant'].includes(lowered)) return '2';
-  if (['crf', 'non-insured client', 'non insured client', 'noninsured client'].includes(lowered)) return '3';
-  return null;
 };
 
 const normalizeEiStatusValue = value => {
@@ -94017,6 +97443,7 @@ app.post('/api/applications/manual-intake', async (req, res) => {
       portfolioRegionId,
       createdByStaffProfileId,
       updatedByStaffProfileId: createdByStaffProfileId,
+      reopenForNewApplication: true,
     });
     const caseId = caseResolution.caseId;
 
@@ -97834,14 +101261,6 @@ app.put('/api/cases/:id', async (req, res) => {
     if (max !== null && rounded > max) return null;
     return rounded;
   };
-  const normalizeConflictChoice = (val) => {
-    if (typeof val !== 'string') return null;
-    const normalized = val.trim().toLowerCase();
-    if (!normalized) return null;
-    if (['no_conflict', 'no-conflict', 'none', 'no'].includes(normalized)) return 'no_conflict';
-    if (['conflict', 'has_conflict', 'potential_conflict', 'possible_conflict', 'yes'].includes(normalized)) return 'conflict';
-    return null;
-  };
   const sanitizeConflictDetails = (val) => {
     if (typeof val !== 'string') return null;
     const trimmed = val.trim();
@@ -97901,6 +101320,7 @@ app.put('/api/cases/:id', async (req, res) => {
   let shouldEnsureClientLink = false;
   let shouldMarkSubmissionNeedsReview = false;
   let shouldRecomputeCaseStatus = false;
+  let allowAggregateCaseReopen = false;
   let autoPlanSuggestion = null;
   let autoPlanApprovalUserId = null;
   let deniedReportingSeedResult = null;
@@ -98123,13 +101543,22 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         const [[dependencyRow]] = await conn.query(
           `SELECT
               (SELECT COUNT(*)
-                 FROM iset_case_action_plan
-                WHERE case_id = ?
-                  AND archived_at IS NULL) AS action_plan_count,
+                 FROM iset_case_action_plan ap
+                WHERE ap.case_id = ?
+                  AND (ap.application_id = ? OR ap.application_id IS NULL)
+                  AND ap.archived_at IS NULL) AS action_plan_count,
               (SELECT COUNT(*)
-                 FROM iset_case_intervention
-                WHERE case_id = ?) AS intervention_count`,
-          [caseId, caseId]
+                 FROM iset_case_intervention ci
+                 LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+                WHERE ci.case_id = ?
+                  AND (
+                    ci.action_plan_id IS NULL
+                    OR (
+                      ap.case_id = ?
+                      AND (ap.application_id = ? OR ap.application_id IS NULL)
+                    )
+                  )) AS intervention_count`,
+          [caseId, applicationId, caseId, caseId, applicationId]
         );
         const actionPlanCount = Number(dependencyRow?.action_plan_count || 0);
         const interventionCount = Number(dependencyRow?.intervention_count || 0);
@@ -98180,8 +101609,15 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           caseClosureReasonToPersist !== beforeCaseClosureReason
         );
       const caseLifecycleChanged = statusToPersist !== beforeStatusNormalised;
+      const deferTerminalCaseTransitionToApplicationAggregate =
+        Boolean(applicationId) &&
+        Object.prototype.hasOwnProperty.call(body, 'applicationStatus') &&
+        (
+          caseLifecycleStatusToPersist === CASE_STATUS_DERIVED_VALUES.closed ||
+          caseLifecycleStatusToPersist === CASE_STATUS_DERIVED_VALUES.archived
+        );
 
-      if (caseStatusNeedsPersistenceUpdate) {
+      if (caseStatusNeedsPersistenceUpdate && !deferTerminalCaseTransitionToApplicationAggregate) {
         await conn.query(
           'UPDATE iset_case SET status = ?, lifecycle_status = ?, closure_reason = ? WHERE id = ?',
           [statusToPersist, caseLifecycleStatusToPersist, caseClosureReasonToPersist, caseId]
@@ -98203,6 +101639,13 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         if (beforeStatusNormalised === CASE_STATUS_DERIVED_VALUES.initiated && statusToPersist !== CASE_STATUS_DERIVED_VALUES.initiated) {
           shouldMarkSubmissionNeedsReview = true;
         }
+      } else if (deferTerminalCaseTransitionToApplicationAggregate) {
+        // A selected application may request a terminal decision, but the case is
+        // the long-lived file. Persist the exact application first, materialize any
+        // reporting artifact, then let the aggregate case derivation decide whether
+        // sibling applications or service plans keep the case open.
+        shouldRecomputeCaseStatus = true;
+        allowAggregateCaseReopen = true;
       }
     }
 
@@ -98538,6 +101981,43 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
             assessmentSubmittedForWorkflow,
         }
       );
+    }
+
+    try {
+      const assessmentDraftStart = await resolveApplicationAssessmentDraftStart(conn, {
+        caseId,
+        applicationId,
+        beforeApplicationStatus,
+        assessmentWriteRequested: hasAssessmentPayload,
+        assessmentSubmittedForWorkflow,
+        reviewWorkflow: applicationAssessmentReviewWorkflow,
+        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+        actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+        assignedStaffProfileId: existingCase.assigned_to_user_id || null,
+      });
+      if (assessmentDraftStart.shouldStart) {
+        const applicationStatusPersistence = buildApplicationStatusPersistence('in_review', {
+          lifecycleStatus: beforeApplicationLifecycleStatus,
+          decisionOutcome: beforeApplicationDecisionOutcome,
+          awaitingReason: beforeApplicationAwaitingReason,
+          closureReason: beforeApplicationClosureReason,
+        });
+        applicationStatusToPersist = applicationStatusPersistence.legacyStatus;
+        applicationLifecycleStatusToPersist = applicationStatusPersistence.lifecycleStatus;
+        applicationDecisionOutcomeToPersist = applicationStatusPersistence.decisionOutcome;
+        applicationAwaitingReasonToPersist = applicationStatusPersistence.awaitingReason;
+        applicationClosureReasonToPersist = applicationStatusPersistence.closureReason;
+      }
+    } catch (error) {
+      await conn.rollback();
+      return res.status(Number(error?.status) || 409).json({
+        success: false,
+        error: error?.code || error?.message || 'assessment_start_forbidden',
+        message:
+          error?.publicMessage ||
+          'This application assessment cannot be started by the current staff member.',
+        lock: lockCheck.lock || null,
+      });
     }
 
     if (assessmentSubmittedForWorkflow) {
@@ -99209,7 +102689,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     }
 
     if (shouldMarkSubmissionNeedsReview) {
-      await markEsdcParticipantSubmissionNeedsReview(conn, caseId, { resetSnapshot: true, resetSubmissionStatus: true });
+      await markIlmpNeedsReviewForApplication(caseId, applicationId, conn);
     }
 
     if (eligibilityCorrectionEvent) {
@@ -99305,7 +102785,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     }
 
     if (shouldRecomputeCaseStatus) {
-      await recomputeCaseStatus(caseId, conn);
+      await recomputeCaseStatus(caseId, conn, {
+        allowReopenFinal: allowAggregateCaseReopen || staffApplicationReopenRequested,
+      });
     }
 
     const submitActionRawForRequiredDocs = body.assessment_submit_action;
@@ -102463,6 +105945,7 @@ const adminRepairExports = {
   applyApplicationAssessmentReviewWorkflowAction,
   applicationAssessmentCaseContextMutationKinds,
   classifyApplicationAssessmentMutationRequest,
+  resolveApplicationAssessmentDraftStart,
   projectApplicationAssessmentCaseContextPatch,
   assertApplicationAssessmentReviewOwnedStatusMutationAllowed,
   assertApplicationAssessmentMutationStageAllowed,
@@ -102482,6 +105965,8 @@ const adminRepairExports = {
   resolveInterventionFinalApprovalWorkflow,
   resolveApprovedInterventionProposalLetterEligibilityFromRow,
   resolveApprovedInterventionProposalLetterEligibility,
+  markApprovedInterventionProposalLetterSent,
+  normaliseDecisionLetterOwnerContext,
   assertInterventionCloseAllowed,
   assertInterventionDeleteAllowed,
   buildInterventionDecisionCoreVersion,
@@ -102493,6 +105978,8 @@ const adminRepairExports = {
   resolveInterventionReviewEiDetails,
   assertInterventionApprovalEiFundingAlignment,
   assertInterventionEiEvidenceLink,
+  validateEiDocumentInterventionLineage,
+  resolveDocumentAttachmentContext,
   validateApprovedInterventionMaterializationRequest,
   resolveApprovedInterventionMaterializationKey,
   buildApprovedInterventionMaterializationItemSignature,
@@ -102520,6 +106007,30 @@ const adminRepairExports = {
   shouldIncludeFundedInterventionForCfa,
   createCfaVersionForPlan,
   ensureAutoPlanAndInterventionFromAssessment,
+  resolveOrCreateCaseForClient,
+  buildDeniedReportingCaseContext,
+  resolveApplicationReportingArtifact,
+  resolveApplicationReportingCaseMode,
+  syncDeniedReportingForApplicationIfNeeded,
+  ensureEsdcParticipantSubmissionRecord,
+  markEsdcParticipantSubmissionNeedsReview,
+  findExactEsdcSubmissionForScope,
+  validateEsdcParticipantSubmission,
+  prepareEsdcParticipantSubmission,
+  transitionEsdcParticipantSubmission,
+  requeueEsdcParticipantSubmissions,
+  collectReadyEsdcBatchParticipants,
+  submitReadyEsdcBatch,
+  assertEsdcBatchCandidateUnchanged,
+  assertEsdcParticipantSubmissionPreparedEvidence,
+  assertReadyToCloseImmutableEsdcEvidence,
+  isTerminalApplicationState,
+  buildApplicationTerminalRankSql,
+  hasDurableEsdcSubmissionEvidence,
+  recordApplicationDecisionLetterSent,
+  classifyReadyToCloseReportingPlans,
+  aggregateReadyToCloseIlmpCompliance,
+  markCaseReadyToClose,
   startInterventionReviewWorkflow,
   buildAssessmentAgreementSectionHtml,
   buildAssessmentPdfFields,
@@ -102530,6 +106041,7 @@ const adminRepairExports = {
   buildAssessmentFinalEvidenceMetadata,
   storeAssessmentPdfDocument,
   storeFundingOverviewPdfDocument,
+  storeDecisionLetterPdfDocument,
   storeFundingAgreementPdfDocument,
   syncInterventionProposalCompatibility,
   generateAndStoreInterventionAssessmentPdf,
@@ -102544,6 +106056,8 @@ const adminRepairExports = {
   setDocsRequestedFromSecureMessage,
   normalizeCaseMessageSigningAttachments,
   validateCaseMessageSigningAttachmentRequest,
+  parseOptionalCaseMessageApplicationId,
+  resolveCaseMessageApplicationIdInput,
   resolveCaseMessageFundingSigningWorkflowKind,
   assertCaseMessagePostApprovalSourceApplication,
   assertCaseMessageFundingFormsPostApproval,
@@ -102558,6 +106072,16 @@ const adminRepairExports = {
   buildRequiredSigningWorkflowSchemas,
   prepareCaseMessageSigningSchema,
   mapCaseMessagePublicError,
+  persistCaseMessageDecisionLetterArtifacts,
+  isCaseSecureMessageUnavailableForReply,
+  caseSecureMessageHasApplicantParticipant,
+  lockAndValidateCaseMessageReplyTarget,
+  markCaseMessageReplyTargetReplied,
+  parseReminderScopeMode,
+  resolveReminderMutationScopeExpectation,
+  reminderScopeIsCaseOnly,
+  validateReminderMutationScopeExpectation,
+  buildReminderListScopeFilter,
   resolveS3UploadVersionId,
   trackGeneratedObjectUploadAttempt,
   verifyGeneratedObjectUploadIdentity,

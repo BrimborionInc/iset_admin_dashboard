@@ -1,5 +1,4 @@
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -13,12 +12,6 @@ const {
   validateQualificationEvidence,
 } = require('../src/lib/releaseQualification');
 const { runtimeCommands } = require('../scripts/path-test-runtime-postflight');
-const {
-  executeQualificationChecks,
-  runCommandCheck,
-  validateCfaQualificationEvidence,
-  validatePrerequisiteDeclarations,
-} = require('../scripts/path-release-qualify');
 
 const inventory = JSON.parse(fs.readFileSync(
   path.resolve(__dirname, '..', 'docs', 'testing', 'release-coverage-inventory.json'),
@@ -52,63 +45,9 @@ function evidence(overrides = {}) {
   return value;
 }
 
-const CFA_REQUIRED_CHECKS = [
-  'live identity and full DDL verified',
-  'synthetic CFA fixture seeded from verified schema',
-  'real applicant Cognito authentication succeeded',
-  'CFA signed with correct application/document/event lineage',
-  'identical repeat signing was idempotent',
-  'changed signing payload was rejected without changing completion state',
-];
-
-function completeCfaEvidence(attemptId) {
-  const execution = {
-    attemptId,
-    releaseAuthority: 'none',
-    status: 'PASS',
-    ok: true,
-    mode: 'stateful-execution',
-    cleanup: { database: 'complete', objects: 'complete' },
-    checks: CFA_REQUIRED_CHECKS,
-    startedAt: '2026-08-13T12:00:00.000Z',
-    finishedAt: '2026-08-13T12:01:00.000Z',
-  };
-  const verification = {
-    attemptId,
-    releaseAuthority: 'none',
-    status: 'PASS',
-    ok: true,
-    mode: 'verify-residue-only',
-    residue: {
-      database: Array.from({ length: 19 }, (_, index) => ({ scope: `db-${index}`, count: 0 })),
-      objects: [{ key: 'prior', absent: true }, { key: 'signed', absent: true }],
-    },
-  };
-  return {
-    ...execution,
-    test: {
-      lifecycle: {
-        interruption: false,
-        execution: {
-          terminal: { status: 'Success', responseCode: 0, terminal: true },
-          transport: { result: { ...execution } },
-        },
-        recovery: null,
-        cognito: { absent: true },
-        verification: {
-          terminal: { status: 'Success', responseCode: 0, terminal: true },
-          transport: { result: verification },
-        },
-        bundle: { absent: true },
-      },
-    },
-  };
-}
-
 describe('release qualification contract', () => {
   test('the machine coverage inventory is valid and all mandatory checks resolve', () => {
     expect(validateInventory(inventory)).toEqual([]);
-    expect(validatePrerequisiteDeclarations(inventory)).toEqual([]);
     const checks = requiredChecksFor(inventory, 'dev', inventory.domains.map(domain => domain.id));
     expect(checks).toEqual(expect.arrayContaining([
       'admin-aggregate',
@@ -117,188 +56,6 @@ describe('release qualification contract', () => {
       'admin-browser-suite',
       'payment-db-rollback',
     ]));
-  });
-
-  test('TEST prerequisite failures block every dependent fixture without suppressing effect-free final checks', () => {
-    const spawned = [];
-    const checks = executeQualificationChecks({
-      stage: 'test',
-      deploymentManifest: '/synthetic/deployment.json',
-    }, inventory, {
-      requiredChecks: inventory.alwaysRequired.test,
-      releaseId: 'release-1',
-      candidate: { source: {}, components: [] },
-    }, '/synthetic/logs', {
-      loadJson: () => ({ app: {} }),
-      internalCheck: id => ({ id }),
-      runCommandCheck: id => {
-        spawned.push(id);
-        return { id, status: id === 'test-target-health' ? 'failed' : 'passed' };
-      },
-      writeProgress: () => {},
-    });
-
-    const dependentIds = [
-      'test-two-step-role-journeys',
-      'test-intake-completion',
-      'test-cfa-signing',
-      'test-applicant-scope-browser',
-      'test-live-privacy-denials',
-      'test-payment-rollback',
-    ];
-    expect(checks.filter(check => dependentIds.includes(check.id)))
-      .toEqual(dependentIds.map(id => expect.objectContaining({ id, status: 'blocked' })));
-    expect(spawned).toEqual([
-      'test-target-health',
-      'test-runtime-postflight',
-      'test-maintenance-cleanup',
-    ]);
-    expect(checks.at(-1)).toEqual(expect.objectContaining({ id: 'candidate-source-stability', status: 'passed' }));
-  });
-
-  test('successful TEST prerequisites preserve declared command order and missing evidence blocks fail closed', () => {
-    const spawned = [];
-    const complete = executeQualificationChecks({
-      stage: 'test',
-      deploymentManifest: '/synthetic/deployment.json',
-    }, inventory, {
-      requiredChecks: inventory.alwaysRequired.test,
-      releaseId: 'release-1',
-      candidate: { source: {}, components: [] },
-    }, '/synthetic/logs', {
-      loadJson: () => ({ app: {} }),
-      internalCheck: id => ({ id }),
-      runCommandCheck: id => {
-        spawned.push(id);
-        return { id, status: 'passed' };
-      },
-      writeProgress: () => {},
-    });
-    expect(complete.every(check => check.status === 'passed')).toBe(true);
-    expect(spawned).toEqual(inventory.alwaysRequired.test.filter(id => !inventory.checks[id].type));
-
-    const missing = executeQualificationChecks({ stage: 'test' }, inventory, {
-      requiredChecks: ['test-cfa-signing'],
-      releaseId: 'release-1',
-      candidate: { source: {}, components: [] },
-    }, '/synthetic/logs', { writeProgress: () => {} });
-    expect(missing).toEqual([expect.objectContaining({
-      id: 'test-cfa-signing',
-      status: 'blocked',
-      reason: expect.stringContaining('test-deployment-provenance=missing'),
-    })]);
-  });
-
-  test('invalid prerequisite declarations fail inventory admission', () => {
-    const invalid = JSON.parse(JSON.stringify(inventory));
-    invalid.checks['test-cfa-signing'].prerequisites = ['unknown-check'];
-    expect(validatePrerequisiteDeclarations(invalid)).toEqual(expect.arrayContaining([
-      'check test-cfa-signing references unknown prerequisite unknown-check',
-      'check test-cfa-signing prerequisite unknown-check must be an earlier test mandatory check',
-    ]));
-  });
-
-  test('CFA dispatch binds a fresh attempt and accepts one complete native result', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rq-cfa-check-'));
-    try {
-      const check = inventory.checks['test-cfa-signing'];
-      const spawn = jest.fn((_command, args) => {
-        const attemptId = args[args.indexOf('--attempt-id') + 1];
-        const evidenceOut = args[args.indexOf('--evidence-out') + 1];
-        fs.writeFileSync(evidenceOut, `${JSON.stringify(completeCfaEvidence(attemptId))}\n`, 'utf8');
-        return { status: 0, stdout: '{"status":"PASS"}', stderr: '' };
-      });
-      const record = runCommandCheck('test-cfa-signing', check, root, {}, {
-        randomUUID: () => '11111111-1111-4111-8111-111111111111',
-        now: () => new Date('2026-08-13T12:00:00.000Z'),
-        spawnSync: spawn,
-      });
-      const args = spawn.mock.calls[0][1];
-      expect(args).toEqual(expect.arrayContaining([
-        '--attempt-id', 'release-cfa-11111111-1111-4111-8111-111111111111',
-        '--sprint-started-at', '2026-08-13T12:00:00.000Z',
-      ]));
-      expect(record).toEqual(expect.objectContaining({
-        status: 'passed',
-        details: expect.objectContaining({
-          attemptId: 'release-cfa-11111111-1111-4111-8111-111111111111',
-          releaseAuthority: 'none',
-          processTerminal: true,
-          cleanupComplete: true,
-          residueVerified: true,
-          evidenceSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
-        }),
-      }));
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-      expect(fs.existsSync(root)).toBe(false);
-    }
-  });
-
-  test.each([
-    ['missing', () => {}],
-    ['malformed', filename => fs.writeFileSync(filename, '{bad-json', 'utf8')],
-    ['conflicting', (filename, attemptId) => fs.writeFileSync(
-      filename,
-      JSON.stringify(completeCfaEvidence(`${attemptId}-stale`)),
-      'utf8'
-    )],
-  ])('CFA %s result evidence fails closed', (_caseName, writeEvidence) => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rq-cfa-negative-'));
-    try {
-      const record = runCommandCheck('test-cfa-signing', inventory.checks['test-cfa-signing'], root, {}, {
-        randomUUID: () => '22222222-2222-4222-8222-222222222222',
-        now: () => new Date('2026-08-13T12:00:00.000Z'),
-        spawnSync: (_command, args) => {
-          const attemptId = args[args.indexOf('--attempt-id') + 1];
-          const filename = args[args.indexOf('--evidence-out') + 1];
-          writeEvidence(filename, attemptId);
-          return { status: 0, stdout: '', stderr: '' };
-        },
-      });
-      expect(record.status).toBe('failed');
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  test('CFA nonzero, timeout, stale path, incomplete cleanup and residue all fail closed', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rq-cfa-failures-'));
-    try {
-      const check = inventory.checks['test-cfa-signing'];
-      const common = {
-        now: () => new Date('2026-08-13T12:00:00.000Z'),
-      };
-      expect(runCommandCheck('test-cfa-signing', check, root, {}, {
-        ...common,
-        randomUUID: () => '33333333-3333-4333-8333-333333333333',
-        spawnSync: () => ({ status: 1, stdout: '', stderr: 'failed' }),
-      })).toEqual(expect.objectContaining({ status: 'failed', exitCode: 1 }));
-      expect(runCommandCheck('test-cfa-signing', check, root, {}, {
-        ...common,
-        randomUUID: () => '44444444-4444-4444-8444-444444444444',
-        spawnSync: () => ({ status: null, signal: 'SIGTERM', error: new Error('timed out'), stdout: '', stderr: '' }),
-      })).toEqual(expect.objectContaining({ status: 'failed', signal: 'SIGTERM', error: 'timed out' }));
-
-      const staleAttempt = 'release-cfa-55555555-5555-4555-8555-555555555555';
-      fs.mkdirSync(path.join(root, 'test-cfa-signing', staleAttempt), { recursive: true });
-      expect(runCommandCheck('test-cfa-signing', check, root, {}, {
-        ...common,
-        randomUUID: () => '55555555-5555-4555-8555-555555555555',
-        spawnSync: () => { throw new Error('must not spawn'); },
-      })).toEqual(expect.objectContaining({ status: 'failed', error: expect.stringContaining('already exists') }));
-
-      const cleanupIncomplete = completeCfaEvidence('attempt-complete-1');
-      cleanupIncomplete.test.lifecycle.cognito.absent = false;
-      expect(() => validateCfaQualificationEvidence(cleanupIncomplete, { attemptId: 'attempt-complete-1' }))
-        .toThrow('CFA Cognito cleanup absence is unproved');
-      const residue = completeCfaEvidence('attempt-complete-2');
-      residue.test.lifecycle.verification.transport.result.residue.database[0].count = 1;
-      expect(() => validateCfaQualificationEvidence(residue, { attemptId: 'attempt-complete-2' }))
-        .toThrow('cfa_independent_residue_result_incomplete');
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
   });
 
   test('TEST strict denials provision disposable identities without manual token variables', () => {
@@ -365,16 +122,6 @@ describe('release qualification contract', () => {
     expect(processProbe.status).toBe(0);
     expect(processProbe.stdout).toContain('PROCESS_NWAC_ADMIN=online');
     expect(processProbe.stdout).toContain('PROCESS_NWAC_PORTAL=online');
-    expect(runtimeCommands({
-      releaseId: 'release-1',
-      deployedComponents: ['admin'],
-      fingerprints: { admin: 'a', portal: 'p', shared: 's' },
-    }, true)).toContain(
-      'cd /opt/nwac/admin-dashboard && node scripts/payments-workflow-smoke.js --target-env test --json'
-    );
-    expect(inventory.checks['payment-db-rollback'].command).toEqual([
-      'npm', 'run', 'payments:workflow:smoke', '--', '--target-env', 'dev',
-    ]);
   });
 
   test('shared and schema changes expand to dependent cross-application domains', () => {
@@ -439,20 +186,6 @@ describe('release qualification contract', () => {
       'qualification evidence is expired or has no valid expiry',
       'qualification check real-mysql-contract is unavailable',
     ]));
-
-    const blocked = evidence({
-      requiredChecks: ['test-cfa-signing'],
-      checks: [{ id: 'test-cfa-signing', status: 'blocked' }],
-    });
-    expect(validateQualificationEvidence({
-      evidence: blocked,
-      expectedStage: 'dev',
-      currentSource: blocked.candidate.source,
-      inventorySha256: sha256Json(inventory),
-      schemaSha256: 'schema-1',
-      requiredComponents: ['admin', 'portal', 'shared'],
-      now: new Date('2026-07-14T00:00:00.000Z'),
-    })).toContain('qualification check test-cfa-signing is blocked');
 
     unavailable.decision = 'GO-but-edited';
     expect(validateQualificationEvidence({

@@ -10,12 +10,7 @@ const {
   LEGACY_PRODUCTION_ENVIRONMENT_FILE,
   resolveAdminEnvironmentFile,
 } = require('../src/server/adminEnvironment');
-const {
-  SYNTHETIC_ENVIRONMENT,
-  buildChildEnvironment,
-  createSyntheticTestEnvironment,
-  withSyntheticTestEnvironment,
-} = require('../scripts/run-test-all');
+const { createSyntheticTestEnvironment } = require('../scripts/run-test-all');
 
 const ownedRoots = new Set();
 
@@ -32,18 +27,21 @@ afterEach(() => {
   ownedRoots.clear();
 });
 
-test('DEV and PROD retain the existing repository-local and legacy environment resolution', () => {
+test('DEV and PROD retain repository-local and legacy environment resolution', () => {
   const serverRoot = createOwnedRoot('path-admin-environment-server-');
   const localEnvironment = path.join(serverRoot, '.env');
-  fs.writeFileSync(localEnvironment, 'synthetic=only\n');
+
   expect(resolveAdminEnvironmentFile({
     serverRoot,
     environment: { NODE_ENV: 'development' },
   })).toBe(localEnvironment);
+
+  fs.writeFileSync(localEnvironment, 'synthetic=only\n');
   expect(resolveAdminEnvironmentFile({
     serverRoot,
     environment: { NODE_ENV: 'production' },
   })).toBe(localEnvironment);
+
   fs.unlinkSync(localEnvironment);
   expect(resolveAdminEnvironmentFile({
     serverRoot,
@@ -67,9 +65,11 @@ test('test mode fails closed without an exact owned synthetic environment file',
   })).toThrow('outside an owned admin test-environment root');
 });
 
-test('the aggregate runner creates a fixed non-secret environment and proves zero residue', () => {
+test('the import-safe runner creates a non-secret environment and cleans it idempotently', () => {
   const synthetic = createSyntheticTestEnvironment();
   ownedRoots.add(synthetic.root);
+
+  expect(Object.keys(require('../scripts/run-test-all'))).toEqual(['createSyntheticTestEnvironment']);
   expect(path.basename(synthetic.root)).toMatch(new RegExp(`^${ADMIN_TEST_ENVIRONMENT_ROOT_PREFIX}`));
   expect(path.basename(synthetic.environmentFile)).toBe(ADMIN_TEST_ENVIRONMENT_FILE);
   expect(resolveAdminEnvironmentFile({
@@ -78,20 +78,20 @@ test('the aggregate runner creates a fixed non-secret environment and proves zer
   })).toBe(fs.realpathSync(synthetic.environmentFile));
 
   const content = fs.readFileSync(synthetic.environmentFile, 'utf8').trimEnd().split('\n');
-  expect(content).toEqual(SYNTHETIC_ENVIRONMENT);
-  expect(content).toEqual(expect.arrayContaining(['OPENROUTER_API_KEY=', 'OPENROUTER_KEY=']));
-  expect(JSON.stringify(synthetic.childEnvironment)).not.toMatch(/SECRET_ACCESS_KEY|SESSION_TOKEN|OPENROUTER/u);
-  expect(synthetic.cleanup()).toBe(true);
-  expect(fs.existsSync(synthetic.root)).toBe(false);
-  ownedRoots.delete(synthetic.root);
-});
-
-test('child environment construction rejects ambient variables by exact-key construction', () => {
-  const root = createOwnedRoot(ADMIN_TEST_ENVIRONMENT_ROOT_PREFIX);
-  const environmentFile = path.join(root, ADMIN_TEST_ENVIRONMENT_FILE);
-  fs.writeFileSync(environmentFile, 'synthetic=only\n');
-  const environment = buildChildEnvironment(root, environmentFile);
-  const expectedKeys = [
+  expect(content).toEqual([
+    'ALLOWED_ORIGIN=http://localhost:3000,http://localhost:3001',
+    'AWS_EC2_METADATA_DISABLED=true',
+    'AWS_REGION=ca-central-1',
+    'COGNITO_REGION=ca-central-1',
+    'COGNITO_STAFF_USER_POOL_ID=ca-central-1_pathSyntheticStaff',
+    'COGNITO_USER_POOL_ID=ca-central-1_pathSyntheticStaff',
+    'COGNITO_APP_CLIENT_ID=path-synthetic-client',
+    'ENABLE_EVENT_DELIVERY_WORKER_IN_TEST=0',
+    'OPENROUTER_API_KEY=',
+    'OPENROUTER_KEY=',
+  ]);
+  const expectedChildKeys = [
+    'AWS_EC2_METADATA_DISABLED',
     'BABEL_ENV',
     'CI',
     'HOME',
@@ -102,25 +102,19 @@ test('child environment construction rejects ambient variables by exact-key cons
     'TMP',
     'TMPDIR',
   ];
-  if (process.platform === 'win32' && process.env.SystemRoot) expectedKeys.push('SystemRoot');
-  expect(Object.keys(environment).sort()).toEqual(expectedKeys.sort());
-  expect(environment).toMatchObject({
-    BABEL_ENV: 'test',
-    CI: 'true',
-    NODE_ENV: 'test',
-    PATH_TEST_ENV_FILE: environmentFile,
-    TEMP: root,
-    TMP: root,
-    TMPDIR: root,
-  });
-});
+  if (process.platform === 'win32' && process.env.SystemRoot) expectedChildKeys.push('SystemRoot');
+  expect(Object.keys(synthetic.childEnvironment).sort()).toEqual(expectedChildKeys.sort());
+  expect(synthetic.childEnvironment.AWS_EC2_METADATA_DISABLED).toBe('true');
+  expect(JSON.stringify(synthetic.childEnvironment)).not.toMatch(
+    /AWS_ACCESS_KEY|AWS_SECRET|AWS_SESSION_TOKEN|OPENROUTER/u
+  );
+  if (process.platform !== 'win32') {
+    expect(fs.statSync(synthetic.root).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(synthetic.environmentFile).mode & 0o777).toBe(0o600);
+  }
 
-test('synthetic environment teardown proves zero residue when execution fails', () => {
-  let failedRoot;
-  expect(() => withSyntheticTestEnvironment((synthetic) => {
-    failedRoot = synthetic.root;
-    throw new Error('deliberate focused failure');
-  })).toThrow('deliberate focused failure');
-  expect(failedRoot).toMatch(new RegExp(`${ADMIN_TEST_ENVIRONMENT_ROOT_PREFIX}`));
-  expect(fs.existsSync(failedRoot)).toBe(false);
+  expect(synthetic.cleanup()).toBe(true);
+  expect(synthetic.cleanup()).toBe(true);
+  expect(fs.existsSync(synthetic.root)).toBe(false);
+  ownedRoots.delete(synthetic.root);
 });

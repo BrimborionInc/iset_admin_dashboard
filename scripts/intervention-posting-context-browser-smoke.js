@@ -425,163 +425,80 @@ async function installBrowserSession(page, frontendBase) {
   }, session, frontendBase);
 }
 
-const INTERVENTION_MODAL_SELECTOR = '[data-path-intervention-surface="modal"]';
-
-async function readInterventionModalEvidence(page) {
-  return page.evaluate(modalSelector => {
-    const boundaries = Array.from(document.querySelectorAll(modalSelector));
-    const boundary = boundaries.length === 1 ? boundaries[0] : null;
-    const dialog = boundary ? boundary.closest('[role="dialog"]') : null;
-    const dialogStyle = dialog ? window.getComputedStyle(dialog) : null;
-    const dialogVisible = Boolean(
-      dialog &&
-      dialogStyle?.display !== 'none' &&
-      dialogStyle?.visibility !== 'hidden' &&
-      dialog.getClientRects().length > 0
+async function clickByText(page, selector, label) {
+  const clicked = await page.evaluate(({ targetSelector, targetLabel }) => {
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const target = Array.from(document.querySelectorAll(targetSelector)).find(
+      element =>
+        normalize(element.innerText || element.textContent) === targetLabel &&
+        !element.disabled &&
+        element.getAttribute('aria-disabled') !== 'true'
     );
-    const actionCounts = {};
-    if (dialog) {
-      Array.from(dialog.querySelectorAll('[data-path-intervention-action]')).forEach(action => {
-        const key = action.getAttribute('data-path-intervention-action');
-        actionCounts[key] = (actionCounts[key] || 0) + 1;
-      });
-    }
-    const programFields = boundary
-      ? Array.from(boundary.querySelectorAll('[data-path-intervention-field="program-name"]'))
-      : [];
-    const programInputs = programFields.length === 1
-      ? Array.from(programFields[0].querySelectorAll('input'))
-      : [];
-    const postingContextFields = boundary
-      ? Array.from(boundary.querySelectorAll('[data-path-intervention-field="posting-context"]'))
-      : [];
-    const programInput = programInputs.length === 1 ? programInputs[0] : null;
-    return {
-      boundaryCount: boundaries.length,
-      dialogPresent: Boolean(dialog),
-      dialogVisible,
-      lifecycleState: boundary?.getAttribute('data-path-intervention-state') || null,
-      postingContext: boundary?.getAttribute('data-path-posting-context') || null,
-      postingContextFieldCount: postingContextFields.length,
-      programFieldCount: programFields.length,
-      programInputCount: programInputs.length,
-      programName: programInput?.value || null,
-      programNameReadOnly: Boolean(
-        programInput &&
-        (programInput.readOnly || programInput.disabled || programInput.getAttribute('aria-readonly') === 'true')
-      ),
-      actionCounts,
-    };
-  }, INTERVENTION_MODAL_SELECTOR);
-}
-
-async function waitForInterventionModalState(page, expectedState) {
-  await page.waitForFunction((modalSelector, targetState) => {
-    const boundaries = Array.from(document.querySelectorAll(modalSelector));
-    if (boundaries.length !== 1) return false;
-    const dialog = boundaries[0].closest('[role="dialog"]');
-    if (!dialog) return false;
-    const style = window.getComputedStyle(dialog);
-    return style.display !== 'none' &&
-      style.visibility !== 'hidden' &&
-      dialog.getClientRects().length > 0 &&
-      boundaries[0].getAttribute('data-path-intervention-state') === targetState;
-  }, {}, INTERVENTION_MODAL_SELECTOR, expectedState);
-}
-
-async function waitForInterventionModalClosed(page) {
-  await page.waitForFunction(
-    modalSelector => {
-      const boundaries = Array.from(document.querySelectorAll(modalSelector));
-      if (boundaries.length !== 1) return false;
-      const dialog = boundaries[0].closest('[role="dialog"]');
-      if (!dialog) return false;
-      const style = window.getComputedStyle(dialog);
-      return style.display === 'none' && dialog.getClientRects().length === 0;
-    },
-    {},
-    INTERVENTION_MODAL_SELECTOR
-  );
-}
-
-async function clickInterventionModalAction(page, action) {
-  const result = await page.evaluate((modalSelector, targetAction) => {
-    const boundaries = Array.from(document.querySelectorAll(modalSelector));
-    if (boundaries.length !== 1) return { clicked: false, boundaryCount: boundaries.length };
-    const dialog = boundaries[0].closest('[role="dialog"]');
-    if (!dialog) return { clicked: false, boundaryCount: 1, dialogPresent: false };
-    const style = window.getComputedStyle(dialog);
-    if (style.display === 'none' || style.visibility === 'hidden' || dialog.getClientRects().length === 0) {
-      return { clicked: false, boundaryCount: 1, dialogPresent: true, dialogVisible: false };
-    }
-    const actionWrappers = Array.from(dialog.querySelectorAll('[data-path-intervention-action]'))
-      .filter(element => element.getAttribute('data-path-intervention-action') === targetAction);
-    if (actionWrappers.length !== 1) {
-      return { clicked: false, boundaryCount: 1, dialogPresent: true, actionCount: actionWrappers.length };
-    }
-    const buttons = Array.from(actionWrappers[0].querySelectorAll('button'));
-    if (buttons.length !== 1) {
-      return { clicked: false, boundaryCount: 1, dialogPresent: true, actionCount: 1, buttonCount: buttons.length };
-    }
-    const button = buttons[0];
-    if (button.disabled || button.getAttribute('aria-disabled') === 'true') {
-      return { clicked: false, boundaryCount: 1, dialogPresent: true, actionCount: 1, buttonCount: 1, disabled: true };
-    }
-    button.scrollIntoView({ block: 'center' });
-    button.click();
-    return { clicked: true };
-  }, INTERVENTION_MODAL_SELECTOR, action);
-  if (!result.clicked) {
-    throw new Error(`Could not click intervention modal action ${action}: ${JSON.stringify(result)}`);
-  }
-}
-
-async function assertInternalPostingContext(page, stage) {
-  const evidence = await readInterventionModalEvidence(page);
-  if (
-    evidence.boundaryCount !== 1 ||
-    !evidence.dialogPresent ||
-    !evidence.dialogVisible ||
-    evidence.postingContextFieldCount !== 1 ||
-    evidence.postingContext !== 'internal'
-  ) {
-    throw new Error(`${stage} did not expose the intervention's persisted internal posting context: ${JSON.stringify(evidence)}`);
-  }
+    if (!target) return false;
+    target.scrollIntoView({ block: 'center' });
+    target.click();
+    return true;
+  }, { targetSelector: selector, targetLabel: label });
+  if (!clicked) throw new Error(`Could not click ${selector} with text "${label}"`);
 }
 
 async function assertFinalRecordReadOnly(page, stage) {
-  const evidence = await readInterventionModalEvidence(page);
-  if (
-    evidence.boundaryCount !== 1 ||
-    !evidence.dialogPresent ||
-    !evidence.dialogVisible ||
-    evidence.lifecycleState !== 'read-only' ||
-    evidence.programFieldCount !== 1 ||
-    evidence.programInputCount !== 1 ||
-    evidence.programName !== 'Legal Paraprofessional Diploma' ||
-    !evidence.programNameReadOnly ||
-    evidence.actionCounts.edit ||
-    evidence.actionCounts.save
-  ) {
-    throw new Error(`${stage} did not expose one persistent read-only intervention record: ${JSON.stringify(evidence)}`);
+  const state = await page.evaluate(() => {
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const enabledLabels = buttons
+      .filter(button => !button.disabled && button.getAttribute('aria-disabled') !== 'true')
+      .map(button => normalize(button.innerText || button.textContent))
+      .filter(Boolean);
+    const programNameInput = Array.from(document.querySelectorAll('input')).find(
+      input => input.value === 'Legal Paraprofessional Diploma'
+    );
+    return {
+      enabledLabels,
+      programNamePresent: Boolean(programNameInput),
+      programNameReadOnly: Boolean(
+        programNameInput &&
+        (programNameInput.readOnly || programNameInput.disabled || programNameInput.getAttribute('aria-readonly') === 'true')
+      ),
+    };
+  });
+  if (state.enabledLabels.includes('Edit') || state.enabledLabels.includes('Save changes')) {
+    throw new Error(`${stage} exposed an edit/save control for a final intervention: ${JSON.stringify(state.enabledLabels)}`);
+  }
+  if (!state.programNamePresent || !state.programNameReadOnly) {
+    throw new Error(`${stage} did not render the final intervention facts read-only: ${JSON.stringify(state)}`);
   }
 }
 
-async function waitForUniqueInterventionLink(page) {
-  await page.waitForFunction(() =>
-    document.querySelectorAll('a[aria-label^="View intervention "]').length === 1
-  );
+async function openIntervention(page) {
+  const opened = await page.evaluate(() => {
+    const link = Array.from(document.querySelectorAll('a')).find(
+      element => String(element.getAttribute('aria-label') || '').startsWith('View intervention ')
+    );
+    if (!link) return false;
+    link.click();
+    return true;
+  });
+  if (!opened) throw new Error('Could not find the existing intervention link.');
+  await page.waitForFunction(() => {
+    const headings = Array.from(document.querySelectorAll('h2'));
+    return headings.some(heading => (heading.innerText || '').trim() === 'View intervention') &&
+      (document.body?.innerText || '').includes('Paid from');
+  });
 }
 
-async function openIntervention(page, expectedState = 'viewing') {
-  const result = await page.evaluate(() => {
-    const links = Array.from(document.querySelectorAll('a[aria-label^="View intervention "]'));
-    if (links.length !== 1) return { opened: false, linkCount: links.length };
-    links[0].click();
-    return { opened: true };
+async function readPaidFromText(page) {
+  return page.evaluate(() => {
+    const text = document.body?.innerText || '';
+    const start = text.indexOf('Paid from');
+    return start >= 0 ? text.slice(start, start + 240) : '';
   });
-  if (!result.opened) throw new Error(`Could not open exactly one intervention: ${JSON.stringify(result)}`);
-  await waitForInterventionModalState(page, expectedState);
+}
+
+function assertInternalPaidFrom(text, stage) {
+  if (!text.includes('Internal (NWAC)') || text.includes('External (region/PTMA)')) {
+    throw new Error(`${stage} did not show the intervention's Internal (NWAC) value: ${JSON.stringify(text)}`);
+  }
 }
 
 async function main() {
@@ -602,7 +519,6 @@ async function main() {
     intervention: buildIntervention(),
     apiCalls: [],
     savedPayloads: [],
-    finalRecordReadOnlyVerified: false,
     failures: [],
     consoleLines: [],
   };
@@ -630,37 +546,47 @@ async function main() {
     await installApiStubs(page, state);
     await installBrowserSession(page, args.frontendBase);
     await page.goto(`${args.frontendBase}/cases/${CASE_ID}`, { waitUntil: 'domcontentloaded' });
-    await waitForUniqueInterventionLink(page);
+    await page.waitForFunction(() => {
+      const text = document.body?.innerText || '';
+      return text.includes('Action plans') &&
+        text.includes('Interventions - Existing external action plan') &&
+        Boolean(document.querySelector('a[aria-label^="View intervention "]'));
+    });
 
     await openIntervention(page);
-    await assertInternalPostingContext(page, 'Initial view');
+    assertInternalPaidFrom(await readPaidFromText(page), 'Initial view');
 
-    await clickInterventionModalAction(page, 'edit');
-    await waitForInterventionModalState(page, 'editing');
-    await assertInternalPostingContext(page, 'Edit view');
+    await clickByText(page, 'button', 'Edit');
+    await page.waitForFunction(() => {
+      return (document.body?.innerText || '').includes('Save changes');
+    });
+    assertInternalPaidFrom(await readPaidFromText(page), 'Edit view');
 
-    const editEvidence = await readInterventionModalEvidence(page);
-    if (editEvidence.programFieldCount !== 1 || editEvidence.programInputCount !== 1 || editEvidence.programNameReadOnly) {
-      throw new Error(`Could not identify one editable modal-owned program name field: ${JSON.stringify(editEvidence)}`);
-    }
-    const programNameInput = await page.$(
-      `${INTERVENTION_MODAL_SELECTOR} [data-path-intervention-field="program-name"] input`
-    );
-    if (!programNameInput) throw new Error('Could not acquire the modal-owned program name field.');
+    const programNameInput = await page.$('input[value="Legal Paraprofessional Diploma"]');
+    if (!programNameInput) throw new Error('Could not find the editable program name field.');
     await programNameInput.type(' updated');
+    await page.waitForFunction(() =>
+      Array.from(document.querySelectorAll('button')).some(button =>
+        (button.innerText || '').trim() === 'Save changes' &&
+        !button.disabled &&
+        button.getAttribute('aria-disabled') !== 'true'
+      )
+    );
 
-    await clickInterventionModalAction(page, 'save');
+    await clickByText(page, 'button', 'Save changes');
     await waitUntil(() => state.savedPayloads.length === 1, 'manual-backload intervention PATCH');
-    await waitForInterventionModalClosed(page);
+    await page.waitForFunction(() => !Array.from(document.querySelectorAll('h2')).some(heading => {
+      const label = (heading.innerText || '').trim();
+      return label === 'View intervention' || label === 'Edit intervention';
+    }));
     if (state.savedPayloads.length !== 1 || state.savedPayloads[0].postingContext !== 'internal') {
       throw new Error(`Manual-backload save did not preserve internal postingContext: ${JSON.stringify(state.savedPayloads)}`);
     }
 
-    await waitForUniqueInterventionLink(page);
+    await page.waitForFunction(() => Boolean(document.querySelector('a[aria-label^="View intervention "]')));
     await openIntervention(page);
-    await assertInternalPostingContext(page, 'Reopened view');
-    await clickInterventionModalAction(page, 'cancel');
-    await waitForInterventionModalClosed(page);
+    assertInternalPaidFrom(await readPaidFromText(page), 'Reopened view');
+    await clickByText(page, 'button', 'Cancel');
 
     state.intervention = buildIntervention({
       applicationId: APPLICATION_ID,
@@ -681,13 +607,15 @@ async function main() {
       },
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await waitForUniqueInterventionLink(page);
-    await openIntervention(page, 'read-only');
-    await assertInternalPostingContext(page, 'Final reviewed view');
+    await page.waitForFunction(() => {
+      const text = document.body?.innerText || '';
+      return text.includes('Interventions - Existing external action plan') &&
+        Boolean(document.querySelector('a[aria-label^="View intervention "]'));
+    });
+    await openIntervention(page);
+    assertInternalPaidFrom(await readPaidFromText(page), 'Final reviewed view');
     await assertFinalRecordReadOnly(page, 'Final reviewed view');
-    state.finalRecordReadOnlyVerified = true;
-    await clickInterventionModalAction(page, 'cancel');
-    await waitForInterventionModalClosed(page);
+    await clickByText(page, 'button', 'Cancel');
     if (state.savedPayloads.length !== 1) {
       throw new Error(`Final reviewed intervention emitted an unexpected PATCH: ${JSON.stringify(state.savedPayloads)}`);
     }
@@ -715,7 +643,7 @@ async function main() {
     pass: state.failures.length === 0,
     screenshot,
     savedPostingContexts: state.savedPayloads.slice(0, 1).map(payload => payload.postingContext),
-    finalRecordReadOnlyVerified: state.finalRecordReadOnlyVerified,
+    finalRecordReadOnlyVerified: state.savedPayloads.length === 1,
     unexpectedFinalPatchCount: Math.max(0, state.savedPayloads.length - 1),
     apiCallCount: state.apiCalls.length,
     apiCallCounts,

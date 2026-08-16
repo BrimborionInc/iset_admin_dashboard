@@ -60,6 +60,26 @@ describe('canRegionalManagerEditApplicationAssessment', () => {
     })).toBe(true);
   });
 
+  test('allows an assigned Regional Manager to make the first write on a submitted application', () => {
+    expect(canRegionalManagerEditApplicationAssessment({
+      isRegionalManager: true,
+      applicationStatus: 'submitted',
+      reviewWorkflow: null,
+      currentStaffProfileId: 9703,
+      assignedStaffProfileId: '9703',
+    })).toBe(true);
+  });
+
+  test('does not let another Regional Manager start an assigned submitted application', () => {
+    expect(canRegionalManagerEditApplicationAssessment({
+      isRegionalManager: true,
+      applicationStatus: 'submitted',
+      reviewWorkflow: null,
+      currentStaffProfileId: 9703,
+      assignedStaffProfileId: 9704,
+    })).toBe(false);
+  });
+
   test('allows a returned assessment when the Regional Manager is its submitter', () => {
     expect(canRegionalManagerEditApplicationAssessment({
       isRegionalManager: true,

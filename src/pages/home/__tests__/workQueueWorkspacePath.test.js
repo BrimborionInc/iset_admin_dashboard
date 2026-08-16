@@ -3,6 +3,8 @@ import {
   getWorkspacePath,
   updateApplicationEligibility,
 } from '../widgets/WorkQueueItemsTableWidget';
+import { getWorkspacePath as getProgramAdminWorkspacePath } from '../widgets/ProgramAdminWorkQueueWidget';
+import { appendExactApplicationIdToWorkspacePath } from '../workQueueWorkspacePath';
 
 jest.mock('@cloudscape-design/board-components', () => ({ BoardItem: 'board-item' }));
 jest.mock('@cloudscape-design/components', () => ({
@@ -45,6 +47,42 @@ describe('work queue workspace links', () => {
     expect(first).toBe('/application-case/76?entry=approval&approvalType=application&step=decision&applicationId=123');
     expect(repeat).toBe('/application-case/76?entry=approval&approvalType=application&step=decision&applicationId=124');
     expect(first).not.toBe(repeat);
+  });
+
+  it('repairs an explicit workspace override so it cannot discard or retain stale application scope', () => {
+    expect(
+      getWorkspacePath({
+        case_id: 76,
+        application_id: 124,
+        workspacePath: '/cases/76?entry=approval&applicationId=123#decision',
+      })
+    ).toBe('/cases/76?entry=approval&applicationId=124#decision');
+  });
+
+  it('keeps application scope on case-workspace intervention links', () => {
+    expect(
+      getWorkspacePath({
+        case_id: 76,
+        application_id: 124,
+        type: 'InterventionMilestone',
+      })
+    ).toBe('/cases/76?applicationId=124');
+  });
+
+  it('uses the same scope preservation for the legacy program-admin work-item widget', () => {
+    expect(
+      getProgramAdminWorkspacePath({
+        caseId: 76,
+        applicationId: 124,
+        workspacePath: '/application-case/76',
+      })
+    ).toBe('/application-case/76?applicationId=124');
+  });
+
+  it('preserves existing query parameters and fragments in the canonical helper', () => {
+    expect(
+      appendExactApplicationIdToWorkspacePath('/application-case/76?step=review#documents', 124)
+    ).toBe('/application-case/76?step=review&applicationId=124#documents');
   });
 });
 

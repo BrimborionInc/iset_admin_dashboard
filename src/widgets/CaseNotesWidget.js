@@ -24,6 +24,40 @@ import { formatReminderBusinessDate, getReminderBusinessDayDiffDays } from '../l
 
 const NOTE_LENGTH_LIMIT = 5000;
 
+const normalizeReminderScopeId = value => {
+  if (typeof value === 'string' && !/^[0-9]+$/.test(value.trim())) return null;
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : null;
+};
+
+export const buildCaseNoteReminderAcknowledgementRequest = ({
+  workspaceMode,
+  caseId,
+  applicationId = null,
+} = {}) => {
+  const expectedCaseId = normalizeReminderScopeId(caseId);
+  const expectedApplicationId = normalizeReminderScopeId(applicationId);
+  if (
+    !expectedCaseId ||
+    (workspaceMode !== 'case' && workspaceMode !== 'application') ||
+    (workspaceMode === 'application' && !expectedApplicationId)
+  ) {
+    return null;
+  }
+  const expectedScope = {
+    scopeMode: workspaceMode,
+    expectedCaseId,
+  };
+  if (workspaceMode === 'application') {
+    expectedScope.expectedApplicationId = expectedApplicationId;
+  }
+  return {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(expectedScope),
+  };
+};
+
 const formatTimestamp = (isoString) => {
   if (!isoString) return '';
   const date = new Date(isoString);
@@ -111,7 +145,13 @@ const getErrorMessage = async (err, fallback) => {
   return fallback;
 };
 
-const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) => {
+const CaseNotesWidget = ({
+  actions,
+  caseData: propCaseData,
+  toggleHelpPanel,
+  application_id: propApplicationId,
+  workspaceMode,
+}) => {
   const workspace = useCaseWorkspace();
   const workspaceCaseData = workspace && typeof workspace === 'object' ? workspace.caseData || null : null;
   const caseData = useMemo(() => {
@@ -128,6 +168,22 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
     workspaceCaseData?.case_id ??
     null;
   const caseId = rawCaseId == null || rawCaseId === '' ? null : rawCaseId;
+  const applicationId = workspaceMode === 'application'
+    ? (
+        propApplicationId ??
+        caseData?.applicationId ??
+        caseData?.application_id ??
+        null
+      )
+    : null;
+  const reminderAcknowledgementRequest = useMemo(
+    () => buildCaseNoteReminderAcknowledgementRequest({
+      workspaceMode,
+      caseId,
+      applicationId,
+    }),
+    [applicationId, caseId, workspaceMode]
+  );
   const caseIdentifier =
     caseData?.tracking_id ??
     caseData?.trackingId ??
@@ -298,11 +354,14 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
   };
 
   const handleAcknowledgeReminder = async (note) => {
-    if (!note?.reminderId || !caseId) return;
+    if (!note?.reminderId || !reminderAcknowledgementRequest) return;
     setPendingAcknowledgeId(note.id);
     setError(null);
     try {
-      const res = await apiFetch(`/api/reminders/${note.reminderId}/acknowledge`, { method: 'POST' });
+      const res = await apiFetch(
+        `/api/reminders/${note.reminderId}/acknowledge`,
+        reminderAcknowledgementRequest
+      );
       if (!res.ok) throw res;
       await loadNotes({ silent: true });
       if (typeof window !== 'undefined') {
@@ -407,7 +466,9 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
     const limit = 420;
     const displayDate = formatFollowUpDate(note.followUpAt);
   const followUpStatus = classifyFollowUpStatus(note.followUpAt);
-    const canAcknowledgeReminder = note.followUpAt && note.reminderId;
+    const canAcknowledgeReminder = Boolean(
+      note.followUpAt && note.reminderId && reminderAcknowledgementRequest
+    );
 
     const textContent =
       text.length <= limit ? (

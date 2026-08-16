@@ -759,44 +759,6 @@ function createLiveMysqlSchemaGuard({
     return cryptoModule.createHash('sha256').update(String(value)).digest('hex');
   }
 
-  function ddlIdentity(type, rawDdl) {
-    const rawDdlHash = sha256(rawDdl);
-    if (type !== 'table') {
-      return {
-        rawDdl,
-        rawDdlHash,
-        structuralDdlHash: rawDdlHash,
-        volatileDdlOptions: [],
-      };
-    }
-    const pattern = /(\) ENGINE=InnoDB AUTO_INCREMENT=)([1-9][0-9]*)( DEFAULT CHARSET=)/gu;
-    const matches = Array.from(rawDdl.matchAll(pattern));
-    if (matches.length > 1) {
-      throw guardError('schema_guard_volatile_ddl_option_ambiguous', 'AUTO_INCREMENT');
-    }
-    if (matches.length === 0) {
-      return {
-        rawDdl,
-        rawDdlHash,
-        structuralDdlHash: rawDdlHash,
-        volatileDdlOptions: [],
-      };
-    }
-    const observedValue = matches[0][2];
-    const structuralDdl = rawDdl.replace(pattern, '$1<VOLATILE_COUNTER>$3');
-    return {
-      rawDdl,
-      rawDdlHash,
-      structuralDdlHash: sha256(structuralDdl),
-      volatileDdlOptions: [{
-        name: 'AUTO_INCREMENT',
-        observedValue,
-        source: 'SHOW CREATE TABLE',
-        scope: 'InnoDB table option between ENGINE and DEFAULT CHARSET',
-      }],
-    };
-  }
-
   async function proveAlias(alias) {
     const normalized = normalizeIdentifier(alias);
     const [rows] = await metadataQuery(
@@ -930,15 +892,13 @@ function createLiveMysqlSchemaGuard({
       })))
       .filter(item => item.column && item.targetTable && item.targetColumn);
     const fallbackForeignKeys = parseForeignKeys(createSql);
-    const ddl = ddlIdentity(type, createSql);
     schema.set(expectation.name, {
       type,
-      ...ddl,
       columns,
       constraints,
       uniqueIndexes,
       foreignKeys: foreignKeys.length ? foreignKeys : fallbackForeignKeys,
-      ddlHash: ddl.rawDdlHash,
+      ddlHash: sha256(createSql),
       columnsHash: sha256(JSON.stringify(columnRows)),
       indexesHash: sha256(JSON.stringify(indexRows || [])),
       constraintsHash: sha256(JSON.stringify({ constraintRows, constraintColumnRows })),
@@ -1145,11 +1105,7 @@ function createLiveMysqlSchemaGuard({
         columns: [...item.columns],
         referencedColumns: [...item.referencedColumns],
       })),
-      rawDdl: proof.rawDdl,
-      rawDdlHash: proof.rawDdlHash,
       ddlHash: proof.ddlHash,
-      structuralDdlHash: proof.structuralDdlHash,
-      volatileDdlOptions: proof.volatileDdlOptions.map(option => ({ ...option })),
       columnsHash: proof.columnsHash,
       indexesHash: proof.indexesHash,
       constraintsHash: proof.constraintsHash,
@@ -1183,11 +1139,7 @@ function createLiveMysqlSchemaGuard({
       identity: identity ? { ...identity } : null,
       objects: Object.fromEntries(Array.from(schema.entries()).map(([name, proof]) => [name, {
         type: proof.type,
-        rawDdl: proof.rawDdl,
-        rawDdlHash: proof.rawDdlHash,
         ddlHash: proof.ddlHash,
-        structuralDdlHash: proof.structuralDdlHash,
-        volatileDdlOptions: proof.volatileDdlOptions.map(option => ({ ...option })),
         columnsHash: proof.columnsHash,
         indexesHash: proof.indexesHash,
         constraintsHash: proof.constraintsHash,
@@ -1196,9 +1148,6 @@ function createLiveMysqlSchemaGuard({
         uniqueIndexCount: proof.uniqueIndexes.size,
       }])),
       ddlHashes: Object.fromEntries(Array.from(schema.entries()).map(([name, proof]) => [name, proof.ddlHash])),
-      structuralDdlHashes: Object.fromEntries(
-        Array.from(schema.entries()).map(([name, proof]) => [name, proof.structuralDdlHash])
-      ),
       optionalAbsentObjects: Array.from(optionalAbsentObjects).sort(),
       absentObjects: Array.from(provenAbsentObjects).sort(),
       verifiedStatementCount,

@@ -44,6 +44,7 @@ import {
     getApplicationQueueRawStatus,
 } from './homeApplicationQueueFields';
 import { resolveInterventionApprovalQueueEiStatus } from './interventionApprovalQueueEiStatus';
+import { preserveWorkQueueApplicationScope } from './workQueueWorkspacePath';
 
 const parseDashboardAmount = value => {
     if (value === null || typeof value === 'undefined' || value === '') {
@@ -486,9 +487,12 @@ const resolveApplicationWorkspacePath = (row, fallbackPath = '/case-assignment-d
     }
     const basePath = `/application-case/${caseId}`;
     if (isPendingCompletionApplicationRow(row)) {
-        return buildPendingCompletionApplicationWorkspacePath(basePath, row);
+        return preserveWorkQueueApplicationScope(
+            buildPendingCompletionApplicationWorkspacePath(basePath, row),
+            row
+        );
     }
-    return basePath;
+    return preserveWorkQueueApplicationScope(basePath, row);
 };
 
 const isAssignedApplicationRow = row => {

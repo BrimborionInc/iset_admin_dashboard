@@ -2582,6 +2582,12 @@ const CoordinatorAssessmentWidget = forwardRef(
   const applicantUserId = caseData?.applicant_user_id ?? caseData?.applicantUserId ?? null;
   const applicationId = caseData?.application_id ?? caseData?.applicationId ?? application_id ?? null;
   const caseId = caseData?.id ?? caseData?.case_id ?? null;
+  const assignedStaffProfileId =
+    caseData?.assigned_staff_profile_id ??
+    caseData?.assignedStaffProfileId ??
+    caseData?.assigned_to_user_id ??
+    caseData?.assignedToUserId ??
+    null;
   const reviewWorkflow = caseData?.reviewWorkflow || caseData?.review_workflow || null;
   const reviewStage = reviewWorkflow?.currentStage || reviewWorkflow?.current_stage || null;
   const reviewWorkflowMetadata = (() => {
@@ -4608,9 +4614,10 @@ const CoordinatorAssessmentWidget = forwardRef(
     applicationStatus: normalizedApplicationStatus,
     reviewWorkflow,
     currentStaffProfileId,
+    assignedStaffProfileId,
   });
   const assessmentEditBlockedMessage = isRegionalManager
-    ? 'Regional Managers can edit their own in-review drafts, including assessments returned to them as the original submitter. Other submitted assessments must move through the review actions instead.'
+    ? 'Regional Managers can edit a submitted application only when it is assigned to them. After submission, they can edit only work returned to them as the original submitter.'
     : 'This role cannot edit assessment fields in the current stage.';
   const canManageEligibilityDuringAssessment =
     canManageEiEligibility &&
@@ -6603,17 +6610,12 @@ const CoordinatorAssessmentWidget = forwardRef(
       }
       const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
       const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
-      const shouldPromoteToInReview = canonicalApplicationStatus === 'submitted';
       const payload = {
         applicationId: applicationId || null,
         assessment_conflict_declaration_signed: true,
         assessment_conflict_declaration_choice: choice,
         assessment_conflict_declaration_details: choice === 'conflict' ? detailsValue : ''
       };
-      if (shouldPromoteToInReview) {
-        payload.status = 'in_review';
-        payload.applicationStatus = 'in_review';
-      }
       if (versionToken > 0) {
         payload.expectedRowVersion = versionToken;
       }
@@ -6674,11 +6676,6 @@ const CoordinatorAssessmentWidget = forwardRef(
           assessment_conflict_declaration_resolved_at: null,
           assessment_conflict_declaration_resolution_note: null
         };
-        if (shouldPromoteToInReview) {
-          updates.status = 'in_review';
-          updates.statusRaw = 'in_review';
-          updates.applicationStatus = 'in_review';
-        }
         onCaseUpdate(updates);
       }
       if (choice === 'conflict') {
@@ -6714,7 +6711,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     persistedConflictDeclarationDetails,
     normalizedPersistedConflictChoice,
     isSigningDeclaration,
-    canonicalApplicationStatus,
     ensureLockForOperation,
     lockHeldByCurrentUser,
     onCaseUpdate,
@@ -7200,11 +7196,18 @@ const CoordinatorAssessmentWidget = forwardRef(
   );
 
   const persistLetterContext = useCallback(
-    async ({ silent = false, contextUpdates = null, letterDraftsOverride = null } = {}) => {
+    async ({
+      silent = false,
+      contextUpdates = null,
+      letterDraftsOverride = null,
+      expectedRowVersion = null
+    } = {}) => {
       if (!caseId) return { ok: false };
       const lockCheck = await ensureLockForOperation();
       if (!lockCheck.ok) return { ok: false };
-      const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
+      const versionToken = Number(
+        expectedRowVersion || applicationRowVersionState || caseData?.application_row_version || 0
+      );
       const baseContext = caseData?.caseContext && typeof caseData.caseContext === 'object' ? caseData.caseContext : {};
       const nextDecisionLetterSent =
         (contextUpdates && contextUpdates.decisionLetterSent) ||
@@ -7784,7 +7787,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
   };
 
   const markDecisionLetterSent = useCallback(
-    async (letterKey) => {
+    async (letterKey, { expectedRowVersion = null, letterDraftsOverride = null } = {}) => {
       if (!letterKey) return { ok: false };
       const timestamp = new Date().toISOString();
       const existing = decisionLetterSent && typeof decisionLetterSent === 'object' ? decisionLetterSent : {};
@@ -7794,7 +7797,9 @@ ${JSON.stringify(aiContext, null, 2)}`;
       const mergedSent = { ...baseSent, ...nextSent };
       const result = await persistLetterContext({
         silent: true,
-        contextUpdates: { decisionLetterSent: mergedSent }
+        contextUpdates: { decisionLetterSent: mergedSent },
+        letterDraftsOverride,
+        expectedRowVersion
       });
       if (!result.ok) {
         setAlert({
@@ -7872,24 +7877,27 @@ ${JSON.stringify(aiContext, null, 2)}`;
       if (applicationId) {
         payload.applicationId = applicationId;
       }
+      if (saved.updatedRowVersion) {
+        payload.expectedApplicationRowVersion = saved.updatedRowVersion;
+      }
       const response = await apiFetch(`/api/cases/${caseId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      const responseData = await response.json().catch(() => ({}));
       if (!response.ok) {
         let detail = '';
-        try {
-          const data = await response.json();
-          if (data && typeof data === 'object') {
-            if (data.error === 'funding_forms_workflows_missing' && Array.isArray(data.missing) && data.missing.length) {
-              detail = `Required funding-form workflows are missing: ${data.missing.join(', ')}.`;
-            } else {
-              detail = data.message || data.error || '';
-            }
+        if (responseData && typeof responseData === 'object') {
+          if (
+            responseData.error === 'funding_forms_workflows_missing' &&
+            Array.isArray(responseData.missing) &&
+            responseData.missing.length
+          ) {
+            detail = `Required funding-form workflows are missing: ${responseData.missing.join(', ')}.`;
+          } else {
+            detail = responseData.message || responseData.error || '';
           }
-        } catch (_) {
-          detail = await response.text().catch(() => '');
         }
         throw new Error(detail || 'Failed to send the decision letter.');
       }
@@ -7901,8 +7909,37 @@ ${JSON.stringify(aiContext, null, 2)}`;
       });
       dispatchSupportingDocsRefresh();
       await loadDocumentChecklist();
-      const sentResult = await markDecisionLetterSent(activeLetterKey);
-      return { ok: true, updatedRowVersion: sentResult.updatedRowVersion || null };
+      const serverPersistence =
+        responseData?.decisionLetterPersistence || responseData?.denialLetterCompletion || null;
+      if (serverPersistence?.letterKey === activeLetterKey) {
+        const sentAt = serverPersistence.sentAt || new Date().toISOString();
+        const nextSent = { ...(decisionLetterSent || {}), [activeLetterKey]: sentAt };
+        setDecisionLetterSent(nextSent);
+        const persistedRowVersion = Number(serverPersistence.applicationRowVersion || 0) || null;
+        if (persistedRowVersion) updateRowVersion(persistedRowVersion);
+        const applicationCompleted =
+          activeLetterKey === 'denial' && serverPersistence.status === 'completed';
+        if (applicationCompleted && typeof onCaseUpdate === 'function') {
+          onCaseUpdate({
+            applicationStatus: 'completed',
+            application_row_version: persistedRowVersion || undefined
+          });
+        }
+        return {
+          ok: true,
+          updatedRowVersion: persistedRowVersion,
+          applicationCompleted
+        };
+      }
+      const sentResult = await markDecisionLetterSent(activeLetterKey, {
+        expectedRowVersion: saved.updatedRowVersion || null,
+        letterDraftsOverride: refreshedLetterDrafts
+      });
+      return {
+        ok: true,
+        updatedRowVersion: sentResult.updatedRowVersion || null,
+        applicationCompleted: false
+      };
     } catch (err) {
       setSendingLetterError(err?.message || 'Failed to send the decision letter.');
       return { ok: false, error: err };
@@ -8027,6 +8064,24 @@ ${JSON.stringify(aiContext, null, 2)}`;
 
       const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
       const caseUpdatePayload = { ...payload };
+      const updatedApplicationStatus =
+        result?.applicationStatus ||
+        result?.application_status ||
+        null;
+      if (updatedApplicationStatus) {
+        caseUpdatePayload.applicationStatus = updatedApplicationStatus;
+        caseUpdatePayload.application_status = updatedApplicationStatus;
+        caseUpdatePayload.applicationStatusRaw = updatedApplicationStatus;
+        caseUpdatePayload.application_status_raw = updatedApplicationStatus;
+      }
+      const updatedApplicationLifecycleStatus =
+        result?.applicationLifecycleStatus ||
+        result?.application_lifecycle_status ||
+        null;
+      if (updatedApplicationLifecycleStatus) {
+        caseUpdatePayload.applicationLifecycleStatus = updatedApplicationLifecycleStatus;
+        caseUpdatePayload.application_lifecycle_status = updatedApplicationLifecycleStatus;
+      }
       if (updatedRowVersion) {
         updateRowVersion(updatedRowVersion);
         caseUpdatePayload.application_row_version = updatedRowVersion;
@@ -8362,7 +8417,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
     const decision = assessment.nwacReviewStatus;
     const isOutcomeApproved = decision === 'approve';
     const isOutcomePushBack = decision === 'push_back';
-    const nextCaseStatus = isOutcomeApproved ? 'initiated' : (isOutcomePushBack ? 'intake' : 'closed');
+    const nextCaseStatus = isOutcomeApproved ? 'initiated' : (isOutcomePushBack ? 'intake' : null);
     const nextApplicationStatus = isOutcomePushBack
       ? (twoStepReviewEnabled && hasReviewWorkflow ? 'pending_approval' : 'in_review')
       : (isOutcomeApproved ? 'approved' : 'rejected');
@@ -8402,8 +8457,8 @@ ${JSON.stringify(aiContext, null, 2)}`;
         assessment_intervention_pot_id: completeAssessmentPayload.assessment_intervention_pot_id,
         postingContext: completeAssessmentPayload.postingContext,
         assessment_submit_action: true,
-        status: nextCaseStatus,
-        applicationStatus: nextApplicationStatus
+        applicationStatus: nextApplicationStatus,
+        ...(nextCaseStatus ? { status: nextCaseStatus } : {})
       };
       const requestBody = { ...payload };
       if (versionToken > 0) {
@@ -8727,6 +8782,15 @@ ${JSON.stringify(aiContext, null, 2)}`;
     const letterResult = await handleSendDecisionLetter();
     if (!letterResult.ok) return;
     if (decisionOutcome === 'denied') {
+      if (letterResult.applicationCompleted) {
+        setHasSubmitted(false);
+        if (typeof actions?.refreshCaseData === 'function') {
+          try {
+            await actions.refreshCaseData();
+          } catch (_) {}
+        }
+        return;
+      }
       await markApplicationCompleted({
         successMessage: 'Denial letter sent. Application marked as completed.',
         expectedRowVersion: letterResult.updatedRowVersion || null

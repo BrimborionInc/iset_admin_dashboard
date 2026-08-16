@@ -36,17 +36,22 @@ const toNumberOrNull = value => {
 export const buildSecureMessageScopePayload = ({
   applicationId,
   isCaseWorkspace = false,
-  interventionId
+  interventionId,
+  replyToMessageId,
 } = {}) => {
   const resolvedApplicationId = toNumberOrNull(applicationId);
   const resolvedInterventionId = toNumberOrNull(interventionId);
+  const resolvedReplyToMessageId = toNumberOrNull(replyToMessageId);
   return {
     ...(Number.isInteger(resolvedApplicationId) && resolvedApplicationId > 0
       ? { applicationId: resolvedApplicationId }
       : {}),
     ...(isCaseWorkspace && Number.isInteger(resolvedInterventionId) && resolvedInterventionId > 0
       ? { interventionId: resolvedInterventionId }
-      : {})
+      : {}),
+    ...(Number.isInteger(resolvedReplyToMessageId) && resolvedReplyToMessageId > 0
+      ? { reply_to: resolvedReplyToMessageId }
+      : {}),
   };
 };
 
@@ -143,7 +148,10 @@ const SecureMessageComposePanel = ({
       const nextIsCaseWorkspace =
         typeof detail.isCaseWorkspace === 'boolean' ? detail.isCaseWorkspace : isCaseWorkspace;
       const nextCaseId = toNumberOrNull(detail.caseId) ?? caseId;
-      const nextApplicationId = toNumberOrNull(detail.applicationId) ?? applicationId;
+      const hasExplicitApplicationId = Object.prototype.hasOwnProperty.call(detail, 'applicationId');
+      const nextApplicationId = hasExplicitApplicationId
+        ? toNumberOrNull(detail.applicationId)
+        : applicationId;
       const nextApplicantUserId = toNumberOrNull(detail.applicantUserId) ?? applicantUserId;
       const nextApplicantName = detail.applicantName || applicantName || 'Applicant';
       const nextInterventionId = nextIsCaseWorkspace
@@ -154,13 +162,17 @@ const SecureMessageComposePanel = ({
         mode: detail.mode === 'reply' ? 'reply' : 'new',
         caseId: nextCaseId,
         applicationId: nextApplicationId,
+        replyToMessageId: toNumberOrNull(detail.replyToMessageId ?? detail.reply_to),
         applicantUserId: nextApplicantUserId,
         applicantName: nextApplicantName,
         toName: detail.toName || nextApplicantName,
         fromName: detail.fromName || currentStaffName || 'Case Worker',
         caseReference: detail.caseReference || caseReference || (nextCaseId ? `Case ${nextCaseId}` : null),
         interventionId: nextInterventionId,
-        isCaseWorkspace: nextIsCaseWorkspace
+        isCaseWorkspace: nextIsCaseWorkspace,
+        originWorkspaceCaseId: caseId,
+        originWorkspaceApplicationId: applicationId,
+        originWorkspaceApplicantUserId: applicantUserId,
       };
     },
     [
@@ -302,9 +314,9 @@ const SecureMessageComposePanel = ({
     const nextApplicantUserId = Number(applicantUserId || 0);
     if (!nextCaseId) return;
     const contextChanged =
-      Number(composeContext.caseId || 0) !== nextCaseId ||
-      (nextApplicationId > 0 && Number(composeContext.applicationId || 0) !== nextApplicationId) ||
-      (nextApplicantUserId > 0 && Number(composeContext.applicantUserId || 0) !== nextApplicantUserId);
+      Number(composeContext.originWorkspaceCaseId || 0) !== nextCaseId ||
+      (nextApplicationId > 0 && Number(composeContext.originWorkspaceApplicationId || 0) !== nextApplicationId) ||
+      (nextApplicantUserId > 0 && Number(composeContext.originWorkspaceApplicantUserId || 0) !== nextApplicantUserId);
     if (!contextChanged) return;
     const hadDraft = hasComposeDraft;
     resetComposeDraft();
@@ -367,13 +379,16 @@ const SecureMessageComposePanel = ({
         fromDisplayName: fromName,
         attachments: attachmentsPayload
       };
-      const sendApplicationId = composeContext?.applicationId || applicationId;
+      const sendApplicationId = composeContext && Object.prototype.hasOwnProperty.call(composeContext, 'applicationId')
+        ? composeContext.applicationId
+        : applicationId;
       const sendIsCaseWorkspace = composeContext?.isCaseWorkspace ?? isCaseWorkspace;
       const sendInterventionId = composeContext?.interventionId || null;
       Object.assign(payload, buildSecureMessageScopePayload({
         applicationId: sendApplicationId,
         isCaseWorkspace: sendIsCaseWorkspace,
-        interventionId: sendInterventionId
+        interventionId: sendInterventionId,
+        replyToMessageId: composeContext?.replyToMessageId,
       }));
       const response = await apiFetch(`/api/cases/${sendCaseId}/messages`, {
         method: 'POST',

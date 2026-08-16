@@ -174,7 +174,7 @@
     "payment-db-rollback": {
       "stage": "dev",
       "cwd": "admin",
-      "command": ["npm", "run", "payments:workflow:smoke", "--", "--target-env", "dev"],
+      "command": ["npm", "run", "payments:workflow:smoke"],
       "description": "Real MySQL payment/evidence/communication/follow-up transaction fixture.",
       "effects": "Synthetic DEV payment fixture inside one transaction; no provider or email call.",
       "cleanup": "Mandatory rollback and zero-residue assertion."
@@ -228,7 +228,6 @@
     "test-two-step-role-journeys": {
       "stage": "test",
       "cwd": "admin",
-      "prerequisites": ["test-deployment-provenance", "test-rollback-readiness", "test-target-health", "test-runtime-postflight"],
       "command": ["node", "scripts/two-step-review-test-smoke.js", "--profile", "nwac-test", "--region", "ca-central-1", "--json"],
       "description": "Deployed browser/API role journeys for Coordinator, Regional Manager and Decision Maker across assessment/proposal/revision workflows.",
       "effects": "Creates disposable TEST Cognito, DB, document, notification and object-store fixtures; no real email.",
@@ -237,7 +236,6 @@
     "test-intake-completion": {
       "stage": "test",
       "cwd": "admin",
-      "prerequisites": ["test-deployment-provenance", "test-rollback-readiness", "test-target-health", "test-runtime-postflight"],
       "command": ["node", "scripts/r1-intake-completion-test-smoke.js", "--profile", "nwac-test", "--region", "ca-central-1", "--json"],
       "description": "Published-workflow validation, completion transaction, retry/idempotency, generated files, and cleanup on deployed TEST.",
       "effects": "Creates disposable TEST applicant/Cognito/DB/object fixtures; no real email.",
@@ -246,7 +244,6 @@
     "test-cfa-signing": {
       "stage": "test",
       "cwd": "admin",
-      "prerequisites": ["test-deployment-provenance", "test-rollback-readiness", "test-target-health", "test-runtime-postflight"],
       "command": ["node", "scripts/cfa-signing-test-smoke.js", "--profile", "nwac-test", "--region", "ca-central-1", "--json"],
       "description": "Authenticated deployed CFA completion using the live signing_request row shape, application lineage, generated PDF, version finalizer, event, idempotent retry, and cleanup.",
       "effects": "Creates disposable TEST Cognito, DB and object-store fixtures; no email or provider call.",
@@ -255,7 +252,6 @@
     "test-applicant-scope-browser": {
       "stage": "test",
       "cwd": "admin",
-      "prerequisites": ["test-deployment-provenance", "test-rollback-readiness", "test-target-health", "test-runtime-postflight"],
       "command": ["node", "scripts/applicant-scope-guard-test-smoke.js", "--profile", "nwac-test", "--region", "ca-central-1", "--json"],
       "description": "Deployed portal browser/API rightful-vs-wrong-applicant access and safe summary behavior.",
       "effects": "Creates disposable TEST Cognito and relational fixtures; no real email.",
@@ -264,7 +260,6 @@
     "test-live-privacy-denials": {
       "stage": "test",
       "cwd": "admin",
-      "prerequisites": ["test-deployment-provenance", "test-rollback-readiness", "test-target-health", "test-runtime-postflight"],
       "command": ["node", "scripts/applicant-scope-guard-test-smoke.js", "--profile", "nwac-test", "--region", "ca-central-1", "--privacy-denials", "--skip-browser", "--json"],
       "description": "Autonomously provision disposable real Cognito staff/applicant identities and relational fixtures, then run strict wrong-role/wrong-owner denials with no skips.",
       "effects": "Creates disposable TEST Cognito, staff/applicant, case/application, document, message and payment fixtures; makes authenticated requests only; no real email or provider call.",
@@ -273,7 +268,6 @@
     "test-payment-rollback": {
       "stage": "test",
       "cwd": "admin",
-      "prerequisites": ["test-deployment-provenance", "test-rollback-readiness", "test-target-health", "test-runtime-postflight"],
       "command": ["node", "scripts/path-test-runtime-postflight.js", "--payment-rollback", "--json"],
       "description": "Run the deployed rollback-only payment fixture with email/provider routing disabled.",
       "effects": "Synthetic TEST transaction only; no email or provider call.",

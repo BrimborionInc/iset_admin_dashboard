@@ -2,7 +2,7 @@
 
 Status: authoritative release gate for local DEV, real-MySQL qualification, TEST deployment, deployed TEST acceptance, and PROD authorization.
 
-Last reviewed: 2026-08-13 after Sprint `RG1` closed the current TEST-gate prerequisite, target-identity, and CFA evidence-binding contracts.
+Last reviewed: 2026-07-13 after the authenticated-admin outage demonstrated that the former unit/composition/health sequence did not qualify a release.
 
 This runbook supersedes any shorter deploy checklist when deciding whether a PATH release is admissible. The deployment guides still describe mechanics and maintenance handling, but they do not authorize a release by themselves.
 
@@ -14,48 +14,6 @@ A release is not qualified by a green unit suite, successful build, healthy targ
 2. `TEST GO`: that DEV-qualified candidate was admitted by the TEST deployment manifest, deployed provenance matches, rollback artifacts exist, target health and on-instance readiness pass, configuration and worker state are safe, deployed role/applicant/cross-app journeys pass, strict denials have no skip, rollback fixtures leave no residue, and maintenance state is clear.
 
 Any failed, skipped, unavailable, expired, unmapped, source-drifted, or cleanup-incomplete required check is `NO-GO`; it must never be relabelled `GO`. Normal releases have no skip or waiver flag. A separately recorded operator-authorized emergency PROD release may use the app-only pre-qualification deployment procedure described below without changing or falsifying the `NO-GO` evidence.
-
-The normal operator workflow has two steps:
-
-1. **Complete testing in TEST.** Run the exact-source DEV qualification, deploy
-   that admitted candidate to TEST, then run the authoritative TEST qualifier.
-   The TEST qualifier records `GO` only when every prerequisite and required
-   check passes. A failed deployment-provenance, rollback-readiness,
-   target-health, or runtime-postflight prerequisite blocks every dependent
-   stateful fixture instead of spawning it. The qualifier creates the CFA
-   attempt ID, evidence path, and sprint timestamp and accepts only the native
-   runner's matching complete terminal, cleanup, and independent zero-residue
-   evidence.
-2. **Deploy to PROD.** Supply the resulting unexpired exact-source `TEST GO` to
-   the existing PROD deploy command and obtain Bill's explicit authorization
-   for that release. Advisory evidence with `releaseAuthority: none` cannot
-   replace `TEST GO`.
-
-The emergency PROD route remains a separately authorized
-`EMERGENCY-AUTHORIZED` app-only path. It does not complete either normal step
-and does not create or imply `TEST GO`.
-
-## Harness design boundary
-
-A broad reusable qualification harness remains the objective. The 2026-08-07 through 2026-08-10 failure was not that acceptance covered more than one reported defect; the harness correctly exposed wider product weaknesses that warranted repair. The failure was deriving environment, UI, fixture, and workflow contracts by inference during the release loop, coupling harness-only corrections to new product release candidates, and allowing newly written harness behavior to become a mandatory gate before the harness itself was shown to be reliable.
-
-- Establish each test contract from observed or authoritative behavior before encoding it: deployed request/response traces, product-owned UI state, live target metadata, and explicit infrastructure capabilities.
-- Version the immutable product candidate, harness implementation, and execution attempt independently. A harness-only repair must not create a new product candidate or require redeployment when the deployed product artifacts are unchanged.
-- Qualify new or materially changed harness checks independently through repeatable known-good and deliberate known-bad trials before promoting them to mandatory release gates.
-- Classify a failure as product, harness, environment, or infrastructure before changing source or restarting qualification. An unclassified failure stops the loop for diagnosis.
-- Keep universal orchestration broad, but compose it from bounded domain checks with explicit prerequisites, effects, assertions, cleanup ownership, and evidence. Do not build one cross-domain simulated journey that makes unrelated systems prerequisites for one another.
-
-Develop the harness bottom-up. Do not begin a new harness generation with the most complex deployed journey. Each layer must first demonstrate repeatable known-good runs, detection of deliberate known-bad cases, bounded timeouts, intelligible evidence, and interruption-safe cleanup before the next layer depends on it:
-
-1. runner lifecycle and evidence format, with no application or environment effects;
-2. deterministic local process and HTTP checks;
-3. explicit metadata-only database and cloud identity adapters;
-4. transactional local fixtures and recovery tests;
-5. immutable TEST deployment, provenance, readiness, and rollback checks;
-6. one bounded deployed domain journey at a time;
-7. cross-domain concurrency and failure/recovery scenarios only after their component journeys are certified.
-
-Do not use ad hoc string parsing to infer JSON structure or SQL correctness. JSON evidence must be schema-validated and compared structurally. SQL-bearing checks must use explicit structured statement declarations or a proven parser/driver boundary, live metadata for the exact target, and the repository's per-statement admission rule. A new test pack starts as advisory and cannot block a product release until its harness behavior has completed this certification path independently of an urgent release.
 
 `scripts/path-deploy.js run` enforces the evidence boundary:
 
@@ -142,7 +100,7 @@ Known qualification-granularity gap (recorded 2026-07-20): the current evidence 
 
 ## Phase 1 — local DEV qualification
 
-Run the metadata-only DEV database gate first. It pins both configured and live native-label identity to the recorded 2026-08-09 target (`172.26.176.1` / `root` / `iset_intake` / `3306`; server `DESKTOP-PDFA51K`; principal `root@172.26.%`; MySQL `8.0.40`), discovers every declared object individually, and records the exact raw `SHOW CREATE` value and its SHA-256 alongside structured column/index/constraint proof, a structural DDL SHA-256 and the hashes of the 13 attempt-bound residue statements. The prospective structural identity excludes only the observed numeric InnoDB table-level `AUTO_INCREMENT` counter in the exact `ENGINE=InnoDB AUTO_INCREMENT=<positive integer> DEFAULT CHARSET=` form. The raw value remains retained and hashed; engine, charset, collation, table-option ordering and every other raw byte remain structural. MySQL documents that generated InnoDB auto-increment values are not rolled back and that `SHOW CREATE TABLE` exposes the current counter as a table option ([InnoDB auto-increment handling](https://dev.mysql.com/doc/refman/8.0/en/innodb-auto-increment-handling.html), [`SHOW CREATE TABLE`](https://dev.mysql.com/doc/refman/8.0/en/show-create-table.html)). Any absent, different or repeated option form is not normalized. The gate performs zero ordinary reads, transactions, fixtures, residue queries, or cleanup:
+Run the metadata-only DEV database gate first. It pins both configured and live native-label identity to the recorded 2026-08-09 target (`172.26.176.1` / `root` / `iset_intake` / `3306`; server `DESKTOP-PDFA51K`; principal `root@172.26.%`; MySQL `8.0.40`), discovers every declared object individually, and hashes its create definition, full columns, indexes, and constraints. It performs zero ordinary reads, transactions, fixtures, residue queries, or cleanup:
 
 ```bash
 node scripts/real-mysql-release-contract.js --target-env dev --schema-preflight-only --json
@@ -154,11 +112,7 @@ If a prior rollback fixture failed after mutation began, do not assume rollback 
 node scripts/real-mysql-release-contract.js --target-env dev --residue-audit-only --json
 ```
 
-This mode performs 14 finished-statement-guarded native `COUNT(*)` checks covering all 13 mutated objects; `staff_profiles` has separate subject and email scopes. The four descendant checks use only current-live-DDL-proven, fully qualified foreign-key joins back to the attempt-owned client or case marker. It performs no fixture mutation, rollback, or cleanup. Any nonzero count or metadata/statement admission failure is `NO-GO` and must be investigated before another ordinary fixture run.
-
-The same mode accepts `--attempt-id <id>` to bind one immutable fixture ledger and exactly one independent count to each of the 13 mutated objects. The full runner records that attempt ID, its derived non-secret fixture markers, the object list, each residue-statement SHA-256 and the ledger digest before mutation. The no-flag release command remains compatible by generating its own unique attempt ID.
-
-The explicit `--fail-after-first-mutation` and `--interrupt-after-first-mutation` controls require a caller-supplied `--attempt-id`, are mutually exclusive and are valid only for the full rollback contract. They act only after the first fixture insert has returned successfully. Their presence does not authorize their execution: run either only inside the separately approved Phase 5 certification boundary, followed by a fresh exact-identity/full-DDL preflight and attempt-bound 13-scope residue verifier. The interrupt control synchronously emits only the attempt ID and ledger digest before signalling its own process. It never runs cleanup SQL.
+This mode performs ten single-table, finished-statement-guarded native `COUNT(*)` checks for the release fixture scopes. It performs no fixture mutation, rollback, or cleanup. Any nonzero count or metadata/statement admission failure is `NO-GO` and must be investigated before another ordinary fixture run.
 
 Then run the resolved mandatory suite. The machine inventory repeats this gate as `real-mysql-schema-preflight` before the schema plan and full real-MySQL contract. This uses local resources and real DEV MySQL only. It must not use TEST or PROD credentials.
 
@@ -172,12 +126,7 @@ npm run release:qualify -- run \
   --evidence-out tmp/release-qualification/dev/<release-id>.json
 ```
 
-Use the same `--full` and `--operation` flags as the plan. The qualifier runs
-the declared TEST prerequisites and effect-free final checks to retain the
-available blocker evidence. Once any deployment-provenance,
-rollback-readiness, target-health, or runtime-postflight prerequisite is not
-`passed`, every dependent stateful TEST fixture is recorded as `blocked` and is
-not spawned. A blocked required check is `NO-GO`.
+Use the same `--full` and `--operation` flags as the plan. The qualifier runs all mandatory checks, even after a failure, so the evidence reports the complete blocker set.
 
 Local database effects are bounded:
 
@@ -185,9 +134,7 @@ Local database effects are bounded:
 - the DEV schema plan proves the pinned database/host/port/principal/version identity, discovers and hashes full migration-ledger DDL metadata when present, and permits only one guarded qualified ledger read; it never creates the ledger;
 - privacy ERM is read-only;
 - the release MySQL contract runs its full structural preflight before readiness reads, inserts synthetic staff/import/event/delivery and document-policy fixtures inside one transaction, rolls back, then proves zero residue;
-- the payment fixture requires `--target-env dev` in DEV; the deployed TEST
-  postflight passes `--target-env test`, and either exact configured/live
-  identity is rejected under the other target;
+- the payment fixture is transaction/rollback only and does not call email or a provider;
 - build and browser outputs live under `tmp/release-qualification/`, generated build metadata is restored, and the local HTTP/browser processes are closed.
 
 A schema or finished-statement failure before mutation closes the connection without rollback, residue reads, or cleanup SQL. Once any fixture mutation is dispatched, failure handling must roll back and still run every guarded zero-residue assertion before surfacing the original and cleanup results together.
@@ -315,146 +262,6 @@ After `TEST GO`, rerun the maintenance-only check if any cleanup command was nee
 ```bash
 npm run release:test:postflight -- --maintenance-only --json
 ```
-
-## Advisory read-only TEST identity and provenance proof
-
-The lean-programme Phase 7 check is deliberately separate from the current
-release gate. It has `releaseAuthority: none`; a pass is not `TEST GO` and does
-not admit PROD. The current qualifier remains authoritative.
-
-The certified task-specific command is pinned to the retained r31 deployment
-manifest, `nwac-test`, account `124355655255`, region `ca-central-1`, the exact
-operator `CODEX_CLI_Admin`, the dynamically verified TEST ASG/SSM instance,
-both TEST target groups, four exact current/rollback artifact keys, and the two
-deployed provenance files:
-
-```bash
-node scripts/path-test-readonly-control-plane.js \
-  --manifest tmp/path-deploy/test/20260809-two-step-review-assurance-r31--2026-08-10T03-24-21-698Z.json \
-  --profile nwac-test --region ca-central-1 \
-  --attempt-id <fresh-attempt-id> \
-  --evidence-out tmp/release-qualification/test-control-plane/<fresh-attempt-id>/final.json \
-  --json
-```
-
-The command fails closed on an expired or changed manifest, identity/resource
-mismatch, missing rollback object, unhealthy or mismatched target, malformed or
-stale provenance, timeout/cancellation failure, missing terminal evidence, or
-local source drift. It performs profiled AWS reads plus one bounded SSM command
-per admitted instance. The remote command calls STS and reads/hashes only
-`.path-release-provenance.json` from the admin and portal roots. It must not
-read environment files, query a database, call product HTTP, invoke SES, send
-email, deploy, build or mutate application state. TEST's explicit `ses:Send*`
-deny remains required.
-
-Sprint `7B` certification passed 47 focused synthetic cases and three complete
-live attempts on 2026-08-12. The retained final-evidence paths and digests are
-recorded in the target-architecture Sprint `7B` completion checkpoint. SSM
-command history is an intentional control-plane record; terminal SSM evidence
-must prove the remote read process ended, and no local check process may remain.
-
-### Phase 8 CFA-only provenance attestation
-
-The explicit `--phase8-cfa-attestation` mode exists only to bind the frozen
-Phase 8 CFA harness-certification exercise to the unchanged product candidate
-already deployed by r31. It does not renew the expired DEV `GO`, replace TEST
-qualification, admit a deployment or authorize PROD. Its output always records
-`releaseAuthority: none`, names the CFA-only consumer, names every prohibited
-consumer and expires 75 minutes after the attempt starts.
-
-The mode requires both exact retained artifacts. It verifies the raw file
-digests and the DEV evidence's canonical `evidenceId`, proves the DEV `GO` was
-unexpired when the manifest's `release.qualification` step began, then freshly
-repeats the Phase 7 identity, target-health, artifact and deployed-provenance
-proof:
-
-```bash
-node scripts/path-test-readonly-control-plane.js \
-  --manifest tmp/path-deploy/test/20260809-two-step-review-assurance-r31--2026-08-10T03-24-21-698Z.json \
-  --phase8-cfa-attestation \
-  --dev-evidence tmp/release-qualification/dev/20260809-two-step-review-assurance-r31.json \
-  --profile nwac-test --region ca-central-1 \
-  --attempt-id <fresh-attempt-id> \
-  --evidence-out tmp/release-qualification/test-control-plane/<fresh-attempt-id>/final.json \
-  --json
-```
-
-The legacy command without `--phase8-cfa-attestation` continues to reject the
-expired manifest. The attestation shape deliberately omits release-evidence
-`stage`, `decision` and `evidenceId` fields and therefore cannot be consumed as
-DEV/TEST qualification or deployment admission. Any candidate, evidence,
-manifest, source, artifact, environment, health, provenance, process or local
-source-state difference fails the attempt. Do not relabel, extend or reuse an
-expired attestation; a new attempt and explicit authorization are required.
-
-## Phase 8 CFA admission status
-
-Sprint `8B` is complete and the CFA read-only admission contract is frozen by
-the completion evidence recorded in the target architecture. Its task-specific
-transport retains the complete attempt-owned evidence envelope remotely,
-returns a compact digest manifest, reconstructs ordered bounded chunks locally,
-and validates both the envelope and decoded admission digests. The successful
-fresh attempt proved two matching raw/structured full-DDL snapshots for all 22
-admitted objects, the 68-statement finished catalogue, eight guarded
-prerequisite reads, exact workflow selection, no-email state and zero
-postflight ordinary statements. Remote cleanup proved the evidence file and
-bundle root absent.
-
-This is read-only admission evidence, not a stateful workflow result and not
-release authority. Do not run the stateful CFA wrapper from this checkpoint.
-The first Sprint `8C` authorization stopped safely before AWS/TEST on local
-lifecycle defects. Product fixtures, product HTTP, Cognito/S3 writes, cleanup
-SQL, SES/email and every database mutation remain unauthorized until Bill
-accepts the subsequent `8C-R1` correction and separately resumes the recorded
-live `8C` contract. The current release gate remains authoritative and
-`releaseAuthority: none` is unchanged.
-
-Sprint `8C-R1` subsequently certified the CFA lifecycle locally without TEST
-access. A future separately authorized stateful invocation must provide one
-shared `--sprint-started-at` value and select either normal execution or the
-single `--interrupt-after-signed-evidence` path. The outer wrapper must observe
-terminal SSM status and response code before cleanup, reconstruct and validate
-each attempt-owned execution/recovery/verifier result through the bounded file/
-chunk transport, actually dispatch recovery after interruption, prove exact
-Cognito absence, run a fresh separate 19-scope/two-object residue verifier, and
-remove the remote bundle only after those proofs. Execution is bounded to 10
-minutes, recovery and verification to 3 minutes each, one attempt to 15 minutes
-and the complete Sprint `8C` window to 75 minutes. A timeout or failed proof
-does not authorize a retry.
-
-This checkpoint still does not authorize the stateful command. It changes the
-Phase 8 harness/test-pack binding, so any live `8C` run requires Bill to accept
-the frozen admin and portal `8C-R1` commits explicitly. TEST SES must remain
-denied and `releaseAuthority: none` remains unchanged.
-
-### Phase 8 CFA stateful completion
-
-Bill subsequently authorized the frozen stateful contract against admin
-`d5228b1cc385cc20d6c8a32aa00a77f0e9987efa`, portal
-`a650d4816d6e4a346acf6b4e5431801c68fc8572`, shared
-`f81519d74ab0553b19713cff33961386dd0887da` and the accepted unexpired
-CFA-only P1 attestation. Fresh admission re-proved the exact TEST operator,
-instance and effective principals, complete IAM capabilities and both explicit
-SES denies. The local product-lineage and fixture-contract negatives passed.
-
-One post-persistence interruption then reached durable native signed-state and
-object evidence, terminated as designed, ran the separately dispatched
-recovery, proved Cognito absence and passed a fresh independent 19-scope/two-
-object zero-residue verifier. Exactly three subsequent clean attempts each
-passed all six native signing, lineage, replay and changed-payload assertions,
-normal cleanup, Cognito absence and a fresh independent verifier. Every attempt
-repeated two stable 22-object raw/structured DDL proofs, the 68-statement
-catalogue, eight admitted prerequisites, no-email state and zero attempt
-markers. No SES call or email occurred. The detailed attempt IDs, artifact
-digests and source identities are recorded in the target architecture's
-Sprint `8C` completion checkpoint.
-
-Narrowed Phase 8 is complete, but this evidence remains limited to the frozen
-CFA harness-certification exercise. It is not renewed DEV or TEST release
-qualification, does not promote a pack and grants no deployment or PROD
-authority. `releaseAuthority: none` and the current authoritative release gate
-remain unchanged. Stop for Bill's mandatory post-Phase-8 programme review; no
-Phase 9 work follows automatically.
 
 ## Hard PROD go/no-go
 

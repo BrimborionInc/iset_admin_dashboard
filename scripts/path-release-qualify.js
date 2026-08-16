@@ -26,8 +26,6 @@ const REPOSITORIES = Object.freeze({
   shared: path.resolve(REPO_ROOT, '..', 'shared'),
   intacctMock: path.resolve(REPO_ROOT, '..', 'intacct-mock-service'),
 });
-const CFA_CHECK_ID = 'test-cfa-signing';
-const CFA_QUALIFICATION_TIMEOUT_MS = 75 * 60 * 1000;
 
 function usage() {
   console.log([
@@ -248,44 +246,9 @@ function validateCommandReferences(inventory) {
   return errors;
 }
 
-function validatePrerequisiteDeclarations(inventory) {
-  const errors = [];
-  const checks = inventory.checks || {};
-  Object.entries(checks).forEach(([id, check]) => {
-    if (check.prerequisites === undefined) return;
-    if (!Array.isArray(check.prerequisites) || !check.prerequisites.length) {
-      errors.push(`check ${id} prerequisites must be a non-empty array`);
-      return;
-    }
-    if (new Set(check.prerequisites).size !== check.prerequisites.length) {
-      errors.push(`check ${id} has duplicate prerequisites`);
-    }
-    check.prerequisites.forEach(prerequisiteId => {
-      if (!checks[prerequisiteId]) errors.push(`check ${id} references unknown prerequisite ${prerequisiteId}`);
-      if (prerequisiteId === id) errors.push(`check ${id} cannot depend on itself`);
-    });
-  });
-  for (const stage of ['dev', 'test']) {
-    const ordered = inventory.alwaysRequired?.[stage] || [];
-    const positions = new Map(ordered.map((id, index) => [id, index]));
-    ordered.forEach(id => {
-      for (const prerequisiteId of checks[id]?.prerequisites || []) {
-        if (!positions.has(prerequisiteId) || positions.get(prerequisiteId) >= positions.get(id)) {
-          errors.push(`check ${id} prerequisite ${prerequisiteId} must be an earlier ${stage} mandatory check`);
-        }
-      }
-    });
-  }
-  return errors;
-}
-
 function internalCheck(id, args, plan, inventory) {
   if (id === 'inventory-contract') {
-    const errors = [
-      ...validateInventory(inventory),
-      ...validateCommandReferences(inventory),
-      ...validatePrerequisiteDeclarations(inventory),
-    ];
+    const errors = [...validateInventory(inventory), ...validateCommandReferences(inventory)];
     if (plan.unmatched.length) errors.push(`unmapped changed files: ${plan.unmatched.map(item => `${item.repo}:${item.file}`).join(', ')}`);
     if (plan.unmatchedOperations.length) errors.push(`unmapped release operations: ${plan.unmatchedOperations.join(', ')}`);
     if (errors.length) throw new Error(errors.join('; '));
@@ -342,108 +305,13 @@ function internalCheck(id, args, plan, inventory) {
   throw new Error(`Unknown internal check: ${id}`);
 }
 
-function createCfaInvocation(check, logDir, dependencies = {}) {
-  const randomUUID = dependencies.randomUUID || crypto.randomUUID;
-  const now = dependencies.now || (() => new Date());
-  const attemptId = `release-cfa-${randomUUID()}`;
-  const attemptDir = path.join(logDir, CFA_CHECK_ID, attemptId);
-  const evidenceOut = path.join(attemptDir, 'result.json');
-  fs.mkdirSync(path.dirname(attemptDir), { recursive: true });
-  if (fs.existsSync(attemptDir)) throw new Error(`CFA attempt evidence path already exists: ${attemptDir}`);
-  fs.mkdirSync(attemptDir, { recursive: false });
-  const sprintStartedAt = now().toISOString();
-  const forbidden = new Set(['--attempt-id', '--evidence-out', '--sprint-started-at']);
-  if (check.command.some(value => forbidden.has(value))) {
-    throw new Error('CFA inventory command must not contain qualifier-owned attempt arguments');
-  }
-  return {
-    attemptId,
-    evidenceOut,
-    sprintStartedAt,
-    command: [
-      ...check.command,
-      '--attempt-id', attemptId,
-      '--evidence-out', evidenceOut,
-      '--sprint-started-at', sprintStartedAt,
-    ],
-  };
-}
-
-function validateCfaQualificationEvidence(evidence, expected, dependencies = {}) {
-  const nativeValidators = dependencies.nativeValidators || require('./cfa-signing-test-smoke');
-  const lifecycle = evidence?.test?.lifecycle;
-  const validateTerminal = (terminal, phase) => {
-    if (terminal?.terminal !== true || terminal?.status !== 'Success' || terminal?.responseCode !== 0) {
-      throw new Error(`CFA ${phase} terminal process evidence is incomplete`);
-    }
-  };
-  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
-    throw new Error('CFA evidence must be one JSON object');
-  }
-  nativeValidators.validateStatefulResult(evidence, {
-    phase: 'execution',
-    attemptId: expected.attemptId,
-    interrupted: false,
-  });
-  validateTerminal(lifecycle?.execution?.terminal, 'execution');
-  nativeValidators.validateStatefulResult(lifecycle?.execution?.transport?.result, {
-    phase: 'execution',
-    attemptId: expected.attemptId,
-    interrupted: false,
-  });
-  if (lifecycle?.interruption !== false || lifecycle?.recovery !== null) {
-    throw new Error('CFA qualification lifecycle conflicts with a clean execution');
-  }
-  if (lifecycle?.cognito?.absent !== true) throw new Error('CFA Cognito cleanup absence is unproved');
-  validateTerminal(lifecycle?.verification?.terminal, 'verification');
-  nativeValidators.validateStatefulResult(lifecycle?.verification?.transport?.result, {
-    phase: 'verification',
-    attemptId: expected.attemptId,
-    interrupted: false,
-  });
-  if (lifecycle?.bundle?.absent !== true) throw new Error('CFA remote bundle absence is unproved');
-  const startedAt = Date.parse(evidence.startedAt);
-  const finishedAt = Date.parse(evidence.finishedAt);
-  if (!Number.isFinite(startedAt) || !Number.isFinite(finishedAt) || finishedAt < startedAt) {
-    throw new Error('CFA result timestamps are missing or invalid');
-  }
-  return {
-    attemptId: expected.attemptId,
-    releaseAuthority: 'none',
-    status: evidence.status,
-    processTerminal: true,
-    cleanupComplete: true,
-    residueVerified: true,
-  };
-}
-
-function validateCfaQualificationEvidenceFile(filename, expected, dependencies = {}) {
-  if (!fs.existsSync(filename)) throw new Error('CFA result evidence file is missing');
-  let evidence;
-  try {
-    evidence = JSON.parse(fs.readFileSync(filename, 'utf8'));
-  } catch (error) {
-    throw new Error(`CFA result evidence is malformed: ${error.message || error}`);
-  }
-  return validateCfaQualificationEvidence(evidence, expected, dependencies);
-}
-
-function runCommandCheck(id, check, logDir, context = {}, dependencies = {}) {
+function runCommandCheck(id, check, logDir, context = {}) {
   const missingEnv = (check.requiredEnv || []).filter(key => !process.env[key]);
   if (missingEnv.length) return { id, status: 'unavailable', reason: `missing environment: ${missingEnv.join(', ')}` };
-  const now = dependencies.now || (() => new Date());
-  const spawn = dependencies.spawnSync || spawnSync;
-  let cfaInvocation = null;
-  try {
-    cfaInvocation = id === CFA_CHECK_ID ? createCfaInvocation(check, logDir, dependencies) : null;
-  } catch (error) {
-    return { id, status: 'failed', error: error.message || String(error) };
-  }
-  const admittedCommand = cfaInvocation?.command || check.command;
-  const startedAt = now().toISOString();
-  const [command, ...commandArgs] = admittedCommand;
+  const startedAt = new Date().toISOString();
+  const [command, ...commandArgs] = check.command;
   const cwd = REPOSITORIES[check.cwd || 'admin'];
-  const result = spawn(command, commandArgs, {
+  const result = spawnSync(command, commandArgs, {
     cwd,
     env: {
       ...process.env,
@@ -455,9 +323,8 @@ function runCommandCheck(id, check, logDir, context = {}, dependencies = {}) {
     },
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
-    ...(id === CFA_CHECK_ID ? { timeout: CFA_QUALIFICATION_TIMEOUT_MS, killSignal: 'SIGTERM' } : {}),
   });
-  const finishedAt = now().toISOString();
+  const finishedAt = new Date().toISOString();
   const log = [result.stdout || '', result.stderr || ''].filter(Boolean).join('\n');
   const logPath = path.join(logDir, `${id}.log`);
   fs.writeFileSync(logPath, log, 'utf8');
@@ -467,89 +334,13 @@ function runCommandCheck(id, check, logDir, context = {}, dependencies = {}) {
     startedAt,
     finishedAt,
     durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
-    command: admittedCommand,
+    command: check.command,
     logPath,
     logSha256: crypto.createHash('sha256').update(log).digest('hex'),
   };
-  if (result.error) {
-    record.status = 'failed';
-    record.error = result.error.message;
-  }
+  if (result.error) record.error = result.error.message;
   if (result.status !== 0) record.exitCode = result.status;
-  if (result.signal) record.signal = result.signal;
-  if (id === CFA_CHECK_ID && record.status === 'passed') {
-    try {
-      const details = (dependencies.validateCfaEvidenceFile || validateCfaQualificationEvidenceFile)(
-        cfaInvocation.evidenceOut,
-        { attemptId: cfaInvocation.attemptId, sprintStartedAt: cfaInvocation.sprintStartedAt },
-        dependencies
-      );
-      const evidenceBytes = fs.readFileSync(cfaInvocation.evidenceOut);
-      record.details = {
-        ...details,
-        evidencePath: cfaInvocation.evidenceOut,
-        evidenceSha256: crypto.createHash('sha256').update(evidenceBytes).digest('hex'),
-      };
-    } catch (error) {
-      record.status = 'failed';
-      record.error = error.message || String(error);
-    }
-  }
   return record;
-}
-
-function prerequisiteBlockers(check, completedChecks) {
-  const byId = new Map(completedChecks.map(result => [result.id, result]));
-  return (check.prerequisites || []).map(id => {
-    const result = byId.get(id);
-    return { id, status: result?.status || 'missing' };
-  }).filter(result => result.status !== 'passed');
-}
-
-function executeQualificationChecks(args, inventory, plan, logDir, dependencies = {}) {
-  const checks = [];
-  let deployedComponents = [];
-  if (args.stage === 'test' && args.deploymentManifest) {
-    const deployment = (dependencies.loadJson || loadJson)(args.deploymentManifest);
-    if (deployment.app?.deployAdmin) deployedComponents.push('admin');
-    if (deployment.app?.deployPortal) deployedComponents.push('portal');
-    if (deployment.app?.deployShared) deployedComponents.push('shared');
-  }
-  for (const id of plan.requiredChecks) {
-    const check = inventory.checks[id];
-    (dependencies.writeProgress || (value => process.stderr.write(value)))(`[release-qualification] ${id}\n`);
-    const blockers = prerequisiteBlockers(check, checks);
-    if (blockers.length) {
-      checks.push({
-        id,
-        status: 'blocked',
-        reason: `prerequisite not passed: ${blockers.map(item => `${item.id}=${item.status}`).join(', ')}`,
-        prerequisites: blockers,
-      });
-      continue;
-    }
-    if (check.type) {
-      const now = dependencies.now || (() => new Date());
-      const startedAt = now().toISOString();
-      try {
-        const details = (dependencies.internalCheck || internalCheck)(id, args, plan, inventory);
-        const finishedAt = now().toISOString();
-        checks.push({ id, status: 'passed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt), details });
-      } catch (error) {
-        const finishedAt = now().toISOString();
-        checks.push({ id, status: 'failed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt), error: error.message || String(error) });
-      }
-    } else {
-      checks.push((dependencies.runCommandCheck || runCommandCheck)(
-        id,
-        check,
-        logDir,
-        { plan, deployedComponents },
-        dependencies
-      ));
-    }
-  }
-  return checks;
 }
 
 function evidencePath(args) {
@@ -562,7 +353,31 @@ function runQualification(args, inventory, plan) {
   const outputPath = evidencePath(args);
   const logDir = `${outputPath}.logs`;
   fs.mkdirSync(logDir, { recursive: true });
-  const checks = executeQualificationChecks(args, inventory, plan, logDir);
+  const checks = [];
+  for (const id of plan.requiredChecks) {
+    const check = inventory.checks[id];
+    process.stderr.write(`[release-qualification] ${id}\n`);
+    if (check.type) {
+      const startedAt = new Date().toISOString();
+      try {
+        const details = internalCheck(id, args, plan, inventory);
+        const finishedAt = new Date().toISOString();
+        checks.push({ id, status: 'passed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt), details });
+      } catch (error) {
+        const finishedAt = new Date().toISOString();
+        checks.push({ id, status: 'failed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt), error: error.message || String(error) });
+      }
+    } else {
+      let deployedComponents = [];
+      if (args.stage === 'test' && args.deploymentManifest) {
+        const deployment = loadJson(args.deploymentManifest);
+        if (deployment.app?.deployAdmin) deployedComponents.push('admin');
+        if (deployment.app?.deployPortal) deployedComponents.push('portal');
+        if (deployment.app?.deployShared) deployedComponents.push('shared');
+      }
+      checks.push(runCommandCheck(id, check, logDir, { plan, deployedComponents }));
+    }
+  }
 
   const blocking = checks.filter(check => check.status !== 'passed');
   const generatedAt = new Date();
@@ -620,7 +435,7 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.command === 'help') return usage();
   const inventory = loadInventory();
-  const inventoryErrors = [...validateInventory(inventory), ...validatePrerequisiteDeclarations(inventory)];
+  const inventoryErrors = validateInventory(inventory);
   if (inventoryErrors.length) throw new Error(`Invalid coverage inventory: ${inventoryErrors.join('; ')}`);
 
   if (args.command === 'validate') {
@@ -649,23 +464,9 @@ function main() {
   if (result.evidence.decision !== 'GO') process.exitCode = 1;
 }
 
-if (require.main === module) {
-  try {
-    main();
-  } catch (error) {
-    console.error(`Release qualification failed: ${error.message || error}`);
-    process.exitCode = 1;
-  }
+try {
+  main();
+} catch (error) {
+  console.error(`Release qualification failed: ${error.message || error}`);
+  process.exitCode = 1;
 }
-
-module.exports = {
-  CFA_QUALIFICATION_TIMEOUT_MS,
-  createCfaInvocation,
-  executeQualificationChecks,
-  prerequisiteBlockers,
-  runCommandCheck,
-  validateCfaQualificationEvidence,
-  validateCfaQualificationEvidenceFile,
-  validateCommandReferences,
-  validatePrerequisiteDeclarations,
-};

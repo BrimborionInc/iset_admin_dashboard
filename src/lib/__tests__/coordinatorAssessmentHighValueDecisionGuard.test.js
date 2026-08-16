@@ -41,6 +41,7 @@ describe('application assessment high-value decision guard', () => {
     expect(source).toContain('applicationStatus: normalizedApplicationStatus');
     expect(source).toContain('reviewWorkflow,');
     expect(source).toContain('currentStaffProfileId,');
-    expect(source).toContain('including assessments returned to them as the original submitter');
+    expect(source).toContain('assignedStaffProfileId,');
+    expect(source).toContain('After submission, they can edit only work returned to them as the original submitter.');
   });
 });

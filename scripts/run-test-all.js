@@ -14,6 +14,7 @@ const {
 const REPO_ROOT = path.resolve(__dirname, '..');
 const SYNTHETIC_ENVIRONMENT = Object.freeze([
   'ALLOWED_ORIGIN=http://localhost:3000,http://localhost:3001',
+  'AWS_EC2_METADATA_DISABLED=true',
   'AWS_REGION=ca-central-1',
   'COGNITO_REGION=ca-central-1',
   'COGNITO_STAFF_USER_POOL_ID=ca-central-1_pathSyntheticStaff',
@@ -36,6 +37,7 @@ function controlledExecutablePath() {
 
 function buildChildEnvironment(root, environmentFile) {
   const environment = {
+    AWS_EC2_METADATA_DISABLED: 'true',
     BABEL_ENV: 'test',
     CI: 'true',
     HOME: root,
@@ -87,19 +89,9 @@ function runPhase(label, args, environment) {
   }
 }
 
-function withSyntheticTestEnvironment(operation) {
+function main() {
   const syntheticEnvironment = createSyntheticTestEnvironment();
   try {
-    return operation(syntheticEnvironment);
-  } finally {
-    if (!syntheticEnvironment.cleanup()) {
-      throw new Error('Admin aggregate synthetic environment residue remains');
-    }
-  }
-}
-
-function main() {
-  return withSyntheticTestEnvironment((syntheticEnvironment) => {
     runPhase('frontend suites', [
       require.resolve('react-scripts/scripts/test'),
       '--watchAll=false',
@@ -114,7 +106,11 @@ function main() {
     ], syntheticEnvironment.childEnvironment);
 
     console.log('\n[test:all] all admin suites passed');
-  });
+  } finally {
+    if (!syntheticEnvironment.cleanup()) {
+      throw new Error('Admin aggregate synthetic environment residue remains');
+    }
+  }
 }
 
 if (require.main === module) {
@@ -127,10 +123,5 @@ if (require.main === module) {
 }
 
 module.exports = {
-  SYNTHETIC_ENVIRONMENT,
-  buildChildEnvironment,
   createSyntheticTestEnvironment,
-  main,
-  runPhase,
-  withSyntheticTestEnvironment,
 };

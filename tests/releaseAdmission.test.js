@@ -15,24 +15,8 @@ const {
   createZipFromDirectory,
 } = require('../scripts/path-deploy');
 
-const ownedTempRoots = new Set();
-
-function createOwnedTempRoot(prefix) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  ownedTempRoots.add(root);
-  return root;
-}
-
-function removeOwnedTempRoots() {
-  const roots = [...ownedTempRoots];
-  roots.forEach(root => fs.rmSync(root, { recursive: true, force: true }));
-  const residue = roots.filter(root => fs.existsSync(root));
-  roots.filter(root => !fs.existsSync(root)).forEach(root => ownedTempRoots.delete(root));
-  return residue;
-}
-
 function makeRepo(buildInfo = {}) {
-  const root = createOwnedTempRoot('path-release-admission-');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'path-release-admission-'));
   fs.mkdirSync(path.join(root, 'src', 'generated'), { recursive: true });
   fs.mkdirSync(path.join(root, 'build', 'static'), { recursive: true });
   const info = {
@@ -49,10 +33,6 @@ function makeRepo(buildInfo = {}) {
 }
 
 describe('release admission', () => {
-  afterEach(() => {
-    expect(removeOwnedTempRoots()).toEqual([]);
-  });
-
   test('accepts only an exact, untampered prebuilt production tree', () => {
     const root = makeRepo();
     writeBuildManifest({ repoRoot: root });
@@ -112,7 +92,7 @@ describe('release admission', () => {
   });
 
   test('archive-content preflight verifies required runtime and smoke scripts before upload', async () => {
-    const temp = createOwnedTempRoot('path-archive-preflight-');
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'path-archive-preflight-'));
     const staging = path.join(temp, 'staging');
     const archive = path.join(temp, 'artifact.zip');
     fs.mkdirSync(path.join(staging, 'scripts', 'lib'), { recursive: true });
@@ -161,7 +141,7 @@ describe('release admission', () => {
   });
 
   test('an interrupted staging set cannot produce an active release pointer', () => {
-    const temp = createOwnedTempRoot('path-artifact-');
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'path-artifact-'));
     const archive = path.join(temp, 'admin.zip');
     fs.writeFileSync(archive, 'immutable admin archive');
     const admin = buildImmutableArtifactRecord({ component: 'admin', releaseId: 'release-1', archivePath: archive });

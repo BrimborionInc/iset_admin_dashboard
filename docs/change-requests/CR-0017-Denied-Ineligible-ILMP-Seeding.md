@@ -1,8 +1,60 @@
 # CR-0017: Denied-Ineligible ILMP Seeding
 
 Status: Superseded by all-denial reporting seed / Forward change implemented
-Owner: Codex + Bill
-Last updated: 2026-05-27
+Owner: Engineering and product owner
+Last updated: 2026-08-15
+
+## 2026-08-15 update: complete application-boundary containment
+
+The preventive fix now contains denial reporting across the repeat-application
+journey. A save or version restore resynchronizes denial artifacts only when the
+selected application has its own reporting artifact and is still denied or
+withdrawn. A sibling application cannot inherit a case-root denial flag,
+reporting-correction permission, Action Plan, intervention, or ESDC participant
+record. Denial becomes case-level reporting-only only when the case has no
+ordinary Action Plan and no other meaningful application.
+
+When a later portal or staff-assisted intake reuses a terminal case, PATH
+reopens that case to `submitted` / `intake`, clears its old closure fields, and
+removes obsolete case-wide reporting routing plus the old application snapshot.
+It preserves `applicationReportingArtifacts` and application-scoped decision
+history, so the prior denial remains reportable without hiding or contaminating
+the new application. An already active case is not reset; stale reporting flags
+are removed without changing its lifecycle.
+
+The selected application now also controls workspace ESDC validation and
+export, correction permissions, and EI correction dependency checks.
+Exact-application or unresolved legacy Action Plans and interventions block an
+EI change; a known sibling application's records do not. ESDC initialization
+rejects a supplied Action Plan whose case or application differs from the
+requested scope.
+
+The repository includes a schema-guarded, rollback-only DEV contract at
+`npm run test:denied-reporting:dev`. Exact-candidate qualification and any
+environment rehearsal remain separate release steps. This is forward code only;
+existing live-data inconsistencies require separately designed, schema-proven
+inventory and repair work after the code release is qualified and deployed.
+
+## 2026-08-14 update: repeat-application and EI funding integrity
+
+The forward denial seed is application scoped and fail closed in source.
+Re-running a denial can update only the reporting Action Plan for the exact
+`case_id + application_id`; it cannot select an older denied application's plan
+by case alone or move that plan to a newer application. The application
+assessment is the denial seed's EI source of truth: `EI Active Claim` maps to
+claimant code `1` / `EI`, `EI Reach Back` maps to code `2` / `EI`, and `CRF`
+maps to code `3` / `CRF`. An absent or unrecognized denial-assessment value
+blocks artifact generation instead of silently defaulting to CRF.
+
+The resolved funding stream is persisted on both the reporting Action Plan and
+each generated intervention. ESDC readiness validation independently compares
+the exact reporting application, its assessment, the Action Plan claimant and
+funding fields, and the stored intervention funding decision; a mismatch or
+unset intervention decision blocks submission. Withdrawal reporting retains its
+existing fallback behavior and is not subject to the denial-only assessment
+requirement.
+
+This preventive source change does not migrate or repair historical records.
 
 ## 2026-05-27 update: education mapping hardening
 

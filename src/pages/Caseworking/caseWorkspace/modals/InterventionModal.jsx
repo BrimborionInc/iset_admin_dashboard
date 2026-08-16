@@ -500,15 +500,6 @@ const InterventionModal = ({
   const isViewMode = mode === "edit" && !isEditing;
   const isFormReadOnly = isAccessReadOnly || isViewMode || (mode === "edit" && isClosing);
   const isCloseReadOnly = isAccessReadOnly || !canClose || !isClosing;
-  const modalLifecycleState = isClosing
-    ? "closing"
-    : mode !== "edit"
-      ? "creating"
-      : isAccessReadOnly
-        ? "read-only"
-        : isEditing
-          ? "editing"
-          : "viewing";
   const modalHeader =
     mode === "edit"
       ? isFormReadOnly
@@ -1114,58 +1105,43 @@ const InterventionModal = ({
       size="large"
       footer={
         <SpaceBetween size="xs" direction="horizontal">
-          <span data-path-intervention-action="cancel">
-            <Button onClick={handleCancel} disabled={loading}>
-              Cancel
-            </Button>
-          </span>
+          <Button onClick={handleCancel} disabled={loading}>
+            Cancel
+          </Button>
           {mode === "edit" && !isAccessReadOnly && !isClosing && !isEditing && !startInCloseMode && (
-            <span data-path-intervention-action="edit">
-              <Button onClick={() => setIsEditing(true)} disabled={loading}>
-                Edit
-              </Button>
-            </span>
+            <Button onClick={() => setIsEditing(true)} disabled={loading}>
+              Edit
+            </Button>
           )}
           {mode === "edit" && canClose && !isAccessReadOnly && !isClosing && !isEditing && (
-            <span data-path-intervention-action="begin-close">
-              <Button onClick={beginClosing} disabled={loading}>
-                Close intervention
-              </Button>
-            </span>
+            <Button onClick={beginClosing} disabled={loading}>
+              Close intervention
+            </Button>
           )}
           {((mode !== "edit") || (mode === "edit" && isEditing)) && !isClosing && (
-            <span data-path-intervention-action="save">
-              <Button
-                variant="primary"
-                onClick={handleSubmit}
-                loading={loading}
-                disabled={saveDisabled}
-              >
-                {mode === "edit" ? "Save changes" : "Create intervention"}
-              </Button>
-            </span>
+            <Button
+              variant="primary"
+              onClick={handleSubmit}
+              loading={loading}
+              disabled={saveDisabled}
+            >
+              {mode === "edit" ? "Save changes" : "Create intervention"}
+            </Button>
           )}
           {isClosing && !isCloseReadOnly && (
-            <span data-path-intervention-action="submit-close">
-              <Button
-                variant="primary"
-                onClick={handleSubmit}
-                loading={loading}
-                disabled={closeDisabled}
-              >
-                Close intervention
-              </Button>
-            </span>
+            <Button
+              variant="primary"
+              onClick={handleSubmit}
+              loading={loading}
+              disabled={closeDisabled}
+            >
+              Close intervention
+            </Button>
           )}
         </SpaceBetween>
       }
     >
-      <div
-        data-path-intervention-surface="modal"
-        data-path-intervention-state={modalLifecycleState}
-        data-path-posting-context={form.postingContext || "external"}
-      >
-        <SpaceBetween size="l">
+      <SpaceBetween size="l">
         {(error || validationError) && (
           <Alert
             type="error"
@@ -1404,16 +1380,14 @@ const InterventionModal = ({
                       readOnly={isFormReadOnly}
                     />
                   </FormField>
-                  <div data-path-intervention-field="program-name">
-                    <FormField label="Program name (optional)" description="Course, credential, or stream name.">
-                      <Input
-                        value={form.programName}
-                        onChange={({ detail }) => handleChange("programName", detail.value)}
-                        spellcheck={false}
-                        readOnly={isFormReadOnly}
-                      />
-                    </FormField>
-                  </div>
+                  <FormField label="Program name (optional)" description="Course, credential, or stream name.">
+                    <Input
+                      value={form.programName}
+                      onChange={({ detail }) => handleChange("programName", detail.value)}
+                      spellcheck={false}
+                      readOnly={isFormReadOnly}
+                    />
+                  </FormField>
                 </ColumnLayout>
                 <FormField
                   label="In-Training Plan (ITP) details"
@@ -1476,33 +1450,31 @@ const InterventionModal = ({
               <FormField label="Budget Pot" description="Inherited. Adjust in parent Action Plan.">
                 <Input value={inheritedBudgetPotLabel} readOnly />
               </FormField>
-              <div data-path-intervention-field="posting-context">
-                <FormField
-                  label="Paid from"
-                  description="Select whether this pot is charged externally or internally."
-                  errorText={fieldErrors.postingContext}
-                >
-                  {isAssessor || !canSelectPostingContext ? (
-                    <Input value="External (region/PTMA)" readOnly />
-                  ) : (
-                    <Select
-                      selectedOption={selectedPostingContext}
-                      options={POSTING_CONTEXT_OPTIONS}
-                      onChange={({ detail }) => {
-                        setFieldErrors(prev => {
-                          if (!prev.postingContext) return prev;
-                          const next = { ...prev };
-                          delete next.postingContext;
-                          return next;
-                        });
-                        setForm(current => ({ ...current, postingContext: detail.selectedOption?.value || "external" }));
-                      }}
-                      placeholder="Select"
-                      readOnly={isFormReadOnly}
-                    />
-                  )}
-                </FormField>
-              </div>
+              <FormField
+                label="Paid from"
+                description="Select whether this pot is charged externally or internally."
+                errorText={fieldErrors.postingContext}
+              >
+                {isAssessor || !canSelectPostingContext ? (
+                  <Input value="External (region/PTMA)" readOnly />
+                ) : (
+                  <Select
+                    selectedOption={selectedPostingContext}
+                    options={POSTING_CONTEXT_OPTIONS}
+                    onChange={({ detail }) => {
+                      setFieldErrors(prev => {
+                        if (!prev.postingContext) return prev;
+                        const next = { ...prev };
+                        delete next.postingContext;
+                        return next;
+                      });
+                      setForm(current => ({ ...current, postingContext: detail.selectedOption?.value || "external" }));
+                    }}
+                    placeholder="Select"
+                    readOnly={isFormReadOnly}
+                  />
+                )}
+              </FormField>
               <FormField label="Planned cost" errorText={fieldErrors.cost}>
                 <Input
                   value={getCurrencyInputDisplayValue(costInputValue, isCostFocused)}
@@ -1597,9 +1569,8 @@ const InterventionModal = ({
               />
             </FormField>
           </SpaceBetween>
-          </SpaceBetween>
         </SpaceBetween>
-      </div>
+      </SpaceBetween>
     </Modal>
   );
 };

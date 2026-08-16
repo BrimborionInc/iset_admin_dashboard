@@ -19,6 +19,7 @@ import {
 } from '@cloudscape-design/components';
 import { boardItemI18nStrings } from './common';
 import { apiFetch } from '../../../auth/apiClient';
+import { buildParticipantWorkspaceHref } from '../participantQueueNavigation';
 import './EsdcParticipantQueueWidget.css';
 
 const readinessBadge = status => {
@@ -81,15 +82,11 @@ const submissionDetail = item => {
   return rest.length ? `${first} (+${rest.length} other issue${rest.length > 1 ? 's' : ''})` : first;
 };
 
-const primaryCaseId = item =>
-  item?.case_id ||
-  (Array.isArray(item?.children) ? item.children.find(child => child?.case_id)?.case_id : null) ||
-  null;
-
 const renderParticipantLink = item => {
   const label = item.participant_name || `Submission #${item.id}`;
-  const caseId = primaryCaseId(item);
-  return caseId ? <Link href={`/cases/${caseId}`}>{label}</Link> : label;
+  if (Array.isArray(item?.children)) return label;
+  const href = buildParticipantWorkspaceHref(item);
+  return href ? <Link href={href}>{label}</Link> : label;
 };
 
 const summaryDefaults = { total: 0, ready: 0, needsReview: 0, blocked: 0 };
@@ -559,8 +556,8 @@ const EsdcParticipantQueueWidget = ({
             empty={renderEmptyState()}
             variant="embedded"
             expandableRows={{
-              getItemChildren: item => (Array.isArray(item.children) && item.children.length > 1 ? item.children : []),
-              isItemExpandable: item => Array.isArray(item.children) && item.children.length > 1,
+              getItemChildren: item => (Array.isArray(item.children) ? item.children : []),
+              isItemExpandable: item => Array.isArray(item.children) && item.children.length > 0,
               expandedItems,
               onExpandableItemToggle: ({ detail }) => {
                 const id = detail.item?.id;

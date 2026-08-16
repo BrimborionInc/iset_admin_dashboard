@@ -1,6 +1,10 @@
 const fs = require("fs");
 const path = require("path");
 
+const {
+  buildParticipantWorkspaceHref,
+} = require("../../pages/esdc/participantQueueNavigation");
+
 const repoRoot = path.resolve(__dirname, "../../..");
 
 const extractBetween = (source, start, end) => {
@@ -30,6 +34,32 @@ describe("ESDC participant queue pagination", () => {
     expect(route).toContain("res.json({ total: sortedGroupedItems.length, items: pagedItems, grouped: true, summary });");
   });
 
+  test("preserves exact application lineage on every participant submission row", () => {
+    const serverSource = fs.readFileSync(path.join(repoRoot, "isetadminserver.js"), "utf8");
+    const route = extractBetween(
+      serverSource,
+      "esdcRouter.get('/participants'",
+      "esdcRouter.post('/participants/validate-all'"
+    );
+
+    expect(route).toContain("eps.application_id,");
+    expect(route.match(/application_id: row\.application_id,/g)).toHaveLength(2);
+    expect(route.match(/applicationId: row\.application_id,/g)).toHaveLength(2);
+  });
+
+  test("builds only exact application-workspace navigation targets", () => {
+    expect(buildParticipantWorkspaceHref({
+      case_id: 76,
+      application_id: 123,
+    })).toBe('/application-case/76?applicationId=123');
+    expect(buildParticipantWorkspaceHref({
+      caseId: '77',
+      applicationId: '124',
+    })).toBe('/application-case/77?applicationId=124');
+    expect(buildParticipantWorkspaceHref({ case_id: 76 })).toBeNull();
+    expect(buildParticipantWorkspaceHref({ application_id: 123 })).toBeNull();
+  });
+
   test("participant queue widget combines validation summary and sorts server-side before pagination", () => {
     const widgetSource = fs.readFileSync(
       path.join(repoRoot, "src/pages/esdc/widgets/EsdcParticipantQueueWidget.jsx"),
@@ -47,7 +77,11 @@ describe("ESDC participant queue pagination", () => {
     expect(widgetSource).toContain("params.set('sortField', sorting.sortingColumn.sortingField);");
     expect(widgetSource).toContain("params.set('sortDirection', sorting.isDescending ? 'desc' : 'asc');");
     expect(widgetSource).toContain("onSortingChange={({ detail }) =>");
-    expect(widgetSource).toContain("item.children.length > 1");
+    expect(widgetSource).toContain("if (Array.isArray(item?.children)) return label;");
+    expect(widgetSource).toContain("Array.isArray(item.children) && item.children.length > 0");
+    expect(widgetSource).toContain("import { buildParticipantWorkspaceHref } from '../participantQueueNavigation';");
+    expect(widgetSource).toContain("const href = buildParticipantWorkspaceHref(item);");
+    expect(widgetSource).not.toMatch(/href=\{`\/cases\//);
     expect(widgetSource).toContain("const exportableQueueCount = (Number(summary.ready) || 0) + (Number(summary.needsReview) || 0);");
     expect(widgetSource).toContain("disabled={loading || exportableQueueCount === 0}");
     expect(widgetSource).toContain("Exportable participants");
@@ -81,7 +115,9 @@ describe("ESDC participant queue pagination", () => {
     expect(widgetSource).toContain("apiFetch('/api/esdc/participants/batch-submit'");
     expect(collector).not.toMatch(/\bLIMIT\b|\bOFFSET\b|pageLimit|pageSize|req\.query|req\.body/);
     expect(prepareRoute).toContain("collectReadyEsdcBatchParticipants()");
-    expect(submitRoute).toContain("collectReadyEsdcBatchParticipants()");
+    expect(submitRoute).toContain('submitReadyEsdcBatch({');
+    expect(collector).toContain('collectParticipants = collectReadyEsdcBatchParticipants');
+    expect(collector).toContain('lockSubmissions: true');
   });
 
   test("recent ILMP exports route limits complete batch groups instead of history rows", () => {

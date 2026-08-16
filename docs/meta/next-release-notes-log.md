@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-08-10
+Last Updated: 2026-08-15
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,10 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-08-15 | Release TBD | Fix/Denied reporting | Repeat-application lifecycle and reporting scope | A new application can reuse a case from an earlier denial without remaining closed, hidden, or tied to the earlier application's reporting records. | PATH reopens only a terminal reused case, preserves the earlier application's reporting history, and scopes correction permissions, EI dependencies, Action Plans, interventions, and ESDC validation and export to the selected application. Historical data repair is separate.
+- 2026-08-15 | Release TBD | Fix/Core workflows | Repeat-application isolation | Work on one application no longer silently closes, edits, validates, reports, or navigates to a sibling application on the same long-lived client file. | Assessment decisions and letters, Action Plans and interventions, EI evidence, ESDC records, closure, documents, messages, reminders, notifications, portal history, and application queues now preserve exact ownership; ambiguous historical records stop for review instead of borrowing the newest application.
+- 2026-08-14 | Release TBD | Fix/Denied reporting | Repeat applications and EI funding | A denied repeat application now keeps its reporting Action Plan, interventions, and ESDC record separate from earlier applications. | PATH uses the selected application assessment consistently: EI Active Claim and EI Reach Back use EI funding with claimant codes 1 and 2, while CRF uses code 3. Conflicting or missing stored funding values block reporting until corrected. Historical records require a separate repair.
+- 2026-08-13 | Release TBD | Fix/Application Assessment | Repeat applications | An assigned ISET Coordinator or Regional Manager can now begin the assessment for a new application on an existing case without signing the same conflict declaration again. | A valid case-level declaration carries forward for that staff member, while the first successful assessment save starts only the selected application. Signing the declaration alone no longer changes application status; case status, earlier applications, review workflows, decisions, letters, and funding agreements are unchanged.
 - 2026-08-10 | Release 20260810-feedback-182-letter-hotfix-r1 | Fix/Application Assessment | Approval and denial letters | Fixed a bug that prevented assigned staff from saving or sending an application decision letter after the final decision was recorded. | Letter drafting, letter-pack preparation, denial explanation, and sent-status tracking now remain available as post-decision follow-up without granting staff permission to alter the Decision Maker's recorded outcome. Active review-stage and case-access controls remain enforced. The actual case-route regression, complete 850-test aggregate, changed-file lint/syntax checks, production build, exact deployed provenance, healthy target, and normal-routing smoke passed; the admin-only emergency hotfix deployed to PROD on 2026-08-10.
 - 2026-08-09 | Release TBD | Fix/Workflow integrity | Two-step assessment and intervention review | Strengthened returned-work ownership, final decisions, and final review records across application assessments, new intervention proposals, and intervention revisions. | Only the recorded submitter can correct returned work; a Regional Manager who is also the submitter must resubmit before using a separate RM sign-off. Final approval/denial packets preserve the submitter, Regional Manager, Decision Maker, outcome, and required notes. Exact application/EI/document lineage is enforced, zero-funded approvals remain letter-only, and applied revisions remain audit evidence without appearing as duplicate operational interventions.
 - 2026-08-08 | Release TBD | UX/Guidance | Two-step review help | Updated PATH help and AI guidance to explain how assessments and intervention requests move between the submitter, Regional Manager, and Decision Maker. | The updated guidance distinguishes direct RM returns from Decision Maker changes routed back through the RM, explains when EI status is required and how it controls CRF/EI funding alignment, and clarifies that application-specific CFA production and signing happen only after a funded final approval.
@@ -490,11 +494,23 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- New applications now reopen a terminal case left by an earlier denial without losing the earlier reporting history; denied repeat applications keep separate Action Plans, interventions, and ESDC records, and PATH blocks reporting when the selected application's assessment and funding records do not agree.
 - Returned assessments and intervention requests can now be corrected only by their recorded submitter, then move through a separate Regional Manager review before reaching the Decision Maker.
 - Final approval and denial records now preserve the exact submitter, Regional Manager, Decision Maker, outcome, notes, application, and submitted version.
 - PATH help and AI guidance now explain the complete two-step review, EI evidence, funding-alignment, and post-approval agreement workflow.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260815-core-workflow-integrity-prod-r1
+
+- Repeat applications now keep assessments, decisions, letters, Action Plans, interventions, EI evidence, ESDC submissions, documents, messages, reminders, notifications, and work-queue links attached to the exact application being worked on.
+- A new application can begin assessment using the staff member's valid case-level conflict declaration. The first successful save advances only that application, while an earlier application and the overall client file remain unchanged.
+- Denying one application no longer closes a client file that still has another open application or active service plan. Decision letters and intervention approval letters now commit their exact message, document, signing and lifecycle records together.
+- Ambiguous historical records now stop for review instead of borrowing the newest application. Historical PROD data correction is a separate controlled operation and is not part of this code release.
+
+#### Release 20260813-portal-help-links-r1
+
+- Fixed both public portal Help-page links to Indigenous Skills and Employment Training service delivery organizations so they open the current Canada.ca directory instead of the retired page.
 
 #### Release 20260810-two-step-review-assurance-r34
 
@@ -503,29 +519,29 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Approved zero-funded work remains letter-only; funded application approvals use the exact application for Client Funding Agreement preparation and signing. Applied intervention revisions remain available as review evidence without appearing as duplicate operational interventions.
 - Updated PATH help panels and Ask the AI guidance explain returns, correction ownership, Regional Manager sign-off, Decision Maker review, EI/CRF alignment, and when funding agreements are produced.
 
-#### Release 20260807-assessment-correction-hotfix-r19
-
-- Financial Overview requests and signing no longer replace the active Application Assessment review stage or hide a returned assessment from the correct queue.
-- A returned assessment can be edited and resubmitted only by the staff member recorded as its original submitter. An older returned assessment can keep its already accepted EI value without supplying a newly retrofitted document; changing that value still requires current evidence. Staff correction saves do not resend Decision Maker fields. A correction-required reopened assessment must be returned for correction before it can move forward again.
-- Client Funding Agreement signing now commits the exact application, agreement version, signed document, request, message, and audit event as one protected operation, with safe retry and rollback behavior.
-- Signed CFA and Financial Overview PDFs now finish before the PDF browser closes, use the required byte format, and retain the exact secure-message link. The portal consumes retryable conflicts with the unchanged signing details and keeps completed forms on the submitted screen after reload; changed signing details remain rejected. Queued review notifications continue processing after startup, retain the exact record scope, and reach an explicitly targeted dual-role submitter without notifying the wider role.
-
-#### Release 20260805-cfa-signing-hotfix-r3
-
-- Fixed Client Funding Agreement signing so PATH carries the agreement's verified application link into the signed PDF, agreement version, document record, and case event.
-- Repeated submission of an already signed agreement remains safe and does not create duplicate documents or events.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
+- Une nouvelle demande rouvre maintenant un dossier terminal laissé par un refus antérieur sans perdre l'historique de déclaration; les demandes répétées refusées conservent des plans d'action, des interventions et des dossiers EDSC distincts, et PATH bloque la déclaration lorsque l'évaluation et le financement de la demande sélectionnée ne concordent pas.
 - Les évaluations et demandes d'intervention retournées peuvent maintenant être corrigées uniquement par la personne enregistrée comme les ayant soumises, puis elles passent par une révision distincte du gestionnaire régional avant d'atteindre le décideur.
 - Les dossiers finaux d'approbation et de refus conservent maintenant la personne ayant soumis le dossier, le gestionnaire régional, le décideur, le résultat, les notes, la demande et la version soumise exacts.
 - L'aide de PATH et les conseils de l'IA expliquent maintenant la révision complète en deux étapes, les preuves d'assurance-emploi, l'harmonisation du financement et le processus d'entente après l'approbation.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260815-core-workflow-integrity-prod-r1
+
+- Les demandes répétées conservent maintenant leurs évaluations, décisions, lettres, plans d'action, interventions, preuves d'assurance-emploi, soumissions EDSC, documents, messages, rappels, notifications et liens de file de travail associés à la demande exacte en cours de traitement.
+- Une nouvelle demande peut commencer son évaluation en utilisant la déclaration de conflit valide du membre du personnel pour le dossier. La première sauvegarde réussie fait avancer uniquement cette demande, sans modifier une demande antérieure ni l'ensemble du dossier client.
+- Le refus d'une demande ne ferme plus un dossier client lorsqu'une autre demande ou un plan de services demeure actif. Les lettres de décision et d'approbation d'intervention enregistrent maintenant ensemble leurs messages, documents, demandes de signature et états de cycle de vie exacts.
+- Les dossiers historiques ambigus sont maintenant bloqués pour révision au lieu d'être associés à la demande la plus récente. La correction des données historiques de PROD constitue une opération contrôlée distincte et ne fait pas partie de cette mise en production du code.
+
+#### Release 20260813-portal-help-links-r1
+
+- Correction des deux liens de la page Aide du portail public vers les organismes autochtones offrant le programme ISET; ils ouvrent maintenant le répertoire Canada.ca actuel plutôt que la page retirée.
 
 #### Release 20260810-two-step-review-assurance-r34
 
@@ -533,18 +549,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les décisions finales sont maintenant bloquées si le flux de travail, la demande, l'identité de la personne ayant soumis le dossier, la preuve d'assurance-emploi, les détails du financement, les éléments proposés et les faits soumis ne concordent pas exactement. Les dossiers d'approbation et de refus conservent les noms, fonctions et dates du gestionnaire régional et du décideur, ainsi que le résultat et les notes obligatoires.
 - Les dossiers approuvés sans financement demeurent limités aux lettres; les approbations financées utilisent la demande exacte pour préparer et signer l'entente de financement du client. Les révisions d'intervention appliquées demeurent disponibles comme preuve de révision sans apparaître comme interventions opérationnelles en double.
 - Les panneaux d'aide de PATH et les conseils de l'IA expliquent les retours, la responsabilité des corrections, l'approbation du gestionnaire régional, la révision du décideur, l'harmonisation AE/CRF et le moment où les ententes de financement sont produites.
-
-#### Release 20260807-assessment-correction-hotfix-r19
-
-- Les demandes et signatures d'aperçu financier ne remplacent plus l'étape active de révision d'une évaluation de demande et ne masquent plus une évaluation retournée dans la mauvaise file.
-- Une évaluation retournée peut être modifiée et soumise de nouveau uniquement par la personne enregistrée comme l'ayant soumise initialement. Une ancienne évaluation peut conserver sa valeur d'assurance-emploi déjà acceptée sans exiger rétroactivement un nouveau document; toute modification de cette valeur exige encore une preuve actuelle. Les sauvegardes de correction ne renvoient pas les champs réservés au décideur. Une évaluation rouverte pour correction doit être retournée avant de pouvoir progresser de nouveau.
-- La signature d'une entente de financement du client enregistre maintenant la demande exacte, la version de l'entente, le document signé, la demande de signature, le message et l'événement d'audit dans une seule opération protégée, avec une reprise et une annulation sécuritaires.
-- La création des PDF signés des ententes de financement et des aperçus financiers se termine maintenant avant la fermeture du navigateur PDF, utilise le format d'octets requis et conserve le lien exact avec le message sécurisé. Le portail reprend automatiquement les conflits temporaires avec les mêmes données de signature et conserve l'écran de confirmation après le rechargement; les données de signature modifiées restent refusées. Les notifications de révision continuent aussi après le démarrage, conservent le dossier exact visé et atteignent la personne explicitement ciblée même lorsqu'elle occupe aussi le rôle de gestionnaire régional, sans aviser tout ce rôle.
-
-#### Release 20260805-cfa-signing-hotfix-r3
-
-- Correction de la signature des ententes de financement du client : PATH transmet maintenant le lien vérifié de la demande au PDF signé, à la version de l'entente, au document et à l'événement du dossier.
-- Une nouvelle soumission d'une entente déjà signée demeure sans danger et ne crée pas de documents ni d'événements en double.
 
 ### Problemes connus (brouillon - FR)
 

@@ -4,31 +4,28 @@ const {
 } = require('../ilmpContextMapping');
 
 describe('ilmpContextMapping', () => {
-  test('chooses the most specific application id available for ILMP context', () => {
+  test('uses exact submission or Action Plan ownership and rejects conflicts', () => {
     expect(
       chooseIlmpApplicationId({
         submissionApplicationId: null,
         actionPlanApplicationId: 12,
-        legacyCaseApplicationId: 99,
-        primaryApplicationId: 44,
+        uniqueCaseApplicationId: 44,
       })
     ).toBe(12);
 
-    expect(
+    expect(() =>
       chooseIlmpApplicationId({
         submissionApplicationId: 7,
         actionPlanApplicationId: 12,
-        legacyCaseApplicationId: 99,
-        primaryApplicationId: 44,
+        uniqueCaseApplicationId: 44,
       })
-    ).toBe(7);
+    ).toThrow(expect.objectContaining({ code: 'ilmp_application_scope_mismatch' }));
 
     expect(
       chooseIlmpApplicationId({
         submissionApplicationId: null,
         actionPlanApplicationId: null,
-        legacyCaseApplicationId: null,
-        primaryApplicationId: '44',
+        uniqueCaseApplicationId: '44',
       })
     ).toBe(44);
   });

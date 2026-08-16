@@ -2,13 +2,13 @@
 
 Purpose: plan the new Regional Manager review stage for assessment and intervention approval workflows.
 Audience: product, engineering, operations, training, and future AI-assisted development threads.
-Last Updated: 2026-08-10
+Last Updated: 2026-08-13
 
 ## Status
 
 Design accepted for a low-risk first pass. The implementation covers application assessments, new intervention proposals, and intervention amendments/revisions behind the runtime toggle. Schema, shared transition helper, backend submission/final-decision integration, Regional Manager action endpoints, workspace payloads, stage-aware homepage queues, exact-workflow PDF signatures, `CoordinatorAssessmentWidget`, and the Case Workspace intervention proposal widget are wired. Application-assessment browser coverage and the deployed r19 TEST correction journey are retained. The 2026-08-09 assurance candidate adds a 12-scenario compiled-browser identity matrix for both intervention workflow types, atomic final decisions, exact application lineage, and expanded strict-denial coverage. Its focused and aggregate local tests are green, but exact-source DEV qualification and a separately approved deployed TEST rehearsal remain mandatory before any PROD rollout decision.
 
-2026-08-10 post-decision communication repair: PROD feedback `#182` exposed that the assurance rollout classified application decision-letter drafting and sent markers as Decision Maker outcome mutations. An assigned ISET Coordinator could see the legitimate post-decision letter step, but the first draft-save request was rejected with `application_decision_forbidden`, so no secure-message send began. The repair separates immutable decision state (`assessment_nwac_review_status`) from post-decision communication state (letter drafts, letter packs, sent markers, and denial-letter reason text). The existing case-access boundary remains authoritative for who may work on the file, and the backend additionally requires `final_decision_recorded` or a legacy recorded decision outcome before accepting communication changes. Active assessment/review stages remain locked. Regression coverage exercises every legacy/current communication key, legacy root-to-application scoping, the final-stage gate, related signing/message invariants, and the Coordinator UI error surface. A caller-boundary test through the actual case route proves that the assigned Coordinator succeeds, a different Coordinator and a pre-final workflow fail closed, and the save does not mutate the assessment or ESDC participant readiness. Release `20260810-feedback-182-letter-hotfix-r1` deployed the exact clean admin source `aa1148094fa8a8ab917857ddd26dd955ecb9062d` through the authorized emergency admin-only path after the complete 850-test gate, quiet lint, privacy smoke, production build, immutable archive preflight, ten-minute warning, and successful ASG refresh. Exact deployed provenance/build markers, a healthy target, normal forwarding, and all public readiness URLs passed. No workflow/data/letter/message mutation was used as a deployment smoke. The live report is now `in_progress` with the release evidence recorded; resolution remains pending the ISET Coordinator's authorized retry of the real save/send action.
+2026-08-10 post-decision communication repair: PROD feedback `#182` exposed that the assurance rollout classified application decision-letter drafting and sent markers as Decision Maker outcome mutations. An assigned ISET Coordinator could see the legitimate post-decision letter step, but the first draft-save request was rejected with `application_decision_forbidden`, so no secure-message send began. The local repair separates immutable decision state (`assessment_nwac_review_status`) from post-decision communication state (letter drafts, letter packs, sent markers, and denial-letter reason text). The existing case-access boundary remains authoritative for who may work on the file, and the backend now additionally requires `final_decision_recorded` or a legacy recorded decision outcome before accepting communication changes. Active assessment/review stages remain locked. Regression coverage exercises every legacy/current communication key, legacy root-to-application scoping, the final-stage gate, related signing/message invariants, and the Coordinator UI error surface. A caller-boundary test through the actual case route proves that the assigned Coordinator succeeds, a different Coordinator and a pre-final workflow fail closed, and the save does not mutate the assessment or ESDC participant readiness. The complete local gate passes all 850 tests, changed-file lint with zero errors, syntax/diff checks, and the production build. The repair is ready for the emergency admin-console hotfix path but remains local until a separately authorized deployment completes.
 
 2026-06-26 update: after PROD feedback `#147` and `#148`, the transition helper now permits a Regional Manager who is acting as the submitter to start the two-step workflow for supported application assessment, intervention proposal, and intervention revision/amendment submissions. This matches the RM-owned draft/edit paths that can exist before a workflow row exists. Under the agreed first-pass rule, the same Regional Manager may submit and then perform the RM review/sign-off so the workflow produces the standard audit trail. NWAC Administrator users do not start workflows; they are Decision Maker final-decision actors only. System Administrator behavior is technical/superuser support only and must not define the business workflow, UX, queue design, or release acceptance criteria. Regional Managers still cannot record the final Decision Maker approval/denial/request-changes decision.
 
@@ -398,8 +398,31 @@ Guide should be written as a job aid, not implementation notes.
 - Configurable per-region review routing.
 - Reporting widgets for RM review throughput and returned-work reasons.
 
+## Cross-workflow assessment-start contract
+
+Conflict declarations remain case-and-staff scoped, while assessment start is
+application scoped. Merely opening the page or signing or reusing a declaration
+must not advance an application. On the first successful assessment write to a
+`submitted` application, the transactional backend boundary requires the exact
+assigned ISET Coordinator or Regional Manager and an active no-conflict or
+cleared-conflict declaration, then moves only that application to `in_review`.
+Direct submission can move directly to its review-owned state. A draft save does
+not create a review workflow or change the case lifecycle, sibling applications,
+decisions, letters, CFA state, or prior assessments.
+
+The broader composed-workflow review must continue to model exact application,
+business role or capacity, application lifecycle, review stage, conflict
+declaration, participant-form and signing state, generated-document version,
+Action Plan and intervention lineage, decision outcome, and post-decision
+communication. Every transition needs one authoritative owner and caller
+boundary; an unrelated prerequisite must never be the only way another state
+machine advances.
+
 ## Open Business Watchpoints
 
 - Confirm remaining stakeholder UAT/training gaps after the early 2026-06-20 PROD activation; do not use the older July 13 target as evidence that PROD is still disabled.
 - Confirm whether the Decision Maker role should be described as permanent in user-facing training, or as a current approval-routing process.
 - Confirm whether final PDFs should include full RM notes or only RM name/date/sign-off plus a reference to internal notes.
+- Keep training and support guidance clear that a valid case-level declaration
+  carries across that staff member's applications on the case, while each
+  application's assessment begins independently on its first successful save.

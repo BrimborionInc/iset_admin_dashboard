@@ -129,7 +129,10 @@ describe("ILMP action plan barrier context", () => {
     expect(groupedPayloadBuilder).toContain("const evaluation = runIlmpValidation(combinedContext);");
     expect(groupedPayloadBuilder).toContain("const snapshot = buildIlmpParticipantPayload(combinedContext);");
     expect(groupedPayloadBuilder).toContain("warnings.length > 0 && !ignoreWarnings");
-    expect(batchCollector).toContain("buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings: true })");
+    expect(batchCollector).toContain('buildGroupedIlmpClientPayload(clientRows, {');
+    expect(batchCollector).toContain('ignoreWarnings: true,');
+    expect(batchCollector).toContain('connection,');
+    expect(batchCollector).toContain('forUpdate: lockSubmissions,');
     expect(batchCollector).toContain("if (blockingIssues.length > 0 || readiness === 'blocked')");
     expect(batchCollector).toContain("readiness_status: warningList.length ? 'needs_review' : 'ready'");
   });

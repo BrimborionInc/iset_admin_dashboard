@@ -24,21 +24,12 @@ function readEnvFile(filename) {
   }).filter(Boolean));
 }
 
-function buildLaunchPlan({
-  root = workspaceRoot,
-  portalEnvironment,
-  ambientEnvironment = process.env,
-  platform = process.platform,
-  minioBinary: explicitMinioBinary,
-} = {}) {
+function buildLaunchPlan({ root = workspaceRoot } = {}) {
   const admin = path.join(root, 'admin-dashboard');
   const portal = path.join(root, 'ISET-intake');
   const intacct = path.join(root, 'intacct-mock-service');
-  const portalEnv = portalEnvironment === undefined
-    ? readEnvFile(path.join(portal, '.env'))
-    : { ...portalEnvironment };
-  const minioBinary = explicitMinioBinary
-    || path.join(portal, 'minio', platform === 'win32' ? 'minio.exe' : 'minio');
+  const portalEnv = readEnvFile(path.join(portal, '.env'));
+  const minioBinary = path.join(portal, 'minio', process.platform === 'win32' ? 'minio.exe' : 'minio');
   return [
     { name: 'portal-frontend', cwd: portal, command: npmCommand(), args: ['start'], env: { BROWSER: 'none' }, required: true },
     { name: 'portal-backend', cwd: portal, command: nodemonCommand(), args: ['server.js'], env: {}, required: true },
@@ -48,8 +39,8 @@ function buildLaunchPlan({
       command: minioBinary,
       args: ['server', 'minio/data', '--address', ':9000', '--console-address', ':9001'],
       env: {
-        MINIO_ROOT_USER: portalEnv.OBJECT_ACCESS_KEY || ambientEnvironment.OBJECT_ACCESS_KEY || '',
-        MINIO_ROOT_PASSWORD: portalEnv.OBJECT_SECRET_KEY || ambientEnvironment.OBJECT_SECRET_KEY || '',
+        MINIO_ROOT_USER: portalEnv.OBJECT_ACCESS_KEY || process.env.OBJECT_ACCESS_KEY || '',
+        MINIO_ROOT_PASSWORD: portalEnv.OBJECT_SECRET_KEY || process.env.OBJECT_SECRET_KEY || '',
       },
       prepareDirectory: path.join(portal, 'minio', 'data'),
       required: true,
