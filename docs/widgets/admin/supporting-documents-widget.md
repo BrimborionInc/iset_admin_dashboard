@@ -61,10 +61,15 @@ manual uploads, and generated forms, then compares them against the relevant che
 - Inline label edits:
   - the table sends `PUT /api/documents/:id` with only `{ label }`
   - the backend treats label-only requests as a rename only and preserves existing case/application/action-plan/client scope without re-running attachment resolution
-  - full edit-modal saves still send document type and attachment fields and continue to validate scope
+  - the Edit document details modal allows authorized staff to correct both the display title and document type for application submissions, secure-message attachments, staff uploads, generated documents, and records with older/unknown source values
+  - changing title/type never changes the stored file, checksum, source, originating message, signing request, uploader, or other provenance
+  - edit-modal saves continue to validate active document types, destination access, client/case/application coherence, and concurrent changes
+  - source-bound documents retain their original case/application ownership; the application selector is read-only when that exact origin is already known
+  - Action Plan/intervention organization remains editable for ordinary evidence, but PATH blocks an actual attachment change when the document has a signing-request, CFA/Funding Overview version, or payment dependency; title and type remain editable
   - client-scoped modal saves and duplicate-document saves include hidden case/application context only so the backend can validate access and resolve client scope; staff are not asked to attach client-scoped documents to an application
   - application-submission documents keep their source-required `application_id` lineage when edited through the modal, even when the selected document type is client-scoped
-  - when an older unscoped row is edited, the modal defaults application/action-plan attachment controls from the current workspace filter/context when possible
+  - the modal preloads an existing application/action-plan attachment even when the document is not classified yet; when an older unscoped row is edited, it defaults attachment controls from the current workspace filter/context when possible
+  - duplicate and delete remain separate destructive operations and retain the stricter source/dependency integrity guard
 - Download behavior:
   - the inline `Download` action is shown only to `System Administrator` and `NWAC Administrator`
   - it requires an explicit privacy warning confirmation
@@ -104,6 +109,8 @@ manual uploads, and generated forms, then compares them against the relevant che
 - If a normal applicant-backed case cannot upload or refresh, inspect `caseData.applicant_user_id` / `caseData.applicantUserId` and the `/api/applicants/:id/*` endpoints.
 - If `/api/applicants/:id/documents/upload` returns `client_id_mismatch`, compare the URL applicant user, the case client, and the application/submission user. A submission user that maps to another client is an unsafe applicant context; the Case Workspace should fall back to `/api/cases/:case_id/documents/upload`.
 - If a document label inline edit does not stick, inspect `PUT /api/documents/:id` first. A label-only request should not fail because an older submission upload lacks modern attachment scope; only document-type or attachment changes should run scope resolution.
+- If document classification fails with `document_attachment_immutable`, verify whether the request also changes the Action Plan/intervention attachment. The title and document type alone are allowed; only reassignment of signing-, version-, or payment-dependent evidence is blocked.
+- If an edit attempts to move a source-bound document to another case or application, expect `document_case_lineage_immutable` or `document_application_lineage_immutable`. Correct its title/type in place; do not rewrite where applicant-, message-, generated-, or unknown-source evidence originated.
 - If an edit-details or duplicate save fails for a client-scoped type such as `identity_document` or `status_card`, verify the widget request includes `caseId` or `applicationId` even though the document remains client-scoped in storage. If the row has `source='application_submission'`, also verify the backend preserves the existing `application_id`; PROD's source-lineage CHECK constraint requires submission documents to keep `client_id`, `case_id`, `application_id`, and `applicant_user_id`.
 - If `chk_iset_document_manual_upload_scope` fails for a staff upload, treat it as a backend context-resolution bug first. Manual uploads must carry `client_id` and `case_id`; application-linked uploads must also carry `application_id` and `applicant_user_id`.
 - Do not add placeholder application, assessment, or action-plan rows just to make document management work.

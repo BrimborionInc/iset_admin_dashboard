@@ -1,0 +1,10 @@
+-- RETIRED WITHOUT EXECUTION on 2026-08-18.
+--
+-- No one-record stage rewrite is part of release
+-- `20260818-admin-workflow-fixes-r2`. Verification belongs to the deployed
+-- application behavior: the existing `withdrawn` recall must be editable only
+-- by its recorded submitter (or System Administrator technical support) and a
+-- successful resubmission must move the workflow to `rm_review` while
+-- preserving submitter lineage.
+--
+-- This file intentionally contains no executable SQL.

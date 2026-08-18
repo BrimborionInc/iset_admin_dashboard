@@ -40,7 +40,7 @@ describe('application assessment reviewer-stage notice', () => {
     expect(smokeSource).toContain("await waitForAssessmentWizardStep(page, 'rationale');");
   });
 
-  test('allows an authorised returned submitter to navigate legacy validation while retaining submit validation', () => {
+  test('allows an authorised returned or recalled submitter to navigate legacy validation while retaining submit validation', () => {
     const source = readSource('src/widgets/CoordinatorAssessmentWidget.js');
     const navigationBlock = extractBetween(
       source,
@@ -53,11 +53,11 @@ describe('application assessment reviewer-stage notice', () => {
       'const handleLetterBodyChange ='
     );
 
-    expect(source).toContain(
-      'twoStepReviewEnabled && reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToSubmitter'
-    );
+    expect(source).toContain('const isSubmitterCorrectionStage =');
+    expect(source).toContain('reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToSubmitter ||');
+    expect(source).toContain('reviewStage === ASSESSMENT_REVIEW_STAGES.withdrawn');
     expect(navigationBlock).toContain(
-      'isReturnedToSubmitterStage && canEditAssessmentBody'
+      'isSubmitterCorrectionStage && canEditAssessmentBody'
     );
     expect(navigationBlock).toContain(
       'if (!valid && !canNavigateReturnedCorrection)'
@@ -69,6 +69,10 @@ describe('application assessment reviewer-stage notice', () => {
     expect(submitBlock).toContain('assessment_submit_action: true');
     expect(submitBlock).not.toContain('includeDecisionFields: true');
     expect(source).toContain('!preserveReturnedAssessmentEligibility');
+    expect(source).toContain("? 'Resubmit for review' : 'Submit for review'");
+    expect(source).toContain("header={reviewStage === ASSESSMENT_REVIEW_STAGES.withdrawn ? 'Submission recalled' : 'Changes requested'}");
+    expect(source).toContain('const recalledReviewWorkflow = result?.reviewWorkflow || result?.review_workflow || null;');
+    expect(source).toContain('recalledCaseUpdates.reviewWorkflow = recalledReviewWorkflow;');
   });
 
   test('refreshes the exact Application Workspace record before submit and labels only real version conflicts as concurrent edits', () => {

@@ -1,12 +1,18 @@
 # Proposal Email: Greater Staff Control to Correct PATH Records
 
-Status: Current proposal sent for NWAC policy discussion; awaiting Émilie/client-PM feedback
+Status: Partially approved; minor reviewer edits and dependency-free accidental reversals confirmed
 Prepared: 2026-07-31
-Revised: 2026-08-05
+Revised: 2026-08-18
 
 ## Workstream status
 
-Bill confirmed that this proposal has been sent for client review and is awaiting feedback from Émilie and the client PM group. Do not expand correction permissions merely because a related bug or data repair is completed. The policy gate remains open.
+Bill relayed the client response on 2026-08-18: allow reviewers to make the minor assessment corrections described in section 1. This approves tracked, non-substantive reviewer edits while preserving the originally submitted wording. It does not authorize a reviewer to change eligibility, requested or approved funding, costs, supporting-document requirements, applicant-provided facts, the recommendation, evidence, or anything requiring new information or professional judgement; those changes still use the return-to-submitter path. The remaining correction and reversal proposals below are not approved by this response and retain their policy gates.
+
+The evidence-based workflow review on 2026-08-18 also confirmed the section 2 boundary: an authorized reviewer may reverse their own accidental workflow decision when no consequential action has relied on it, provided they give a reason and PATH preserves the original decision and full history. Once a letter, signature, payment, reporting submission, or other downstream action exists, reversal requires separate authorization and explicit recovery of those dependencies. The same dependency-free, audit-preserving principle permits retraction rather than deletion of an erroneous historical entry. Whether a validly closed service episode should ever reopen because circumstances later change remains unsettled.
+
+The consequential-reversal authority was then settled as follows. Another NWAC Administrator acting as a Decision Maker must confirm the reversal and dependency-recovery plan; the person authorized for the replacement outcome records the new decision. The existing high-value rule remains intact, so Shelley Stacey must record an approval of `$20,000` or more even when another NWAC Administrator confirmed the reversal. Finance, reporting, signing, and communication owners confirm or perform recovery in their own domains but do not acquire program-decision authority. A System Administrator may execute a necessary technical recovery but is not the business authorizer.
+
+The same role principle exposes a current inconsistency in section 3: PATH's controlled closed-plan reopen is currently System-Administrator-only even though reopening for business reasons is an operational decision. Wherever policy permits a reopen, an authorized Regional Manager or NWAC Administrator must be able to initiate it under the same reason, conflict, dependency, reporting-reset, and audit safeguards; System Administration must not be the mandatory business intermediary. The separate question of when to reopen the old service episode rather than create a new one remains unresolved.
 
 NWAC management direction confirmed by Bill on 2026-08-05: when an error found after assessment submission requires the assessment or approved funding amounts to change, the preferred correction is for the Regional Manager to return the assessment to the submitter. That path must preserve the return reason, submitter edit, resubmission, and renewed review/decision history. If the assessment's current state has no supported return transition, a System Administrator may exceptionally change status or directly repair the record, but that is a technical recovery path rather than the target business workflow and is disfavoured because it does not produce the normal business audit trail. A missing post-decision return transition is therefore a workflow gap; it is not justification for direct coordinator editing of finally decided assessments.
 
@@ -24,7 +30,7 @@ Recent feedback work provides implementation evidence for this proposal, but onl
 | `#173` | Generated-document/workflow correction | The targeted repair and prevention work are complete, but the corrected CFA draft still requires staff review and sending. This does not add general correction authority. |
 | `#178` | Post-decision assessment/funding correction | A guarded System Administrator recovery restored the affected approved assessment to Regional Manager review and withdrew its unsigned generated plan/CFA artifacts. Derry must now use the normal Return to Coordinator action, after which Danielle can correct/resubmit and Madison can record the renewed decision. The report remains in progress, and the exceptional repair does not add a general post-decision return or staff correction control. |
 
-Next gate: obtain the client-PM response, then turn the agreed policy into an explicit matrix of roles, permitted actions, workflow states, dependency blockers, audit requirements and any second-person approval. Only then should the remaining correction controls be designed and scheduled as a coherent work package.
+Next gate: turn the approved minor-edit and reversal policies into an explicit implementation matrix, while separately resolving the remaining correction proposals and exact dependency-recovery operations. Only approved controls should be designed and scheduled for implementation.
 
 The proposal sent for review follows.
 

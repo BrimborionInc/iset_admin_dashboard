@@ -9,6 +9,9 @@ const normalizeWorkflowStage = value =>
 
 const normalizeEligibility = value => String(value || '').trim().toLowerCase();
 
+const isSubmitterCorrectionStage = stage =>
+  stage === 'returned_to_submitter' || stage === 'withdrawn';
+
 export const canPreserveReturnedAssessmentEligibility = ({
   reviewWorkflow,
   currentEligibility,
@@ -20,7 +23,7 @@ export const canPreserveReturnedAssessmentEligibility = ({
   const current = normalizeEligibility(currentEligibility);
   const initial = normalizeEligibility(initialEligibility);
   return Boolean(
-    reviewStage === 'returned_to_submitter' &&
+    isSubmitterCorrectionStage(reviewStage) &&
     current &&
     current === initial
   );
@@ -39,7 +42,7 @@ export const isReturnedAssessmentEligibilityChangeUnverified = ({
   const current = normalizeEligibility(currentEligibility);
   const initial = normalizeEligibility(initialEligibility);
   return Boolean(
-    reviewStage === 'returned_to_submitter' &&
+    isSubmitterCorrectionStage(reviewStage) &&
     current !== initial &&
     !hasVerificationDocument &&
     !hasSelectedVerificationFile
@@ -90,7 +93,7 @@ export const canRegionalManagerEditApplicationAssessment = ({
   const reviewStage = normalizeWorkflowStage(
     reviewWorkflow.currentStage ?? reviewWorkflow.current_stage
   );
-  if (reviewStage !== 'returned_to_submitter') {
+  if (!isSubmitterCorrectionStage(reviewStage)) {
     return false;
   }
 
@@ -116,7 +119,7 @@ export const canEditApplicationAssessmentBody = ({
   const reviewStage = normalizeWorkflowStage(
     reviewWorkflow?.currentStage ?? reviewWorkflow?.current_stage
   );
-  if (reviewStage === 'returned_to_submitter') {
+  if (isSubmitterCorrectionStage(reviewStage)) {
     return Boolean(
       (isAssessor || isRegionalManager) &&
       isCurrentApplicationAssessmentWorkflowSubmitter({

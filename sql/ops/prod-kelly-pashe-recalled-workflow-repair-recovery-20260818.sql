@@ -1,0 +1,8 @@
+-- RETIRED WITHOUT EXECUTION on 2026-08-18.
+--
+-- The paired Kelly Pashe one-record apply was abandoned before execution, so
+-- there is no data mutation to recover. The production record should remain at
+-- the valid recalled review stage `withdrawn` until the recorded submitter
+-- resubmits it through the corrected application workflow.
+--
+-- This file intentionally contains no executable SQL.

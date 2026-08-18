@@ -159,6 +159,17 @@ describe('two-step review EI server guards', () => {
       code: 'assessment_ei_verification_required',
       status: 422,
     }));
+
+    expect(assertApplicationAssessmentEiSubmissionReady({
+      reviewWorkflow: { current_stage: 'withdrawn' },
+      previousEligibility: 'EI Reach Back',
+      nextEligibility: 'ei_reach_back',
+      hasVerificationEvidence: false,
+    })).toMatchObject({
+      enforced: true,
+      eligibility: 'ei_reach_back',
+      reason: 'returned_eligibility_unchanged',
+    });
   });
 
   test.each([

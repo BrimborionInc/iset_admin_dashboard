@@ -57,6 +57,7 @@ const REVIEW_STAGES = {
   returnedToRm: 'returned_to_rm',
   returnedToSubmitter: 'returned_to_submitter',
   finalDecisionRecorded: 'final_decision_recorded',
+  withdrawn: 'withdrawn',
 };
 
 const REVIEW_ACTIONS = {
@@ -296,13 +297,17 @@ function buildReviewWorkflow(stage = REVIEW_STAGES.rmReview, overrides = {}) {
         ? 'NWAC Administrator'
         : stage === REVIEW_STAGES.returnedToSubmitter
           ? 'Submitter'
-          : 'Regional Manager',
+          : stage === REVIEW_STAGES.withdrawn
+            ? null
+            : 'Regional Manager',
     current_owner_role:
       stage === REVIEW_STAGES.nwacReview
         ? 'NWAC Administrator'
         : stage === REVIEW_STAGES.returnedToSubmitter
           ? 'Submitter'
-          : 'Regional Manager',
+          : stage === REVIEW_STAGES.withdrawn
+            ? null
+            : 'Regional Manager',
     submittedByStaffProfileId: 1,
     submitted_by_staff_profile_id: 1,
     submittedAt: '2026-06-19T13:00:00.000Z',
@@ -575,10 +580,12 @@ function applyCaseMutation(state, body) {
       body.assessment_recommendation &&
       body.assessment_justification
     ) {
+      const currentWorkflow = state.casePayload.reviewWorkflow || state.casePayload.review_workflow || null;
       const transition = getReviewTransition({
         action: REVIEW_WORKFLOW_ACTIONS.SubmitForRmReview,
         workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
         role: state.role,
+        currentStage: currentWorkflow?.currentStage || currentWorkflow?.current_stage,
       });
       if (!transition.allowed) {
         return {
@@ -587,7 +594,16 @@ function applyCaseMutation(state, body) {
           _status: 403,
         };
       }
-      const workflow = buildReviewWorkflow(REVIEW_STAGES.rmReview);
+      const workflow = buildReviewWorkflow(REVIEW_STAGES.rmReview, {
+        submittedByStaffProfileId:
+          currentWorkflow?.submittedByStaffProfileId ||
+          currentWorkflow?.submitted_by_staff_profile_id ||
+          1,
+        submitted_by_staff_profile_id:
+          currentWorkflow?.submittedByStaffProfileId ||
+          currentWorkflow?.submitted_by_staff_profile_id ||
+          1,
+      });
       next.reviewWorkflow = workflow;
       next.review_workflow = workflow;
     } else if (body.assessment_nwac_review_status && state.casePayload.reviewWorkflow) {
@@ -744,6 +760,16 @@ function applyReviewWorkflowAction(state, body) {
 function applyAssessmentRecall(state) {
   const currentVersion = Number(state.casePayload.application_row_version || 0) || 0;
   const nextVersion = currentVersion + 1;
+  const currentWorkflow = state.casePayload.reviewWorkflow || state.casePayload.review_workflow || null;
+  const recalledWorkflow = currentWorkflow
+    ? {
+        ...currentWorkflow,
+        currentStage: REVIEW_STAGES.withdrawn,
+        current_stage: REVIEW_STAGES.withdrawn,
+        currentOwnerRole: null,
+        current_owner_role: null,
+      }
+    : null;
   const next = {
     ...state.casePayload,
     applicationStatus: 'in_review',
@@ -754,6 +780,8 @@ function applyAssessmentRecall(state) {
     applicationLifecycleStatus: 'assessment',
     decision_outcome: null,
     decisionOutcome: null,
+    reviewWorkflow: recalledWorkflow,
+    review_workflow: recalledWorkflow,
     application_row_version: nextVersion,
     applicationRowVersion: nextVersion,
   };
@@ -768,6 +796,8 @@ function applyAssessmentRecall(state) {
     applicationRowVersion: nextVersion,
     archivedDocumentIds: [701],
     eventType: 'assessment_recalled',
+    reviewWorkflow: recalledWorkflow,
+    review_workflow: recalledWorkflow,
   };
 }
 
@@ -1595,6 +1625,8 @@ function buildScenarios() {
         applicationStatus: 'pending_approval',
         completeAssessment: true,
         conflictSigned: true,
+        twoStepReviewEnabled: true,
+        reviewWorkflow: buildReviewWorkflow(REVIEW_STAGES.rmReview),
       }),
       run: async ({ page, state }) => {
         await waitForWorkspaceReady(page, 'Recall submission');
@@ -1620,7 +1652,23 @@ function buildScenarios() {
           throw new Error(`Recall sent wrong expectedRowVersion: ${recallPost.body.expectedRowVersion}`);
         }
         await waitForText(page, 'Assessment submission recalled. You can make corrections and submit it again when ready.');
-        await waitForText(page, 'Submit assessment');
+        await waitForText(page, 'Submission recalled');
+        await waitForButtonEnabled(page, 'Resubmit for review');
+        await clickButtonByText(page, 'Resubmit for review');
+        const resubmitPut = await waitUntil(
+          () => state.mutations.casePuts.find(entry => entry.body.assessment_submit_action === true),
+          'recalled assessment resubmit PUT'
+        );
+        if (resubmitPut.body.applicationId !== APPLICATION_ID) {
+          throw new Error(`Recalled assessment resubmit used wrong applicationId: ${resubmitPut.body.applicationId}`);
+        }
+        if (resubmitPut.body.expectedRowVersion !== 8) {
+          throw new Error(`Recalled assessment resubmit sent wrong expectedRowVersion: ${resubmitPut.body.expectedRowVersion}`);
+        }
+        if (state.casePayload.reviewWorkflow?.currentStage !== REVIEW_STAGES.rmReview) {
+          throw new Error(`Recalled assessment resubmit did not restart RM review: ${state.casePayload.reviewWorkflow?.currentStage}`);
+        }
+        await waitForText(page, 'Assessment submitted to Regional Manager review.');
       },
     },
     {
@@ -2116,7 +2164,21 @@ async function main() {
     scenarios: results,
   };
   if (!pass) {
-    console.error(JSON.stringify(summary, null, 2));
+    console.error(JSON.stringify({
+      pass,
+      screenshotDir: args.screenshotDir,
+      failedScenarios: results
+        .filter(result => !result.pass)
+        .map(result => ({
+          name: result.name,
+          failures: result.failures,
+          screenshot: result.screenshot,
+          casePuts: result.casePuts,
+          assessmentRecalls: result.assessmentRecalls,
+          reviewActions: result.reviewActions,
+          consoleWarnings: result.consoleWarnings,
+        })),
+    }, null, 2));
     process.exit(1);
   }
   console.log(JSON.stringify(summary, null, 2));

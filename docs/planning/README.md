@@ -32,6 +32,7 @@ As of 2026-07-10, these are the main planning docs intentionally linked from `do
 - `engineering-audit-register.md`
 - `engineering-audit-release-wave-manifest.md`
 - `staff-record-correction-controls-proposal-email.md`
+- `workflow-policy-uncertainty-register.md`
 - `rm-two-step-review-workflow.md`
 - `rm-two-step-review-assurance-prod-rollout-2026-08-09.md`
 

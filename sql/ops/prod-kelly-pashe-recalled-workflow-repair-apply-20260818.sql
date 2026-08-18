@@ -1,0 +1,12 @@
+-- RETIRED WITHOUT EXECUTION on 2026-08-18.
+--
+-- Do not turn Kelly Pashe application 71 / review workflow 68 from `withdrawn`
+-- into `returned_to_submitter`. Live investigation proved that `withdrawn` is
+-- the review stage intentionally written by Recall submission while the
+-- underlying application remains `in_review`. The generalized application fix
+-- treats that existing stage as submitter-owned correction work and resubmits
+-- it to Regional Manager review without rewriting PROD data.
+--
+-- This inert marker preserves the abandoned artifact name so the earlier
+-- investigation cannot be mistaken for an outstanding one-record repair.
+-- It intentionally contains no executable SQL.

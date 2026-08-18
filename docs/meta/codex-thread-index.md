@@ -1406,6 +1406,37 @@ For each indexed thread/topic, keep:
 - Status: active runbook and dashboard pattern created on 2026-06-07; Financial Reports public review draft added to the runbook notes on 2026-06-09.
 - Notes: Bill's Synthesia API key lives only in the repo-root `.env` as `SYNTHESIA_API_KEY`; never print or commit it. Script/storyboard approval is mandatory before Synthesia renders unless Bill explicitly waives that checkpoint for the specific draft. Draft/test videos stay private and watermarked, with no Synthesia video ID or embed URL in app metadata until Bill approves a published staff-safe version or explicitly asks to make a draft shareable. The first real in-production dashboard row is `application-withdrawal` / `Withdrawing and reopening an application`; private test-mode withdrawal drafts were rendered for review from disposable DEV fixture screenshots. The Financial Reports public review draft uses sanitized smoke visuals and is intentionally not listed in app metadata yet.
 
+### Kelly Pashe recalled-assessment resubmission bug
+
+- Codex task title: `Fix recalled assessment resubmission`
+- Topic: Judy Cook could recall Kelly Pashe's assessment before decision, but the resulting review workflow remained at its valid `withdrawn` recall stage and the Application Assessment editor treated that stage as cancelled/read-only.
+- Keywords: `Kelly Pashe`, `Judy Cook`, `assessment recall`, `withdrawn review workflow`, `Resubmit for review`, `assessment_returned_to_submitter_actor_forbidden`, `application 71`, `workflow 68`
+- When to open: a submitter successfully recalls an assessment but cannot edit it, retain an unchanged accepted EI status, or resubmit it to Regional Manager review.
+- Primary docs:
+  - `docs/widgets/admin/application-assessment-widget.md`
+  - `docs/workflows/admin/application-assessment.md`
+  - `docs/planning/rm-two-step-review-workflow.md`
+  - `docs/meta/changelog.md`
+  - `isetadminserver.js`
+  - `src/widgets/CoordinatorAssessmentWidget.js`
+- Status: the general code repair and exact recalled-stage regression coverage are implemented locally for release `20260818-admin-workflow-fixes-r2`; no PROD data repair or deployment has occurred.
+- Notes: `withdrawn` is the established review-workflow stage produced by the pre-decision Recall submission action; the underlying application remains `in_review`. The fix treats that stage as submitter-owned correction work, preserves the recorded original submitter, permits unchanged accepted EI eligibility, clears stale RM/Decision Maker fields on resubmission, and returns the workflow to `rm_review`. The earlier draft one-record stage rewrite to `returned_to_submitter` is unnecessary and must not be included in the app release.
+
+### Kelly secure-message document classification bug
+
+- Codex task title: `Investigate Kelly document renaming bug`
+- Topic: PROD feedback `#189` showed the August 18 rename hotfix restored only label-only requests while the Edit document details modal still returned `409` when Kelly classified incoming secure-message attachments.
+- Keywords: `Kelly`, `feedback 189`, `Labelling documents`, `secure_message_attachment`, `document_immutable`, `document_attachment_immutable`, `Supporting Documents`, `Edit document details`, `2026-08-18 09:30:35`
+- When to open: staff cannot rename, classify, or organize a supporting document, especially an applicant upload, secure-message attachment, generated document, or older/unknown-source record.
+- Primary docs:
+  - `docs/widgets/admin/supporting-documents-widget.md`
+  - `docs/planning/workflow-policy-uncertainty-register.md`
+  - `docs/meta/changelog.md`
+  - `isetadminserver.js`
+  - `src/widgets/SupportingDocumentsWidget.js`
+- Status: root cause proved from PROD feedback, deployment provenance, exact ALB requests, live record context, and current source. The complete operation-specific DEV repair is implemented and locally verified but not deployed.
+- Notes: Release `20260818-admin-workflow-fixes-r1` was genuinely live before the report. Kelly's browser received three `409` responses while editing secure-message documents `11484` and `11485`; this was not stale UI. The August 15 repeat-application patch had intentionally treated all non-manual sources as wholly immutable, and the August 18 hotfix bypassed that guard only for `{ label }`. The replacement policy permits title/type edits across every source, preserves exact source-owned case/application lineage, and checks signing/version/payment dependencies only when a save would actually change document attachments. Duplicate and delete remain separate strict operations.
+
 ## Future improvements
 
 - Add stable entry IDs if this grows beyond a small manual list.

@@ -53,6 +53,30 @@ function loadIntegrityGuard({ paymentLinkCount = 0 } = {}) {
   return { guard, paymentLinkLookup };
 }
 
+function loadAttachmentIntegrityGuard({ paymentLinkCount = 0 } = {}) {
+  const start = serverSource.indexOf('function buildImmutableDocumentAttachmentError');
+  const end = serverSource.indexOf('\nfunction documentMutationTimestamp', start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const implementation = serverSource.slice(start, end);
+  const paymentLinkLookup = jest.fn().mockResolvedValue(paymentLinkCount);
+  const factory = new Function(
+    'normalisePositiveInteger',
+    'fetchDocumentPaymentLinkCount',
+    'pool',
+    `${implementation}\nreturn validateDocumentAttachmentMutationIntegrity;`
+  );
+  const guard = factory(
+    value => {
+      const numeric = Number(value);
+      return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+    },
+    paymentLinkLookup,
+    { query: jest.fn() }
+  );
+  return { guard, paymentLinkLookup };
+}
+
 function loadLockedMutationContext({ mutationError = null } = {}) {
   const start = serverSource.indexOf('function documentMutationTimestamp');
   const end = serverSource.indexOf('\nasync function fetchCaseAccessRowsForDocument', start);
@@ -209,6 +233,56 @@ describe('generic Supporting Documents mutation integrity', () => {
   });
 
   test.each([
+    'application_submission',
+    'secure_message_attachment',
+    'manual_upload',
+    'legacy_intake_upload',
+    'system_generated',
+    'unrecognised_source',
+  ])('%s details are not classified as an unsafe attachment mutation', async source => {
+    const { guard, paymentLinkLookup } = loadAttachmentIntegrityGuard();
+    const connection = { query: jest.fn().mockResolvedValue([[]]) };
+
+    await expect(guard({ id: 30, source, origin_message_id: 71 }, connection)).resolves.toBeNull();
+    expect(connection.query).toHaveBeenCalledTimes(2);
+    expect(paymentLinkLookup).toHaveBeenCalledWith(30, connection);
+  });
+
+  test('attachment reassignment remains blocked for concrete signing, version, and payment dependencies', async () => {
+    await expect(
+      loadAttachmentIntegrityGuard().guard(
+        { id: 31, signing_request_id: 4 },
+        { query: jest.fn() }
+      )
+    ).resolves.toMatchObject({ body: { reason: 'signing_request_link' } });
+
+    await expect(
+      loadAttachmentIntegrityGuard().guard(
+        { id: 32 },
+        { query: jest.fn().mockResolvedValueOnce([[{ document_id: 32 }]]) }
+      )
+    ).resolves.toMatchObject({ body: { reason: 'cfa_version_link' } });
+
+    await expect(
+      loadAttachmentIntegrityGuard().guard(
+        { id: 33 },
+        {
+          query: jest.fn()
+            .mockResolvedValueOnce([[]])
+            .mockResolvedValueOnce([[{ document_id: 33 }]]),
+        }
+      )
+    ).resolves.toMatchObject({ body: { reason: 'funding_overview_version_link' } });
+
+    await expect(
+      loadAttachmentIntegrityGuard({ paymentLinkCount: 1 }).guard(
+        { id: 34 },
+        { query: jest.fn().mockResolvedValue([[]]) }
+      )
+    ).resolves.toMatchObject({ body: { reason: 'payment_evidence_link' } });
+  });
+
+  test.each([
     ['post', '/api/documents/:id/duplicate'],
     ['delete', '/api/documents/:id'],
   ])('%s %s loads provenance and invokes the integrity guard before mutation', (method, route) => {
@@ -240,28 +314,34 @@ describe('generic Supporting Documents mutation integrity', () => {
     expect(routeSource).toContain('.commit()');
   });
 
-  test('full document edits retain the integrity guard while title-only edits use the narrower locked path', () => {
+  test('document edits use the attachment-specific guard only when the resolved attachment changes', () => {
     const routeSource = extractRoute('put', '/api/documents/:id');
     const labelOnlyMarker = routeSource.indexOf('if (isLabelOnlyUpdate)');
-    const fullEditGuard = routeSource.indexOf('if (!isLabelOnlyUpdate)');
     const labelOnlyEnd = routeSource.indexOf('const effectiveDocType', labelOnlyMarker);
     const labelOnlySource = routeSource.slice(labelOnlyMarker, labelOnlyEnd);
+    const sourceLineage = routeSource.indexOf('preserveDocumentSourceLineage({');
+    const attachmentGuard = routeSource.indexOf('if (attachmentMutationRequested)');
 
-    expect(fullEditGuard).toBeGreaterThanOrEqual(0);
-    expect(fullEditGuard).toBeLessThan(labelOnlyMarker);
-    expect(routeSource.slice(fullEditGuard, labelOnlyMarker)).toContain(
-      'validateGenericDocumentMutationIntegrity(existingRow)'
-    );
     expect(labelOnlySource).toContain('lockGenericDocumentMutationContext({');
     expect(labelOnlySource).toContain('requireIntegrityCheck: false');
     expect(labelOnlySource).toContain('SET label = ?, metadata = ?, updated_at = NOW()');
     expect(labelOnlySource).not.toContain('validateGenericDocumentMutationIntegrity(');
+    expect(routeSource).not.toContain('validateGenericDocumentMutationIntegrity(existingRow)');
+    expect(sourceLineage).toBeGreaterThan(labelOnlyEnd);
+    expect(attachmentGuard).toBeGreaterThan(sourceLineage);
+    expect(routeSource.slice(attachmentGuard)).toContain(
+      'validateDocumentAttachmentMutationIntegrity(existingRow)'
+    );
 
     const fullMutationIndex = routeSource.indexOf('SET ${updateFields.join');
     expect(fullMutationIndex).toBeGreaterThan(labelOnlyEnd);
-    expect(
-      routeSource.lastIndexOf('lockGenericDocumentMutationContext({', fullMutationIndex)
-    ).toBeGreaterThan(labelOnlyEnd);
+    const lockedPath = routeSource.slice(
+      routeSource.lastIndexOf('lockGenericDocumentMutationContext({', fullMutationIndex),
+      fullMutationIndex
+    );
+    expect(lockedPath).toContain('requireIntegrityCheck: false');
+    expect(lockedPath).toContain('lockedAttachmentMutation');
+    expect(lockedPath).toContain('validateDocumentAttachmentMutationIntegrity(');
   });
 
   test('the final locked check catches a dependency created after preflight', async () => {
@@ -337,9 +417,11 @@ describe('generic Supporting Documents mutation integrity', () => {
 
   test('immutable responses fail closed with a stable conflict contract', () => {
     expect(serverSource).toContain("error: 'document_immutable'");
+    expect(serverSource).toContain("error: 'document_attachment_immutable'");
     expect(serverSource).toContain('status: 409');
     expect(serverSource).toContain(
-      'cannot be edited, duplicated, or deleted through Supporting Documents.'
+      'cannot be duplicated or deleted through Supporting Documents.'
     );
+    expect(serverSource).toContain('The document title and document type can be edited');
   });
 });

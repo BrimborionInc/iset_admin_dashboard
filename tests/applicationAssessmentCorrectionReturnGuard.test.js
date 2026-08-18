@@ -1,4 +1,6 @@
 const { Blob, File } = require('buffer');
+const fs = require('fs');
+const path = require('path');
 const { ReadableStream } = require('stream/web');
 const { MessageChannel, MessagePort } = require('worker_threads');
 
@@ -155,9 +157,9 @@ describe('application assessment correction-return caller guard', () => {
     updated_at: '2026-08-06 12:00:00',
   });
 
-  const buildStartReviewConnection = () => {
+  const buildStartReviewConnection = (workflowOverrides = {}) => {
     const queries = [];
-    const returnedWorkflow = buildReturnedWorkflowRow();
+    const returnedWorkflow = { ...buildReturnedWorkflowRow(), ...workflowOverrides };
     const updatedWorkflow = {
       ...returnedWorkflow,
       current_stage: 'rm_review',
@@ -552,6 +554,24 @@ describe('application assessment correction-return caller guard', () => {
 
     expect(() => assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
       applicationStatusMutationRequested: true,
+      reviewWorkflow: { current_stage: 'withdrawn' },
+      assessmentSubmittedForWorkflow: false,
+      actorRole: 'ISET Coordinator',
+      beforeApplicationStatus: 'in_review',
+      nextApplicationStatus: 'pending_approval',
+    })).toThrow(expect.objectContaining({ code: 'assessment_review_status_transition_forbidden' }));
+
+    expect(assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      applicationStatusMutationRequested: true,
+      reviewWorkflow: { current_stage: 'withdrawn' },
+      assessmentSubmittedForWorkflow: true,
+      actorRole: 'ISET Coordinator',
+      beforeApplicationStatus: 'in_review',
+      nextApplicationStatus: 'pending_approval',
+    })).toEqual({ enforced: true, reason: 'authorized_review_owned_status_transition' });
+
+    expect(() => assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      applicationStatusMutationRequested: true,
       reviewWorkflow: { current_stage: 'returned_to_submitter' },
       assessmentSubmittedForWorkflow: false,
       actorRole: 'Regional Manager',
@@ -748,6 +768,84 @@ describe('application assessment correction-return caller guard', () => {
     const update = queries.find(entry => entry.sql.includes('UPDATE iset_review_workflow'));
     expect(update).toBeTruthy();
     expect(update.params[7]).toBe(54);
+  });
+
+  test('recalled assessment resubmission allows only the original submitter and restarts RM review', async () => {
+    const denied = buildStartReviewConnection({ current_stage: 'withdrawn' });
+    await expect(
+      startApplicationAssessmentReviewWorkflow(denied.connection, {
+        caseId: 76,
+        applicationId: 123,
+        actorStaffProfileId: 88,
+        actorRole: 'ISET Coordinator',
+        metadata: { source: 'application_assessment_submit' },
+      })
+    ).rejects.toMatchObject({
+      code: 'assessment_returned_to_submitter_actor_forbidden',
+      status: 403,
+    });
+    expect(denied.queries).toHaveLength(1);
+
+    const allowed = buildStartReviewConnection({ current_stage: 'withdrawn' });
+    await expect(
+      startApplicationAssessmentReviewWorkflow(allowed.connection, {
+        caseId: 76,
+        applicationId: 123,
+        actorStaffProfileId: 54,
+        actorRole: 'ISET Coordinator',
+        metadata: { source: 'application_assessment_submit' },
+      })
+    ).resolves.toMatchObject({ current_stage: 'rm_review' });
+
+    const update = allowed.queries.find(entry => entry.sql.includes('UPDATE iset_review_workflow'));
+    const event = allowed.queries.find(entry => entry.sql.includes('INSERT INTO iset_review_workflow_event'));
+    expect(update.params[7]).toBe(54);
+    expect(update.sql).toContain('rm_reviewed_by_staff_profile_id = NULL');
+    expect(update.sql).toContain('nwac_decided_by_staff_profile_id = NULL');
+    expect(event.params[4]).toBe('withdrawn');
+    expect(event.params[5]).toBe('rm_review');
+    expect(event.params[6]).toBe(54);
+  });
+
+  test('assessment recall returns the withdrawn review workflow for immediate client reconciliation', () => {
+    const serverSource = fs.readFileSync(path.join(__dirname, '..', 'isetadminserver.js'), 'utf8');
+    const recallRouteStart = serverSource.indexOf("app.post('/api/cases/:id/assessment/recall'");
+    const reviewActionRouteStart = serverSource.indexOf(
+      "app.post('/api/cases/:id/assessment/review-workflow/action'",
+      recallRouteStart
+    );
+    const recallRoute = serverSource.slice(recallRouteStart, reviewActionRouteStart);
+
+    expect(recallRouteStart).toBeGreaterThan(-1);
+    expect(reviewActionRouteStart).toBeGreaterThan(recallRouteStart);
+    expect(recallRoute).toContain(
+      'recalledReviewWorkflowRow = await applyApplicationAssessmentReviewWorkflowAction'
+    );
+    expect(recallRoute).toContain(
+      'const recalledReviewWorkflow = serializeReviewWorkflowRow(recalledReviewWorkflowRow);'
+    );
+    expect(recallRoute).toContain('reviewWorkflow: recalledReviewWorkflow');
+    expect(recallRoute).toContain('review_workflow: recalledReviewWorkflow');
+  });
+
+  test('System Administrator support preserves the original submitter when restarting a recalled assessment', async () => {
+    const { connection, queries } = buildStartReviewConnection({ current_stage: 'withdrawn' });
+
+    await expect(
+      startApplicationAssessmentReviewWorkflow(connection, {
+        caseId: 76,
+        applicationId: 123,
+        actorStaffProfileId: 999,
+        actorRole: 'System Administrator',
+        metadata: { source: 'system_administrator_support' },
+      })
+    ).resolves.toMatchObject({ current_stage: 'rm_review' });
+
+    const update = queries.find(entry => entry.sql.includes('UPDATE iset_review_workflow'));
+    const event = queries.find(entry => entry.sql.includes('INSERT INTO iset_review_workflow_event'));
+    expect(update.params[7]).toBe(54);
+    expect(event.params[6]).toBe(999);
+    expect(event.params[7]).toBe('System Administrator');
   });
 
   test('System Administrator can resubmit as technical support without replacing the original submitter', async () => {

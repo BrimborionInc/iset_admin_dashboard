@@ -4581,8 +4581,12 @@ const CoordinatorAssessmentWidget = forwardRef(
   const isAssessmentSubmitted =
     isPendingApprovalStatus || isApplicationAssessmentReviewerStage;
   const isReviewComplete = APPLICATION_FINAL_STATUSES.has(normalizedApplicationStatus);
-  const isReturnedToSubmitterStage =
-    twoStepReviewEnabled && reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToSubmitter;
+  const isSubmitterCorrectionStage =
+    twoStepReviewEnabled &&
+    (
+      reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToSubmitter ||
+      reviewStage === ASSESSMENT_REVIEW_STAGES.withdrawn
+    );
   const preserveReturnedAssessmentEligibility = canPreserveReturnedAssessmentEligibility({
     reviewWorkflow,
     currentEligibility: assessment.esdcEligibility,
@@ -4593,7 +4597,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     (
       isPendingApprovalStatus ||
       isApplicationAssessmentReviewerStage ||
-      isReturnedToSubmitterStage ||
+      isSubmitterCorrectionStage ||
       isPostDecisionStatus ||
       isReviewComplete
     );
@@ -6495,12 +6499,18 @@ const CoordinatorAssessmentWidget = forwardRef(
         updateRowVersion(updatedRowVersion);
       }
       if (typeof onCaseUpdate === 'function') {
-        onCaseUpdate({
+        const recalledReviewWorkflow = result?.reviewWorkflow || result?.review_workflow || null;
+        const recalledCaseUpdates = {
           applicationStatus: result?.applicationStatus || 'in_review',
           application_status: result?.applicationStatus || 'in_review',
           applicationStatusRaw: result?.applicationStatus || 'in_review',
           application_row_version: updatedRowVersion || undefined,
-        });
+        };
+        if (recalledReviewWorkflow) {
+          recalledCaseUpdates.reviewWorkflow = recalledReviewWorkflow;
+          recalledCaseUpdates.review_workflow = recalledReviewWorkflow;
+        }
+        onCaseUpdate(recalledCaseUpdates);
       }
       if (typeof actions?.refreshCaseData === 'function') {
         await actions.refreshCaseData().catch(() => {});
@@ -8855,7 +8865,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
         setFieldErrors(validateAssessment(assessment));
         const valid = validateWizardStep(currentStep);
         const canNavigateReturnedCorrection =
-          isReturnedToSubmitterStage && canEditAssessmentBody;
+          isSubmitterCorrectionStage && canEditAssessmentBody;
         if (!valid && !canNavigateReturnedCorrection) {
           return;
         }
@@ -11598,11 +11608,18 @@ ${JSON.stringify(aiContext, null, 2)}`;
         <Box whiteSpace="pre-wrap">{rmReviewNote || 'No Regional Manager note recorded.'}</Box>
       </SpaceBetween>
     ) : null;
-  const submitterChangeInstructionsAlert =
-    twoStepReviewEnabled && reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToSubmitter ? (
-      <Alert type="warning" header="Changes requested" statusIconAriaLabel="Warning">
+  const submitterChangeInstructionsAlert = isSubmitterCorrectionStage ? (
+      <Alert
+        type="warning"
+        header={reviewStage === ASSESSMENT_REVIEW_STAGES.withdrawn ? 'Submission recalled' : 'Changes requested'}
+        statusIconAriaLabel="Warning"
+      >
         <SpaceBetween size="s">
-          <Box>Review the notes below, update the assessment, then resubmit it for review when ready.</Box>
+          <Box>
+            {reviewStage === ASSESSMENT_REVIEW_STAGES.withdrawn
+              ? 'Update the recalled assessment, then resubmit it for review when ready.'
+              : 'Review the notes below, update the assessment, then resubmit it for review when ready.'}
+          </Box>
           {nwacDecisionNote ? (
             <Box>
               <Box fontWeight="bold">Decision Maker note</Box>
@@ -11615,7 +11632,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
               <Box whiteSpace="pre-wrap">{rmReviewNote}</Box>
             </Box>
           ) : null}
-          {!nwacDecisionNote && !rmReviewNote ? (
+          {reviewStage !== ASSESSMENT_REVIEW_STAGES.withdrawn && !nwacDecisionNote && !rmReviewNote ? (
             <Box>No detailed change note was recorded. Contact the Regional Manager before resubmitting.</Box>
           ) : null}
         </SpaceBetween>
@@ -11890,7 +11907,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
       : STEP_LABELS.communication;
   const decisionStepTitle = isReviewWithRegionalManager ? 'Regional Manager review' : STEP_LABELS.decision;
   const assessmentSubmitLabel = twoStepReviewEnabled
-    ? (reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToSubmitter ? 'Resubmit for review' : 'Submit for review')
+    ? (isSubmitterCorrectionStage ? 'Resubmit for review' : 'Submit for review')
     : 'Submit assessment';
   const stepDefinitionById = {
     eligibility: { title: STEP_LABELS.eligibility, content: eligibilityStepContent, isOptional: false },

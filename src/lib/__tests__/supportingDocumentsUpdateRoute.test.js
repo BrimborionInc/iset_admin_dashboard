@@ -31,18 +31,24 @@ describe('Supporting Documents update route', () => {
     expect(routeSource).toContain("console.error('[admin:documents:update-label] error', err)");
   });
 
-  test('full edits validate immutable workflow provenance before resolving destination scope', () => {
+  test('detail edits preserve source lineage and guard only a real attachment change', () => {
     const routeSource = extractRouteBlock('put', '/api/documents/:id');
     const duplicateRouteSource = extractRouteBlock('post', '/api/documents/:id/duplicate');
     const sourceLookup = routeSource.indexOf(
       'applicant_user_id, source, origin_message_id, signing_request_id, updated_at FROM iset_document'
     );
-    const integrityGuard = routeSource.indexOf('validateGenericDocumentMutationIntegrity(existingRow)');
+    const sourceLineage = routeSource.indexOf('preserveDocumentSourceLineage({');
+    const attachmentChange = routeSource.indexOf('const attachmentMutationRequested');
+    const attachmentGuard = routeSource.indexOf('validateDocumentAttachmentMutationIntegrity(existingRow)');
     const targetAccessCheck = routeSource.indexOf('validateDocumentAttachmentContextAccess');
 
     expect(sourceLookup).toBeGreaterThanOrEqual(0);
-    expect(integrityGuard).toBeGreaterThan(sourceLookup);
-    expect(targetAccessCheck).toBeGreaterThan(integrityGuard);
+    expect(sourceLineage).toBeGreaterThan(sourceLookup);
+    expect(attachmentChange).toBeGreaterThan(sourceLineage);
+    expect(attachmentGuard).toBeGreaterThan(attachmentChange);
+    expect(targetAccessCheck).toBeGreaterThan(attachmentGuard);
+    expect(routeSource).not.toContain('validateGenericDocumentMutationIntegrity(existingRow)');
+    expect(routeSource).toContain('requireIntegrityCheck: false');
     expect(duplicateRouteSource).toContain('validateGenericDocumentMutationIntegrity(doc)');
   });
 
@@ -61,5 +67,16 @@ describe('Supporting Documents update route', () => {
     expect(widgetSource).toContain('const payload = { label: trimmedLabel };');
     expect(widgetSource).toContain('if (detailsChanged) {');
     expect(widgetSource).toContain('payload.documentType = trimmedType;');
+  });
+
+  test('uncategorized source documents preload and retain their originating application', () => {
+    expect(widgetSource).toContain(
+      "let nextApplicationId = item.application_id ? String(item.application_id) : '';"
+    );
+    expect(widgetSource).toContain('const editHasSourceBoundLineage = hasSourceBoundDocumentLineage(editDocument);');
+    expect(widgetSource).toContain('This document stays with the application where it originated.');
+    expect(widgetSource).toContain(
+      'disabled={editHasSourceBoundLineage && Boolean(editDocument?.application_id)}'
+    );
   });
 });

@@ -84,6 +84,13 @@ const SOURCE_LABELS = {
   manual_upload: 'Staff upload',
   system_generated: 'PATH generated'
 };
+const STAFF_REASSIGNABLE_DOCUMENT_SOURCES = new Set(['manual_upload', 'legacy_intake_upload']);
+
+const hasSourceBoundDocumentLineage = item => {
+  if (item?.origin_message_id) return true;
+  const source = String(item?.source || '').trim().toLowerCase();
+  return !STAFF_REASSIGNABLE_DOCUMENT_SOURCES.has(source);
+};
 
 const formatSourceLabel = item => {
   const source = item?.source;
@@ -1267,31 +1274,23 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     if (!item || !item.id) return;
     const nextType = resolveDocumentType(item);
     const scope = getDocumentTypeScope(nextType);
-    let nextApplicationId = '';
-    let nextActionPlanId = '';
-    let nextInterventionIds = [];
+    let nextApplicationId = item.application_id ? String(item.application_id) : '';
+    let nextActionPlanId = item.action_plan_id ? String(item.action_plan_id) : '';
+    let nextInterventionIds = normalizeIdList(item.intervention_ids);
     if (scope === 'application') {
-      if (item.application_id) {
-        nextApplicationId = String(item.application_id);
-      } else if (item.action_plan_id) {
-        nextActionPlanId = String(item.action_plan_id);
-        nextInterventionIds = normalizeIdList(item.intervention_ids);
-      } else if (caseWorkspaceApplicationId) {
+      if (!nextApplicationId && !nextActionPlanId && caseWorkspaceApplicationId) {
         nextApplicationId = String(caseWorkspaceApplicationId);
-      } else if (selectedApplicationFilter) {
+      } else if (!nextApplicationId && !nextActionPlanId && selectedApplicationFilter) {
         nextApplicationId = String(selectedApplicationFilter);
-      } else if (applicationId) {
+      } else if (!nextApplicationId && !nextActionPlanId && applicationId) {
         nextApplicationId = String(applicationId);
       }
     } else if (scope === 'action_plan') {
-      if (item.action_plan_id) {
-        nextActionPlanId = String(item.action_plan_id);
-      } else if (selectedInterventionFilter) {
+      if (!nextActionPlanId && selectedInterventionFilter) {
         nextActionPlanId = interventionPlanMap.get(String(selectedInterventionFilter)) || '';
-      } else if (actionPlanOptions.length === 1) {
+      } else if (!nextActionPlanId && actionPlanOptions.length === 1) {
         nextActionPlanId = actionPlanOptions[0].value;
       }
-      nextInterventionIds = normalizeIdList(item.intervention_ids);
       if (!nextInterventionIds.length && selectedInterventionFilter) {
         nextInterventionIds = [String(selectedInterventionFilter)];
       }
@@ -2163,6 +2162,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     actionPlanId: editActionPlanId,
     interventionIds: editInterventionIds,
   });
+  const editHasSourceBoundLineage = hasSourceBoundDocumentLineage(editDocument);
 
 
   return (
@@ -2465,7 +2465,11 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             <>
               <FormField
                 label="Attach to application"
-                description="Application-scoped documents must be attached to an application."
+                description={
+                  editHasSourceBoundLineage && editDocument?.application_id
+                    ? 'This document stays with the application where it originated.'
+                    : 'Application-scoped documents must be attached to an application.'
+                }
                 errorText={editAttachError}
               >
                 <Select
@@ -2478,6 +2482,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
                   placeholder={applicationSelectOptions.length ? 'Select application' : 'No applications available'}
                   loading={applicationsLoading}
                   filteringType="none"
+                  disabled={editHasSourceBoundLineage && Boolean(editDocument?.application_id)}
                 />
               </FormField>
               {editAssociationChanged && (

@@ -1434,8 +1434,24 @@ async function resolveDocumentAttachmentContext({
   };
 }
 
+const STAFF_REASSIGNABLE_DOCUMENT_SOURCES = new Set([
+  'manual_upload',
+  'legacy_intake_upload',
+]);
+
+function normalizedDocumentSource(source) {
+  return (normaliseString(source) || '').toLowerCase();
+}
+
 function documentSourceRequiresApplicationLineage(source) {
-  return normaliseString(source).toLowerCase() === 'application_submission';
+  return normalizedDocumentSource(source) === 'application_submission';
+}
+
+function documentHasSourceBoundCoreLineage(documentRow = null) {
+  if (normalisePositiveInteger(documentRow?.origin_message_id)) return true;
+  return !STAFF_REASSIGNABLE_DOCUMENT_SOURCES.has(
+    normalizedDocumentSource(documentRow?.source)
+  );
 }
 
 async function preserveDocumentSourceLineage({
@@ -1446,6 +1462,29 @@ async function preserveDocumentSourceLineage({
 } = {}) {
   let nextCaseId = normalisePositiveInteger(caseId);
   let nextApplicationId = normalisePositiveInteger(applicationId);
+
+  if (documentHasSourceBoundCoreLineage(documentRow)) {
+    const existingCaseId = normalisePositiveInteger(documentRow?.case_id);
+    const existingApplicationId = normalisePositiveInteger(documentRow?.application_id);
+    if (existingCaseId && nextCaseId && existingCaseId !== nextCaseId) {
+      const err = new Error('document_case_lineage_immutable');
+      err.code = 'document_case_lineage_immutable';
+      err.status = 409;
+      throw err;
+    }
+    if (
+      existingApplicationId &&
+      nextApplicationId &&
+      existingApplicationId !== nextApplicationId
+    ) {
+      const err = new Error('document_application_lineage_immutable');
+      err.code = 'document_application_lineage_immutable';
+      err.status = 409;
+      throw err;
+    }
+    nextCaseId = existingCaseId || nextCaseId;
+    nextApplicationId = existingApplicationId || nextApplicationId;
+  }
 
   if (!documentSourceRequiresApplicationLineage(documentRow?.source)) {
     return {
@@ -14352,6 +14391,13 @@ async function refreshReviewWorkflowById(connection, workflowId) {
   return row || null;
 }
 
+function isApplicationAssessmentSubmitterCorrectionStage(stage) {
+  return new Set([
+    REVIEW_STAGES.ReturnedToSubmitter,
+    REVIEW_STAGES.Withdrawn,
+  ]).has(stage);
+}
+
 function assertApplicationAssessmentReturnedToSubmitterActor({
   reviewWorkflow,
   actorStaffProfileId,
@@ -14361,8 +14407,11 @@ function assertApplicationAssessmentReturnedToSubmitterActor({
   if (!assessmentMutationRequested) {
     return { enforced: false, reason: 'no_assessment_mutation' };
   }
-  if (reviewWorkflow?.current_stage !== REVIEW_STAGES.ReturnedToSubmitter) {
-    return { enforced: false, reason: 'not_returned_to_submitter' };
+  const correctionStage = isApplicationAssessmentSubmitterCorrectionStage(
+    reviewWorkflow?.current_stage
+  );
+  if (!correctionStage) {
+    return { enforced: false, reason: 'not_submitter_correction_stage' };
   }
   if (canonicaliseAccessRole(actorRole) === 'System Administrator') {
     return { enforced: true, reason: 'system_administrator_support' };
@@ -14381,7 +14430,7 @@ function assertApplicationAssessmentReturnedToSubmitterActor({
   error.code = 'assessment_returned_to_submitter_actor_forbidden';
   error.status = 403;
   error.publicMessage =
-    'Only the staff member who originally submitted this assessment can edit or resubmit it after it is returned for correction.';
+    'Only the staff member who originally submitted this assessment can edit or resubmit it after it is returned or recalled for correction.';
   throw error;
 }
 
@@ -14682,7 +14731,7 @@ function assertApplicationAssessmentEiSubmissionReady({
     );
   }
   const preservesAcceptedReturnedEligibility = Boolean(
-    reviewWorkflow?.current_stage === REVIEW_STAGES.ReturnedToSubmitter &&
+    isApplicationAssessmentSubmitterCorrectionStage(reviewWorkflow?.current_stage) &&
     normalizedPreviousEligibility &&
     normalizedPreviousEligibility === normalizedNextEligibility
   );
@@ -15224,6 +15273,9 @@ function assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
   const submitterResubmission =
     reviewStage === REVIEW_STAGES.ReturnedToSubmitter &&
     assessmentSubmittedForWorkflow;
+  const recalledSubmitterResubmission =
+    reviewStage === REVIEW_STAGES.Withdrawn &&
+    assessmentSubmittedForWorkflow;
   const decisionMakerTransition =
     reviewStage === REVIEW_STAGES.NwacReview &&
     assessmentReviewStatusProvided &&
@@ -15236,6 +15288,7 @@ function assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
   if (
     systemAdministratorSupport ||
     submitterResubmission ||
+    recalledSubmitterResubmission ||
     decisionMakerTransition ||
     postDecisionCompletion
   ) {
@@ -15297,16 +15350,16 @@ async function startReviewWorkflow(connection, {
     workflowType: normalizedWorkflowType,
     role: actorRole,
   });
-  const isSystemAdministratorReturnedAssessmentSupport =
+  const isSystemAdministratorAssessmentCorrectionSupport =
     enforceApplicationAssessmentOriginalSubmitter &&
-    existing?.current_stage === REVIEW_STAGES.ReturnedToSubmitter &&
+    isApplicationAssessmentSubmitterCorrectionStage(existing?.current_stage) &&
     canonicaliseAccessRole(actorRole) === 'System Administrator';
   const isSystemAdministratorReturnedInterventionSupport =
     enforceInterventionOriginalSubmitter &&
     existing?.current_stage === REVIEW_STAGES.ReturnedToSubmitter &&
     canonicaliseAccessRole(actorRole) === 'System Administrator';
   const isSystemAdministratorReturnedSubmitterSupport =
-    isSystemAdministratorReturnedAssessmentSupport ||
+    isSystemAdministratorAssessmentCorrectionSupport ||
     isSystemAdministratorReturnedInterventionSupport;
   if (!transition.allowed && isSystemAdministratorReturnedSubmitterSupport) {
     transition = {
@@ -15324,10 +15377,13 @@ async function startReviewWorkflow(connection, {
 
   const metadataJson = metadata && typeof metadata === 'object' ? JSON.stringify(metadata) : null;
   const preserveReturnedSubmitterLineage =
-    existing?.current_stage === REVIEW_STAGES.ReturnedToSubmitter &&
     (
-      enforceApplicationAssessmentOriginalSubmitter ||
-      enforceInterventionOriginalSubmitter
+      enforceApplicationAssessmentOriginalSubmitter &&
+      isApplicationAssessmentSubmitterCorrectionStage(existing?.current_stage)
+    ) ||
+    (
+      enforceInterventionOriginalSubmitter &&
+      existing?.current_stage === REVIEW_STAGES.ReturnedToSubmitter
     );
   const workflowSubmitterStaffProfileId = preserveReturnedSubmitterLineage
     ? normalisePositiveInteger(existing?.submitted_by_staff_profile_id)
@@ -24847,7 +24903,7 @@ function buildImmutableDocumentMutationError(reason) {
       error: 'document_immutable',
       reason,
       message:
-        'This document is an authoritative workflow record and cannot be edited, duplicated, or deleted through Supporting Documents.',
+        'This document is an authoritative workflow record and cannot be duplicated or deleted through Supporting Documents. Its title and document type can still be edited.',
     },
   };
 }
@@ -24904,10 +24960,89 @@ async function validateGenericDocumentMutationIntegrity(documentRow, connection 
   return null;
 }
 
+function buildImmutableDocumentAttachmentError(reason) {
+  return {
+    status: 409,
+    body: {
+      error: 'document_attachment_immutable',
+      reason,
+      message:
+        'The document title and document type can be edited, but its workflow attachment cannot be changed because PATH must preserve an active signing, version, or payment relationship.',
+    },
+  };
+}
+
+async function validateDocumentAttachmentMutationIntegrity(documentRow, connection = pool) {
+  if (!documentRow) {
+    return { status: 404, body: { error: 'document_not_found' } };
+  }
+
+  if (normalisePositiveInteger(documentRow.signing_request_id)) {
+    return buildImmutableDocumentAttachmentError('signing_request_link');
+  }
+
+  const normalizedDocumentId = normalisePositiveInteger(documentRow.id);
+  if (!normalizedDocumentId) {
+    return buildImmutableDocumentAttachmentError('invalid_document_identity');
+  }
+
+  const [[cfaVersionLink]] = await connection.query(
+    `SELECT cvd.document_id
+       FROM cfa_version_documents cvd
+      WHERE cvd.document_id = ?
+      LIMIT 1`,
+    [normalizedDocumentId]
+  );
+  if (normalisePositiveInteger(cfaVersionLink?.document_id)) {
+    return buildImmutableDocumentAttachmentError('cfa_version_link');
+  }
+
+  const [[fundingOverviewVersionLink]] = await connection.query(
+    `SELECT fvd.document_id
+       FROM funding_overview_version_documents fvd
+      WHERE fvd.document_id = ?
+      LIMIT 1`,
+    [normalizedDocumentId]
+  );
+  if (normalisePositiveInteger(fundingOverviewVersionLink?.document_id)) {
+    return buildImmutableDocumentAttachmentError('funding_overview_version_link');
+  }
+
+  const paymentLinkCount = await fetchDocumentPaymentLinkCount(normalizedDocumentId, connection);
+  if (paymentLinkCount > 0) {
+    return buildImmutableDocumentAttachmentError('payment_evidence_link');
+  }
+
+  return null;
+}
+
 function documentMutationTimestamp(value) {
   if (!value) return null;
   const parsed = value instanceof Date ? value : new Date(value);
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.getTime();
+}
+
+function normalizedDocumentAttachmentIds(value) {
+  return normalizeIdList(value).sort((left, right) => left - right);
+}
+
+function hasDocumentAttachmentMutation({
+  documentRow,
+  currentInterventionIds = [],
+  nextCaseId = null,
+  nextApplicationId = null,
+  nextActionPlanId = null,
+  nextInterventionIds = [],
+} = {}) {
+  const sameId = (left, right) =>
+    normalisePositiveInteger(left) === normalisePositiveInteger(right);
+  if (!sameId(documentRow?.case_id, nextCaseId)) return true;
+  if (!sameId(documentRow?.application_id, nextApplicationId)) return true;
+  if (!sameId(documentRow?.action_plan_id, nextActionPlanId)) return true;
+
+  const currentIds = normalizedDocumentAttachmentIds(currentInterventionIds);
+  const requestedIds = normalizedDocumentAttachmentIds(nextInterventionIds);
+  return JSON.stringify(currentIds) !== JSON.stringify(requestedIds);
 }
 
 async function lockGenericDocumentMutationContext({
@@ -59093,17 +59228,6 @@ app.put('/api/documents/:id', async (req, res) => {
     console.error('[admin:documents:update] access check failed', err);
     return res.status(500).json({ error: 'document_access_check_failed' });
   }
-  if (!isLabelOnlyUpdate) {
-    try {
-      const mutationError = await validateGenericDocumentMutationIntegrity(existingRow);
-      if (mutationError) {
-        return res.status(mutationError.status).json(mutationError.body);
-      }
-    } catch (err) {
-      console.error('[admin:documents:update] integrity check failed', err);
-      return res.status(500).json({ error: 'document_integrity_check_failed' });
-    }
-  }
   if (!metadataObj || typeof metadataObj !== 'object') metadataObj = {};
   metadataObj.label = label;
   if (docType) metadataObj.document_type = docType;
@@ -59249,7 +59373,26 @@ app.put('/api/documents/:id', async (req, res) => {
     nextApplicationId = lineageScope.applicationId;
   } catch (err) {
     const errorCode = err?.code || 'document_source_lineage_validation_failed';
-    return res.status(400).json({ error: errorCode });
+    return res.status(Number.isInteger(err?.status) ? err.status : 400).json({ error: errorCode });
+  }
+  const attachmentMutationRequested = hasDocumentAttachmentMutation({
+    documentRow: existingRow,
+    currentInterventionIds: existingInterventionIds,
+    nextCaseId,
+    nextApplicationId,
+    nextActionPlanId,
+    nextInterventionIds,
+  });
+  if (attachmentMutationRequested) {
+    try {
+      const mutationError = await validateDocumentAttachmentMutationIntegrity(existingRow);
+      if (mutationError) {
+        return res.status(mutationError.status).json(mutationError.body);
+      }
+    } catch (err) {
+      console.error('[admin:documents:update] attachment integrity check failed', err);
+      return res.status(500).json({ error: 'document_attachment_integrity_check_failed' });
+    }
   }
   try {
     const targetAccessError = await validateDocumentAttachmentContextAccess(req, {
@@ -59302,10 +59445,33 @@ app.put('/api/documents/:id', async (req, res) => {
       req,
       expectedUpdatedAt: existingRow.updated_at,
       connection: updateConnection,
+      requireIntegrityCheck: false,
     });
     if (locked.error) {
       await updateConnection.rollback();
       return res.status(locked.error.status).json(locked.error.body);
+    }
+    const lockedInterventionMap = await fetchDocumentInterventionMap({
+      documentIds: [documentId],
+      connection: updateConnection,
+    });
+    const lockedAttachmentMutation = hasDocumentAttachmentMutation({
+      documentRow: locked.documentRow,
+      currentInterventionIds: lockedInterventionMap.get(documentId) || [],
+      nextCaseId,
+      nextApplicationId,
+      nextActionPlanId,
+      nextInterventionIds,
+    });
+    if (lockedAttachmentMutation) {
+      const mutationError = await validateDocumentAttachmentMutationIntegrity(
+        locked.documentRow,
+        updateConnection
+      );
+      if (mutationError) {
+        await updateConnection.rollback();
+        return res.status(mutationError.status).json(mutationError.body);
+      }
     }
     const updateFields = [
       'label = ?',
@@ -100655,6 +100821,7 @@ app.post('/api/cases/:id/assessment/recall', async (req, res) => {
       REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
       conn
     );
+    let recalledReviewWorkflowRow = null;
     if (workflowEnabled) {
       const workflowRow = await fetchApplicationAssessmentReviewWorkflow(conn, { applicationId }, { forUpdate: true });
       if (workflowRow && workflowRow.current_stage !== REVIEW_STAGES.Withdrawn) {
@@ -100669,7 +100836,7 @@ app.post('/api/cases/:id/assessment/recall', async (req, res) => {
             message: 'This assessment has already been signed off by the Regional Manager and cannot be recalled by the Coordinator.',
           });
         }
-        await applyApplicationAssessmentReviewWorkflowAction(conn, {
+        recalledReviewWorkflowRow = await applyApplicationAssessmentReviewWorkflowAction(conn, {
           caseId,
           applicationId,
           action: REVIEW_ACTIONS.Withdraw,
@@ -100680,6 +100847,8 @@ app.post('/api/cases/:id/assessment/recall', async (req, res) => {
             source: 'application_assessment_recall',
           },
         });
+      } else {
+        recalledReviewWorkflowRow = workflowRow || null;
       }
     }
     const latestSubmittedDoc = await fetchLatestAssessmentDocumentInfo({
@@ -100793,6 +100962,7 @@ app.post('/api/cases/:id/assessment/recall', async (req, res) => {
       actorStaffProfileId,
     });
 
+    const recalledReviewWorkflow = serializeReviewWorkflowRow(recalledReviewWorkflowRow);
     return res.status(200).json({
       success: true,
       applicationId,
@@ -100801,6 +100971,8 @@ app.post('/api/cases/:id/assessment/recall', async (req, res) => {
       application_row_version: Number(updatedApplication?.row_version || currentRowVersion + 1),
       recalledVersionNumber,
       archivedDocumentIds,
+      reviewWorkflow: recalledReviewWorkflow,
+      review_workflow: recalledReviewWorkflow,
     });
   } catch (error) {
     if (conn) {

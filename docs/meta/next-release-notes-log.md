@@ -22,6 +22,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-08-18 | Release 20260818-admin-workflow-fixes-r2 | Fix/Assessments | Recall submission | The staff member who recalled an assessment can edit it and resubmit it to Regional Manager review. | PATH keeps the original submitter and recall history, preserves unchanged accepted EI eligibility, and clears stale reviewer decisions when the assessment is resubmitted.
+- 2026-08-18 | Release 20260818-admin-workflow-fixes-r2 | Fix/Documents | Supporting Documents | Staff can edit document titles and document types regardless of how the document arrived in PATH. | PATH keeps the original file and source-owned client/case/application history intact. It blocks only unsafe reassignment of evidence already tied to signing, versioned forms, or payments; duplicate and delete keep their stricter safeguards.
 - 2026-08-17 | Release 20260818-admin-workflow-fixes-r1 | Fix/Assessments | Submit for review | Assessment submission now refreshes the selected application before checking for concurrent edits. | Genuine concurrent changes reload the latest assessment; other workflow problems show their actual message instead of the concurrency warning.
 - 2026-08-17 | Release 20260818-admin-workflow-fixes-r1 | Fix/Documents | Supporting Documents | Staff can rename the display title of applicant-submitted and other supporting documents again. | Renaming changes only the staff-facing title; the stored file, document type, ownership, workflow links, and audit evidence are unchanged. Broader edits, duplication, and deletion retain their integrity checks.
 - 2026-08-15 | Release TBD | Fix/Denied reporting | Repeat-application lifecycle and reporting scope | A new application can reuse a case from an earlier denial without remaining closed, hidden, or tied to the earlier application's reporting records. | PATH reopens only a terminal reused case, preserves the earlier application's reporting history, and scopes correction permissions, EI dependencies, Action Plans, interventions, and ESDC validation and export to the selected application. Historical data repair is separate.
@@ -496,14 +498,15 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Assessment submission now refreshes the selected application first and shows the correct message when another workflow condition prevents submission.
-- Staff can rename a supporting document's display title without changing the file or its workflow record.
-- New applications now reopen a terminal case left by an earlier denial without losing the earlier reporting history; denied repeat applications keep separate Action Plans, interventions, and ESDC records, and PATH blocks reporting when the selected application's assessment and funding records do not agree.
-- Returned assessments and intervention requests can now be corrected only by their recorded submitter, then move through a separate Regional Manager review before reaching the Decision Maker.
-- Final approval and denial records now preserve the exact submitter, Regional Manager, Decision Maker, outcome, notes, application, and submitted version.
-- PATH help and AI guidance now explain the complete two-step review, EI evidence, funding-alignment, and post-approval agreement workflow.
+- Staff who recall an assessment before decision can edit it and resubmit it to Regional Manager review without losing the recorded submitter or accepted EI status.
+- Staff can correct supporting-document titles and types regardless of how the document arrived, while PATH preserves its source history and any signing, version, or payment relationship.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260818-admin-workflow-fixes-r2
+
+- Recalled assessments now return to an editable submitter-correction state and can be resubmitted through the normal Regional Manager review path. PATH preserves the original submitter and recall history and clears stale reviewer decisions.
+- Supporting-document titles and types can now be corrected for applicant uploads, secure-message attachments, staff uploads, generated documents, and older records. Source ownership and dependent signing, version, and payment evidence remain protected.
 
 #### Release 20260818-admin-workflow-fixes-r1
 
@@ -517,24 +520,21 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Denying one application no longer closes a client file that still has another open application or active service plan. Decision letters and intervention approval letters now commit their exact message, document, signing and lifecycle records together.
 - Ambiguous historical records now stop for review instead of borrowing the newest application. Historical PROD data correction is a separate controlled operation and is not part of this code release.
 
-#### Release 20260813-portal-help-links-r1
-
-- Fixed both public portal Help-page links to Indigenous Skills and Employment Training service delivery organizations so they open the current Canada.ca directory instead of the retired page.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- La soumission d'une évaluation actualise maintenant d'abord la demande sélectionnée et affiche le bon message lorsqu'une autre condition du flux de travail empêche la soumission.
-- Le personnel peut renommer le titre d'affichage d'un document justificatif sans modifier le fichier ni son dossier de flux de travail.
-- Une nouvelle demande rouvre maintenant un dossier terminal laissé par un refus antérieur sans perdre l'historique de déclaration; les demandes répétées refusées conservent des plans d'action, des interventions et des dossiers EDSC distincts, et PATH bloque la déclaration lorsque l'évaluation et le financement de la demande sélectionnée ne concordent pas.
-- Les évaluations et demandes d'intervention retournées peuvent maintenant être corrigées uniquement par la personne enregistrée comme les ayant soumises, puis elles passent par une révision distincte du gestionnaire régional avant d'atteindre le décideur.
-- Les dossiers finaux d'approbation et de refus conservent maintenant la personne ayant soumis le dossier, le gestionnaire régional, le décideur, le résultat, les notes, la demande et la version soumise exacts.
-- L'aide de PATH et les conseils de l'IA expliquent maintenant la révision complète en deux étapes, les preuves d'assurance-emploi, l'harmonisation du financement et le processus d'entente après l'approbation.
+- Le membre du personnel qui rappelle une évaluation avant la décision peut la modifier et la soumettre de nouveau au gestionnaire régional sans perdre l'identité de la personne ayant soumis le dossier ni le statut d'assurance-emploi accepté.
+- Le personnel peut corriger les titres et les types de documents justificatifs, quelle que soit leur provenance, tandis que PATH préserve leur historique et leurs liens avec les signatures, les versions ou les paiements.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260818-admin-workflow-fixes-r2
+
+- Les évaluations rappelées redeviennent modifiables par la personne enregistrée comme les ayant soumises et peuvent être soumises de nouveau selon le processus normal de révision du gestionnaire régional. PATH préserve l'historique du rappel et efface les anciennes décisions des réviseurs.
+- Les titres et les types des documents justificatifs peuvent maintenant être corrigés pour les téléversements des demandeurs, les pièces jointes aux messages sécurisés, les téléversements du personnel, les documents générés et les anciens dossiers. La provenance et les preuves liées aux signatures, aux versions et aux paiements demeurent protégées.
 
 #### Release 20260818-admin-workflow-fixes-r1
 
@@ -547,10 +547,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Une nouvelle demande peut commencer son évaluation en utilisant la déclaration de conflit valide du membre du personnel pour le dossier. La première sauvegarde réussie fait avancer uniquement cette demande, sans modifier une demande antérieure ni l'ensemble du dossier client.
 - Le refus d'une demande ne ferme plus un dossier client lorsqu'une autre demande ou un plan de services demeure actif. Les lettres de décision et d'approbation d'intervention enregistrent maintenant ensemble leurs messages, documents, demandes de signature et états de cycle de vie exacts.
 - Les dossiers historiques ambigus sont maintenant bloqués pour révision au lieu d'être associés à la demande la plus récente. La correction des données historiques de PROD constitue une opération contrôlée distincte et ne fait pas partie de cette mise en production du code.
-
-#### Release 20260813-portal-help-links-r1
-
-- Correction des deux liens de la page Aide du portail public vers les organismes autochtones offrant le programme ISET; ils ouvrent maintenant le répertoire Canada.ca actuel plutôt que la page retirée.
 
 ### Problemes connus (brouillon - FR)
 
