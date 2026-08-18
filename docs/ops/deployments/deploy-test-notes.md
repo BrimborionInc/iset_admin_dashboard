@@ -11,7 +11,7 @@ Run the PATH orchestrator from the WSL admin repo:
 
 ```bash
 cd /home/bill/ISET/admin-dashboard
-npm run path:deploy -- --env test --skip-data --release-id <release-id>
+npm run path:deploy -- --env test --skip-data --release-id <release-id> --skip-qualification --yes
 ```
 
 This recommended command is app/schema-only. Runtime configuration and allowlisted data promotion are separate scope; include `--dataset intake-release --workflow-id 21` only when Bill explicitly confirms that the TEST run should promote workflow authoring plus the global published intake runtime row.
@@ -108,7 +108,7 @@ For a planned admin-only TEST deploy that may briefly interrupt the admin consol
 ```bash
 cd /home/bill/ISET/admin-dashboard
 npm run path:maintenance -- set --env test --surfaces admin --start-in 5m --expected-duration 5m --title "Test and Training maintenance" --message "The Test and Training environment is temporarily unavailable for maintenance. Production is not affected."
-npm run path:deploy -- --env test --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id>
+npm run path:deploy -- --env test --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id> --skip-qualification --yes
 npm run path:maintenance -- clear --env test --surfaces admin
 ```
 
@@ -122,7 +122,7 @@ Deploy the portal code:
 
 ```bash
 cd /home/bill/ISET/admin-dashboard
-npm run path:deploy -- --env test --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-test
+npm run path:deploy -- --env test --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-test --skip-qualification --yes
 ```
 
 Enable the flag after smoke passes:

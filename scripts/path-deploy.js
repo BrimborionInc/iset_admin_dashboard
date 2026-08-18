@@ -88,6 +88,8 @@ function usage() {
     '  node scripts/path-deploy.js run --env prod --skip-data --release-id <release-id> --qualification-evidence <TEST-GO.json> --yes',
     '  node scripts/path-deploy.js run --env prod --skip-schema --skip-data --release-id <release-id> --qualification-evidence <KNOWN-EVIDENCE.json> --emergency-release --emergency-release-reason <reason> --yes',
     '  node scripts/path-deploy.js run --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --qualification-evidence <TEST-GO.json> --yes  # explicit runtime/config promotion only',
+    '  node scripts/path-deploy.js run --env test --skip-data --release-id <release-id> --skip-qualification --yes  # qualification system unavailable',
+    '  node scripts/path-deploy.js run --env prod --skip-schema --skip-data --release-id <release-id> --skip-qualification --yes  # qualification system unavailable',
     '',
     'Options:',
     '  --env NAME             Target environment: test or prod',
@@ -106,6 +108,7 @@ function usage() {
     '  --skip-shared          Do not upload shared for prod',
     '  --skip-build           Pass through to the app deploy scripts',
     '  --skip-smoke           Skip post-deploy health checks',
+    '  --skip-qualification   Bypass GO evidence gate when qualification system is unavailable; records UNQUALIFIED in manifest and provenance',
     '  --compatibility-only   PROD recovery: update live *-latest.zip artifacts without immutable release objects',
     '  --allow-dirty          Permit a dirty PROD app source tree when paired with --dirty-reason',
     '  --dirty-reason TEXT    Required explanation when overriding the PROD dirty-source guard',
@@ -122,6 +125,8 @@ function usage() {
     '  - Prod app deploys upload artifacts, then run a waited ASG instance refresh.',
     '  - TEST runs with --refresh-test-db are destructive and therefore also require --yes.',
     '  - Prod runs that change schema or allowlisted data capture an RDS cluster snapshot restore point before mutation.',
+    '  - --skip-qualification bypasses only the GO evidence gate; source checks, builds, lint, privacy, smoke, and rollback recording still run.',
+    '  - --skip-qualification cannot be combined with --qualification-evidence.',
   ].join('\n'));
 }
 
@@ -148,6 +153,7 @@ function parseArgs(argv) {
     allowDirty: false,
     dirtyReason: null,
     qualificationEvidence: null,
+    skipQualification: false,
     emergencyRelease: false,
     emergencyReleaseReason: null,
     yes: false,
@@ -189,6 +195,8 @@ function parseArgs(argv) {
       args.skipBuild = true;
     } else if (token === '--skip-smoke') {
       args.skipSmoke = true;
+    } else if (token === '--skip-qualification') {
+      args.skipQualification = true;
     } else if (token === '--compatibility-only') {
       args.compatibilityOnly = true;
     } else if (token === '--allow-dirty') {
@@ -225,6 +233,19 @@ function parseArgs(argv) {
   }
 
   return args;
+}
+
+function validateQualificationModeArgs(args) {
+  if (!args.skipQualification) return;
+  if (args.qualificationEvidence) {
+    throw new Error('--skip-qualification and --qualification-evidence are mutually exclusive');
+  }
+  if (args.emergencyRelease || args.emergencyReleaseReason) {
+    throw new Error('--skip-qualification cannot be combined with --emergency-release or --emergency-release-reason');
+  }
+  if (!args.yes) {
+    throw new Error('--skip-qualification requires --yes to acknowledge the unqualified deployment record');
+  }
 }
 
 function getEnvironmentConfig(args) {
@@ -870,6 +891,7 @@ function writeStagingReleaseProvenance(stagingPath, { releaseId, environment, co
     releaseId,
     environment,
     component,
+    qualificationDecision: qualification?.decision || null,
     qualificationEvidenceId: qualification?.evidenceId || null,
     source: qualification?.candidate?.source || {},
     generatedAt: new Date().toISOString(),
@@ -2324,6 +2346,7 @@ async function handleRun(args, envConfig, identity) {
   if (envConfig.name === 'test' && args.refreshTestDb && !args.yes) {
     throw new Error('TEST run with --refresh-test-db requires --yes because it resets the TEST database');
   }
+  validateQualificationModeArgs(args);
 
   const plan = buildPlan(args, envConfig, identity);
   const manifestPath = getManifestPath(envConfig.name, plan.releaseId);
@@ -2344,7 +2367,17 @@ async function handleRun(args, envConfig, identity) {
       manifest,
       manifestPath,
       'release.qualification',
-      async () => admitReleaseQualification(args, envConfig, plan, manifest.repos)
+      async () => {
+        if (args.skipQualification) {
+          process.stderr.write('[path-deploy] WARNING: --skip-qualification active — qualification evidence gate bypassed. This deployment is UNQUALIFIED.\n');
+          return {
+            decision: 'UNQUALIFIED',
+            skipQualification: true,
+            candidate: { source: qualificationSourceFromRepoState(manifest.repos) },
+          };
+        }
+        return admitReleaseQualification(args, envConfig, plan, manifest.repos);
+      }
     );
 
     if (plan.app.deployShared || plan.app.deployAdmin || plan.app.deployPortal) {
@@ -2473,6 +2506,8 @@ async function main() {
     throw new Error('--compatibility-only is a PROD recovery option');
   }
 
+  validateQualificationModeArgs(args);
+
   const envConfig = getEnvironmentConfig(args);
   const identity = getAwsIdentity(envConfig);
   assertAwsIdentity(identity, envConfig);
@@ -2506,4 +2541,6 @@ module.exports = {
   PORTAL_SUPPORT_SCRIPT_FILES,
   assertArchiveContains,
   createZipFromDirectory,
+  parseArgs,
+  validateQualificationModeArgs,
 };

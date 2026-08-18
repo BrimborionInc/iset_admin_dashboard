@@ -27,6 +27,7 @@ describe('Supporting Documents update route', () => {
     expect(labelOnlyBranch).toBeGreaterThanOrEqual(0);
     expect(scopeResolution).toBeGreaterThan(labelOnlyBranch);
     expect(routeSource).toContain('SET label = ?, metadata = ?, updated_at = NOW()');
+    expect(routeSource.slice(labelOnlyBranch, scopeResolution)).toContain('requireIntegrityCheck: false');
     expect(routeSource).toContain("console.error('[admin:documents:update-label] error', err)");
   });
 
@@ -51,5 +52,14 @@ describe('Supporting Documents update route', () => {
     expect(widgetSource).toContain('applyClientScopeContext(payload, editDocument)');
     expect(widgetSource).toContain('applyClientScopeContext(payload, duplicateDocument)');
     expect(widgetSource).toContain("scope === 'client' && !caseId && applicationId ? String(applicationId) : ''");
+  });
+
+  test('both inline rename and an unchanged edit modal send a title-only request', () => {
+    expect(widgetSource).toContain('body: JSON.stringify({ label: trimmed })');
+    expect(widgetSource).toContain('const detailsChanged =');
+    expect(widgetSource).toContain('trimmedType !== resolveDocumentType(editDocument) || associationChanged');
+    expect(widgetSource).toContain('const payload = { label: trimmedLabel };');
+    expect(widgetSource).toContain('if (detailsChanged) {');
+    expect(widgetSource).toContain('payload.documentType = trimmedType;');
   });
 });

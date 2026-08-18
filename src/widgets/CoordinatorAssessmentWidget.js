@@ -2250,7 +2250,7 @@ const extractJsonFromAi = (value) => {
 };
 
 const CoordinatorAssessmentWidget = forwardRef(
-  ({ actions, toggleHelpPanel, caseData, application_id, onCaseUpdate, applicationRowVersion, onRowVersionUpdate, workspaceEntry }, ref) => {
+  ({ actions, toggleHelpPanel, caseData, application_id, onCaseUpdate, applicationRowVersion, onRowVersionUpdate, refreshCaseData, workspaceEntry }, ref) => {
   const history = useHistory();
   const approvalWorkspaceEntry =
     workspaceEntry?.mode === 'approval' && workspaceEntry?.approvalType === 'application'
@@ -6985,6 +6985,10 @@ const CoordinatorAssessmentWidget = forwardRef(
       preserveExistingApplicationForm = false,
       preserveExistingFinancialOverview = false
     } = {}) => {
+      const refreshCurrentCase =
+        typeof refreshCaseData === 'function'
+          ? refreshCaseData
+          : (typeof actions?.refreshCaseData === 'function' ? actions.refreshCaseData : null);
       setIsSubmittingAssessment(true);
       try {
         // --- POST-VALIDATION WORKFLOW ---
@@ -6994,7 +6998,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         // Pull the freshest row_version before building the submit payload to avoid optimistic conflicts.
         let latestRowVersion = applicationRowVersionState;
         try {
-          const latest = typeof actions?.refreshCaseData === 'function' ? await actions.refreshCaseData() : null;
+          const latest = refreshCurrentCase ? await refreshCurrentCase() : null;
           const refreshedVersion = Number(latest?.application_row_version || latest?.applicationRowVersion || 0);
           if (refreshedVersion > 0) {
             latestRowVersion = refreshedVersion;
@@ -7051,12 +7055,12 @@ const CoordinatorAssessmentWidget = forwardRef(
             releaseLock({ silent: true }).catch(() => {});
             return;
           }
-          if (res.status === 409) {
+          if (res.status === 409 && result?.error === 'row_version_conflict') {
             const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
             if (latestVersion) updateRowVersion(latestVersion);
-            if (typeof actions?.refreshCaseData === 'function') {
+            if (refreshCurrentCase) {
               try {
-                await actions.refreshCaseData();
+                await refreshCurrentCase();
               } catch (_) {}
             }
             setIsEditingAssessment(false);
@@ -7075,7 +7079,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             return;
           }
           if (!res.ok || !result?.success) {
-            throw new Error(result?.error || 'Failed to save assessment.');
+            throw new Error(result?.message || result?.error || 'Failed to save assessment.');
           }
           const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
           if (updatedRowVersion) {

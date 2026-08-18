@@ -1,11 +1,11 @@
 # PATH Deployment Quick Guide
 
 Status: current primary operator guide for normal TEST/PROD PATH deploys.
-Last reviewed: 2026-07-13 after comprehensive release qualification became mandatory; command names checked against current `package.json`.
+Last reviewed: 2026-08-16 — qualification harness abandoned; `--skip-qualification` replaces `--qualification-evidence` for all current deploys.
 
 This is the shortest operator guide for normal PATH deployments.
 
-Qualification authority lives in `release-qualification-runbook.md`. Every mutating TEST command now needs `--qualification-evidence <DEV-GO.json>` and every mutating PROD command needs `--qualification-evidence <TEST-GO.json>`. Command fragments below that focus on deploy scope do not override that requirement; the CLI rejects an omitted, expired, mismatched, failed, skipped, or unavailable qualification.
+The qualification harness (`path-release-qualify.js`) was permanently abandoned on 2026-08-16. Use `--skip-qualification` in place of `--qualification-evidence` for all TEST and PROD deploys. This flag bypasses only the GO evidence gate; source checks, builds, lint, privacy, smoke, and rollback recording still run. The decision is recorded as `UNQUALIFIED` in the manifest and artifact provenance. `--qualification-evidence` remains available in the CLI for future use if a new qualification system is established.
 
 Work from:
 
@@ -22,7 +22,7 @@ When Bill starts a new Codex thread for deploy work, the agent must first:
 - Read `docs/AGENTS.md`, this quick guide, `docs/ops/deployments/prod-deployment-guide.md`, `docs/ops/deployments/path-deploy-orchestrator.md`, and `docs/ops/deployments/data-promotion-catalog.md`.
 - Run `git status --short` from `/home/bill/ISET/admin-dashboard`, `git -C ../ISET-intake status --short`, and `git -C ../shared status --short`, then state that the deploy artifact packages the current WSL working trees, not only staged files.
 - For PROD app deploys, the deploy orchestrator now fails dirty source trees before mutation. Commit, stash, or isolate the admin/portal/shared source before deploy; use `--allow-dirty --dirty-reason "<specific approved reason>"` only for an explicitly approved emergency exception.
-- Every deploy run now consumes machine-generated `release.qualification` before `release.preflight` and every mutation boundary. TEST requires DEV GO; PROD requires deployed TEST GO. The evidence covers both apps, shared runtime, real MySQL, compiled journeys, configuration, workers, external substitutes, provenance, rollback, cleanup, and deployed acceptance. Do not treat the smaller packaging preflight or later health checks as a substitute.
+- Every deploy run records `release.qualification` before `release.preflight` and every mutation boundary. While the retired qualifier is unavailable, pass `--skip-qualification --yes`; the manifest and artifact provenance record `UNQUALIFIED`, and source/build/product-test/lint/privacy/deploy/smoke controls remain mandatory. Do not describe those narrower controls as comprehensive workflow qualification.
 - `--skip-build` requires `build/path-build-manifest.json` for the exact target, release ID, clean Git commit, and untampered build tree. Generate it with `npm run build:manifest` only after building the exact prebuilt release; an older TEST/PROD build cannot be relabelled during deploy.
 - PROD normal-routing smoke uses public `/readyz` for admin and portal so missing canonical runtime schema fails with `503`; use local `/healthz` only to diagnose whether a replacement process has started while ALB routing/fallback is still in transition.
 - `/home/bill/ISET/shared` should be a local Git repo. If it is missing or not a repo, stop and restore/recreate it before deploy unless Bill explicitly approves an emergency exception with marker/checksum verification.
@@ -72,7 +72,7 @@ When Bill starts a new Codex thread for deploy work, the agent must first:
 ### 1. Deploy current code to TEST
 
 ```bash
-npm run path:deploy -- --env test --skip-data --release-id <release-id> --qualification-evidence <DEV-GO.json>
+npm run path:deploy -- --env test --skip-data --release-id <release-id> --skip-qualification --yes
 ```
 
 Use this when:
@@ -83,7 +83,7 @@ Use this when:
 For an admin-only TEST rollout with no schema/data/portal work:
 
 ```bash
-npm run path:deploy -- --env test --skip-schema --skip-data --skip-portal --release-id <release-id>
+npm run path:deploy -- --env test --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id> --skip-qualification --yes
 ```
 
 Before running that shortcut, set an admin-scoped TEST warning or use the ALB maintenance page if the rollout may restart the admin app or briefly expose a gateway error:
@@ -115,7 +115,7 @@ Use that admin-only shortcut only when the change is truly confined to the admin
 ### 2. Reset TEST from the current DEV baseline, then deploy
 
 ```bash
-npm run path:deploy -- --env test --refresh-test-db --skip-data --release-id <release-id> --qualification-evidence <DEV-GO.json> --yes
+npm run path:deploy -- --env test --refresh-test-db --skip-data --release-id <release-id> --skip-qualification --yes
 ```
 
 Use this when:
@@ -146,7 +146,7 @@ For a normal app rollout, use the maintenance sequence so smoke runs after norma
 npm run path:maintenance -- set --env prod --surfaces all --start-in 5m --expected-duration 15m --yes
 # wait through the warning window
 npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
-npm run path:deploy -- --env prod --skip-data --release-id <release-id> --qualification-evidence <TEST-GO.json> --skip-smoke --yes
+npm run path:deploy -- --env prod --skip-data --release-id <release-id> --skip-qualification --skip-smoke --yes
 npm run path:maintenance:fallback -- clear --env prod --surfaces all --yes
 npm run path:deploy:smoke -- --env prod
 npm run path:maintenance -- clear --env prod --surfaces all --yes
@@ -177,7 +177,7 @@ Historical note:
 For an admin-only PROD rollout with no schema/data/portal work and no shared-library changes:
 
 ```bash
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id> --skip-smoke --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id> --skip-qualification --skip-smoke --yes
 ```
 
 Before running that shortcut, set an admin-scoped warning if the rollout will refresh PROD instances or can cause a brief gateway error:
@@ -197,7 +197,7 @@ Use this pattern when a portal behavior change is guarded by a runtime flag such
 Deploy the portal code first, without unrelated schema/data/admin work:
 
 ```bash
-npm run path:deploy -- --env test --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-test
+npm run path:deploy -- --env test --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-test --skip-qualification --yes
 ```
 
 Then enable the runtime flag in TEST:
@@ -212,7 +212,7 @@ bash scripts/run-test-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (sco
 Deploy the code first with the flag still absent or `false`, let the rollout finish, and only then enable the flag:
 
 ```bash
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id intake-draft-autosave-prod --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id intake-draft-autosave-prod --skip-qualification --yes
 ```
 
 After prod smoke passes, enable the flag:
@@ -232,7 +232,7 @@ If the feature is already enabled in the target environment, set it to `false` b
 Portal-only PROD hotfix command:
 
 ```bash
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id <release-id> --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id <release-id> --skip-qualification --yes
 ```
 
 The deploy command records smoke-check details in the release manifest even when the console only prints the final summary. If you need operator-visible smoke lines before clearing the maintenance warning, run:
@@ -258,8 +258,8 @@ The plan or manifest must show `summary.runtimePublish.runtime.workflowId` equal
 When runtime promotion is approved as part of a deploy, include the dataset intentionally:
 
 ```bash
-npm run path:deploy -- --env test --dataset intake-release --workflow-id 21 --release-id <release-id>
-npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --yes
+npm run path:deploy -- --env test --dataset intake-release --workflow-id 21 --release-id <release-id> --skip-qualification --yes
+npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --skip-qualification --yes
 ```
 
 When only runtime/config promotion is approved, use `data:sync:apply` instead of hiding it inside an app rollout:

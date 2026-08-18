@@ -2,6 +2,13 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-08-18
+- Ops/Deployments: Retired the non-authoritative general release qualifier from current deployment admission and added explicit `--skip-qualification --yes` handling. Deploy manifests and artifacts record `UNQUALIFIED`; source, builds, product tests, lint, privacy, rollout, rollback, and smoke controls remain in force.
+
+## 2026-08-17
+- Fix/Application Assessment/Submission retry: Corrected the Application Workspace assessment widget to use its actual case refresh callback before submitting. A stale row-version conflict now reloads the selected application's current version, while other workflow conflicts show their real server message instead of being mislabeled as another user's edit.
+- Fix/Supporting Documents/Document titles: Corrected the over-broad workflow-document guard introduced in the core workflow release. Staff may rename a document's display title without changing its stored file, type, ownership, application/plan links, or workflow evidence. Broader edits, duplication, and deletion remain subject to the authoritative-document dependency checks.
+
 ## 2026-08-15
 - Fix/Core workflow integrity/Repeat applications: Completed a bounded cross-workflow containment pass for assessment decisions, letters, case lifecycle, Action Plans and interventions, EI evidence, ESDC submissions, ready-to-close, documents, secure messages, reminders, notifications, and application work queues. Exact application and plan lineage now wins over case-primary fallbacks; denial and closure derive aggregate case state only after sibling work is considered; immutable reporting and workflow documents are preserved; ambiguous legacy ownership fails closed. Exact-candidate qualification and historical anomaly inventory or repair remain separate.
 - Fix/Denied reporting/Repeat intake: Completed application-boundary containment for repeated denials. Version saves and restores resynchronize only the selected denied or withdrawn application's artifact; case-level routing applies only when no ordinary plan or meaningful sibling application exists; workspace ESDC status, validation and export, correction permission, and EI dependency checks follow the selected application. Portal, manual, and submission-backed staff intake reopen a reused terminal case without deleting historical application reporting artifacts, while already active cases keep their lifecycle.

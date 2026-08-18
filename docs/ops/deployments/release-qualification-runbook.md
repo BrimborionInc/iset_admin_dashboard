@@ -1,8 +1,10 @@
 # PATH Release Qualification and PROD Authorization Runbook
 
-Status: authoritative release gate for local DEV, real-MySQL qualification, TEST deployment, deployed TEST acceptance, and PROD authorization.
+Status: retired historical runbook. The general qualification harness was abandoned as non-authoritative on 2026-08-16.
 
-Last reviewed: 2026-07-13 after the authenticated-admin outage demonstrated that the former unit/composition/health sequence did not qualify a release.
+Last reviewed: 2026-08-18 after the qualification harness was retired.
+
+Do not run this harness or use its `GO`/`NO-GO` files as current deployment admission. Current TEST and PROD runs use the explicit `--skip-qualification --yes` path documented in `deployment-quick-guide.md`. That path records `UNQUALIFIED` and retains the ordinary clean-source, build, product-test, lint, privacy, rollout, rollback, and smoke controls. The phases below are retained only to explain historical artifacts and past releases.
 
 This runbook supersedes any shorter deploy checklist when deciding whether a PATH release is admissible. The deployment guides still describe mechanics and maintenance handling, but they do not authorize a release by themselves.
 

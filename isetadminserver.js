@@ -24915,6 +24915,7 @@ async function lockGenericDocumentMutationContext({
   req,
   expectedUpdatedAt,
   connection,
+  requireIntegrityCheck = true,
 } = {}) {
   const normalizedDocumentId = normalisePositiveInteger(documentId);
   if (!normalizedDocumentId || !connection || typeof connection.query !== 'function') {
@@ -24950,8 +24951,10 @@ async function lockGenericDocumentMutationContext({
   }
   const accessError = await validateDocumentAccess(req, documentRow, { connection });
   if (accessError) return { error: accessError };
-  const mutationError = await validateGenericDocumentMutationIntegrity(documentRow, connection);
-  if (mutationError) return { error: mutationError };
+  if (requireIntegrityCheck) {
+    const mutationError = await validateGenericDocumentMutationIntegrity(documentRow, connection);
+    if (mutationError) return { error: mutationError };
+  }
   return { documentRow };
 }
 
@@ -59090,14 +59093,16 @@ app.put('/api/documents/:id', async (req, res) => {
     console.error('[admin:documents:update] access check failed', err);
     return res.status(500).json({ error: 'document_access_check_failed' });
   }
-  try {
-    const mutationError = await validateGenericDocumentMutationIntegrity(existingRow);
-    if (mutationError) {
-      return res.status(mutationError.status).json(mutationError.body);
+  if (!isLabelOnlyUpdate) {
+    try {
+      const mutationError = await validateGenericDocumentMutationIntegrity(existingRow);
+      if (mutationError) {
+        return res.status(mutationError.status).json(mutationError.body);
+      }
+    } catch (err) {
+      console.error('[admin:documents:update] integrity check failed', err);
+      return res.status(500).json({ error: 'document_integrity_check_failed' });
     }
-  } catch (err) {
-    console.error('[admin:documents:update] integrity check failed', err);
-    return res.status(500).json({ error: 'document_integrity_check_failed' });
   }
   if (!metadataObj || typeof metadataObj !== 'object') metadataObj = {};
   metadataObj.label = label;
@@ -59114,6 +59119,7 @@ app.put('/api/documents/:id', async (req, res) => {
         req,
         expectedUpdatedAt: existingRow.updated_at,
         connection,
+        requireIntegrityCheck: false,
       });
       if (locked.error) {
         await connection.rollback();

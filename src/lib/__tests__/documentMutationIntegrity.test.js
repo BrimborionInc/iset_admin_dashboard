@@ -209,7 +209,6 @@ describe('generic Supporting Documents mutation integrity', () => {
   });
 
   test.each([
-    ['put', '/api/documents/:id'],
     ['post', '/api/documents/:id/duplicate'],
     ['delete', '/api/documents/:id'],
   ])('%s %s loads provenance and invokes the integrity guard before mutation', (method, route) => {
@@ -239,6 +238,30 @@ describe('generic Supporting Documents mutation integrity', () => {
     expect(routeSource).toContain('beginTransaction()');
     expect(routeSource).toContain('lockGenericDocumentMutationContext({');
     expect(routeSource).toContain('.commit()');
+  });
+
+  test('full document edits retain the integrity guard while title-only edits use the narrower locked path', () => {
+    const routeSource = extractRoute('put', '/api/documents/:id');
+    const labelOnlyMarker = routeSource.indexOf('if (isLabelOnlyUpdate)');
+    const fullEditGuard = routeSource.indexOf('if (!isLabelOnlyUpdate)');
+    const labelOnlyEnd = routeSource.indexOf('const effectiveDocType', labelOnlyMarker);
+    const labelOnlySource = routeSource.slice(labelOnlyMarker, labelOnlyEnd);
+
+    expect(fullEditGuard).toBeGreaterThanOrEqual(0);
+    expect(fullEditGuard).toBeLessThan(labelOnlyMarker);
+    expect(routeSource.slice(fullEditGuard, labelOnlyMarker)).toContain(
+      'validateGenericDocumentMutationIntegrity(existingRow)'
+    );
+    expect(labelOnlySource).toContain('lockGenericDocumentMutationContext({');
+    expect(labelOnlySource).toContain('requireIntegrityCheck: false');
+    expect(labelOnlySource).toContain('SET label = ?, metadata = ?, updated_at = NOW()');
+    expect(labelOnlySource).not.toContain('validateGenericDocumentMutationIntegrity(');
+
+    const fullMutationIndex = routeSource.indexOf('SET ${updateFields.join');
+    expect(fullMutationIndex).toBeGreaterThan(labelOnlyEnd);
+    expect(
+      routeSource.lastIndexOf('lockGenericDocumentMutationContext({', fullMutationIndex)
+    ).toBeGreaterThan(labelOnlyEnd);
   });
 
   test('the final locked check catches a dependency created after preflight', async () => {
@@ -272,6 +295,44 @@ describe('generic Supporting Documents mutation integrity', () => {
       expect.objectContaining({ id: 41 }),
       connection
     );
+  });
+
+  test('a title-only lock preserves access and concurrency checks without classifying the whole document as mutable', async () => {
+    const { lock, validateDocumentAccess, validateGenericDocumentMutationIntegrity } =
+      loadLockedMutationContext({
+        mutationError: {
+          status: 409,
+          body: { error: 'document_immutable', reason: 'authoritative_source' },
+        },
+      });
+    const connection = {
+      query: jest.fn().mockResolvedValueOnce([[
+        {
+          id: 42,
+          status: 'active',
+          source: 'application_submission',
+          updated_at: '2026-08-17T12:00:00.000Z',
+        },
+      ]]),
+    };
+
+    await expect(lock({
+      documentId: 42,
+      req: {},
+      expectedUpdatedAt: '2026-08-17T12:00:00.000Z',
+      connection,
+      requireIntegrityCheck: false,
+    })).resolves.toEqual({
+      documentRow: expect.objectContaining({ id: 42, source: 'application_submission' }),
+    });
+
+    expect(connection.query.mock.calls[0][0]).toContain('FOR UPDATE');
+    expect(validateDocumentAccess).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ id: 42 }),
+      { connection }
+    );
+    expect(validateGenericDocumentMutationIntegrity).not.toHaveBeenCalled();
   });
 
   test('immutable responses fail closed with a stable conflict contract', () => {

@@ -13,6 +13,8 @@ const {
 const {
   assertArchiveContains,
   createZipFromDirectory,
+  parseArgs,
+  validateQualificationModeArgs,
 } = require('../scripts/path-deploy');
 
 function makeRepo(buildInfo = {}) {
@@ -175,5 +177,89 @@ describe('release admission', () => {
       descriptorKey: 'releases/release-0/release-descriptor.json',
       descriptorSha256: descriptor.descriptorSha256,
     });
+  });
+});
+
+describe('--skip-qualification CLI flag', () => {
+  test('defaults to false when flag is absent', () => {
+    expect(parseArgs(['--env', 'test']).skipQualification).toBe(false);
+  });
+
+  test('sets skipQualification true when flag is present', () => {
+    expect(parseArgs(['--env', 'test', '--skip-qualification']).skipQualification).toBe(true);
+  });
+
+  test('flag position does not affect other parsed args', () => {
+    const args = parseArgs(['--skip-qualification', '--env', 'prod', '--skip-data', '--yes']);
+    expect(args.skipQualification).toBe(true);
+    expect(args.env).toBe('prod');
+    expect(args.skipData).toBe(true);
+    expect(args.yes).toBe(true);
+  });
+
+  test('--skip-qualification and --qualification-evidence are mutually exclusive', () => {
+    expect(() => validateQualificationModeArgs(parseArgs([
+      '--skip-qualification',
+      '--qualification-evidence',
+      'evidence.json',
+      '--yes',
+    ]))).toThrow('--skip-qualification and --qualification-evidence are mutually exclusive');
+  });
+
+  test('--skip-qualification cannot be mixed with the historical emergency path', () => {
+    expect(() => validateQualificationModeArgs(parseArgs([
+      '--skip-qualification',
+      '--emergency-release',
+      '--yes',
+    ]))).toThrow('--skip-qualification cannot be combined with --emergency-release');
+  });
+
+  test('--skip-qualification requires explicit operator acknowledgement', () => {
+    expect(() => validateQualificationModeArgs(parseArgs([
+      '--skip-qualification',
+      '--env',
+      'test',
+    ]))).toThrow('--skip-qualification requires --yes');
+    expect(() => validateQualificationModeArgs(parseArgs([
+      '--skip-qualification',
+      '--env',
+      'test',
+      '--yes',
+    ]))).not.toThrow();
+  });
+
+  test('UNQUALIFIED decision is recorded in the manifest when gate is bypassed', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'path-deploy.js'), 'utf8');
+    expect(source).toContain("decision: 'UNQUALIFIED'");
+    expect(source).toContain('skipQualification: true');
+  });
+
+  test('skip path still goes through the release.qualification step — no ordering bypass', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'path-deploy.js'), 'utf8');
+    const runStart = source.indexOf('async function handleRun');
+    const qualStep = source.indexOf("'release.qualification'", runStart);
+    const skipBranch = source.indexOf('args.skipQualification', qualStep);
+    expect(qualStep).toBeGreaterThan(runStart);
+    expect(skipBranch).toBeGreaterThan(qualStep);
+    const preflight = source.indexOf("'release.preflight'", runStart);
+    expect(preflight).toBeGreaterThan(qualStep);
+  });
+
+  test('provenance writer records qualificationDecision field', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'path-deploy.js'), 'utf8');
+    expect(source).toContain('qualificationDecision');
+    const provenanceStart = source.indexOf('function writeStagingReleaseProvenance');
+    const provenanceEnd = source.indexOf('\n}', provenanceStart);
+    expect(source.slice(provenanceStart, provenanceEnd)).toContain('qualificationDecision');
+  });
+
+  test('provenance qualificationDecision is UNQUALIFIED string — not GO or qualified', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'path-deploy.js'), 'utf8');
+    const skipBlock = source.slice(
+      source.indexOf('args.skipQualification)'),
+      source.indexOf('return admitReleaseQualification')
+    );
+    expect(skipBlock).toContain("'UNQUALIFIED'");
+    expect(skipBlock).not.toContain("'GO'");
   });
 });

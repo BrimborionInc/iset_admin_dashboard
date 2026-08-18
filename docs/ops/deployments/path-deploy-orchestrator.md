@@ -1,7 +1,7 @@
 # PATH Deploy Orchestrator
 
 Status: current deployment control-plane reference.
-Last reviewed: 2026-07-13 after adding enforced DEV/TEST release qualification and artifact provenance; command names checked against current `package.json`.
+Last reviewed: 2026-08-18 after retiring the general qualification harness and adding explicit unqualified deployment records.
 
 Start with the short operator runbook in `docs/ops/deployments/deployment-quick-guide.md` if you just need the normal commands.
 
@@ -22,7 +22,7 @@ cd /home/bill/ISET/admin-dashboard
 
 The orchestrator packages the WSL working tree for TEST and PROD app deploys. If `/mnt/x/ISET` still exists, treat it as stale/archive-only unless a task explicitly asks to inspect it.
 
-`release-qualification-runbook.md` is the authorization authority. The orchestrator refuses every TEST/PROD run without `--qualification-evidence`: TEST requires DEV GO and PROD requires TEST GO for the exact release/source/schema/operation inventory. Its narrower packaging preflight and smoke steps are defense in depth, not qualification.
+The general release-qualification harness is retired and non-authoritative. Current TEST and PROD runs use `--skip-qualification --yes`. This bypasses only evidence admission, records `UNQUALIFIED` in the manifest and artifact provenance, and retains source controls, builds, product tests, lint, privacy checks, rollout handling, and smoke. It is not a claim of comprehensive workflow qualification.
 
 For PROD app deploys, the orchestrator refuses dirty packaged source trees before any restore point, artifact upload, ASG refresh, schema/data step, or smoke step runs. The guard checks the admin repo when deploying the admin artifact, the portal repo when deploying the portal artifact, and the sibling `shared` repo whenever admin, portal, or shared artifacts package it. A dirty-source exception requires `--allow-dirty --dirty-reason "<specific approved reason>"` and must have Bill's explicit approval in the current thread.
 
@@ -60,13 +60,13 @@ npm run path:deploy:plan -- --env test --skip-data
 Run a TEST deployment:
 
 ```bash
-npm run path:deploy -- --env test --skip-data --release-id <release-id> --qualification-evidence <DEV-GO.json>
+npm run path:deploy -- --env test --skip-data --release-id <release-id> --skip-qualification --yes
 ```
 
 Run a TEST deployment that also rebuilds TEST from the current DEV baseline first:
 
 ```bash
-npm run path:deploy -- --env test --refresh-test-db --skip-data --release-id <release-id> --qualification-evidence <DEV-GO.json> --yes
+npm run path:deploy -- --env test --refresh-test-db --skip-data --release-id <release-id> --skip-qualification --yes
 ```
 
 Plan a PROD deployment:
@@ -78,7 +78,7 @@ npm run path:deploy:plan -- --env prod --skip-data
 Run a PROD deployment:
 
 ```bash
-npm run path:deploy -- --env prod --skip-data --release-id <release-id> --qualification-evidence <TEST-GO.json> --yes
+npm run path:deploy -- --env prod --skip-data --release-id <release-id> --skip-qualification --yes
 ```
 
 If immutable release-object upload is blocked but the live bootstrap still consumes the
@@ -179,8 +179,8 @@ Use this pattern:
 Suggested portal-only deploy commands:
 
 ```bash
-npm run path:deploy -- --env test --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-test
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-prod --yes
+npm run path:deploy -- --env test --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-test --skip-qualification --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-prod --skip-qualification --yes
 ```
 
 Then enable the flag with:

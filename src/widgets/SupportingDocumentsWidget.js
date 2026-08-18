@@ -138,6 +138,31 @@ const normalizeIdList = list =>
   Array.from(new Set((Array.isArray(list) ? list : []).map(value => String(value)).filter(Boolean)))
     .sort();
 
+const hasDocumentAssociationChanged = ({
+  document,
+  scope,
+  usesApplicationFallback,
+  applicationId,
+  actionPlanId,
+  interventionIds,
+}) => {
+  const originalApplicationId = document?.application_id ? String(document.application_id) : '';
+  const originalActionPlanId = document?.action_plan_id ? String(document.action_plan_id) : '';
+  const originalInterventionIds = normalizeIdList(document?.intervention_ids);
+  const normalizedInterventionIds = normalizeIdList(interventionIds);
+
+  if (scope === 'application' && !usesApplicationFallback) {
+    return Boolean(applicationId && applicationId !== originalApplicationId);
+  }
+  if (scope === 'application' || scope === 'action_plan') {
+    return (
+      (actionPlanId || '') !== originalActionPlanId ||
+      JSON.stringify(normalizedInterventionIds) !== JSON.stringify(originalInterventionIds)
+    );
+  }
+  return false;
+};
+
 const SCOPE_LABELS = {
   client: 'Client',
   application: 'Application',
@@ -1331,47 +1356,60 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     setEditCategoryError('');
     setEditAttachError('');
     const scope = getDocumentTypeScope(trimmedType);
-    const payload = { label: trimmedLabel, documentType: trimmedType };
-    if (scope === 'application') {
-      if (canUseApplicantDocumentMode) {
-        const nextApplicationId = (editApplicationId || '').trim();
-        if (!nextApplicationId) {
-          setEditAttachError('Select which application this document should be attached to.');
-          return;
-        }
-        payload.applicationId = nextApplicationId;
-      } else {
-        const fallbackTarget = buildApplicationFallbackTarget(editActionPlanId, editInterventionIds);
-        if (fallbackTarget.actionPlanId) {
-          payload.actionPlanId = fallbackTarget.actionPlanId;
-          payload.interventionIds = fallbackTarget.interventionIds;
-        } else if (fallbackTarget.caseId) {
-          payload.caseId = fallbackTarget.caseId;
+    const associationChanged = hasDocumentAssociationChanged({
+      document: editDocument,
+      scope,
+      usesApplicationFallback: usesApplicationScopeFallback(scope),
+      applicationId: editApplicationId,
+      actionPlanId: editActionPlanId,
+      interventionIds: editInterventionIds,
+    });
+    const detailsChanged =
+      trimmedType !== resolveDocumentType(editDocument) || associationChanged;
+    const payload = { label: trimmedLabel };
+    if (detailsChanged) {
+      payload.documentType = trimmedType;
+      if (scope === 'application') {
+        if (canUseApplicantDocumentMode) {
+          const nextApplicationId = (editApplicationId || '').trim();
+          if (!nextApplicationId) {
+            setEditAttachError('Select which application this document should be attached to.');
+            return;
+          }
+          payload.applicationId = nextApplicationId;
         } else {
-          setEditAttachError('This document must be attached to a case or action plan.');
+          const fallbackTarget = buildApplicationFallbackTarget(editActionPlanId, editInterventionIds);
+          if (fallbackTarget.actionPlanId) {
+            payload.actionPlanId = fallbackTarget.actionPlanId;
+            payload.interventionIds = fallbackTarget.interventionIds;
+          } else if (fallbackTarget.caseId) {
+            payload.caseId = fallbackTarget.caseId;
+          } else {
+            setEditAttachError('This document must be attached to a case or action plan.');
+            return;
+          }
+        }
+      } else if (scope === 'case') {
+        const nextCaseId = caseId ? String(caseId) : editDocument?.case_id ? String(editDocument.case_id) : '';
+        if (!nextCaseId) {
+          setEditAttachError('This document type must be attached to a case.');
           return;
         }
+        payload.caseId = nextCaseId;
+      } else if (scope === 'client') {
+        if (!applyClientScopeContext(payload, editDocument)) {
+          setEditAttachError('Unable to determine which case or application should validate this client document.');
+          return;
+        }
+      } else if (scope === 'action_plan') {
+        const nextActionPlanId = (editActionPlanId || '').trim();
+        if (!nextActionPlanId) {
+          setEditAttachError('Select which action plan this document should be attached to.');
+          return;
+        }
+        payload.actionPlanId = nextActionPlanId;
+        payload.interventionIds = normalizeIdList(editInterventionIds);
       }
-    } else if (scope === 'case') {
-      const nextCaseId = caseId ? String(caseId) : editDocument?.case_id ? String(editDocument.case_id) : '';
-      if (!nextCaseId) {
-        setEditAttachError('This document type must be attached to a case.');
-        return;
-      }
-      payload.caseId = nextCaseId;
-    } else if (scope === 'client') {
-      if (!applyClientScopeContext(payload, editDocument)) {
-        setEditAttachError('Unable to determine which case or application should validate this client document.');
-        return;
-      }
-    } else if (scope === 'action_plan') {
-      const nextActionPlanId = (editActionPlanId || '').trim();
-      if (!nextActionPlanId) {
-        setEditAttachError('Select which action plan this document should be attached to.');
-        return;
-      }
-      payload.actionPlanId = nextActionPlanId;
-      payload.interventionIds = normalizeIdList(editInterventionIds);
     }
     try {
       const res = await apiFetch(`/api/documents/${editDocument.id}`, {
@@ -1410,7 +1448,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     loadChecklist,
     handleEditDismiss,
     canUseApplicantDocumentMode,
-    caseId
+    caseId,
+    resolveDocumentType,
+    usesApplicationScopeFallback
   ]);
 
   const openDuplicateModal = useCallback(item => {
@@ -2115,25 +2155,14 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     actionPlanOptions.find(opt => opt.value === editActionPlanId) || null;
   const selectedDuplicateActionPlanOption =
     actionPlanOptions.find(opt => opt.value === duplicateActionPlanId) || null;
-  const originalApplicationId = editDocument?.application_id
-    ? String(editDocument.application_id)
-    : '';
-  const originalActionPlanId = editDocument?.action_plan_id
-    ? String(editDocument.action_plan_id)
-    : '';
-  const originalInterventionIds = normalizeIdList(editDocument?.intervention_ids);
-  const editAssociationChanged =
-    (editDocScope === 'application' &&
-      !editUsesApplicationFallback &&
-      editApplicationId &&
-      editApplicationId !== originalApplicationId) ||
-    (editDocScope === 'application' &&
-      editUsesApplicationFallback &&
-      (((editActionPlanId || '') !== originalActionPlanId) ||
-        JSON.stringify(normalizeIdList(editInterventionIds)) !== JSON.stringify(originalInterventionIds))) ||
-    (editDocScope === 'action_plan' &&
-      ((editActionPlanId || '') !== originalActionPlanId ||
-        JSON.stringify(normalizeIdList(editInterventionIds)) !== JSON.stringify(originalInterventionIds)));
+  const editAssociationChanged = hasDocumentAssociationChanged({
+    document: editDocument,
+    scope: editDocScope,
+    usesApplicationFallback: editUsesApplicationFallback,
+    applicationId: editApplicationId,
+    actionPlanId: editActionPlanId,
+    interventionIds: editInterventionIds,
+  });
 
 
   return (

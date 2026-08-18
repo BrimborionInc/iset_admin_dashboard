@@ -1,9 +1,9 @@
 # Prod Deployment Guide
 
 Status: current WSL-native PROD deployment guide. Verify live AWS state before any mutating command.
-Last reviewed: 2026-08-02 after release `20260801-returned-assessment-edit` deployed to PROD.
+Last reviewed: 2026-08-18 after retiring the general qualification harness.
 
-For authorization, start with `docs/ops/deployments/release-qualification-runbook.md`; use `deployment-quick-guide.md` for shorter mechanics only. PROD mutation requires an unexpired exact-source `TEST GO` file passed as `--qualification-evidence`.
+Use `deployment-quick-guide.md` for the current authorization and execution sequence. The retired qualification runbook remains historical evidence only. Current deploys use `--skip-qualification --yes`, record `UNQUALIFIED`, and retain ordinary source/build/product-test/lint/privacy/deploy/smoke controls.
 
 This guide records the PROD safety sequence. The active app artifact rollout is WSL-native through `scripts/path-deploy.js`; do not use stale Windows checkout paths as a deployment source.
 
@@ -35,7 +35,7 @@ This guide records the PROD safety sequence. The active app artifact rollout is 
 
 ## Full Prod Deploy
 
-If Bill explicitly orders an emergency app-only release because qualification itself is non-functional, use the documented `--emergency-release` path instead of fabricating a TEST `GO` or manually bypassing the orchestrator. Supply the preserved known evidence, `--skip-schema --skip-data`, and the exact authorization reason. This restores the pre-qualification procedure while retaining clean-source enforcement, builds, tests/lint/privacy preflight, immutable staging, maintenance, refresh, smoke, and rollback records. It does not authorize any schema, data, runtime-config, SQL, or provider mutation.
+The current unqualified path is explicit rather than an emergency-evidence workaround: use `--skip-qualification --yes`. Never combine it with `--qualification-evidence` or `--emergency-release`. It does not authorize schema, data, runtime-config, SQL, or provider mutation; those remain separate scopes requiring their normal controls.
 
 Preflight from WSL:
 
@@ -50,7 +50,7 @@ Planned maintenance sequence:
 npm run path:maintenance -- set --env prod --surfaces all --start-in 5m --expected-duration 15m --yes
 # wait through the warning window
 npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
-npm run path:deploy -- --env prod --skip-data --release-id <release-id> --qualification-evidence <TEST-GO.json> --skip-smoke --yes
+npm run path:deploy -- --env prod --skip-data --release-id <release-id> --skip-qualification --skip-smoke --yes
 npm run path:maintenance:fallback -- clear --env prod --surfaces all --yes
 npm run path:deploy:smoke -- --env prod
 npm run path:maintenance -- clear --env prod --surfaces all --yes
@@ -105,7 +105,7 @@ Recommended prod sequence:
 
 ```bash
 cd /home/bill/ISET/admin-dashboard
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id intake-draft-autosave-prod --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id intake-draft-autosave-prod --skip-qualification --yes
 ```
 
 3. After the prod refresh and smoke checks pass, enable the flag:
@@ -138,7 +138,7 @@ The plan or deploy manifest must show `summary.runtimePublish.runtime.workflowId
 If runtime promotion is explicitly in scope, either include the dataset deliberately in the PROD deploy:
 
 ```bash
-npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --yes
+npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --skip-qualification --yes
 ```
 
 or apply only the data/config bundle:
@@ -204,7 +204,7 @@ Wait through the warning window, then run:
 ```bash
 cd /home/bill/ISET/admin-dashboard
 npm run path:maintenance:fallback -- set --env prod --surfaces admin --yes
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id> --skip-smoke --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id> --skip-qualification --skip-smoke --yes
 npm run path:maintenance:fallback -- clear --env prod --surfaces admin --yes
 npm run path:deploy:smoke -- --env prod --skip-portal --skip-shared
 npm run path:maintenance -- clear --env prod --surfaces admin --yes
@@ -228,7 +228,7 @@ Wait through the warning window, then run:
 ```bash
 cd /home/bill/ISET/admin-dashboard
 npm run path:maintenance:fallback -- set --env prod --surfaces portal --yes
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id <release-id> --skip-smoke --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id <release-id> --skip-qualification --skip-smoke --yes
 npm run path:maintenance:fallback -- clear --env prod --surfaces portal --yes
 npm run path:deploy:smoke -- --env prod --skip-admin --skip-shared
 npm run path:maintenance -- clear --env prod --surfaces portal --yes
@@ -247,7 +247,7 @@ cd /home/bill/ISET/admin-dashboard
 npm run path:maintenance -- set --env prod --surfaces all --start-in 5m --expected-duration 5m --yes
 # wait through the warning window
 npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-portal --release-id <release-id> --skip-smoke --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-portal --release-id <release-id> --skip-qualification --skip-smoke --yes
 npm run path:maintenance:fallback -- clear --env prod --surfaces all --yes
 npm run path:deploy:smoke -- --env prod
 npm run path:maintenance -- clear --env prod --surfaces all --yes

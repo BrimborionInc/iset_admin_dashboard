@@ -71,6 +71,24 @@ describe('application assessment reviewer-stage notice', () => {
     expect(source).toContain('!preserveReturnedAssessmentEligibility');
   });
 
+  test('refreshes the exact Application Workspace record before submit and labels only real version conflicts as concurrent edits', () => {
+    const source = readSource('src/widgets/CoordinatorAssessmentWidget.js');
+    const workspaceSource = readSource('src/pages/applicationCaseDashboard.js');
+    const submitBlock = extractBetween(
+      source,
+      'const handleSubmit = async () => {',
+      'const handleLetterBodyChange ='
+    );
+
+    expect(workspaceSource).toContain('refreshCaseData={refreshCaseData}');
+    expect(source).toContain('onRowVersionUpdate, refreshCaseData, workspaceEntry');
+    expect(submitBlock).toContain("typeof refreshCaseData === 'function'");
+    expect(submitBlock).toContain('const latest = refreshCurrentCase ? await refreshCurrentCase() : null;');
+    expect(submitBlock).toContain("if (res.status === 409 && result?.error === 'row_version_conflict')");
+    expect(submitBlock).toContain("result?.message || result?.error || 'Failed to save assessment.'");
+    expect(submitBlock).not.toContain('if (res.status === 409)');
+  });
+
   test('keeps staff assessment saves separate from Decision Maker fields and context', () => {
     const source = readSource('src/widgets/CoordinatorAssessmentWidget.js');
     const payloadBuilder = extractBetween(
