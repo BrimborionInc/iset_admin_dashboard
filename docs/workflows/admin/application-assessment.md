@@ -51,7 +51,7 @@ Widget references:
 
 ## Role Notes
 
-- Intended for ISET Coordinator, Regional Manager, Program Administrator.
+- Intended for ISET Coordinator, Regional Manager, NWAC Administrator.
 - Final permissions enforced by route matrix and server-side action checks.
 
 ## Current Gaps / Risks

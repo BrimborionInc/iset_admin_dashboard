@@ -326,6 +326,44 @@ resource "aws_iam_role_policy" "app_runtime" {
   })
 }
 
+# Removing a caller-owned pre-submission portal upload must also remove its object
+# history. The current shared uploads/ prefix also contains files after they become
+# authoritative, so IAM cannot enforce draft state: the portal route is the state
+# boundary. A dedicated draft prefix plus promotion would be stronger. No
+# generated-preview prefix is granted, and this policy remains optional/default-deny.
+resource "aws_iam_role_policy" "app_draft_upload_cleanup" {
+  count = var.draft_upload_cleanup_bucket_arn == "" ? 0 : 1
+
+  name = "${var.name_prefix}-app-draft-upload-cleanup"
+  role = aws_iam_role.app.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ListDraftUploadObjectVersions"
+        Effect   = "Allow"
+        Action   = "s3:ListBucketVersions"
+        Resource = var.draft_upload_cleanup_bucket_arn
+        Condition = {
+          StringLike = {
+            "s3:prefix" = "uploads/*"
+          }
+        }
+      },
+      {
+        Sid    = "DeleteDraftUploadObjectVersions"
+        Effect = "Allow"
+        Action = [
+          "s3:DeleteObject",
+          "s3:DeleteObjectVersion"
+        ]
+        Resource = "${var.draft_upload_cleanup_bucket_arn}/uploads/*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "app_aws_status_readonly" {
   name = "${var.name_prefix}-app-aws-status-readonly"
   role = aws_iam_role.app.id

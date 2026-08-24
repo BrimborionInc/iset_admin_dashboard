@@ -38,7 +38,7 @@ Following these guidelines keeps the board responsive, allows widgets to be adde
 - [ ] Are layout changes persisted only when the exported layout actually changes?
 - [ ] Do palette open/reset events reuse the shared helpers?
 - [ ] Are the `boardI18nStrings` and `boardItemI18nStrings` identical (or equivalent) to the proven finance implementation?
-- [ ] Has the new route been registered in access control with System Administrator and Program Administrator enabled by default?
+- [ ] Has the new route been registered in access control with System Administrator and NWAC Administrator enabled by default?
 
 Following the pattern above keeps new dashboards from entering the runaway render loop and ensures widget removal, drag, and resize announcements behave consistently.
 

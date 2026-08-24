@@ -58,10 +58,9 @@ This module enables Indigenous Skills & Employment Training (ISET) agreement hol
 7. **XML Submission Interface** – configure exports that map internal records to the ESDC XML schema ([5]).
 
 ### 3.2 Actors and Roles
-- **Finance Officer** – records transactions, prepares reports, uploads evidence.
-- **Auditor / Compliance Officer** – reviews flagged transactions, monitors adherence to capacity tier rules.
-- **Sub-Agreement User** – submits downstream financial data and supporting documents.
-- **Administrator** – manages agreements, overrides, and system configuration.
+- **System Administrator / NWAC Administrator** – manages PATH-side financial data, reports, evidence, overrides, and configuration.
+- **Regional Manager / ISET Coordinator** – works only with financial records inside normal case scope.
+- **Finance / Audit / Sub-agreement stakeholders** – receive exports or handoffs and work outside PATH; they do not have PATH sign-in roles.
 
 ## 4. Functional Requirements
 
@@ -119,7 +118,7 @@ This module enables Indigenous Skills & Employment Training (ISET) agreement hol
 - Maintain audit trail for all report submissions (user, timestamp, artifact hash).
 
 ### FR-7 Security & Compliance
-- Implement role-based access control for Finance Officer, Auditor, Sub-Agreement User, and Administrator roles.
+- Implement role-based access control using only System Administrator, NWAC Administrator, Regional Manager, and ISET Coordinator, with the documented global-versus-case scope split.
 - Encrypt evidence files at rest (AWS KMS / S3 SSE-KMS) and in transit.
 - Enforce PII redaction guidance on upload and align with CCCS Medium security profile.
 - Log all access, changes, and export actions for audit reporting.
@@ -143,7 +142,7 @@ This module enables Indigenous Skills & Employment Training (ISET) agreement hol
 | User Directory (Cognito) | Authentication and RBAC | OIDC / JWT |
 
 ## 7. Reporting Workflow
-1. Finance Officer records transactions and uploads evidence.
+1. Authorized PATH staff record PATH-side transaction data and upload evidence; external Finance retains accounting authority.
 2. System validates eligibility rules and flat-rate calculations ([3], [4]).
 3. Report compiles for interim or year-end submission and passes automated validation ([2]).
 4. Authorized signatory reviews, certifies, and locks the report.
@@ -179,7 +178,7 @@ Context: This module is primarily for leadership and finance management at an IS
 
 ### 10.2 Primary Personas & Permissions
 - CEO / Executive Director: overview dashboards, approve budget reallocations, certify reports (read/write/approve).
-- Finance Officer / Controller: manage budgets, run reallocations, reconcile transactions from Case Management, prepare reports (read/write).
+- System Administrator / NWAC Administrator: manage PATH budgets, reallocations, case transaction reconciliation, and reports (read/write).
 - Program/Regional Manager: view budgets for own portfolio, propose reallocations with justification (read/write within scope).
 - Auditor / ESDC Monitor (internal or external): read-only access to certified data, evidence bundles, and logs (read).
 - Caseworker (from Case Management): no write in Finance; can view read-only budget summaries tied to their cases (read-scoped).
@@ -396,7 +395,7 @@ Forecasting adds a forward-looking layer to the existing Plan → Actual → Rep
 - **Actual**: confirmed expenditures to date (primarily imported from Case Management).
 - **Forecast**: projected expenditure for the period end, based on trends and manual adjustments.
 
-This layer supports scenario planning and helps CEOs and finance officers manage funds dynamically while maintaining auditability.
+This layer supports scenario planning for PATH administrators and external leadership while maintaining auditability.
 
 ---
 
@@ -469,7 +468,7 @@ Forecast records include a period-end date and versioning for audit purposes.
 
 - Case Management transaction trends (rolling averages, known commitments).
 - Scheduled payments and approved proposals.
-- Manual entries by finance officers.
+- Manual entries by authorized PATH administrators.
 
 Each forecast entry is labeled with its origin:
 
@@ -482,7 +481,7 @@ method = system_estimate | manual_override | imported_commitment
 ### 20.7 Role-Based Interaction
 
 - **CEO / Executive Director**: reviews forecasts, approves reallocations, certifies scenarios.
-- **Finance Officer**: manages detailed forecast entries, performs simulations.
+- **System Administrator / NWAC Administrator**: manages detailed PATH forecast entries and simulations.
 - **Program Manager**: proposes updates for their area, subject to approval.
 
 ---

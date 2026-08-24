@@ -41,7 +41,7 @@ const FinanceAllocationsHelp = () => (
     <Box>
       <strong>Dependencies &amp; notes</strong>
       <ul>
-        <li>Requires finance roles to approve/apply; effective date controls auto-apply vs scheduled.</li>
+        <li>Only PATH administrators can approve or apply changes; the effective date controls immediate or scheduled application.</li>
         <li>Applied transfers write adjustments back to Budgets and update pot evidence lists.</li>
         <li>Evidence uploads use the allocations namespace in object storage; links are presigned when viewed.</li>
       </ul>

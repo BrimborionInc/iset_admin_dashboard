@@ -182,10 +182,12 @@ const canonicalizeRole = (role) => {
 
 const normalizeEscalationRole = (roleKey) => {
   if (!roleKey) return '';
-  if (roleKey === 'application_assessor') return 'iset_coordinator';
-  if (roleKey === 'regional_coordinator') return 'regional_manager';
-  if (roleKey === 'program_admin' || roleKey === 'program_administrator') return 'nwac_administrator';
-  return roleKey;
+  return [
+    'system_administrator',
+    'nwac_administrator',
+    'regional_manager',
+    'iset_coordinator',
+  ].includes(roleKey) ? roleKey : '';
 };
 
 const formatRoleLabel = (roleKey) => {
@@ -361,7 +363,7 @@ const ApplicationOverviewWidget = ({
   const canonicalRole = toCanonicalRole(userRole || '');
   const canonicalRoleKey = canonicalizeRole(canonicalRole || '');
   const isSystemAdminRole = canonicalRole === 'System Administrator';
-  const isProgramAdminRole = canonicalRole === 'NWAC Administrator';
+  const isNwacAdministratorRole = canonicalRole === 'NWAC Administrator';
   const isRegionalManagerRole = canonicalRole === 'Regional Manager';
   const [confirmStatusChange, setConfirmStatusChange] = useState(null);
   const {
@@ -974,9 +976,10 @@ const ApplicationOverviewWidget = ({
   };
   const hasOpenEscalation = escalation && escalation.state && escalation.state !== 'resolved';
   const escalationOwnerRole = normalizeEscalationRole(canonicalizeRole(escalation?.current_owner_role || escalation?.currentOwnerRole));
+  const escalationTargetRole = normalizeEscalationRole(canonicalizeRole(escalation?.target_role || escalation?.targetRole));
   const isEscalationOwner = Boolean(hasOpenEscalation && escalationOwnerRole && escalationOwnerRole === roleKey);
   const escalationBadgeLabel = hasOpenEscalation
-    ? `Escalated to ${formatRoleLabel(escalationOwnerRole || escalation?.target_role || escalation?.targetRole || '')}`
+    ? `Escalated to ${formatRoleLabel(escalationOwnerRole || escalationTargetRole)}`
     : null;
   const escalationTargetRoleLabel = roleKey === 'regional_manager' ? 'NWAC Administrator' : 'Regional Manager';
   const hasCaseId = Boolean(caseData?.id);
@@ -1075,7 +1078,7 @@ const ApplicationOverviewWidget = ({
       const rawStaff = Array.isArray(data) ? data : [];
       const filteredStaff = rawStaff.filter(staff => {
         if (isSystemAdminRole) return true;
-        if (isProgramAdminRole) {
+        if (isNwacAdministratorRole) {
           const staffRole = toCanonicalRole(staff?.role || staff?.primary_role || staff?.primaryRole || '');
           return staffRole !== 'System Administrator';
         }
@@ -1124,7 +1127,7 @@ const ApplicationOverviewWidget = ({
     caseData?.owner?.staffProfileId,
     caseData?.owner?.staff_profile_id,
     caseData?.owner?.id,
-    isProgramAdminRole,
+    isNwacAdministratorRole,
     isRegionalManagerRole,
     isSystemAdminRole,
   ]);

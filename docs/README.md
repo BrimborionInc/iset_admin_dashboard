@@ -20,6 +20,7 @@ Start with `../AGENTS.md` and `docs/AGENTS.md` before using any directory below.
 - `inventory/`: inventory/scope matrices; often point-in-time.
 - `ops/`: operational runbooks and deployment/environment guidance.
 - `planning/`: active plans plus historical design notes and handoffs.
+- `product/`: curated ChatGPT Pro source pack, publishing boundaries, Codex handoff protocol, and approved content screenshots.
 - `prompts/`: prompt snippets/source material, not project behavior.
 - `requirements/`: source requirements, specs, and applicant form artifacts.
 - `runtime/`: runtime/workflow/event design notes; verify against code.

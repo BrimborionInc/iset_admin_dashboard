@@ -8,7 +8,7 @@ Last Updated: 2026-05-20
 
 - Route: `/`
 - Widget title: `Metrics`
-- Visible to: Program Administrator, Regional Coordinator, Application Assessor
+- Visible to: NWAC Administrator, Regional Manager, ISET Coordinator
 - Hidden from: System Administrator
 
 ## Current UX
@@ -49,13 +49,13 @@ Last Updated: 2026-05-20
 
 ## Scope rules
 
-- Program Administrator: global scope
-- Regional Coordinator: all resolved `regionIds` from the current staff context
-- Application Assessor: assigned-owner scope (`assigned_staff_profile_id`, with legacy `assigned_to_user_id` fallback during transition)
+- NWAC Administrator: global scope
+- Regional Manager: all resolved `regionIds` from the current staff context
+- ISET Coordinator: assigned-owner scope (`assigned_staff_profile_id`, with legacy `assigned_to_user_id` fallback during transition)
 
 Important:
 
-- The metrics scope helper in `isetadminserver.js` must honor `regionIds`, not just a single `regionId`, or Regional Coordinator counts and drilldowns will diverge.
+- The metrics scope helper in `isetadminserver.js` must honor `regionIds`, not just a single `regionId`, or Regional Manager counts and drilldowns will diverge.
 
 ## UX guardrails
 

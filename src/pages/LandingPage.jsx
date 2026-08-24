@@ -26,7 +26,7 @@ const copy = {
       eyebrow: "Native Women’s Association of Canada (NWAC)",
       title: 'PATH',
       lead: 'PATH is the NWAC staff system for reviewing ISET applications, managing participant cases, recording services, and completing program reporting.',
-      support: 'Sign in with your NWAC staff credentials to continue. If you need access or support, contact the NWAC ISET program admin team.',
+      support: 'Sign in with your NWAC staff credentials to continue. If you need access or support, contact the NWAC PATH support team.',
       primaryCta: 'Staff sign in',
       secondaryCta: 'Applicant portal',
       meta: [
@@ -54,7 +54,7 @@ const copy = {
         },
         {
           title: 'Need help?',
-          description: 'For onboarding, access changes, or PATH support, contact the NWAC ISET program admin team.'
+          description: 'For onboarding, access changes, or PATH support, contact the NWAC PATH support team.'
         }
       ],
       updatesPrompt: 'Looking for recent changes?',
@@ -62,7 +62,7 @@ const copy = {
     },
     footer: {
       heading: 'Need access or support?',
-      body: 'Contact the NWAC ISET program admin team for sign-in help, onboarding support, or access changes.',
+      body: 'Contact the NWAC PATH support team for sign-in help, onboarding support, or access changes.',
       primary: 'Staff sign in',
       secondary: 'Applicant portal',
       releaseNotes: 'Release notes'
@@ -82,7 +82,7 @@ const copy = {
       eyebrow: 'Association des Femmes Autochtones du Canada (AFAC)',
       title: 'PATH',
       lead: 'PATH est le système du personnel de l’AFAC pour examiner les demandes ISET, gérer les dossiers des participantes, consigner les services et préparer les rapports du programme.',
-      support: 'Connectez-vous avec vos identifiants du personnel de l’AFAC pour continuer. Pour l’accès ou le soutien, communiquez avec l’équipe d’administration du programme ISET de l’AFAC.',
+      support: 'Connectez-vous avec vos identifiants du personnel de l’AFAC pour continuer. Pour l’accès ou le soutien, communiquez avec l’équipe de soutien PATH de l’AFAC.',
       primaryCta: 'Connexion du personnel',
       secondaryCta: 'Portail des candidates',
       meta: [
@@ -110,7 +110,7 @@ const copy = {
         },
         {
           title: 'Besoin d’aide?',
-          description: 'Pour l’accueil, les changements d’accès ou le soutien PATH, communiquez avec l’équipe d’administration du programme ISET de l’AFAC.'
+          description: 'Pour l’accueil, les changements d’accès ou le soutien PATH, communiquez avec l’équipe de soutien PATH de l’AFAC.'
         }
       ],
       updatesPrompt: 'Vous cherchez les changements récents?',
@@ -118,7 +118,7 @@ const copy = {
     },
     footer: {
       heading: 'Besoin d’accès ou de soutien?',
-      body: 'Communiquez avec l’équipe d’administration du programme ISET de l’AFAC pour obtenir de l’aide à la connexion, au démarrage ou aux changements d’accès.',
+      body: 'Communiquez avec l’équipe de soutien PATH de l’AFAC pour obtenir de l’aide à la connexion, au démarrage ou aux changements d’accès.',
       primary: 'Connexion du personnel',
       secondary: 'Portail des candidates',
       releaseNotes: 'Notes de version'

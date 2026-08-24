@@ -17,14 +17,14 @@ Last Updated: 2026-05-05
 
 ## Status
 - Read `docs/README.md` and `docs/guides/configurable-dashboard-notes.md`.
-- Reviewed Program Admin / Regional Coordinator home page wiring in `src/pages/home/HomeDashboardPage.jsx`, `src/pages/home/widgets/ProgramAdminWorkQueueWidget.js`, and `src/pages/home/widgets/WorkQueueItemsTableWidget.js`.
+- Reviewed NWAC Administrator / Regional Manager home page wiring in `src/pages/home/HomeDashboardPage.jsx`, `src/pages/home/widgets/ProgramAdminWorkQueueWidget.js`, and `src/pages/home/widgets/WorkQueueItemsTableWidget.js`.
 
 ## Open Questions
 - Pending: Define required wizard steps, validations, status transitions, and role gating for the coordinator view.
 
 ## Progress Log
 - 2025-10-11: Initialized plan and reviewed mandatory dashboard guidance.
-- 2025-10-11: Reviewed Program Admin / Regional Coordinator home page implementation to mirror patterns for the coordinator view.
+- 2025-10-11: Reviewed NWAC Administrator / Regional Manager home page implementation to mirror patterns for the coordinator view.
 - 2025-10-11: Asked to confirm wizard steps before implementation per stated working style constraints.
 - 2025-10-11: Noted updated instruction to ignore wizard-step requirement; continuing single-question interview only.
 - 2025-10-11: User prefers implementation choices that align with existing home page architecture; clarifying coordinator bucket scope next.
@@ -32,7 +32,7 @@ Last Updated: 2026-05-05
 - 2025-10-11: Confirmed to keep the existing 10 ISET Coordinator buckets.
 - 2025-10-11: Confirmed coordinator queues should be limited to items assigned to the signed-in coordinator.
 - 2025-10-11: Agreed to implement queues one at a time to validate columns and actions.
-- 2025-10-11: User wants to follow Program Admin/Regional Manager home page column conventions (standard Item column).
+- 2025-10-11: User wants to follow NWAC Administrator/Regional Manager home page column conventions (standard Item column).
 - 2025-10-11: User expects proactive UX decisions aligned to existing home page patterns; start with “My New Applications.”
 - 2025-10-11: Coordinator “My New Applications” should be simplified to “Applications assigned to me” (no acknowledged/contacted field).
 - 2025-10-11: Provided canonical application status list from status lifecycle guide for filtering decisions.
@@ -53,10 +53,10 @@ Last Updated: 2026-05-05
 - 2025-10-11: Applied severity thresholds to SLA Status when overdue (0-3 neutral, 3-6 low, 7-14 medium, 15-28 high, >28 critical).
 - 2025-10-11: Updated Missing Docs queue status column to use Docs Requested age badge and relabeled Due to SLA Target with stage-aware labels.
 - 2025-10-11: Applied the same status badge and SLA Target column treatment to the My Applications queue.
-- 2025-10-11: Noted that the new status/SLA display pattern should be reused for future queues and will be applied to Program Admin/Regional Manager queues when requested.
-- 2025-10-11: Applied the enhanced Status badge and SLA Target display to Program Admin and Regional Manager queue items.
+- 2025-10-11: Noted that the new status/SLA display pattern should be reused for future queues and will be applied to NWAC Administrator/Regional Manager queues when requested.
+- 2025-10-11: Applied the enhanced Status badge and SLA Target display to NWAC Administrator and Regional Manager queue items.
 - 2025-10-11: Made the Item column applicant name a workspace link aligned with the Open workspace inline action.
-- 2025-10-11: Linked applicant names in Program Admin/Regional Manager queue lists and detail views to their workspace paths.
+- 2025-10-11: Linked applicant names in NWAC Administrator/Regional Manager queue lists and detail views to their workspace paths.
 - 2025-10-11: Ready to resume ISET Coordinator queue build-out and select the next queue to implement.
 - 2025-10-11: Proposed EI Consent / EI Verification Pending as the next coordinator queue; awaiting criteria and data source confirmation.
 - 2025-10-11: Enabled the EI Consent / EI Verification Pending queue with user-facing hint text and eligibility-missing filter on assigned applications.

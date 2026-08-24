@@ -79,7 +79,7 @@ function fakeJwt() {
     base64UrlEncode({
       sub: 'smoke-admin-sub',
       email: 'program.admin@awentech.ca',
-      name: 'Program Admin',
+      name: 'System Administrator',
       role: 'System Administrator',
       'cognito:groups': ['System_Administrator'],
       iat: now,
@@ -146,7 +146,7 @@ function buildCasePayload(state) {
     decision_outcome: 'approved',
     assigned_staff_profile_id: 1,
     assigned_user_email: 'program.admin@awentech.ca',
-    assigned_user_display_name: 'Program Admin',
+    assigned_user_display_name: 'System Administrator',
     assessment_esdc_eligibility: 'eligible',
     submitted_at: '2026-05-08T16:24:00Z',
     created_at: '2026-05-08T16:24:00Z',
@@ -156,7 +156,7 @@ function buildCasePayload(state) {
     docs_requested_cleared_at: state.docsRequestedActive ? null : new Date().toISOString(),
     docs_requested_source: 'secure_message',
     lock_owner_id: 'smoke-admin-sub',
-    lock_owner_name: 'Program Admin',
+    lock_owner_name: 'System Administrator',
     lock_owner_email: 'program.admin@awentech.ca',
     lock_expires_at: lockExpiresAt,
   };
@@ -186,7 +186,7 @@ function buildApplicationPayload(state) {
     docs_requested_cleared_at: state.docsRequestedActive ? null : new Date().toISOString(),
     docs_requested_source: 'secure_message',
     lock_owner_id: 'smoke-admin-sub',
-    lock_owner_name: 'Program Admin',
+    lock_owner_name: 'System Administrator',
     lock_owner_email: 'program.admin@awentech.ca',
     lock_expires_at: lockExpiresAt,
   };
@@ -226,7 +226,7 @@ async function installApiStubs(page, apiCalls, state) {
         auth: {
           sub: 'smoke-admin-sub',
           email: 'program.admin@awentech.ca',
-          name: 'Program Admin',
+          name: 'System Administrator',
           role: 'System Administrator',
           groups: ['System_Administrator'],
           staffProfileId: 1,
@@ -235,7 +235,7 @@ async function installApiStubs(page, apiCalls, state) {
         profile: {
           id: 1,
           email: 'program.admin@awentech.ca',
-          name: 'Program Admin',
+          name: 'System Administrator',
           role: 'System Administrator',
           region_id: 1,
           region_ids: [1],
@@ -292,7 +292,7 @@ async function installApiStubs(page, apiCalls, state) {
         lock: {
           application_id: 2,
           owner_user_id: 'smoke-admin-sub',
-          owner_display_name: 'Program Admin',
+          owner_display_name: 'System Administrator',
           owner_email: 'program.admin@awentech.ca',
           acquired_at: now.toISOString(),
           expires_at: lockExpiresAt,

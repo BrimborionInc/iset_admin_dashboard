@@ -159,12 +159,12 @@ function containsForbidden(snippet, patterns = []) {
 
 const checks = [
   {
-    name: 'admin allocation evidence upload requires finance role and pending ownership',
+    name: 'admin allocation evidence upload requires PATH administrator access and pending ownership',
     source: 'admin',
     anchor: "app.post('/api/allocations/evidence/upload'",
     patterns: [
-      'requireFinanceRole(req, res)',
-      'resolveFinanceRouteActorUserId(req)',
+      'requireFinancialManagementAdminAccess(req, res)',
+      'resolvePaymentActorUserId(req',
       'generateKey(`allocations/${actorUserId}`',
       'persistFinanceEvidencePendingUpload',
     ],
@@ -174,7 +174,7 @@ const checks = [
     source: 'admin',
     anchor: "app.post('/api/allocations/evidence/delete'",
     patterns: [
-      'requireFinanceRole(req, res)',
+      'requireFinancialManagementAdminAccess(req, res)',
       'ensureFinanceEvidenceObjectAccess',
       'finance_evidence_in_use',
       'DELETE FROM pending_uploads',
@@ -185,7 +185,7 @@ const checks = [
     source: 'admin',
     anchor: "app.post('/api/allocations/evidence/presign-download'",
     patterns: [
-      'requireFinanceRole(req, res)',
+      'requireFinancialManagementAdminAccess(req, res)',
       'ensureFinanceEvidenceObjectAccess',
       'presignGet',
     ],
@@ -201,20 +201,67 @@ const checks = [
     ],
   },
   {
+    name: 'admin document delete is scoped and records a reversible lifecycle change',
+    source: 'admin',
+    anchor: "app.delete('/api/documents/:id'",
+    extraction: 'express-route',
+    patterns: [
+      'validateDocumentAccess(req, doc)',
+      'validateGenericDocumentMutationIntegrity(doc)',
+      'lockGenericDocumentMutationContext',
+      "SET status = 'deleted'",
+      'appendDocumentLifecycleEvent',
+      'await connection.commit()',
+    ],
+  },
+  {
+    name: 'admin document restore is System Administrator-only and verifies storage first',
+    source: 'admin',
+    anchor: "app.post('/api/documents/:id/restore'",
+    extraction: 'express-route',
+    patterns: [
+      'isSystemAdministratorRequest(req)',
+      'headObject',
+      "SET status = 'active'",
+      'appendDocumentLifecycleEvent',
+    ],
+  },
+  {
+    name: 'admin supporting documents expose no permanent-delete endpoint or purge workflow',
+    source: 'admin',
+    anchor: "app.delete('/api/documents/:id'",
+    extraction: 'whole-source',
+    patterns: [
+      "app.delete('/api/documents/:id'",
+      "app.post('/api/documents/:id/restore'",
+    ],
+    forbidden: [
+      "app.delete('/api/documents/:id/permanent'",
+      'iset_document_purge_operation',
+      'can_permanently_delete',
+    ],
+  },
+  {
     name: 'admin applicant document list requires scoped applicant context',
     source: 'admin',
     anchor: "app.get('/api/applicants/:id/documents'",
+    extraction: 'express-route',
     patterns: [
       'validateApplicantDocumentContextAccess',
       'requireScopedContext: true',
+      'deletedView && !isSystemAdministratorRequest(req)',
+      'iset_document_lifecycle',
     ],
   },
   {
     name: 'admin case document list validates case access',
     source: 'admin',
     anchor: "app.get('/api/cases/:id/documents'",
+    extraction: 'express-route',
     patterns: [
       'validateCaseAccessByCaseId(req, caseId)',
+      'deletedView && !isSystemAdministratorRequest(req)',
+      'iset_document_lifecycle',
     ],
   },
   {
@@ -882,7 +929,9 @@ function createDefaultRouteScopeChecks() {
 function evaluateRouteScopeCheck(source, check) {
   const snippet = check.extraction === 'express-route'
     ? extractExpressRouteRegistration(source, check.anchor)
-    : extractWindow(source, check.anchor, { after: check.after || 5000 });
+    : check.extraction === 'whole-source'
+      ? source
+      : extractWindow(source, check.anchor, { after: check.after || 5000 });
   if (!snippet) {
     return {
       name: check.name,

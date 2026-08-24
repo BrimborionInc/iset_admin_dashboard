@@ -14,7 +14,7 @@ This review extends that incident response from identity-domain correctness into
 2. Prioritize client-data objects with high privacy sensitivity: secure messages, documents, payment packets, applications, cases, notes, and generated exports.
 3. For each route family, prove both authentication and object-level authorization:
    - staff identity domain: `staff_profiles.id` vs local `user.id`
-   - case/client scope: assigned case, regional portfolio, admin/global role, finance role
+   - case/client scope: assigned case, regional portfolio, or one of the two administrator roles with global access
    - target mutation scope: existing object access and destination object access
    - file access: presigned URLs must not be grantable by document ID alone
 4. Patch confirmed exposure paths before speculative cleanup.
@@ -46,9 +46,9 @@ Risk: payment-packet routes allowed broad payment-role access, including `Region
 Patched in `isetadminserver.js`:
 
 - Added `validatePaymentPacketAccess`, `validatePaymentTargetAccess`, and `validatePaymentPacketDocumentAccess`.
-- Finance roles remain global for payment operations.
-- Casework payment roles (`Regional Manager`, `ISET Coordinator`) are limited by the same case access rules used elsewhere.
-- Batch and ledger endpoints now require global finance/admin payment access rather than casework payment access.
+- System Administrator and NWAC Administrator remain global for payment operations; Regional Manager and ISET Coordinator remain case-scoped. Finance does not sign in to PATH.
+- Regional Managers and ISET Coordinators are limited by the same case access rules used elsewhere.
+- Batch and ledger endpoints now require System Administrator or NWAC Administrator access rather than case-scoped access.
 - Payment document attach/update/delete, payment line mutation/status, packet PDF/audit-bundle, communications, validation, send, update, delete, and status routes now validate packet scope.
 - Document presign can use a payment-packet context (`paymentPacketId`) when a finance workflow needs to open a same-packet/same-client document that is not yet linked as payment evidence.
 
@@ -88,9 +88,9 @@ Patched in `isetadminserver.js`:
 - Reminder routes must validate both the existing reminder context and any new destination context on update.
 - Case notes and case events must be treated as client data and case-scoped before response.
 - Payment packet access has two layers:
-  - finance/admin payment roles are global
-  - casework payment roles are case-scoped
-- Payment batches and full ledger exports are finance/admin-only surfaces.
+  - System Administrators and NWAC Administrators have global access
+  - Regional Managers and ISET Coordinators have case-scoped access
+- Payment batches and full ledger exports are limited to System Administrator and NWAC Administrator.
 - Staff actor/audit `*_user_id` columns still require explicit local `user.id` resolution; do not reuse `staff_profiles.id`.
 
 ## Verification

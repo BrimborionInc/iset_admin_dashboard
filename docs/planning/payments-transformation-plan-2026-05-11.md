@@ -45,15 +45,15 @@ The list below records the issues found during the implementation review. The 20
 
 1. **Email handoff is not the only submit path.** `POST /api/finance/payment-packets/:id/status` is the good path because it validates gates, sends the email, records communication, updates status, and creates submitted `finance_transaction` rows. But `POST /api/finance/payment-packets/:id/send-email` can send externally from draft without the normal status/ledger transition.
 2. **Packet create accepts non-draft statuses.** The UI creates drafts, but the API accepts submitted/confirmed statuses and timestamps at creation time, bypassing the transition model.
-3. **`SIMPLE_PAYMENT_WORKFLOW` preserves an old internal-payment model.** In simple mode, a submitted line can be marked `paid` without finance/AP role, proof, reference, batch, or maker-checker checks. This is not the right fix for NWAC's unreliable Finance-feedback problem; it just turns PATH into false payment authority.
+3. **`SIMPLE_PAYMENT_WORKFLOW` preserves an old internal-payment model.** In simple mode, a submitted line can be marked `paid` without administrator access, proof, reference, batch, or maker-checker checks. This is not the right fix for NWAC's unreliable Finance-feedback problem; it just turns PATH into false payment authority.
 4. **Post-email follow-up is under-modeled.** Current line `paid`/packet `confirmed` statuses are doing too much. PATH needs explicit operations follow-up/confidence tracking: sent, follow-up needed, reported paid, confirmed by evidence, stale/no response, cancelled/not proceeding.
-5. **Two surfaces were not in parity.** Case Workspace widgets were the action surface while the old cross-client dashboard was mostly inspection/read-only. The 2026-05-11 two-surface tranche now makes `/iset/payments` the cross-client operational surface, while `/finance/payments` remains a separate finance/admin oversight route pending a later route decision.
+5. **Two surfaces were not in parity.** Case Workspace widgets were the action surface while the old cross-client dashboard was mostly inspection/read-only. The 2026-05-11 two-surface tranche now makes `/iset/payments` the cross-client operational surface, while `/finance/payments` remains a separate administrator oversight route pending a later route decision.
 6. **The standalone `/iset/payments` page was a scaffold.** This is fixed in DEV as of 2026-05-11: the page now hosts the shared queue, detail, and communications widgets in operational mode.
 7. **Cross-client scope filtering is not designed for real dashboard scale.** The list endpoint queries the first capped result set and then filters each row through packet access. That is acceptable for small/unused data, but not for an operational cross-client queue.
 8. **Communications are now partially aligned with scoped use.** The data provider now reloads communications for the selected packet with `packetId`, and the Case Workspace manage-payments layout includes the communications widget. Remaining work: richer email/reply tracking and browser/API smoke coverage.
 9. **Line-level evidence attach is now implemented in DEV.** The schema, checklist model, manual attach route, and upload/link UI all carry `payment_packet_document.payment_packet_line_id` for line-scoped evidence.
 10. **Budget/reporting labels are now partially aligned.** `submitted` finance transactions support operational committed/requested amounts. `posted` finance transactions drive PATH-recorded actual/confirmation values, with widgets/help now avoiding Sage-authoritative wording. Remaining work is deeper reporting/budget test coverage and any role-specific reporting refinements found during browser automation.
-11. **Route and label language is mid-cleanup.** Main route/header/help copy has moved back to "Payments", but the remaining reporting/help pass still needs to check optional batch wording and finance-owned phrasing against the operations-owned request/follow-up model.
+11. **Route and label language is mid-cleanup.** Main route/header/help copy has moved back to "Payments", but the remaining reporting/help pass still needs to check optional batch wording against the operations-owned request/follow-up model and the external Finance boundary.
 
 ## Target Business Workflows
 
@@ -126,9 +126,9 @@ Use computed packet status from lines/events where practical. Keep existing pack
 
 ### D. Access And Scale
 
-- Keep finance/admin global access and casework scoped access.
+- Keep System Administrator / NWAC Administrator global access and Regional Manager / ISET Coordinator case-scoped access.
 - For cross-client dashboard use, implement SQL-level scope filters for Regional Manager/ISET Coordinator access instead of broad query then per-row filtering.
-- Align route matrix, backend roles, and actual Cognito groups. PROD currently appears to use System/NWAC/Regional/ISET Coordinator groups, while backend code also names Finance Approver/Reviewer/Ops/AP roles.
+- Resolved 2026-08-24: align the route matrix and backend to the four actual Cognito roles only. Finance remains external and has no PATH group.
 - Preserve object-scope checks for packet details, documents, PDFs, communications, and generated files.
 
 ### E. Evidence Alignment

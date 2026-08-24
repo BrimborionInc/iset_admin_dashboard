@@ -1,8 +1,9 @@
 # Finance Payments Module and Dashboard
 
 **Purpose:** Canonical design and planning for the Payments module/dashboard, aligned to `docs/requirements/payments-module.v2.md`.  
-**Audience:** Finance staff, program staff, product owners, engineers, ops, audit/compliance.  
-**Last Updated:** 2026-05-11
+**Audience:** PATH program staff, product owners, engineers, operations, audit/compliance, and external Finance stakeholders.
+**Status:** partially deployed/current-source capability; real Finance email routing/sends are not rolled out or enabled in PROD.
+**Last Updated:** 2026-08-21
 
 Current implementation review: `docs/planning/payments-implementation-review-2026-05-11.md`. Current target operating model: `docs/planning/payments-target-operating-model-2026-05-11.md`. Current transformation plan for the NWAC email workflow: `docs/planning/payments-transformation-plan-2026-05-11.md`.
 
@@ -12,10 +13,10 @@ Current implementation review: `docs/planning/payments-implementation-review-202
 - **MAY (configurable/later):** Optional capabilities not required for initial compliance.
 
 ## Context (current codebase)
-- The cross-client operational Payments dashboard is live at `/iset/payments` in `src/pages/Caseworking/ProgramPaymentsPage.jsx` with queue, detail, communications, and SLA widgets. `/finance/payments` remains a finance/admin oversight surface using the same shared widget family.
+- The cross-client operational Payments dashboard is implemented and has admin deployment history at `/iset/payments` in `src/pages/Caseworking/ProgramPaymentsPage.jsx` with queue, detail, communications, and SLA widgets. `/finance/payments` remains an administrator oversight surface using the same shared widget family. Route deployment does not mean the real Finance email workflow is enabled.
 - Core finance objects already exist: `budget_pot`, `budget_pot_region`, `finance_transaction`, `iset_document`, `pending_uploads`.
 - The Payments module is internal to NWAC (ISET team to Finance team), not GoC disbursement.
-- Finance/Sage is the financial system of record. PATH is the ISET operations system that prepares, sends, and tracks payment requests across the email handoff gap.
+- Finance/Sage is the financial system of record. PATH is the ISET operations system designed to prepare, evidence, and track payment requests across the email handoff gap; real PROD Finance email sends remain disabled pending a deliberate rollout.
 - Finance reporting back to operations after AP fulfillment is erratic, so PATH must support operational follow-up and confidence tracking without pretending to be authoritative accounting truth.
 - Payments are exposed through two operational surfaces over the same data and business capabilities: a case-scoped surface in the Case Workspace and the multi-client `/iset/payments` dashboard. The difference is scope and queueing context, not a separate workflow model.
 
@@ -49,14 +50,12 @@ Current implementation review: `docs/planning/payments-implementation-review-202
 - **Evidence:** Supporting documents tied to packet/line (invoice, attendance report, receipts).
 
 ## Roles and permissions (RBAC)
-- **Program requester:** Creates packets, attaches evidence, validates, and submits to Finance.
-- **Finance ops:** Records payment confirmation and optional batch/export handling when used.
-- **Audit/Compliance:** Read-only; export audit bundles.
-- **Admin:** Configures evidence rules, thresholds, pot mappings, reporting units.
+- **ISET Coordinator / Regional Manager:** Work with packets and evidence within normal case scope.
+- **System Administrator / NWAC Administrator:** Have global payment administration and can use restricted finalization, batch, export, and configuration actions.
+- **Finance:** Receives the handoff and works outside PATH; Finance does not sign in.
 
 Segregation of duties (SHOULD):
-- Same user cannot create and finance-approve/mark-paid the same line.
-- Evidence overrides require elevated role plus logged reason.
+- Sensitive overrides and finalization should use the two administrator roles, a logged reason, and actor history.
 
 ## Workflow and statuses
 Packet status (canonical):
@@ -127,7 +126,7 @@ Confirmed payment line must produce a posted `finance_transaction` with:
 Program dashboard:
 - Drafts / Needs Evidence, Ready to send, Sent to finance.
 
-Finance dashboard:
+Administrator oversight dashboard:
 - Drafts needing evidence, Sent to finance, Payment confirmed, overdue evidence tasks.
 
 The case-scoped payment widgets and the cross-client Payments dashboard should show the same packet/line/payment-follow-up data and support the same core business actions where role/scope allows. The dashboard adds aggregate filtering, queueing, and cross-client monitoring; the case workspace adds local case context.
@@ -142,8 +141,8 @@ Payment detail view:
 - Approvals and audit timeline.
 - Notes/questions to requester.
 - Duplicate warnings + override history.
-- Batch actions (finance only).
-- Mark paid + attach confirmation (AP/Ops only).
+- Batch actions (System Administrator / NWAC Administrator only).
+- Record PATH follow-up and attach confirmation evidence through the restricted administrator workflow; this does not make PATH the accounting authority.
 
 Batch UI:
 - Optional internal grouping of already-submitted lines.

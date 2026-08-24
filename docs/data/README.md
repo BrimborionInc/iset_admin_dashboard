@@ -10,7 +10,7 @@ This directory is not a single source of truth. It contains current domain docs,
 ## How To Use
 
 - For database orientation, start with `database-documentation.md` and `database-overview.md`.
-- For document storage/scoping, use `documents-model.md`.
+- For document storage/scoping and the `iset_document_lifecycle` / `iset_document_lifecycle_event` reversible-delete audit tables, use `documents-model.md`.
 - For the current PROD document checklist gate and document-type configuration snapshot, use `document-checklist-current-configuration.md`.
 - For applicant accounts, use `applicant-account-activation.md`.
 - For secure messaging data integration, use `integrations/secure-messaging.md`.

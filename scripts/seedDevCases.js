@@ -19,16 +19,16 @@ try {
       charset: 'utf8mb4_general_ci',
     });
     const count = Number(process.argv[2] || 8);
-    const [evals] = await pool.query("SELECT id, primary_role AS role FROM staff_profiles WHERE primary_role IN ('Program Administrator','Application Assessor','ISET Coordinator')");
-    let paId = evals.find(e => e.role === 'Program Administrator')?.id;
-    let aaId = evals.find(e => e.role === 'Application Assessor' || e.role === 'ISET Coordinator')?.id;
-    if (!paId) {
-      const [r] = await pool.query("INSERT INTO staff_profiles (display_name, name, email, primary_role, status, created_at, updated_at) VALUES ('Pat Admin','Pat Admin','admin@example.com','Program Administrator','active',NOW(),NOW())");
-      paId = r.insertId;
+    const [staffRows] = await pool.query("SELECT id, primary_role AS role FROM staff_profiles WHERE primary_role IN ('NWAC Administrator','ISET Coordinator')");
+    let nwacAdministratorId = staffRows.find(row => row.role === 'NWAC Administrator')?.id;
+    let isetCoordinatorId = staffRows.find(row => row.role === 'ISET Coordinator')?.id;
+    if (!nwacAdministratorId) {
+      const [result] = await pool.query("INSERT INTO staff_profiles (display_name, name, email, primary_role, status, created_at, updated_at) VALUES ('Pat Admin','Pat Admin','admin@example.com','NWAC Administrator','active',NOW(),NOW())");
+      nwacAdministratorId = result.insertId;
     }
-    if (!aaId) {
-      const [r] = await pool.query("INSERT INTO staff_profiles (display_name, name, email, primary_role, status, created_at, updated_at) VALUES ('Alex Assessor','Alex Assessor','assessor@example.com','Application Assessor','active',NOW(),NOW())");
-      aaId = r.insertId;
+    if (!isetCoordinatorId) {
+      const [result] = await pool.query("INSERT INTO staff_profiles (display_name, name, email, primary_role, status, created_at, updated_at) VALUES ('Alex Coordinator','Alex Coordinator','coordinator@example.com','ISET Coordinator','active',NOW(),NOW())");
+      isetCoordinatorId = result.insertId;
     }
     let created = 0;
     for (let i = 0; i < count; i++) {
@@ -47,7 +47,7 @@ try {
           [lastName, firstName, 'AD', new Date(), new Date()]
         );
         const clientId = clientRes.insertId;
-        const assignedId = (i % 2 === 0) ? aaId : paId;
+        const assignedId = (i % 2 === 0) ? isetCoordinatorId : nwacAdministratorId;
         const [caseRes] = await conn.query(
           "INSERT INTO iset_case (client_id, assigned_staff_profile_id, status, lifecycle_status, priority, stage, opened_at, created_at, updated_at) VALUES (?,?,?,?,?,?,NOW(),NOW(),NOW())",
           [clientId, assignedId, 'open', 'intake', 'medium', 'intake_review']

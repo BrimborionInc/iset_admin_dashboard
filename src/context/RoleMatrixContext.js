@@ -16,7 +16,10 @@ const ROLE_ALIASES = {
   'ISET Coordinator': 'ISET Coordinator',
 };
 
-export const toCanonicalRole = (role) => ROLE_ALIASES[role] || role;
+export const toCanonicalRole = (role) => {
+  const normalized = typeof role === 'string' ? role.trim() : '';
+  return ROLE_ALIASES[normalized] || null;
+};
 
 const RoleMatrixContext = createContext({
   roleMatrix: null,
@@ -48,9 +51,6 @@ const sortRoles = (roles = []) => {
       remaining.delete(role);
     }
   });
-  if (remaining.size > 0) {
-    ordered.push(...Array.from(remaining).sort());
-  }
   return ordered;
 };
 

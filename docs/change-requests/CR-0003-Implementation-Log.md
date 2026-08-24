@@ -2,6 +2,8 @@
 _Implementation Log & Chat Handoff Notes_
 Last Updated: 2025-12-07
 
+Current role boundary (2026-08-24): PATH has only System Administrator, NWAC Administrator, Regional Manager, and ISET Coordinator sign-in roles. Finance and Sage work outside PATH; this historical implementation log does not authorize a separate Finance user or group.
+
 ## 1. Purpose
 Track progress, decisions, and outstanding work for the CR-0003 implementation. Use this document to resume work across chat sessions without re-reading the full change request.
 
@@ -32,7 +34,7 @@ Track progress, decisions, and outstanding work for the CR-0003 implementation. 
 3. **Forecasting/variance** - Add auto-forecasting (system-generated) and clarify variance vs adjusted; remove manual placeholder.
 4. **Rollup integrity** - Add guarded recalc endpoint/background checks for pot rollups; extend burn-rate/snapshot consistency tests.
 5. **Exports/reporting** - Extend exports beyond CSV (PDF/JSON) and align saved-view filters; build Reports/Monitoring/Forecasting/Settings boards with scoped widgets.
-6. **Role granularity & telemetry** – Confirm finance sub-roles (read-only/auditor) and hook telemetry for `agreement_id`/`report_id` events.
+6. **Role scope & telemetry** – Keep access within the four canonical PATH roles, confirm object scope for read-only/audit views, and hook telemetry for `agreement_id`/`report_id` events.
 7. **Payments wiring** – Connect Payments board to services for packet ingest, confirmations, GL/region metadata, and evidence storage; replace mock data context.
 
 ## 5. Open Questions / Dependencies

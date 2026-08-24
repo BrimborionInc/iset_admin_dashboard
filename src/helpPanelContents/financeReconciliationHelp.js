@@ -15,8 +15,8 @@ const FinanceReconciliationHelp = () => (
       <p>
         Each time PATH submits a payment packet to Intacct (REST mode), the attempt is logged with
         outcome, reason, and any validation details. The dashboard surfaces the latest result per
-        packet so program admins can quickly spot failures and resolve them back in the payment
-        packet screens.
+        packet so authorized PATH administrators can quickly spot failures and resolve them back in
+        the payment packet screens.
       </p>
     </Box>
     <Box>

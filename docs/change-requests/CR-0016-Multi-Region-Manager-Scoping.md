@@ -9,7 +9,7 @@ Enable Regional Managers to be assigned to multiple provinces/territories and ha
 
 ## Historical baseline
 - A single `custom:region_id` flows from Cognito -> `req.auth.regionId` -> `staff_profiles.region_id`.
-- Regional Manager (Regional Coordinator role in backend) scoping uses a single `region_id` in multiple places:
+- Regional Manager scoping uses a single `region_id` in multiple places:
   - RBAC helpers (`src/lib/rbac.js`, `src/lib/dbScope.js`).
   - Assignment checks (e.g., `ensureCanAssignCase`).
   - Case/app listing endpoints and dashboard widgets.

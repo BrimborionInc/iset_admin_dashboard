@@ -17,9 +17,9 @@ This document summarizes the current behavior of `staff_profiles` and the relate
 2. Delete the duplicate row (leave the GUID row intact). If you remove a user’s row entirely, have them sign in once with IAM on; `staffProfileMiddleware` will recreate it.
 
 ## Application visibility rules (RBAC)
-- **System Administrator / Program Administrator**: full access to all cases (including unassigned submissions).
-- **Regional Coordinator**: sees cases assigned to their region or directly assigned to their staff profile (`sp.region_id = regionId OR assigned_staff_profile_id = staffProfileId`).
-- **Application Assessor**: sees only cases assigned to their `staff_profiles.id`.
+- **System Administrator / NWAC Administrator**: full access to all cases (including unassigned submissions).
+- **Regional Manager**: sees cases assigned to their region or directly assigned to their staff profile (`sp.region_id = regionId OR assigned_staff_profile_id = staffProfileId`).
+- **ISET Coordinator**: sees only cases assigned to their `staff_profiles.id`.
 
 Because the API depends on accurate `staff_profiles.region_id` and `staff_region` mappings, ensure each coordinator has a local operational row and assign region access through Manage Users or reviewed DB repair. Do not rely on Cognito custom region attributes to seed access.
 

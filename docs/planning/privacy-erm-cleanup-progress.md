@@ -1359,12 +1359,12 @@ Verification performed:
 
 Started the route-level scope-denial lane by closing a raw object-key exposure in finance allocation evidence:
 
-- `POST /api/allocations/evidence/upload`, `/delete`, and `/presign-download` now require the finance role guard instead of accepting any authenticated staff request.
+- `POST /api/allocations/evidence/upload`, `/delete`, and `/presign-download` now require System Administrator or NWAC Administrator instead of accepting any authenticated staff request.
 - Allocation evidence uploads now store object keys under an actor-specific `allocations/<localUserId>` object prefix and record a short-lived `pending_uploads` row with `document_type = finance_allocation_evidence`.
 - Allocation evidence delete/presign now rejects arbitrary object keys. A key must either be referenced in `budget_allocation.metadata.evidence[*].attachments[*]` / `budget_pot.metadata.evidence[*].attachments[*]`, or be an unexpired pending finance evidence upload owned by the current local staff user.
 - Delete refuses to remove evidence already referenced by a budget allocation or pot (`finance_evidence_in_use`).
 - Legacy allocation evidence keys already stored as `uploads/YYYY/MM/DD/allocations/<uuid>-...` remain readable when referenced by allocation/pot metadata; new uploads use `uploads/YYYY/MM/DD/allocations/<actorUserId>/<uuid>-...`.
-- `requireFinanceRole()` now uses the canonical role normalizer, so Cognito-style role aliases are handled consistently with the rest of the admin access layer.
+- The allocation-evidence administrator guard uses the canonical role normalizer, so Cognito-style aliases for the two administrator roles are handled consistently with the rest of the admin access layer.
 
 Added a lightweight static route-scope smoke:
 

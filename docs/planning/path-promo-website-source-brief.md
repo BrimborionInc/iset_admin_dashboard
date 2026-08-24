@@ -1,14 +1,16 @@
 # PATH Promo Website Source Brief
 
-Status: current source brief for marketing/content drafting; verify claims against current code and environment evidence before publishing.
+Status: current detailed marketing raw material. `docs/product/path-capability-source-pack.md` controls release status and publishing boundaries.
 Audience: Bill, product/content collaborators, and AI tools drafting the PATH promotional website.
-Last Updated: 2026-06-22
+Last Updated: 2026-08-21
 
 ## Purpose
 
 This file is source material for drafting a promotional website for PATH. It is intentionally broader and more detailed than final website copy should be.
 
 Use it to help ChatGPT Pro or another writing tool understand what PATH does, what value it creates, and which features should be considered when shaping website content. The drafting tool should decide how to organize and simplify the material for public-facing copy.
+
+Do not upload or use this file by itself. Start with `docs/product/README.md`, upload the curated capability source pack and ChatGPT project instructions, and treat any conflict there as an override of this broader inventory.
 
 The recommended marketing approach is layered:
 
@@ -17,6 +19,19 @@ The recommended marketing approach is layered:
 - Include a deeper capabilities section to show PATH is fully featured.
 - Use a "follow the file" story to show integration across intake, casework, documents, approvals, funding, and reporting.
 - Give migration/onboarding, audit, official artifacts, and reporting explicit visibility because they are trust-builders.
+
+## Current Publishing Boundary
+
+As of 2026-08-21:
+
+- The submitter → Regional Manager → Decision Maker two-step review capability is deployed for application assessments, new intervention proposals, and intervention revisions.
+- Admin-only release `20260818-admin-workflow-fixes-r2` deployed recalled-assessment edit/resubmit and expanded supporting-document title/type editing. It did not deploy portal/shared/schema/data changes and retained no smoke targets, so exact manual steps still require targeted screen verification.
+- Core portal account, intake, upload, dashboard, messaging, and signing capabilities have PROD evidence. Newer August portal repeat-application/case-reopen changes remain current-source/DEV, not current PROD evidence.
+- The Payments dashboard/model is partial. Real Finance email routing/sends are not enabled in PROD, and PATH is not the Finance/Sage system of record.
+- Admin AI guidance is intentionally narrow and must not be described as complete product coverage.
+- No marketing/manual screenshot has completed the curated synthetic-data approval workflow yet.
+
+Use `docs/product/codex-support-handoff.md` whenever a claim, UI label, role, procedure, or screenshot needs current evidence.
 
 ## Ready-To-Use Prompt For ChatGPT Pro
 
@@ -29,9 +44,9 @@ Use the source brief I provide as raw material. Do not turn every feature into e
 
 1. A sharp homepage promise.
 2. 5-6 main value pillars.
-3. A "follow the file" journey showing how PATH connects intake, casework, documents, approvals, funding follow-up, official artifacts, and reporting.
+3. A "follow the file" journey showing how PATH connects intake, casework, documents, approvals, approved-funding visibility, official artifacts, and reporting.
 4. A migration/onboarding section showing how existing and historical files move into PATH.
-5. A deeper capabilities section grouped by product area, showing that PATH is fully featured.
+5. A deeper capabilities section grouped by product area, showing the breadth of verified PATH capability without implying that every source feature is enabled in PROD.
 6. Suggested section headings, subheadings, short body copy, and callout text.
 7. Optional alternative taglines and hero copy.
 
@@ -39,7 +54,8 @@ Important constraints:
 
 - Write for program leaders, administrators, casework managers, funders, compliance reviewers, and staff who need confidence that PATH is operationally mature.
 - Do not make PATH sound like a generic CRM.
-- Do not describe PATH as replacing Sage or the finance/accounting system of record. PATH tracks program-side funding and payment follow-up, evidence, and handoff status.
+- Do not describe PATH as replacing Sage or the finance/accounting system of record. Approved-funding reporting is live; payment-packet/evidence/follow-up surfaces are partial, and real Finance email/Sage handoff is not PROD-enabled.
+- Do not describe real Finance email sending or Sage Intacct integration as a current live capability; those functions remain outside the enabled PROD operating boundary.
 - Do not imply AI makes eligibility or funding decisions.
 - Do not over-focus on "PDF generation" as a technical utility. Instead, describe official, versioned, auditable artifacts generated from workflow data.
 - Keep the copy plain, concrete, and credible.
@@ -47,12 +63,12 @@ Important constraints:
 
 ## Executive Positioning
 
-PATH is the connected operating system for ISET delivery. It brings intake, casework, documents, secure participant communication, approvals, funding follow-up, official artifacts, and reporting into one auditable workflow.
+PATH is the connected operating system for ISET delivery. It brings intake, casework, documents, secure participant communication, approvals, approved-funding visibility, official artifacts, and reporting into one auditable workflow.
 
 PATH is not just a staff dashboard. It is a program delivery backbone:
 
 - Applicants use the public portal to register, apply, upload documents, receive secure messages, and sign forms.
-- Staff use PATH to receive and assign applications, assess eligibility, request missing information, manage documents, review cases, record approvals, manage action plans and interventions, prepare payment packets, and monitor follow-up.
+- Staff use PATH to receive and assign applications, assess eligibility, request missing information, manage documents, review cases, record approvals, and manage action plans and interventions. Payment-packet and Finance-handoff functions are a separate partial rollout and must not be folded into the live core claim.
 - Managers use PATH to see role-based queues, bottlenecks, overdue work, regional workload, review stages, and exception items.
 - Administrators configure workflows, templates, notifications, document requirements, staff access, dashboards, and assignment rules.
 - Reporting users use PATH data to produce operational reports, financial views, regional summaries, drilldowns, ILMP/ESDC-aligned outputs, and exports.
@@ -60,7 +76,7 @@ PATH is not just a staff dashboard. It is a program delivery backbone:
 Short core promise:
 
 ```text
-PATH brings ISET intake, casework, documents, approvals, funding follow-up, and reporting into one auditable workflow.
+PATH brings ISET intake, casework, documents, approvals, approved-funding visibility, and reporting into one auditable workflow.
 ```
 
 Slightly fuller version:
@@ -94,7 +110,7 @@ Use these as homepage pillars, not as the full feature list.
 
 ### 1. Everything In One Client File
 
-Applications, documents, signed forms, secure messages, notes, reminders, case history, action plans, interventions, payment follow-up, and generated artifacts are organized around the participant and case.
+Applications, documents, signed forms, secure messages, notes, reminders, case history, action plans, interventions, approved-funding context, and generated artifacts are organized around the participant and case.
 
 Why it matters:
 
@@ -105,7 +121,7 @@ Why it matters:
 
 ### 2. Workflow From Intake To Decision
 
-PATH tracks the file through assignment, EI verification, assessment, Regional Manager review, Decision Maker approval, returned changes, post-decision follow-up, intervention proposals, amendments, funding agreement steps, and payment readiness.
+PATH tracks the file through assignment, EI verification, assessment, Regional Manager review, Decision Maker approval, returned changes, post-decision follow-up, intervention proposals, amendments, and funding agreement steps. Describe payment readiness only as a partial/controlled capability until the real Finance workflow is enabled.
 
 Why it matters:
 
@@ -149,7 +165,7 @@ Why it matters:
 
 ### 6. Reporting That Comes From The Work
 
-PATH turns operational activity into Data and Results reports, financial reports, regional summaries, drilldowns, ILMP/ESDC-aligned outputs, payment follow-up visibility, and exports.
+PATH turns operational activity into Data and Results reports, financial reports, regional summaries, drilldowns, ILMP/ESDC-aligned outputs, approved-funding visibility, and exports.
 
 Why it matters:
 
@@ -236,8 +252,8 @@ Capabilities:
 - Duplicate detection inside the upload and against existing client records.
 - Matching by SIN, prior case/submission SIN, normalized email, name plus date of birth, and stricter name-only fallback when DOB is missing.
 - Commit modes that create a new client and application-less case, create a case for an existing client, or update an existing case.
-- Silent applicant account creation/linking only when a clean email exists, without sending email during import.
-- Imported applicant account activation workflow through PATH-branded activation email later.
+- When an import row has exactly one clean valid email, the current commit path can silently create/link the applicant account without sending an activation email. Missing, invalid, ambiguous, or multiple emails leave account creation for later staff review.
+- Import does not fabricate historical applications, submissions, assessments, plans, interventions, or placeholder workflow records. Authorized staff can later send/resend the separate PATH activation email where appropriate.
 - Manual application/intake paths for staff-entered or paper-origin files.
 - Application-less client files for historical records where no portal submission exists.
 - Explicit backload quick actions for existing/historical action plans, interventions, and documents.
@@ -338,7 +354,7 @@ Capabilities:
 - Review workflow events record actor, role, timestamp, action, stage transition, notes, and subject context.
 - Review/decision notes are mirrored into case notes for easy discovery.
 - Final generated PDFs can include submitter evidence, RM sign-off, and Decision Maker final decision evidence.
-- High-value funding approval guard: only Shelley Stacey can approve funding of `$20,000` or above; other final-decision users can deny or request changes.
+- High-value funding approvals use a restricted designated authority; other Decision Makers may still deny or request changes. Do not put the designated person's name or email in external copy or an external AI upload.
 - Queue deep links open the relevant workspace in a review-focused layout and step.
 
 Value story:
@@ -495,9 +511,9 @@ Value story:
 - PATH covers the service delivery record, not only the initial application.
 - Action plans and interventions connect program work to funding, documents, reporting, and closeout evidence.
 
-### Funding, Payment Packets, And Finance Follow-Up
+### Funding, Payment Packets, And Finance Follow-Up (Partial / Controlled Rollout)
 
-PATH supports program-side funding and payment request workflows while respecting Finance/Sage boundaries.
+PATH has program-side funding visibility plus implemented payment-packet, evidence, and follow-up surfaces. The real Finance email workflow is not rolled out or enabled in PROD, so this section is target/partial capability material rather than a present-tense live marketing claim.
 
 Capabilities:
 
@@ -512,7 +528,7 @@ Capabilities:
 - Create packet from case context or program payments dashboard.
 - Payment packet creation can derive reporting unit, pot, and amount from selected intervention.
 - Partial payments and service period fields where relevant.
-- Send-to-finance workflow locks edits once sent.
+- In the target enabled workflow, send-to-finance locks edits once sent.
 - Follow-up status such as draft, ready to send, sent to finance, needs follow-up, reported paid, confirmed by evidence, stale/no response, and cancelled.
 - Posted PATH-side finance transactions when payment is confirmed.
 - Historical finance entries for backloaded interventions.
@@ -521,14 +537,14 @@ Capabilities:
 
 Value story:
 
-- Program staff can prepare, validate, evidence, and track payment requests.
-- Managers can see what is ready, what is missing evidence, and what needs follow-up.
+- Once deliberately rolled out, program staff can prepare, validate, evidence, and track payment requests.
+- The implemented surfaces are intended to show what is ready, what is missing evidence, and what needs follow-up.
 - PATH improves operational visibility without pretending to be the accounting ledger.
 
 Required caution:
 
 - PATH is not the Finance/Sage system of record.
-- Describe PATH as the ISET operations system that prepares, sends, tracks, and evidences payment requests and follow-up.
+- Do not say PATH currently sends real Finance emails or posts to Sage Intacct. Until rollout, describe only the partial packet/evidence/follow-up design with an explicit availability qualification.
 
 ### Reporting, Data, Results, And Exports
 
@@ -705,7 +721,7 @@ Value story:
 Careful language:
 
 - AI should be presented as staff guidance/support, not as an automated decision-maker.
-- Do not claim full AI coverage across every workflow unless coverage has been expanded and verified.
+- Do not claim full AI coverage across every workflow. The current guidance seed and verified eval subset are intentionally narrow.
 
 ## Suggested Website Architecture
 
@@ -730,7 +746,7 @@ Group the detailed feature list under headings:
 - Client File and Document Management
 - Workflow and Approvals
 - Official Artifacts and Signatures
-- Funding and Payment Follow-Up
+- Funding Visibility and Controlled Payment Follow-Up
 - Reporting and Oversight
 - Configuration and Administration
 - Security, Compliance, and Staff Support
@@ -748,7 +764,7 @@ A strong visual section would show:
 7. Regional Manager signs off or returns it with notes.
 8. Decision Maker approves, denies, or requests changes.
 9. PATH generates official records, letters, and signed/funding artifacts.
-10. Case moves into action plans, interventions, funding agreement, and payment follow-up.
+10. Case moves into action plans, interventions, funding agreements, and approved-funding reporting. Payment follow-up is included only for an explicitly qualified partial/controlled-rollout story.
 11. Documents, messages, notes, decisions, and artifacts remain on the client file.
 12. Reporting dashboards and exports draw from the same operational record.
 
@@ -778,7 +794,7 @@ Use this table to choose copy emphasis.
 | RM/Decision Maker workflow | Review stages are visible and auditable | Approval routing with evidence |
 | Supporting documents/checklists | Missing evidence is visible | Know what is received and what is missing |
 | Secure messaging/signing | Sensitive communication stays in the system | Secure participant follow-up |
-| Payment packets | Program-side funding requests are evidenced and tracked | Funding follow-up with evidence |
+| Payment packets | Partial/controlled rollout; exclude from present-tense live copy until enabled | Funding follow-up with evidence (availability qualification required) |
 | Reporting/drilldowns | Reports trace back to source work | Reporting that comes from the work |
 | Notifications/templates | Staff and applicants get workflow-aware communication | Configurable communication |
 | Security/RBAC/audit | Sensitive records are protected and traceable | Built for sensitive program work |
@@ -793,7 +809,7 @@ Use these as starting points only.
 ```text
 One auditable workflow for ISET delivery.
 
-PATH brings intake, casework, documents, approvals, funding follow-up, and reporting into one connected system.
+PATH brings intake, casework, documents, approvals, approved-funding visibility, and reporting into one connected system.
 ```
 
 ### Option B
@@ -817,7 +833,7 @@ PATH reduces retyping, organizes evidence, generates official records, and keeps
 ```text
 Move ISET work out of scattered files and into one auditable path.
 
-PATH connects applications, documents, approvals, signatures, payments, and reports around the participant record.
+PATH connects applications, documents, approvals, signatures, service delivery, and reports around the participant record.
 ```
 
 ## Claims To Avoid Or Treat Carefully
@@ -837,7 +853,7 @@ Avoid:
 
 Use instead:
 
-- "PATH tracks program-side funding and payment follow-up while Finance/Sage remains the accounting system of record."
+- "PATH reports on approved program funding while Finance/Sage remains the accounting system of record." Mention packet/evidence/follow-up functions only with the controlled-rollout qualification.
 - "PATH supports staff review with role-based queues, evidence, and audit history."
 - "PATH generates official, versioned artifacts from workflow data."
 - "PATH helps reduce retyping and manual spreadsheet reconstruction."
@@ -890,4 +906,4 @@ The source brief was prepared from current project memory and subsystem docs, in
 - `../ISET-intake/docs/portal/messaging/secure-messaging.md`
 - `../ISET-intake/docs/portal/accounts/registration.md`
 
-Before publishing public copy, verify the exact release/environment status of any claim that sounds absolute, especially around newly deployed workflow stages, AI coverage, notification/email behavior, and reporting timestamp semantics.
+Before publishing public copy, apply `docs/product/path-capability-source-pack.md`, then verify the exact release/environment status of any unresolved claim—especially around portal changes after the last deployed portal commit, payments/Finance/Sage, AI coverage, notification/email behavior, correction/reversal paths, accessibility/bilingual coverage, and reporting timestamp semantics.

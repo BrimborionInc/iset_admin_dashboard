@@ -204,7 +204,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - **In scope:** expose the widget from “New Intervention”; header/banner + plan selector; initial fields (rationale, code/type, dates, cost, attachments, EI consent flag); draft record creation linked to plan/case; show draft in Interventions list with status badge; submit action to move `draft → submitted`; guard against start without active plan (UX prompt only).
 - **Out of scope:** approval actions, EI verification validation, RM/NWAC role handling, start/close transitions, backend status guards, reminders/queues UI beyond showing draft in the existing table.
 - **Draft rule:** only one draft proposal exists per case; “Save draft” updates the existing draft instead of creating another intervention record.
-- **Submitted review access:** submitted proposals stay in the wizard for Regional Managers, Program Administrators, and System Administrators to complete EI verification + record of decision; Case Managers see submitted proposals in read-only mode.
+- **Submitted review access:** submitted proposals stay in the wizard for Regional Managers to complete first-pass review and for NWAC Administrators acting as Decision Makers to record the final decision. System Administrators retain technical support access; Case Managers see submitted proposals in read-only mode.
 - **Single proposal guard:** while a draft or submitted proposal exists, block starting a new wizard; non-draft interventions open read-only in the wizard.
 - **Plan:**
   1. Add Intervention Assessment widget (board item) to Case Workspace and route “New Intervention” to reveal it.

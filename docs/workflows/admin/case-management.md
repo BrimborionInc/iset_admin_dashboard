@@ -61,13 +61,14 @@ Widget references:
 ## Data & Integration Touchpoints
 
 - Case workspace endpoint(s) for case context and plans/interventions.
+- Participant Details saves use the dedicated case-only `PATCH /api/cases/:caseId/participant-details` endpoint. The request contains only changed canonical participant fields and never carries an `applicationId`, application decision state, assessment state, or the whole case context. The server applies normal case access, locks and rereads the case, merges only its controlled field mapping, and returns the authoritative saved context.
 - ILMP validation/export services for compliance and payload preview.
 - Payment packet data via finance payment services/context.
 - Document and secure messaging APIs.
 
 ## Role Notes
 
-- Intended for ISET Coordinator, Regional Manager, Program Administrator.
+- Intended for ISET Coordinator, Regional Manager, NWAC Administrator.
 - Some actions are role-sensitive; route and server checks determine final access.
 - The `ISET Clients` route is available to Regional Managers; the backing `/api/cases` list uses the same case-scope model as workspaces: direct assignment, unassigned files when the manager has region scope, portfolio-region matches, and assigned-owner region matches.
 - Regional Managers can now open directly assigned case-workspace files even when the case's current portfolio/owner region falls outside their normal region scope; otherwise normal region-scoped case access still applies.

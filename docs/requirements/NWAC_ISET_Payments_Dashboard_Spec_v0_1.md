@@ -57,14 +57,13 @@ This module is about **NWAC internal payment operations** (ISET Team → Finance
 - **Case Manager / Coordinator (Requester)**: creates payment requests, uploads evidence, submits to program approval.
 - **Regional ISET Manager (Program Approver)**: reviews completeness and eligibility, approves or returns.
 - **NWAC Associate Director / Senior Director (Program Final Approver)**: optional second-level approval for thresholds/high-risk items.
-- **Finance Processor**: reviews approved requests, prepares batches, generates EFT forms/exports, marks paid with proof.
-- **Finance Approver**: final finance approval for batch (maker-checker).
-- **System Admin**: configures evidence rules, thresholds, pot mappings, reporting units, fiscal calendars.
-- **Auditor/Read-only**: view-only access with export/audit bundle capability.
+- **ISET Coordinator / Regional Manager**: prepares requests and evidence within normal case scope.
+- **System Administrator / NWAC Administrator**: has global payment administration, restricted finalization, batch/export, and configuration access.
+- **Finance/AP**: receives and processes the handoff outside PATH; no PATH sign-in.
 
 ### 4.2 Segregation of duties (best practice requirement)
-- A user **cannot** both (a) request and (b) finance-approve the same payment line.
-- “Mark Paid” permission is restricted to Finance roles.
+- Sensitive finalization should retain actor history and any required maker-checker separation.
+- Payment finalization is restricted to System Administrator and NWAC Administrator and must not be presented as authoritative Sage/AP truth.
 - Evidence rule overrides require elevated role and leave an audit trail.
 
 ---
@@ -286,7 +285,7 @@ From any payment line:
   - show in dashboard risk queue. fileciteturn3file0
 
 ### FR-PAY-006 Mark paid + post transaction
-- Only Finance roles can mark paid.
+- Only System Administrator and NWAC Administrator can record the restricted PATH-side confirmation/follow-up outcome.
 - Marking paid requires:
   - paid date,
   - payment reference,
@@ -360,9 +359,9 @@ In-scope items:
 Out-of-scope items remain out-of-scope (bank integration, procurement lifecycle, payroll engine).
 
 ### 13.2 Roles and permissions (RBAC)
-- Role support: PARTIAL. Payments endpoints are gated by a broad allowlist (System Admin, Program Admin, Regional Coordinator, Application Assessor). Dedicated Finance Processor/Approver roles are not enforced.
-- Segregation of duties: GAP. No guardrails prevent requester = finance approver on the same line.
-- Mark paid restriction: GAP. Status updates are not restricted to finance roles.
+- Role support: UPDATED. Payments use the four actual PATH roles: System Administrator and NWAC Administrator have global/finalization access; Regional Manager and ISET Coordinator remain case-scoped.
+- Segregation of duties: GAP. Any required requester/finalizer separation still needs an explicit control using the actual PATH actors.
+- Confirmation restriction: UPDATED. Restricted finalization uses the two administrator roles; Finance remains external to PATH.
 
 ### 13.3 Data model mapping
 - PaymentRequest -> `payment_packet` table (numeric ID, status, reporting_unit, notes, risk_flags, approvals, timestamps).
@@ -415,13 +414,13 @@ Batch UI:
 - FR-PAY-003 Recurring payment scheduler: GAP.
 - FR-PAY-004 Duplicate payment detection: GAP.
 - FR-PAY-005 Receipt follow-up enforcement: GAP.
-- FR-PAY-006 Mark paid + post transaction: PARTIAL. Confirmation posts transactions; paid date/reference/proof fields and finance-only role gates are missing.
+- FR-PAY-006 Mark paid + post transaction: PARTIAL. Confirmation posts transactions; paid date/reference/proof fields are missing. PATH uses its four canonical staff roles and does not have a separate Finance login role.
 - FR-PAY-007 Reporting unit roll-ups: GAP.
 - FR-PAY-008 Annual Report export compatibility: GAP (no export; missing evidence doc IDs on transactions).
 - FR-PAY-009 Audit bundle export: GAP.
 
 ### 13.8 Non-functional requirements mapping
-- NFR-PAY-001 Security/RBAC: PARTIAL. Payments endpoints are gated but not by finance-specific roles.
+- NFR-PAY-001 Security/RBAC: PARTIAL. Payments endpoints use the canonical PATH staff roles, with global access for the two administrator roles and normal case scope for Regional Managers and ISET Coordinators. Finance and Sage do not sign in to PATH.
 - NFR-PAY-002 Auditability: PARTIAL. Status events and communications are logged; no immutable audit bundle export.
 - NFR-PAY-003 Integrity: PARTIAL. Evidence documents use checksums; batch/export artifacts are not implemented.
 - NFR-PAY-004 Privacy: PARTIAL. No download logging for evidence in payments flow.

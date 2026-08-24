@@ -33,7 +33,7 @@ Define non-layout quick actions for the Application Workspace header, including 
 - Add new application status for "closure notice" (key: `closure_notice`, label: "Closure Notice") + backend support and transitions.
 
 ### Assign / reassign
-- Roles that can see/use: System Administrator, Program Administrator, Regional Manager.
+- Roles that can see/use: System Administrator, NWAC Administrator, Regional Manager.
 - Role naming note: "ISET coordinator" maps to assessor role; exclude from assign/reassign visibility.
 - Status gating: Available for all statuses except Approved, Archived, Closed.
 - Backend endpoint + payload: Match Case Workspace assign/reassign behavior (same roles/constraints).
@@ -71,7 +71,7 @@ Define non-layout quick actions for the Application Workspace header, including 
 - Intent: applicant has withdrawn or is no longer pursuing the application; display as `Withdrawn` in application status surfaces.
 
 ### Archive application
-- Roles that can see/use: System Administrator, Program Administrator.
+- Roles that can see/use: System Administrator, NWAC Administrator.
 - Status gating: Available from `approved`, `completed`, `rejected`, `closed`/`withdrawn`.
 - Backend endpoint + payload: Set status to `archived`.
 - Confirmation/modal requirements: Confirm modal with required note.
@@ -102,11 +102,11 @@ Unless explicitly stated otherwise, quick actions should use a confirmation moda
 ### Escalate application
 - Roles that can see/use: ISET Coordinators and Regional Managers.
 - Status gating: Available from all non-terminal statuses (approved/completed/rejected/closed/archived excluded).
-- Backend endpoint + payload: Single "Escalate application" action; target = Regional Manager (from Coordinator), Program Administrator (from Regional Manager). If Regional Manager is responding to an escalation, include "Escalate to Program Administrator".
+- Backend endpoint + payload: Single "Escalate application" action; target = Regional Manager (from Coordinator), NWAC Administrator (from Regional Manager). If Regional Manager is responding to an escalation, include "Escalate to NWAC Administrator".
 - Confirmation/modal requirements:
 
 ### Respond to escalation
-- Roles that can see/use: Escalation owner only (Regional Manager or Program Administrator as current owner).
+- Roles that can see/use: Escalation owner only (Regional Manager or NWAC Administrator as current owner).
 - Status gating: Escalation open only.
 - Backend endpoint + payload:
 - Confirmation/modal requirements: Confirm modal with required note (default).

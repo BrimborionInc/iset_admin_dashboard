@@ -54,8 +54,9 @@ Widget references:
 
 ## Role Notes
 
-- Program Administrator and Regional Manager are primary operational roles for finance payment queues.
-- ISET Coordinator interaction is typically case-scoped and may be partial.
+- System Administrator and NWAC Administrator have global payment administration.
+- Regional Manager and ISET Coordinator use the payment workflow only within their normal case scope.
+- Finance/AP receives and processes the handoff outside PATH; Finance does not sign in.
 
 ## Current Gaps / Risks
 

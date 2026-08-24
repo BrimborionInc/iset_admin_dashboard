@@ -255,4 +255,60 @@ describe("CaseWorkspaceProvider route ownership", () => {
       totalInterventions: 1,
     });
   });
+
+  test.each([
+    [null, "direct case entry"],
+    [90, "application-selected entry"],
+  ])("saves Participant Details through the case-only boundary for %s (%s)", async (applicationId) => {
+    const initialPayload = workspacePayload({
+      caseId: 9,
+      applicationId,
+      label: "Participant Details",
+    });
+    initialPayload.caseContext = {
+      address: { postalCode: "OLD" },
+      applicationDecisionLetters: { 27: { status: "sent" } },
+    };
+    initialPayload.compliance = { ilmp: { status: "ready" } };
+    const savedContext = {
+      ...initialPayload.caseContext,
+      address: { postalCode: "K1A 0B1" },
+    };
+
+    apiFetch.mockImplementation((url, options = {}) => {
+      if (options.method === "DELETE") return Promise.resolve(response({}));
+      if (options.method === "PATCH" && url === "/api/cases/9/participant-details") {
+        return Promise.resolve(response({
+          changed: true,
+          ilmpNeedsReview: true,
+          caseContext: savedContext,
+        }));
+      }
+      if (url.startsWith("/api/cases/9/workspace")) {
+        return Promise.resolve(response(initialPayload));
+      }
+      throw new Error(`Unexpected request: ${options.method || "GET"} ${url}`);
+    });
+
+    renderWorkspace(9, applicationId);
+    await waitFor(() => expect(latestWorkspace.caseData?.caseNumber).toBe("Participant Details"));
+
+    await act(async () => {
+      await latestWorkspace.saveParticipantDetails({ postalCode: "K1A 0B1" });
+    });
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      "/api/cases/9/participant-details",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ participantDetails: { postalCode: "K1A 0B1" } }),
+      }
+    );
+    expect(JSON.parse(apiFetch.mock.calls.find(([url]) => (
+      url === "/api/cases/9/participant-details"
+    ))[1].body)).not.toHaveProperty("applicationId");
+    expect(latestWorkspace.caseData.caseContext).toEqual(savedContext);
+    expect(latestWorkspace.caseData.compliance.ilmp.status).toBe("pending");
+  });
 });

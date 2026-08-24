@@ -60,7 +60,7 @@
    - Filtering: `query` matches on `client` names, tracking ID, assigned user name/email; `status` and `owner` filters translate to `WHERE` clauses (`IN` lists). `stage` filter remains optional until column exists; treat absent column as noop.
 2. **GET `/api/cases/:id/workspace`:**
    - Returns the workspace summary used by the Case Header widget (case metadata, client/owner context, headline counters).
-   - Applies the same RBAC rules as the listing endpoint (system/program admins see all, regional coordinators are restricted to their region or unassigned cases, assessors/adjudicators only see cases assigned to them; all other roles receive `403`).
+   - Applies the same RBAC rules as the listing endpoint (System Administrators and NWAC Administrators see all, Regional Managers are restricted to their permitted region scope or directly assigned cases, and ISET Coordinators see only assigned cases; all other roles receive `403`).
    - Draft payload:
      ```json5
      {
@@ -89,7 +89,7 @@
          "id": 21,
          "name": "Shelley Stacey",
          "email": "shelley@example.ca",
-         "role": "Program Administrator",
+         "role": "NWAC Administrator",
          "regionId": 14
        },
        "counts": {
@@ -105,7 +105,7 @@
    - Region values derive from the client’s captured address (province -> canonical label). If no address/province is available, the response returns `null` and the UI shows “Not set”; we no longer fall back to the assessor’s region for display.
    - Current implementation ignores `stage` filter (with console warning) because `iset_case` lacks that column; will be revisited when lifecycle fields are introduced.
 2. **POST `/api/cases/:id/assign`:**
-   - Body `{ toUserId }` (required). Only roles with assignment permission may invoke (System Admin, Program Admin, Regional Coordinator per current policy).
+   - Body `{ toUserId }` (required). Only roles with assignment permission may invoke (System Administrator, NWAC Administrator, Regional Manager per current policy).
    - Validations: case must exist, not already assigned to `toUserId`, ensure assigner has scope over target user (region constraints for RC).
    - Persist assignment change, emit audit/event entry (`case.assignment.assigned`) with actor, target, case metadata.
    - Replaces legacy `PATCH /api/cases/:id/assign` (which accepted `assignee_id` or placeholder email). Old route retained temporarily for backwards compatibility.
@@ -134,7 +134,7 @@
 ### RBAC
 - Extend existing role matrix / middleware to expose `canAssignCases` and `canReassignCases` booleans in `/api/auth/me` response.
 - Server-side guards enforce role + region rules; frontend only consumes computed flags (no client-side security).
-- Explicitly block `Application Assessor` from assignment endpoints (HTTP 403). Regional Coordinators can only assign within their region set.
+- Explicitly block `ISET Coordinator` from assignment endpoints (HTTP 403). Regional Managers can only assign within their region set.
 - API changes will also provide the current user's `regionId` and `userId` (already exposed) plus assignment booleans so the frontend can hide inline actions early.
 
 ## Acceptance Criteria
@@ -142,7 +142,7 @@
 2. `Assign` and `Reassign` actions complete end-to-end, persist ownership changes, and emit audit/event entries.
 3. All existing cases after migration possess a valid `client_id`; newly created cases require `client_id` regardless of `application_id` presence.
 4. `application_id` remains optional for admin-created cases, but `client_id` is mandatory.
-5. RBAC prevents forbidden roles (e.g., Application Assessors) from seeing or invoking assignment actions.
+5. RBAC prevents forbidden roles (e.g., ISET Coordinators) from seeing or invoking assignment actions.
 6. Migrations are reversible, use named foreign keys, and maintain `utf8mb4`/`InnoDB` consistency.
 
 ## Dependencies & Assumptions

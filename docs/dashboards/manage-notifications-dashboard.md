@@ -1,8 +1,9 @@
 # Manage Notifications Dashboard
 
-Last updated: 2026-05-25
+Status: current writable notification-matrix and sender-settings reference; delivery remains configuration/event dependent.
+Last updated: 2026-08-21
 
-> **Quick patch (2025-10-02):** Applicant email alerts for submissions, secure messages, and decisions are temporarily hardwired while the dashboard toggles remain read-only.
+> **Historical note (2025-10-02; superseded):** Applicant email alerts were temporarily hardwired while the dashboard toggles were read-only. The current Notification Settings widget saves changed matrix rows and sender settings as described below; individual event pipelines may still have explicit gaps.
 
 ## Widgets
 
@@ -12,7 +13,7 @@ Last updated: 2026-05-25
 - The shared template list endpoint can be read by staff with either `/manage-notifications` or `/template-editor` access, because both dashboards need the same template catalogue.
 - Stores the PATH SES sender settings in `iset_runtime_config` (`scope='notifications'`, `k='path.email'`) so PATH-generated emails share one configurable `From` address, display name, and `Reply-To` across the admin dashboard and portal.
 - Sender and `Reply-To` email identities are trimmed and validated but their casing is preserved, because SES email identity verification can be case-sensitive in sandboxed DEV testing.
-- Roles are hydrated with `value`/`label` pairs; legacy `PTMA Staff` entries map to `Application Assessor`, and the synthetic `Applicant` row is injected when the API omits it so applicant toggles stay visible.
+- Roles are hydrated with `value`/`label` pairs for the four canonical PATH staff roles, and the synthetic `Applicant` row is injected when the API omits it so applicant toggles stay visible.
 - Each row captures `enabled`, `template_id`, `email_alert`, and `bell_alert`; the Save action only posts rows whose state changed and refreshes from the API so new IDs or template edits flow through immediately.
 - Success and error states surface through a `Flashbar`, and the Cancel button restores the last-saved matrix snapshot without reloading the page.
 
@@ -21,7 +22,7 @@ Last updated: 2026-05-25
 
 ## Behavioural Notes
 - Default language remains `en`; additional locales require widening both the admin API (template/settings queries) and the widget wiring.
-- Role comparisons rely on canonical string values. Ensure backend payloads emit the normalised keys used in the widget (`ApplicationAssessor`, `applicant`, etc.).
+- Role comparisons rely on canonical string values. Ensure backend payloads emit the normalised keys used in the widget (`isetcoordinator`, `applicant`, etc.).
 - The side-navigation footer item labelled `Notifications` is not a link to this dashboard. It is a signed-in shell control that refreshes the current user's bell alerts, so it stays visible even when the route access matrix does not allow `/manage-notifications`.
 - The admin-shell notification rail defaults to newest-first chronological order from `/api/me/notifications`; staff can switch the visible bell-alert stack between `Newest` and `Urgency` only after expanding the stacked notifications area.
 - Templates are optional. When none is selected the backend stores `NULL`; bell notifications continue to use stock text, while email delivery suppresses that event/role until a template is assigned.

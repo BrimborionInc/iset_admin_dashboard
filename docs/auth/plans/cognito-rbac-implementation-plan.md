@@ -2,6 +2,8 @@
 
 Last updated: 2025-08-19
 
+Status: superseded historical design plan. It is retained for authentication-design provenance, not as current role, schema, or implementation guidance. Role wording below has been translated to the four current PATH sign-in roles; verify current authorization in the route matrix and server guards before acting.
+
 ## Objectives
 - Configure AWS Cognito for Admin authentication (User Pool + App Client + Hosted UI Domain) with Email OTP MFA.
 - Issue tokens containing role and region claims via Pre Token Generation (PreTokenGen) Lambda.
@@ -10,15 +12,15 @@ Last updated: 2025-08-19
 - Ensure auditability and session controls appropriate for Protected B.
 
 ## Roles & Delegation
-- SysAdmin: Full system access; can create SysAdmins & ProgramAdmins.
-- ProgramAdmin: Full data access across regions; can create RegionalCoordinators.
-- RegionalCoordinator: Scoped to one region; can view all applications in region; can create Adjudicators (regional staff).
-- Adjudicator: Scoped to one region; access only cases assigned to them; no delegation.
+- System Administrator: Full system access; can create System Administrators & NWAC Administrators.
+- NWAC Administrator: Full data access across regions; can create Regional Managers.
+- Regional Manager: Scoped to one region; can view all applications in region; can create ISET Coordinators (regional staff).
+- ISET Coordinator: Scoped to one region; access only cases assigned to them; no delegation.
 - One role per user; hierarchical privilege is explicit, not implicit.
 
 ## Assumptions
 - Admin backend is `admin-dashboard/isetadminserver.js` (Express + MySQL). Admin React app runs in the same project.
-- Regions are finite and stored as `region_id` in DB; null permitted for Sys/Program where global.
+- Regions are finite and stored as `region_id` in DB; this draft proposed null region scope for the two administrator roles where access was global.
 - We can add an `admin_user` mapping table (or reuse existing staff tables) to link Cognito user to app DB user and region.
 
 ## Ambiguities (to confirm)
@@ -77,9 +79,9 @@ Public Portal (`ISET-intake`)
 
 ### Phase 3 – DB scoping helper + retrofits
 - `dbScope` helpers: generate predicate/params for role:
-  - SysAdmin/ProgramAdmin: no region filter.
-  - RegionalCoordinator: `region_id = ?`.
-  - Adjudicator: `region_id = ? AND assigned_to_user_id = ?`.
+  - System Administrator/NWAC Administrator: no region filter.
+  - Regional Manager: `region_id = ?`.
+  - ISET Coordinator: `region_id = ? AND assigned_to_user_id = ?`.
 - Refactor all application/case queries to include scoping; add deny logs for violations.
 
 ### Phase 4 – Data model & migrations
@@ -96,9 +98,9 @@ Public Portal (`ISET-intake`)
   - POST /users: create Cognito user, set attributes (`custom:region_id`, `custom:user_id`), add to Group, persist mapping in DB.
   - PATCH /users/:id: enable/disable, update role/region (update Cognito Group & attributes).
 - Enforce delegation rules:
-  - SysAdmin can create/disable SysAdmin & ProgramAdmin.
-  - ProgramAdmin can create/disable RegionalCoordinator.
-  - RegionalCoordinator can create/disable Adjudicator in their region.
+  - System Administrator can create/disable System Administrator & NWAC Administrator.
+  - NWAC Administrator can create/disable Regional Manager.
+  - Regional Manager can create/disable ISET Coordinator in their region.
 
 ### Phase 6 – React Admin (Hosted UI)
 - OIDC Code + PKCE via Hosted UI; configure callback/logout URIs.
@@ -137,10 +139,10 @@ Unit
 Integration
 - API tests with signed JWTs containing role/region/user claims.
 - Negative cases:
-  - Adjudicator: other region -> 403
-  - Adjudicator: same region but unassigned -> 403
-  - RegionalCoordinator: other region -> 403
-  - Program/Sys: global -> 200
+  - ISET Coordinator: other region -> 403
+  - ISET Coordinator: same region but unassigned -> 403
+  - Regional Manager: other region -> 403
+  - System Administrator/NWAC Administrator: global -> 200
 - User lifecycle endpoints: delegation boundaries enforced.
 
 E2E

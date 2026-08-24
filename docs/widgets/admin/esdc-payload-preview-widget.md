@@ -10,7 +10,7 @@ ILMP Reporting
 
 ## Primary Route Context
 
-- /esdc/participant/:clientId
+- /esdc/participants/:clientId
 
 ## Purpose
 

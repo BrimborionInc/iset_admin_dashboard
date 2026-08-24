@@ -437,25 +437,15 @@ const getHomeIntroTutorialIdForRole = (role) => {
   const normalized = normalizeRole(role);
   if (!normalized) return null;
 
-  if (
-    normalized === 'iset coordinator' ||
-    normalized === 'iset coordinator'
-  ) {
+  if (normalized === 'iset coordinator') {
     return ISET_COORDINATOR_INTRO_TUTORIAL_ID;
   }
 
-  if (
-    normalized === 'regional manager' ||
-    normalized === 'regional manager'
-  ) {
+  if (normalized === 'regional manager') {
     return REGIONAL_MANAGER_INTRO_TUTORIAL_ID;
   }
 
-  if (
-    normalized === 'nwac administrator' ||
-    normalized === 'program admin' ||
-    normalized === 'nwac administrator'
-  ) {
+  if (normalized === 'nwac administrator') {
     return PROGRAM_ADMIN_INTRO_TUTORIAL_ID;
   }
 
@@ -474,11 +464,7 @@ const isHomeIntroTutorial = (tutorial) => {
 
 const APPLICATION_WORKSPACE_ROLE_KEYS = new Set([
   'iset coordinator',
-  'iset coordinator',
   'nwac administrator',
-  'program admin',
-  'nwac administrator',
-  'regional manager',
   'regional manager'
 ]);
 
@@ -488,8 +474,6 @@ const CASE_WORKSPACE_ROLE_KEYS = new Set([
 ]);
 
 const NWAC_ASSESSMENT_ROLE_KEYS = new Set([
-  'nwac administrator',
-  'program admin',
   'nwac administrator',
   'system administrator'
 ]);

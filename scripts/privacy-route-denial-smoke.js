@@ -44,7 +44,7 @@ const portalBaseUrl = normalizeBaseUrl(
 const tokens = {
   nonAdminStaff: envToken('PRIVACY_DENIAL_NON_ADMIN_STAFF_TOKEN'),
   staff: envToken('PRIVACY_DENIAL_STAFF_TOKEN') || envToken('PRIVACY_DENIAL_NON_ADMIN_STAFF_TOKEN'),
-  financeOrAdmin: envToken('PRIVACY_DENIAL_FINANCE_OR_ADMIN_TOKEN') ||
+  paymentAdmin: envToken('PRIVACY_DENIAL_PAYMENT_ADMIN_TOKEN') ||
     envToken('PRIVACY_DENIAL_SYSADMIN_TOKEN') ||
     envToken('PRIVACY_DENIAL_NWAC_ADMIN_TOKEN'),
   caseworkPayments: envToken('PRIVACY_DENIAL_CASEWORK_PAYMENTS_TOKEN'),
@@ -309,10 +309,10 @@ async function runGeneratedPdfChecks() {
 async function runFinanceChecks() {
   const nonAdminToken = tokens.nonAdminStaff;
   const nonAdminMissing = missingToken('PRIVACY_DENIAL_NON_ADMIN_STAFF_TOKEN', nonAdminToken);
-  const financeOrAdminToken = tokens.financeOrAdmin;
-  const financeOrAdminMissing = missingToken(
-    'PRIVACY_DENIAL_FINANCE_OR_ADMIN_TOKEN or PRIVACY_DENIAL_SYSADMIN_TOKEN or PRIVACY_DENIAL_NWAC_ADMIN_TOKEN',
-    financeOrAdminToken
+  const paymentAdminToken = tokens.paymentAdmin;
+  const paymentAdminMissing = missingToken(
+    'PRIVACY_DENIAL_PAYMENT_ADMIN_TOKEN or PRIVACY_DENIAL_SYSADMIN_TOKEN or PRIVACY_DENIAL_NWAC_ADMIN_TOKEN',
+    paymentAdminToken
   );
   const caseworkToken = tokens.caseworkPayments;
   const caseworkMissing = missingToken('PRIVACY_DENIAL_CASEWORK_PAYMENTS_TOKEN', caseworkToken);
@@ -322,7 +322,7 @@ async function runFinanceChecks() {
     key: privacyDenialFinanceEvidenceKey(),
   };
 
-  await liveCheck('finance allocation evidence presign rejects non-admin finance role', {
+  await liveCheck('allocation evidence presign rejects non-administrator role', {
     baseUrl: adminBaseUrl,
     method: 'POST',
     path: '/api/allocations/evidence/presign-download',
@@ -331,7 +331,7 @@ async function runFinanceChecks() {
     missing: nonAdminMissing,
     expectedStatuses: [403],
   });
-  await liveCheck('finance allocation evidence delete rejects non-admin finance role', {
+  await liveCheck('allocation evidence delete rejects non-administrator role', {
     baseUrl: adminBaseUrl,
     method: 'POST',
     path: '/api/allocations/evidence/delete',
@@ -344,9 +344,9 @@ async function runFinanceChecks() {
     baseUrl: adminBaseUrl,
     method: 'POST',
     path: '/api/allocations/evidence/presign-download',
-    token: financeOrAdminToken,
+    token: paymentAdminToken,
     body: rawEvidenceBody,
-    missing: financeOrAdminMissing,
+    missing: paymentAdminMissing,
     expectedStatuses: [403],
   });
   await liveCheck('casework payments token cannot read explicit out-of-scope payment packet', {
@@ -745,7 +745,7 @@ function usage() {
     '  PRIVACY_DENIAL_NON_ADMIN_STAFF_TOKEN',
     '  PRIVACY_DENIAL_STAFF_TOKEN',
     '  PRIVACY_DENIAL_CASEWORK_PAYMENTS_TOKEN',
-    '  PRIVACY_DENIAL_FINANCE_OR_ADMIN_TOKEN',
+    '  PRIVACY_DENIAL_PAYMENT_ADMIN_TOKEN',
     '  PRIVACY_DENIAL_APPLICANT_A_TOKEN',
     '  PRIVACY_DENIAL_APPLICANT_B_TOKEN',
     '',

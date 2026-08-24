@@ -193,7 +193,7 @@ npm run db:migrate:apply -- --target-env test
 - wrong-region/wrong-assignee case/application access
 - generated consent/declaration PDFs for out-of-scope applications
 - document presign by raw ID without case/application scope
-- finance payment-packet access for case-scoped versus global finance roles
+- payment-packet access for case-scoped Regional Manager / ISET Coordinator versus global System Administrator / NWAC Administrator
 - Query Editor server export rejects non-active database selections
 - admin AI chat rejects obvious applicant/client identifiers before proxying, and AI dummy-data routes return 404 unless unsafe debug routes are explicitly enabled
 - notification template/settings/sender APIs reject non-System/NWAC Administrator staff tokens

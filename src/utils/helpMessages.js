@@ -7,7 +7,7 @@ export const helpMessages = {
 
       <h3>Concept</h3>
       <p>
-        Give Executive Directors and Finance Officers immediate insight into budget burn, administrative caps, monitoring
+        Give program leadership immediate insight into budget burn, administrative caps, monitoring
         status, and report readiness without drilling into individual sub-pages.
       </p>
 

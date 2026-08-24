@@ -6,7 +6,7 @@ Transformation planning now lives in `docs/planning/payments-transformation-plan
 
 ## Current Source-Backed State
 
-- `docs/AGENTS.md` remains the entry point. The current payment access rule is: finance/admin payment roles are global, casework payment roles are case-scoped, and payment batch plus full ledger exports are finance/admin-only.
+- `docs/AGENTS.md` remains the entry point. The current payment access rule is: System Administrator and NWAC Administrator are global; Regional Manager and ISET Coordinator are case-scoped; batch and full-ledger exports are limited to the two administrator roles.
 - Agreed business context from the May 11 design conversation: Finance/Sage is the financial system of record. PATH is the ISET operations system for preparing payment requests, sending the finance email handoff, and tracking operations-side follow-up where Finance feedback is unreliable.
 - Post-email state in PATH should be treated as operational confidence/follow-up status, not authoritative AP/accounting truth. Keep that distinction in design docs and help guidance; avoid turning normal widgets into warning-heavy explanations.
 - The canonical workflow record is `payment_packet`; the ledger-of-record is still `finance_transaction`.
@@ -15,7 +15,7 @@ Transformation planning now lives in `docs/planning/payments-transformation-plan
 - Agreed target surface model: Payments has two surfaces over the same data and business actions. The Case Workspace is case-scoped; the Payments dashboard is cross-client/multi-case. They should differ by scope, filtering, and queueing context, not by having separate workflows.
 - Canonical packet statuses are `draft`, `ready_to_send`, `submitted`, `confirmed`, and `cancelled`.
 - Canonical line statuses are `needs_evidence`, `ready_to_send`, `submitted`, `paid`, `held`, and `cancelled`.
-- As of the 2026-05-11 two-surface tranche, `/iset/payments` is the cross-client operational dashboard using the shared payment queue, detail, communications, and SLA widgets. `/finance/payments` remains a finance/admin oversight board pending a later route decision.
+- As of the 2026-05-11 two-surface tranche, `/iset/payments` is the cross-client operational dashboard using the shared payment queue, detail, communications, and SLA widgets. `/finance/payments` remains an administrator oversight board pending a later route decision.
 - Submitting a packet through `POST /api/finance/payment-packets/:id/status` with `status=submitted` runs policy, funding, duplicate, EI, and evidence gates, then sends externally. External submission routes to email unless runtime config `scope=finance`, `k=intacct.integration`, field `submissionMode` is `intacct_rest`.
 - The local WSL DEV database checked on 2026-05-11 has canonical enum definitions for packet, line, and batch statuses. The checked local database had no current packet or line rows, so there were no legacy status values to normalize in data.
 - The checked local finance runtime config had `intacct.integration.submissionMode = email`, `enabled = false`, payment evidence rules dated 2026-03-19, and email routing enabled.
@@ -45,14 +45,14 @@ Runtime config `finance/payment.evidence.rules` contained:
 
 Safety tranche update on 2026-05-11: `SIMPLE_PAYMENT_WORKFLOW` was disabled, direct `send-email` now returns `410 payment_email_endpoint_retired`, packet creation rejects non-draft statuses, line creation rejects non-draft line statuses, the frontend send helper uses the canonical packet status transition, and the old `Mark paid` UI action is hidden pending explicit follow-up modeling. Follow-up tranche update on 2026-05-11: `payment_packet` and `payment_packet_line` now carry current follow-up fields, `payment_followup_event` stores immutable follow-up history, and packet/line follow-up can be logged through the new follow-up API/UI. Two-surface tranche update on 2026-05-11: `/iset/payments` is populated as the operational dashboard, Case Workspace manage-payments includes communications, communications load by selected packet for scoped users, and manual email logging uses a modal instead of one-click placeholder rows. Evidence tranche update on 2026-05-11: manual payment document attach now supports line-scoped evidence and writes `payment_packet_document.payment_packet_line_id` after validating the line belongs to the packet. Reporting/budget semantics tranche update on 2026-05-11: Financial Reports prefer explicit packet follow-up state, report/export paid wording is now `Recorded paid`, and budget/case/homepage finance labels use `Recorded actual` where PATH is only the operational shadow. See `docs/planning/payments-transformation-plan-2026-05-11.md` and `docs/testing/payments-workflow-automation.md`.
 
-1. The first explicit follow-up model is in place. Remaining follow-up refinement: decide the final visible labels, minimum evidence/note rules, and whether line `paid` remains an internal finance/AP concept or is fully replaced by follow-up state for operations.
+1. The first explicit follow-up model is in place. Remaining follow-up refinement: decide the final visible labels, minimum evidence/note rules, and whether line `paid` is fully replaced by follow-up state for operations.
 2. `applyPostPayEvidenceHolds()` no longer short-circuits with `SIMPLE_PAYMENT_WORKFLOW` disabled. Re-test this behavior once follow-up/fulfillment semantics are redesigned so post-payment evidence holds do not imply Sage authority.
 3. The direct email route is retired, but any callers or docs that still use `/send-email` must be removed or migrated to the canonical packet status transition.
 4. Packet creation is now draft-only, but a separately named import/admin path would still be needed if future migration/backload work legitimately has to create non-draft packet history.
 5. Line-level payment evidence attach is now implemented. Remaining evidence work is to broaden workflow/API/browser coverage, confirm audit bundle output, and retest evidence gates against line-specific payment types.
 6. Recurring-line backend/context paths still exist, while the UI hides the recurring button with `showRecurringLinesButton = false`. Decide to ship, retire, or keep behind an explicit feature flag.
 7. The route/header/help labels for the main payment surfaces no longer say "Batch Payments", and the main budget/reporting surfaces now use PATH-recorded wording. The broader user manual and any less-used finance help pages still need a focused pass so email-workflow language, optional batches, and experimental Intacct content do not conflict.
-8. Frontend route matrix allows `/finance/payments` only for System Administrator and NWAC Administrator, while backend payment role allowlists include Finance Approver, Finance Reviewer, Finance Ops, and AP/Ops. Decide whether those finance roles are real PATH roles or remove the backend affordance.
+8. Resolved 2026-08-24: PATH has only four sign-in roles. The backend and frontend payment allowlists now use `System Administrator`, `NWAC Administrator`, `Regional Manager`, and `ISET Coordinator`; only the two administrator roles have global/finalization access, while Regional Manager and ISET Coordinator remain case-scoped. Finance remains external to PATH.
 9. The `/iset/payments` dashboard is now operational, but `/finance/payments` is still a separate inspection-oriented surface. Decide later whether that route remains useful, aliases the operational dashboard, or is retired.
 
 ## Recommended Cleanup Direction
@@ -60,7 +60,7 @@ Safety tranche update on 2026-05-11: `SIMPLE_PAYMENT_WORKFLOW` was disabled, dir
 - Make the packet status endpoint the only path that performs external submission.
 - Restrict packet creation to `draft` unless a reviewed import/admin exception is added.
 - Either retire `SIMPLE_PAYMENT_WORKFLOW` or clearly mark it as a local/demo-only feature flag and keep it disabled outside controlled development.
-- Move Mark paid/confirmation to finance/AP roles, require proof/reference where the AP model requires it, and preserve maker-checker checks.
+- Keep payment confirmation/finalization restricted to System Administrator and NWAC Administrator, require proof/reference where the operating model requires it, and preserve actor history.
 - Keep line-level evidence as the canonical model for payment-type gates and extend test/browser coverage around it.
 - Update route titles, help panels, and user manual copy so "Payment packets", "optional batches", email, and Intacct REST do not conflict.
 

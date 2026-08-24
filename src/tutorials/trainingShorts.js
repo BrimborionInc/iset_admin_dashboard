@@ -142,7 +142,7 @@ const TRAINING_SHORTS = [
     title: 'Payments',
     description: 'Process and track payment requests.',
     topic: 'Payments',
-    audience: 'Casework and finance staff',
+    audience: 'PATH casework and program staff',
     duration: '1 min 51 sec',
     durationSeconds: 111,
     status: 'available',

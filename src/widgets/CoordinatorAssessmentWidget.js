@@ -247,7 +247,7 @@ const OVERVIEW_WORD_LIMIT = 400;
 const EMPLOYMENT_GOALS_WORD_LIMIT = 400;
 const HIGH_VALUE_FUNDING_APPROVAL_THRESHOLD = 20000;
 const HIGH_VALUE_FUNDING_APPROVER_EMAIL = 'sstacey@nwac.ca';
-const PROGRAM_ADMIN_ROLE_KEYS = new Set(['nwacadministrator']);
+const NWAC_ADMINISTRATOR_ROLE_KEYS = new Set(['nwacadministrator']);
 const LEGACY_APPLICATION_FALLBACK_STATUSES = new Set([
   'submitted',
   'in_review',
@@ -2413,8 +2413,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   const isIsetCoordinator = groupKeys.includes('iset_coordinator');
   const roleKey = normalizedRole.replace(/[\s_-]+/g, '');
   const normalizedUserEmail = (currentUserEmail || '').trim().toLowerCase();
-  const isProgramAdminRole = PROGRAM_ADMIN_ROLE_KEYS.has(roleKey);
-  const isNwacAdministrator = isProgramAdminRole || groupKeys.includes('nwac_administrator');
+  const isNwacAdministratorRole = NWAC_ADMINISTRATOR_ROLE_KEYS.has(roleKey);
+  const isNwacAdministrator = isNwacAdministratorRole || groupKeys.includes('nwac_administrator');
   const canApproveHighValueFunding = normalizedUserEmail === HIGH_VALUE_FUNDING_APPROVER_EMAIL;
   const eligibilityRoleAllowlist = new Set([
     'systemadministrator',

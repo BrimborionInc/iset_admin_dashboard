@@ -1,6 +1,6 @@
 # Secure Messaging Integration
 
-Updated: 2026-07-05
+Updated: 2026-08-19
 
 ## Overview
 Secure messaging is shared between the public intake portal and the admin dashboard. Messages live in the shared MySQL database (`iset_intake.messages`) so both applications can render the same case thread.
@@ -32,6 +32,7 @@ As of migration `20260426_0007_harden_secure_message_scope_constraints.sql` in D
 1. Admin dashboard sends through `POST /api/cases/:id/messages`.
    - The handler validates case access, resolves the case applicant user, derives the application from the case, and writes a `staff_profile -> applicant_user` message when the staff profile is known.
    - Staff compose now treats the `To` display as read-only and requires recipient/case confirmation before send; routing remains derived from the case's linked applicant account, not from editable display text.
+   - Reply status follows the locked target's direction. A staff reply can mark an applicant-origin target as replied, but a staff follow-up that quotes a staff-origin target must not claim that the applicant replied; the target keeps its existing applicant-facing sent/read state.
 2. Public portal sends through `/api/messages/reply` or `/api/messages/reply-with-attachments`.
    - The backend derives the allowed case/application and staff recipient from the applicant messaging context or typed reply counterpart.
    - The portal no longer supplies legacy recipient authority when replying to an existing message.

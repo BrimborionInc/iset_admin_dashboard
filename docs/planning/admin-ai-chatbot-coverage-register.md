@@ -1,7 +1,7 @@
 # Admin AI Chatbot Coverage Register
 
 Status: current working register
-Last updated: 2026-08-08
+Last updated: 2026-08-21
 
 ## Purpose
 
@@ -111,9 +111,8 @@ Initial route inventory from `src/routes/AppRoutes.js`.
 | `/manage-security-options` | Manage Security Options | Configuration / security | P2 | security/encryption help files | inventory-only | Cover security settings, encryption, secret rotation intent, and safe admin scope. |
 | `/access-control` | Access Control | Configuration / RBAC | P2 | access-control code/help | inventory-only | Cover role matrix, route access, admin-only editing, and default deny behavior. |
 | `/user-management-dashboard` | User Management | Staff/applicant administration | P1 | `userManagement` help key; `docs/features/user-management.md` | inventory-only | Cover staff profile editing, display name, applicants, Cognito subject rules, region scope. |
-| `/modify-ptma/:id` | Modify Location | Configuration / locations | P2 | `modifyPtma` help key | inventory-only | Cover edit behavior if route remains current. |
-| `/new-location` | New PTMA | Configuration / locations | P2 | `newPtma` help key | inventory-only | Cover create behavior if route remains current. |
-| `/nwac-hub-management` | NWAC Hub Management | Configuration / legacy | P3 | none identified in route wrapper | inventory-only | Verify current use and whether to defer. |
+| `/nwac-hub-management` | NWAC Hub Management | Configuration / hubs | P2 | `nwacHubManagement` help key; `src/pages/nwacHubManagement.js` | inventory-only | Current System Administrator hub-management list. PTMA management routes are retired. |
+| `/modify-hub/:id` | Modify NWAC Hub | Configuration / hubs | P2 | `modifyHub` help key; `src/pages/modifyLocation.js` | inventory-only | Cover current hub edit behavior and `/api/hubs` type/scope guard. |
 | `/job-bank-search` | Job Bank Search | Integrations | P2 | `jobBankSearchHelp.js` | inventory-only | Cover search behavior, job selection, and integration limits. |
 | `/iset/payments` | Program Payments | Casework / payments | P1 | payment docs/help | inventory-only | Verify relationship to finance payment module and casework payment scope. |
 | `/book-appointment-q1` through `/book-appointment-q8` | Book Appointment previews | Legacy previews | P3 | `bookAppointmentQ*` help keys | defer | Decide if these preview routes are still reachable/needed before writing cards. |

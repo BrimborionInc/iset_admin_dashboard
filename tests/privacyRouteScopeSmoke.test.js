@@ -20,7 +20,7 @@ describe('privacy route-scope smoke', () => {
     expect(result.status).toBe(0);
     const payload = JSON.parse(result.stdout);
     expect(payload).toMatchObject({ ok: true });
-    expect(payload.results).toHaveLength(71);
+    expect(payload.results).toHaveLength(74);
   });
 
   test('does not borrow a guard from a later sibling route', () => {

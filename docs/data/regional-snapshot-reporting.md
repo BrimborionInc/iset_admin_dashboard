@@ -1,6 +1,8 @@
 # Regional Snapshot Reporting
 
-Purpose: schema note for the Board-style regional snapshot report planned under `Reporting`.
+Status: current deployed reporting reference with an explicit application-less historical-data limitation.
+Last Updated: 2026-08-21
+Purpose: schema and behavior note for the Board-style Regional Snapshot report under `Reporting`.
 
 ## Primary table
 

@@ -40,7 +40,7 @@ These are the biggest areas where the exercise is not just “configuration” t
 - **Holder/tenant model is global, not per-holder.** Most runtime settings are stored as shared environment-level keys rather than holder-scoped records.
 - **NWAC branding is still in code.** Examples include top-nav branding, NWAC logos used in generated artifacts, and multiple default organization labels.
 - **Approval logic is still NWAC-specific.** The assessment/decision path still uses NWAC review fields and currently includes hard-coded approval thresholds and a named approver email.
-- **Role naming is still NWAC-biased.** `NWAC Administrator` remains a canonical admin role label, even though some older `Program Administrator` naming is still tolerated as an alias.
+- **Role naming is still NWAC-biased.** `NWAC Administrator` is one of the four canonical PATH role labels and would need tenant-neutral naming for another holder.
 - **Training/help/document content is heavily NWAC/PTMA-oriented.** Even where the workflow engine is configurable, the surrounding instructional and policy content still needs review for a non-NWAC rollout.
 
 ## Practical Scoping Recommendation

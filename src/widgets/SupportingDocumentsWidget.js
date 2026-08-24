@@ -189,7 +189,10 @@ const ModalScopeHint = ({ children }) => (
 const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) => {
   const workspace = useCaseWorkspace();
   const { role: currentUserRole } = useCurrentUser();
-  const { isAdminRole: canDownloadOriginalDocuments } = getRoleGroups(currentUserRole);
+  const {
+    isAdminRole: canDownloadOriginalDocuments,
+    isSystemAdministratorRole,
+  } = getRoleGroups(currentUserRole);
   const caseData = useMemo(() => {
     if (propCaseData) return propCaseData;
     if (workspace && typeof workspace === 'object') {
@@ -242,10 +245,17 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [deleteRefused, setDeleteRefused] = useState(false);
+  const [pendingRestores, setPendingRestores] = useState({});
+  const [restoreModalVisible, setRestoreModalVisible] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState(null);
+  const [restoreError, setRestoreError] = useState('');
   const [downloadModalVisible, setDownloadModalVisible] = useState(false);
   const [downloadTarget, setDownloadTarget] = useState(null);
   const [downloadConfirm, setDownloadConfirm] = useState('');
   const [activeTabId, setActiveTabId] = useState('documents');
+  const isDeletedView = activeTabId === 'deleted';
   const [checklistItems, setChecklistItems] = useState([]);
   const [checklistLoading, setChecklistLoading] = useState(false);
   const [checklistError, setChecklistError] = useState(null);
@@ -638,6 +648,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         } else if (!isCaseWorkspace && applicationId) {
           params.set('applicationId', String(applicationId));
         }
+        if (isDeletedView) {
+          params.set('view', 'deleted');
+        }
         const query = params.toString() ? `?${params.toString()}` : '';
         const endpoint = canUseApplicantDocumentMode
           ? `/api/applicants/${applicantUserId}/documents${query}`
@@ -664,6 +677,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       applicationId,
       isCaseDocumentMode,
       isCaseWorkspace,
+      isDeletedView,
       selectedApplicationFilter,
       selectedInterventionFilter,
     ]
@@ -803,7 +817,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   }, [applicantUserId, canUploadDocuments, canUseApplicantDocumentMode, caseId, loadDocuments, loadChecklist]);
 
   useEffect(() => {
-    if (canUseApplicantDocumentMode || activeTabId === 'documents') return;
+    if (canUseApplicantDocumentMode || activeTabId !== 'checklist') return;
     setActiveTabId('documents');
   }, [activeTabId, canUseApplicantDocumentMode]);
 
@@ -1226,8 +1240,14 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
 
   const openDeleteModal = useCallback(item => {
     if (!item?.id) return;
+    if (item.can_delete === false) {
+      setError(item.delete_disabled_reason || "PATH needs to keep this document, so it can't be deleted.");
+      return;
+    }
     setDeleteTarget(item);
     setDeleteConfirm('');
+    setDeleteError('');
+    setDeleteRefused(false);
     setDeleteModalVisible(true);
   }, []);
 
@@ -1235,6 +1255,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     setDeleteModalVisible(false);
     setDeleteTarget(null);
     setDeleteConfirm('');
+    setDeleteError('');
+    setDeleteRefused(false);
   }, []);
 
   const handleDeleteConfirm = useCallback(async () => {
@@ -1243,6 +1265,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       return;
     }
     setError(null);
+    setDeleteError('');
     setPendingDeletes(prev => ({ ...prev, [deleteTarget.id]: true }));
     try {
       const res = await apiFetch(`/api/documents/${deleteTarget.id}`, { method: 'DELETE' });
@@ -1253,12 +1276,24 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         } catch (_) {
           payload = null;
         }
-        throw new Error(payload?.message || 'Failed to delete document.');
+        if (payload?.error === 'document_immutable') {
+          setDeleteRefused(true);
+          setDeleteConfirm('');
+          setDeleteError(
+            "PATH needs to keep this document in the applicant's file. You can still change its title or document type."
+          );
+          return;
+        }
+        setDeleteError(payload?.message || 'The document could not be deleted. Please try again.');
+        return;
       }
       await loadDocuments({ silent: true });
+      if (canUseApplicantDocumentMode) {
+        await loadChecklist();
+      }
       handleDeleteCancel();
     } catch (err) {
-      setError(err?.message || 'Failed to delete document.');
+      setDeleteError(err?.message || 'The document could not be deleted. Please try again.');
     } finally {
       setPendingDeletes(prev => {
         const next = { ...prev };
@@ -1268,7 +1303,55 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         return next;
       });
     }
-  }, [deleteTarget, loadDocuments, handleDeleteCancel]);
+  }, [canUseApplicantDocumentMode, deleteTarget, loadChecklist, loadDocuments, handleDeleteCancel]);
+
+  const openRestoreModal = useCallback(item => {
+    if (!item?.id || item.can_restore !== true) return;
+    setRestoreTarget(item);
+    setRestoreError('');
+    setRestoreModalVisible(true);
+  }, []);
+
+  const handleRestoreCancel = useCallback(() => {
+    setRestoreModalVisible(false);
+    setRestoreTarget(null);
+    setRestoreError('');
+  }, []);
+
+  const handleRestoreConfirm = useCallback(async () => {
+    const documentId = restoreTarget?.id;
+    if (!documentId) {
+      handleRestoreCancel();
+      return;
+    }
+    setRestoreError('');
+    setPendingRestores(previous => ({ ...previous, [documentId]: true }));
+    try {
+      const response = await apiFetch(`/api/documents/${encodeURIComponent(documentId)}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const payload = await response?.json?.().catch(() => null);
+      if (!response?.ok) {
+        setRestoreError(payload?.message || 'The document could not be restored. Please try again.');
+        return;
+      }
+      await loadDocuments({ silent: true });
+      if (canUseApplicantDocumentMode) {
+        await loadChecklist();
+      }
+      handleRestoreCancel();
+    } catch (error) {
+      setRestoreError(error?.message || 'The document could not be restored. Please try again.');
+    } finally {
+      setPendingRestores(previous => {
+        const next = { ...previous };
+        delete next[documentId];
+        return next;
+      });
+    }
+  }, [canUseApplicantDocumentMode, handleRestoreCancel, loadChecklist, loadDocuments, restoreTarget]);
 
   const openEditModal = useCallback(item => {
     if (!item || !item.id) return;
@@ -1692,7 +1775,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         case 'label':
           return normalizeSortText(item?.label || item?.file_name || '');
         case 'uploaded_at':
-          return toSortTimestamp(item?.uploaded_at);
+          return toSortTimestamp(item?.deleted_at || item?.uploaded_at);
         case 'file_name':
           return normalizeSortText(item?.file_name || '');
         case 'source':
@@ -1749,24 +1832,28 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         header: 'Document label',
         cell: item => item.label || item.file_name || '',
         sortingComparator: (a, b) => compareDocuments('label', a, b),
-        editConfig: {
-          ariaLabel: 'Document label',
-          editIconAriaLabel: 'Edit document label',
-          disabledReason: item => (!item?.id ? 'Cannot edit this document.' : undefined),
-          editingCell: (item, { currentValue, setValue }) => (
-            <Input
-              autoFocus
-              value={currentValue ?? item.label ?? item.file_name ?? ''}
-              onChange={({ detail }) => setValue(detail.value)}
-              placeholder="e.g., Government ID"
-            />
-          )
-        }
+        ...(isDeletedView
+          ? {}
+          : {
+              editConfig: {
+                ariaLabel: 'Document label',
+                editIconAriaLabel: 'Edit document label',
+                disabledReason: item => (!item?.id ? 'Cannot edit this document.' : undefined),
+                editingCell: (item, { currentValue, setValue }) => (
+                  <Input
+                    autoFocus
+                    value={currentValue ?? item.label ?? item.file_name ?? ''}
+                    onChange={({ detail }) => setValue(detail.value)}
+                    placeholder="e.g., Government ID"
+                  />
+                )
+              }
+            })
       },
       {
         id: 'uploaded_at',
-        header: 'Uploaded',
-        cell: item => formatDateTime(item.uploaded_at),
+        header: isDeletedView ? 'Deleted' : 'Uploaded',
+        cell: item => formatDateTime(isDeletedView ? item.deleted_at : item.uploaded_at),
         sortingComparator: (a, b) => compareDocuments('uploaded_at', a, b)
       },
       {
@@ -1804,17 +1891,40 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           const inFlight = !!pendingDownloads[item.id];
           const downloadingOriginal = !!pendingOriginalDownloads[item.id];
           const deleting = !!pendingDeletes[item.id];
+          const restoring = !!pendingRestores[item.id];
           const canDuplicate = item?.scope !== 'client';
           const allowDuplicate = canDuplicate && (isCaseWorkspace || hasMultipleApplications);
-          const actionItems = [
-            { id: 'edit', text: 'Edit' },
-            ...(allowDuplicate ? [{ id: 'duplicate', text: 'Duplicate' }] : []),
-            ...(canDownloadOriginalDocuments
-              ? [{ id: 'download', text: downloadingOriginal ? 'Download (loading...)' : 'Download', disabled: downloadingOriginal }]
-              : []),
-            { id: 'view', text: inFlight ? 'View (loading...)' : 'View', disabled: inFlight },
-            { id: 'delete', text: deleting ? 'Delete (in progress...)' : 'Delete', disabled: deleting }
-          ];
+          const actionItems = isDeletedView
+            ? [
+                { id: 'view', text: inFlight ? 'View (loading...)' : 'View', disabled: inFlight },
+                ...(canDownloadOriginalDocuments
+                  ? [{
+                      id: 'download',
+                      text: downloadingOriginal ? 'Download (loading...)' : 'Download',
+                      disabled: downloadingOriginal,
+                    }]
+                  : []),
+                {
+                  id: 'restore',
+                  text: restoring ? 'Restore (in progress...)' : 'Restore',
+                  disabled: restoring || item.can_restore !== true,
+                  disabledReason: item.restore_disabled_reason || undefined,
+                },
+              ]
+            : [
+                { id: 'edit', text: 'Edit' },
+                ...(allowDuplicate ? [{ id: 'duplicate', text: 'Duplicate' }] : []),
+                ...(canDownloadOriginalDocuments
+                  ? [{ id: 'download', text: downloadingOriginal ? 'Download (loading...)' : 'Download', disabled: downloadingOriginal }]
+                  : []),
+                { id: 'view', text: inFlight ? 'View (loading...)' : 'View', disabled: inFlight },
+                {
+                  id: 'delete',
+                  text: deleting ? 'Delete (in progress...)' : 'Delete',
+                  disabled: deleting || item.can_delete === false,
+                  disabledReason: item.delete_disabled_reason || undefined,
+                }
+              ];
           return (
             <ButtonDropdown
               ariaLabel={`Actions for ${item.label || item.file_name || 'document'}`}
@@ -1837,6 +1947,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
                   case 'delete':
                     openDeleteModal(item);
                     break;
+                  case 'restore':
+                    openRestoreModal(item);
+                    break;
                   default:
                     break;
                 }
@@ -1854,6 +1967,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       openDeleteModal,
       openDuplicateModal,
       openEditModal,
+      openRestoreModal,
+      pendingRestores,
       pendingOriginalDownloads,
       pendingDownloads,
       pendingDeletes,
@@ -1861,7 +1976,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       compareDocuments,
       getDocumentReferenceLabel,
       isCaseWorkspace,
-      hasMultipleApplications
+      hasMultipleApplications,
+      isDeletedView,
     ]
   );
 
@@ -2164,6 +2280,64 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   });
   const editHasSourceBoundLineage = hasSourceBoundDocumentLineage(editDocument);
 
+  const documentsTableContent = (
+    <SpaceBetween size="s">
+      <TextFilter
+        filteringText={documentFilteringText}
+        onChange={({ detail }) => setDocumentFilteringText(detail.filteringText)}
+        filteringPlaceholder={isDeletedView ? 'Find deleted documents' : 'Find documents'}
+        countText={
+          documentFilteringText
+            ? `${sortedDocuments.length} match${sortedDocuments.length === 1 ? '' : 'es'}`
+            : undefined
+        }
+      />
+      <Table
+        trackBy="id"
+        loading={loading || refreshing}
+        loadingText={isDeletedView ? 'Loading deleted documents' : `Loading ${isCaseDocumentMode ? 'case documents' : 'supporting documents'}`}
+        variant="embedded"
+        items={sortedDocuments}
+        columnDefinitions={columnDefinitionsForTable}
+        resizableColumns
+        stickyHeader
+        enableKeyboardNavigation
+        sortingColumn={activeSortingColumn || { id: sortingState.columnId }}
+        sortingDescending={sortingState.isDescending}
+        onSortingChange={({ detail }) => {
+          const columnId = detail?.sortingColumn?.id;
+          if (columnId) {
+            setSortingState({ columnId, isDescending: detail.isDescending });
+          }
+        }}
+        onColumnWidthsChange={handleColumnWidthsChange}
+        preferences={preferencesComponent}
+        submitEdit={isDeletedView ? undefined : handleInlineEdit}
+        ariaLabels={{
+          activateEditLabel: (column, item) => `Edit ${item?.label || item?.file_name || 'document'} ${column.header}`,
+          cancelEditLabel: column => `Cancel editing ${column.header}`,
+          submitEditLabel: column => `Submit editing ${column.header}`,
+          tableLabel: isDeletedView
+            ? 'Deleted documents'
+            : isCaseDocumentMode
+              ? 'Case documents'
+              : 'Supporting documents'
+        }}
+        empty={
+          <Box textAlign="center">
+            {documentFilteringText
+              ? 'No matching documents.'
+              : isDeletedView
+                ? 'No deleted documents to display.'
+                : isCaseDocumentMode
+                  ? 'No case documents to display.'
+                  : 'No supporting documents to display.'}
+          </Box>
+        }
+      />
+    </SpaceBetween>
+  );
+
 
   return (
     <>
@@ -2403,31 +2577,73 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         footer={
           <SpaceBetween direction="horizontal" size="xs">
             <Button variant="link" onClick={handleDeleteCancel}>
-              Cancel
+              {deleteRefused ? 'Close' : 'Cancel'}
             </Button>
+            {!deleteRefused && (
+              <Button
+                variant="primary"
+                onClick={handleDeleteConfirm}
+                disabled={deleteConfirm.trim().toLowerCase() !== 'delete' || pendingDeletes[deleteTarget?.id]}
+                loading={pendingDeletes[deleteTarget?.id]}
+              >
+                Delete
+              </Button>
+            )}
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          {deleteError && (
+            <Alert type="error" header={deleteRefused ? "This document can't be deleted" : 'Delete failed'}>
+              {deleteError}
+            </Alert>
+          )}
+          {!deleteRefused && (
+            <>
+              <Box>
+                This removes the file from Supporting Documents and checklists. A System Administrator can restore it
+                later. Type <strong>delete</strong> to confirm.
+              </Box>
+              <FormField label="Type delete to confirm">
+                <Input
+                  value={deleteConfirm}
+                  onChange={({ detail }) => setDeleteConfirm(detail.value)}
+                  autoFocus
+                  placeholder="delete"
+                />
+              </FormField>
+            </>
+          )}
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={restoreModalVisible}
+        onDismiss={handleRestoreCancel}
+        closeAriaLabel="Close dialog"
+        header="Restore document"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="link" onClick={handleRestoreCancel}>Cancel</Button>
             <Button
               variant="primary"
-              onClick={handleDeleteConfirm}
-              disabled={deleteConfirm.trim().toLowerCase() !== 'delete' || pendingDeletes[deleteTarget?.id]}
-              loading={pendingDeletes[deleteTarget?.id]}
+              onClick={handleRestoreConfirm}
+              loading={pendingRestores[restoreTarget?.id]}
+              disabled={pendingRestores[restoreTarget?.id]}
             >
-              Delete
+              Restore
             </Button>
           </SpaceBetween>
         }
       >
         <SpaceBetween size="s">
+          {restoreError && <Alert type="error">{restoreError}</Alert>}
           <Box>
-            This will permanently delete the document from Supporting Documents. Type <strong>delete</strong> to confirm.
+            This puts the file back in Supporting Documents. Checklists and other PATH processes will be able to use it
+            again.
           </Box>
-          <FormField label="Type delete to confirm">
-            <Input
-              value={deleteConfirm}
-              onChange={({ detail }) => setDeleteConfirm(detail.value)}
-              autoFocus
-              placeholder="delete"
-            />
-          </FormField>
+          <Box variant="awsui-key-label">
+            File: {restoreTarget?.file_name || restoreTarget?.label || 'Selected document'}
+          </Box>
         </SpaceBetween>
       </Modal>
       <Modal
@@ -2760,7 +2976,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
                 variant="primary"
                 iconName="upload"
                 onClick={openLabelModal}
-                disabled={!canUploadDocuments}
+                disabled={!canUploadDocuments || isDeletedView}
                 loading={uploading}
               >
                 Upload
@@ -2830,58 +3046,11 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             {
               id: 'documents',
               label: 'Documents',
-              content: (
-                <SpaceBetween size="s">
-                  <TextFilter
-                    filteringText={documentFilteringText}
-                    onChange={({ detail }) => setDocumentFilteringText(detail.filteringText)}
-                    filteringPlaceholder="Find documents"
-                    countText={
-                      documentFilteringText
-                        ? `${sortedDocuments.length} match${sortedDocuments.length === 1 ? '' : 'es'}`
-                        : undefined
-                    }
-                  />
-                  <Table
-                    trackBy="id"
-                    loading={loading || refreshing}
-                    loadingText={`Loading ${isCaseDocumentMode ? 'case documents' : 'supporting documents'}`}
-                    variant="embedded"
-                    items={sortedDocuments}
-                    columnDefinitions={columnDefinitionsForTable}
-                    resizableColumns
-                    stickyHeader
-                    enableKeyboardNavigation
-                    sortingColumn={activeSortingColumn || { id: sortingState.columnId }}
-                    sortingDescending={sortingState.isDescending}
-                    onSortingChange={({ detail }) => {
-                      const columnId = detail?.sortingColumn?.id;
-                      if (columnId) {
-                        setSortingState({ columnId, isDescending: detail.isDescending });
-                      }
-                    }}
-                    onColumnWidthsChange={handleColumnWidthsChange}
-                    preferences={preferencesComponent}
-                    submitEdit={handleInlineEdit}
-                    ariaLabels={{
-                      activateEditLabel: (column, item) => `Edit ${item?.label || item?.file_name || 'document'} ${column.header}`,
-                      cancelEditLabel: column => `Cancel editing ${column.header}`,
-                      submitEditLabel: column => `Submit editing ${column.header}`,
-                      tableLabel: isCaseDocumentMode ? 'Case documents' : 'Supporting documents'
-                    }}
-                    empty={
-                      <Box textAlign="center">
-                        {documentFilteringText
-                          ? 'No matching documents.'
-                          : isCaseDocumentMode
-                            ? 'No case documents to display.'
-                            : 'No supporting documents to display.'}
-                      </Box>
-                    }
-                  />
-                </SpaceBetween>
-              )
+              content: documentsTableContent
             },
+            ...(isSystemAdministratorRole
+              ? [{ id: 'deleted', label: 'Deleted', content: documentsTableContent }]
+              : []),
             ...(showChecklistTab
               ? [
                   {

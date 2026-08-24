@@ -1,6 +1,6 @@
 # Supporting Documents widget
 
-Date: 2026-06-10
+Date: 2026-08-24
 
 ## Workflow
 
@@ -33,6 +33,7 @@ manual uploads, and generated forms, then compares them against the relevant che
 - `GET /api/documents/:id/presign-download`
 - `PUT /api/documents/:id`
 - `DELETE /api/documents/:id`
+- `POST /api/documents/:id/restore`
 - `POST /api/documents/:id/duplicate`
 
 ## Key UI behavior
@@ -53,6 +54,17 @@ manual uploads, and generated forms, then compares them against the relevant che
     - `/api/applicants/:applicant_user_id/documents/upload` for applicant/application mode
     - `/api/cases/:case_id/documents/upload` for case-backed document mode when the file has no safe applicant account context
 - Refresh behavior: listens for `iset:supporting-documents:refresh`, mainly from Secure Messaging attachment adoption.
+- Delete behavior:
+  - all four PATH staff roles can use `Delete` when they already have access to the file and the file is an ordinary staff upload with no protected workflow dependency
+  - `Delete` is reversible: PATH marks the document deleted, removes it from normal document lists and checklist/process matching, and leaves the stored file in place
+  - generated files, applicant submissions, documents linked to PATH signing requests, secure-message attachments, version evidence, payment evidence, and other authoritative records cannot be deleted through the widget; the disabled action explains why in plain language
+  - deleting a document does not undo a signature, payment, approval, submission, or any other business event
+- Deleted view:
+  - only `System Administrator` sees the `Deleted` tab and can view, download, or restore files deleted through this lifecycle
+  - historical rows that already had `iset_document.status='deleted'` before this feature are not treated as lifecycle deletions and do not appear in the tab
+  - restore checks that the stored object still exists and matches the recorded size/checksum before returning the document to active lists and processes
+  - PATH has no permanent-delete action for supporting documents, including for System Administrators; the file and document row remain available for restore
+  - any exceptional physical removal is a separately reviewed database/storage operation outside the product workflow
 - View behavior:
   - most files open from the presigned object URL returned by `GET /api/documents/:id/presign-download`
   - Word files (`.doc`, `.docx`) now take a different path: the backend generates or reuses a cached internal preview and returns that preview URL instead of the original Office object
@@ -69,7 +81,7 @@ manual uploads, and generated forms, then compares them against the relevant che
   - client-scoped modal saves and duplicate-document saves include hidden case/application context only so the backend can validate access and resolve client scope; staff are not asked to attach client-scoped documents to an application
   - application-submission documents keep their source-required `application_id` lineage when edited through the modal, even when the selected document type is client-scoped
   - the modal preloads an existing application/action-plan attachment even when the document is not classified yet; when an older unscoped row is edited, it defaults attachment controls from the current workspace filter/context when possible
-  - duplicate and delete remain separate destructive operations and retain the stricter source/dependency integrity guard
+  - duplicate and delete remain separate operations and retain the stricter source/dependency integrity guard
 - Download behavior:
   - the inline `Download` action is shown only to `System Administrator` and `NWAC Administrator`
   - it requires an explicit privacy warning confirmation
@@ -113,4 +125,10 @@ manual uploads, and generated forms, then compares them against the relevant che
 - If an edit attempts to move a source-bound document to another case or application, expect `document_case_lineage_immutable` or `document_application_lineage_immutable`. Correct its title/type in place; do not rewrite where applicant-, message-, generated-, or unknown-source evidence originated.
 - If an edit-details or duplicate save fails for a client-scoped type such as `identity_document` or `status_card`, verify the widget request includes `caseId` or `applicationId` even though the document remains client-scoped in storage. If the row has `source='application_submission'`, also verify the backend preserves the existing `application_id`; PROD's source-lineage CHECK constraint requires submission documents to keep `client_id`, `case_id`, `application_id`, and `applicant_user_id`.
 - If `chk_iset_document_manual_upload_scope` fails for a staff upload, treat it as a backend context-resolution bug first. Manual uploads must carry `client_id` and `case_id`; application-linked uploads must also carry `application_id` and `applicant_user_id`.
+- If `Delete` is disabled, use the reason shown by PATH. Do not detach, reclassify, or rewrite provenance merely to make an authoritative file deletable.
+- If a newly deleted file is missing from the `Deleted` tab, verify the lifecycle schema migration is present and the delete transaction wrote `iset_document_lifecycle`; do not backfill older `status='deleted'` rows by assumption.
+- Release gate: current admin uploads store and verify `path-sha256` object metadata, but older `manual_upload` objects may predate it. Do not roll out reversible Delete until PATH either verifies object identity before allowing Delete (and gives a plain refusal for unverifiable legacy files) or supports a reviewed full-object checksum fallback. Otherwise an older file could be hidden successfully and then fail the restore check.
+- Release gate: assessment and intervention-decision paths that rely on an active manual document must lock and recheck that document inside their write transaction. A pre-transaction check alone can race Delete and commit a decision against a document that has just become hidden.
+- Release gate: payment evidence must remain protected after it enters finance history, even if a user later removes the visible packet link. Prospective unlink/packet/line operations can be blocked once normalized payment transactions exist; protecting already-stale historical document IDs requires a reviewed normalized finance-transaction/document history record and guarded backfill rather than relying on JSON or comma-separated IDs.
+- A preview/download URL issued before Delete remains usable until its short expiry. Delete prevents new ordinary-user access after the lifecycle change, but it cannot revoke a URL or copy that was already issued.
 - Do not add placeholder application, assessment, or action-plan rows just to make document management work.

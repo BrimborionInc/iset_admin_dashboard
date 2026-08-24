@@ -8,7 +8,7 @@ Last updated: 2025-10-01
 Keep applicant-facing notifications configurable from the same matrix used for staff, letting administrators toggle delivery per event/role and choose templates for secure messages and companion emails.
 
 ## Current Implementation
-- The Notification Settings widget already renders applicant rows alongside staff roles. Legacy PTMA values are normalised to `ApplicationAssessor`, and a synthetic `applicant` row is injected if the API response omits it.
+- The Notification Settings widget renders applicant rows alongside the four canonical PATH staff roles, and a synthetic `applicant` row is injected if the API response omits it.
 - `/api/notifications` accepts and returns applicant entries; the persisted settings capture `{ event, role, language, enabled, template_id, email_alert, bell_alert }`.
 - `bell_alert` flags drive staff-facing in-app notifications through `shared/events/notificationDispatcher`, which fans out to `iset_internal_notification`.
 - `email_alert` values are stored but not yet consumed; applicant confirmations (and other outbound emails) still need to source their content from these settings and templates.
@@ -76,7 +76,7 @@ Until the cache layer lands, the structured logs plus Jest coverage help us dete
 - Context: Hard-coded applicant confirmation emails were removed from the intake service; delivery must now respect `notification_setting` and templates configured via the admin dashboard.
 - SES: account still sandboxed in ca-central-1; use verified sender/recipient for all testing and keep the sandbox redirect in `sesMailer` until production access is granted.
 - Admin configuration:
-  - Notification Settings widget persists `{event, role, enabled, template_id, email_alert, bell_alert}` and normalises legacy roles (PTMA -> ApplicationAssessor, synthetic applicant row).
+  - Notification Settings widget persists `{event, role, enabled, template_id, email_alert, bell_alert}`, keeps staff rows on the four canonical PATH roles, and adds the synthetic applicant row when needed.
   - `/api/notifications` endpoints (GET/POST/DELETE) are the sole contract for stored settings.
   - Manage Templates widget is functional but needs UX polish; templates provide HTML + text bodies for notifications and will power email content once wired through intake.
 - Intake plan overview:

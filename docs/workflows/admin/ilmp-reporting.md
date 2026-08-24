@@ -7,7 +7,7 @@ Prepare participant and reporting-package files for ILMP/ESDC requirements, incl
 ## Primary Routes
 
 - `/esdc/participants`
-- `/esdc/participant/:clientId`
+- `/esdc/participants/:clientId`
 - `/esdc/reporting`
 
 ## Core Widgets (current)
@@ -16,7 +16,7 @@ Participant submissions page (`/esdc/participants`):
 - Participant submission queue (bucket-style readiness summary, Validate all action, Generate batch XML action, and queue table)
 - Recent ILMP exports (optional palette widget for downloaded file audit/requeue work; no longer shown by default)
 
-Participant workspace (`/esdc/participant/:clientId`):
+Participant workspace (`/esdc/participants/:clientId`):
 - Submission readiness checklist
 - Validation summary
 - Payload preview
@@ -55,6 +55,7 @@ Widget references:
 - ILMP validation messages must be staff-facing. Visible warnings/blockers should state the issue, name the affected ESDC Data Exchange Guide rule or clearly say it is a PATH-only review check, and point to a staff-editable location such as Participant Details, the action-plan label, or the intervention label/date. Do not expose database IDs like `[actionPlan-69]` or `[intervention-123]` in user-facing issue text; keep those only as internal rule/debug identifiers.
 - PATH-only review warnings must not be worded as ESDC gateway failures. The old childcare warning for `No funding received` was removed because ESDC code `5` is valid and there is no guide rule requiring a separate justification field.
 - Participant export history stores the XML snapshot generated at download/export time. The history `XML` view should not be described as live XML based on current client data.
+- A real Participant Details change returns current non-archived case ILMP readiness to `needs_review`. It does not create a submission row, change submission status, or replace the stored payload, object key, or checksum for a submitted/accepted snapshot; an unchanged save performs no invalidation.
 - Reporting package and notes persistence.
 - Intervention/action-plan close-out rules are status-driven: planned end dates on non-terminal interventions stay out of ILMP close-out XML, while completed/cancelled interventions require end date + outcome.
 - Intervention duration is exported/stored as the ILMP three-digit duration field and is capped at 999 days. Do not use that cap to limit real program schedules; long intervention start/end dates remain valid and the reportable duration should be clamped.
@@ -65,7 +66,7 @@ Widget references:
 
 ## Role Notes
 
-- `/esdc/reporting` is explicitly guarded for Program Administrator (and System Administrator).
+- `/esdc/reporting` is explicitly guarded for NWAC Administrator (and System Administrator).
 - Other ESDC routes are role-matrix controlled.
 
 ## Current Gaps / Risks

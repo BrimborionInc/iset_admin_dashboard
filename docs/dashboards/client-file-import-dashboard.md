@@ -6,7 +6,7 @@ Date: 2026-03-23
 
 - Route: `/iset/imports/client-files`
 - Navigation label: `Configuration > Client Batch Import`
-- Default access: `System Administrator`, `Program Administrator`
+- Default access: `System Administrator`, `NWAC Administrator`
 - Purpose: backload participant/client spreadsheets into real client files without fabricating historical applications or downstream case artefacts.
 - Follow-on operating model: after import, case managers build out pre-go-live action plans, interventions, funding/cost details, and documents from the Case Workspace using explicit backload actions rather than fake intake workflow.
 

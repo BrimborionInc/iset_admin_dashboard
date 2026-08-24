@@ -49,7 +49,7 @@ The current database supports initial case tracking (linking applications to cas
 
 Financial APIs are not yet exposed; finance UI widgets use mocked data or rely on snapshots. ESDC submission endpoints exist (`/api/esdc/reporting-packages`) but operate separately from action plans/interventions.
 
-Finance allocation evidence note (2026-04-27): the current DEV finance allocation evidence helper routes are not general document-store routes. `/api/allocations/evidence/upload`, `/delete`, and `/presign-download` are finance-role guarded; new uploads are tracked as actor-owned `pending_uploads` rows with `document_type = finance_allocation_evidence`; presign/delete requires either allocation/pot evidence metadata provenance or ownership of the pending upload. Do not add raw object-key download or delete paths for finance evidence.
+Finance allocation evidence note (updated 2026-08-24): the current DEV finance allocation evidence helper routes are not general document-store routes. `/api/allocations/evidence/upload`, `/delete`, and `/presign-download` require `System Administrator` or `NWAC Administrator`; new uploads are tracked as actor-owned `pending_uploads` rows with `document_type = finance_allocation_evidence`; presign/delete requires either allocation/pot evidence metadata provenance or ownership of the pending upload. Do not add raw object-key download or delete paths for finance evidence.
 
 ### 2.3 Application Payload Insights
 
@@ -70,7 +70,7 @@ Application answers (stored in `iset_application.payload_json.answers`) are used
 - **ESDC ILMP Schema 1.4:** Requires action plan records with agreement number, start/result dates, result codes, eligibility, and associated interventions (mandatory fields: code, start date; conditional fields: end date, duration, cost, outcome, related NOC/version). See `docs/data/ESDC/` for full specification.
 - **ESDC Submission Audit:** Each exported participant submission requires traceability (source case, action plan, interventions, financial totals) and ability to regenerate/export corrections.
 - **NWAC / Contribution Agreement Oversight:** Budget pots (EI vs CRF), local priorities, and region-specific funding allocations must be enforceable to avoid overspend and ensure interventions tie to correct funding stream.
-- **Multi-role Access Control:** System admin, program admin, regional coordinator, and assessor roles with region scoping; financial officers/auditors will be added.
+- **PATH Access Control:** The only sign-in roles are System Administrator, NWAC Administrator, Regional Manager, and ISET Coordinator. Finance and audit work outside PATH unless a future operating-model decision explicitly changes that boundary.
 
 ---
 
@@ -249,7 +249,7 @@ Establish consistent DTOs mapping to normalized tables; avoid direct JSON blobs 
 2. **Assessment** – Assessor works in workspace pulling application answers; upon submission, data stored in `CaseAssessmentVersion` and informs action plan context.
 3. **Action Plan Draft** – User launches plan modal (context from `/action-plan/context`), stores to `ActionPlan` with initial metadata and revision snapshot.
 4. **Add Interventions** – Each intervention captures ILMP code, schedule, funding needs; splits recorded via `InterventionFundingSplit`. Commitments created once budgets approved.
-5. **Financial Approvals** – Finance officer reviews commitments, creates disbursements, and records payments. Snapshots aggregate case-level financial status.
+5. **Finance Handoff and Follow-up** – PATH staff prepare and track the request; Finance reviews and processes it outside PATH. PATH snapshots aggregate operations-side financial status without claiming accounting authority.
 6. **Plan Closure** – When outcomes achieved, plan result code/date captured; interventions closed with actuals. `ActionPlanOutcome` records final ILMP data.
 7. **ESDC Submission** – Exporter composes participant XML from normalized tables (client + plan + interventions + financial totals); submission log captures ack/error.
 8. **Reporting** – Dashboards draw from budgets, commitments, payments, and snapshots; compliance audits rely on event logs and document links.

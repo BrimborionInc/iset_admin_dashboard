@@ -10,11 +10,11 @@ Last Updated: 2026-02-10
 
 - Implemented (2026-02-10): ISET Coordinator intro tour + one-time sign-in prompt + DB-backed progress tracking.
 - Current live coordinator intro tutorial ID: `iset-coordinator-intro-v2` after the PATH onboarding rewrite on 2026-03-30.
-- Deferred: Tutorials dashboard (`/tutorials-dashboard`) and additional role-specific tours (Program Admin, Regional Manager).
+- Deferred: Tutorials dashboard (`/tutorials-dashboard`) and additional role-specific tours (NWAC Administrator, Regional Manager).
 
 ## Implementation Summary (2026-02-10)
 
-- Tutorial ID: `iset-coordinator-intro-v1` (role: canonical `Application Assessor`).
+- Tutorial ID: `iset-coordinator-intro-v1` (role: canonical `ISET Coordinator`).
 - Auto-trigger: on homepage (`/`) after sign-in, show a one-time confirmation modal (Start tour / Not now).
 - Persistence: stored per staff profile in MySQL table `staff_tutorial_progress` (`completed` | `dismissed`).
 - Hotspots: added stable anchors on the homepage widgets and side navigation so the tour does not depend on live row-level data.
@@ -42,7 +42,7 @@ Last Updated: 2026-02-10
 
 ## Requirements Captured So Far
 
-- Target roles: Program Admin, Regional Manager, ISET Coordinator.
+- Target roles: NWAC Administrator, Regional Manager, ISET Coordinator.
 - Start with ISET Coordinator tutorial first (simplest; fewer dashboards).
 - Track which staff have completed which tutorials.
 - If a staff member has not completed the introductory tutorial, it should auto-trigger after they sign in.
@@ -158,7 +158,7 @@ Files (expected):
 
 ### Phase 6: Auto-trigger UX (one-time sign-in prompt)
 
-- On route `/` for role "Application Assessor" (ISET Coordinator):
+- On route `/` for role `ISET Coordinator`:
   - If intro tutorial has no progress row yet, show a modal prompt:
     - Primary: "Start tour"
     - Secondary: "Not now" (records `dismissed`)

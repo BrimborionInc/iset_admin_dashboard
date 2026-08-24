@@ -2,9 +2,54 @@
 
 Purpose: track live PROD data repairs whose affected staff or business owners may need to be informed later.
 Audience: operations, product, support, and future AI-assisted maintenance threads.
-Last Updated: 2026-08-06
+Last Updated: 2026-08-21
 
 Use this log for repairs that may be externally invisible to staff but should be available for later owner communication. Keep entries concise, evidence-based, and linked to the exact scripts or reports where possible. Do not use this file as approval to mutate PROD; follow the PROD repair rules in `docs/ops/agent-operational-access.md`.
+
+## 2026-08-21 - Approval-letter sent-marker residual repair
+
+Status: guarded PROD repair applied and independently verified. Canonical feedback `#182` is resolved and duplicate `#193` remains closed. No staff or applicant notification was sent by PATH.
+
+Reason: application `27` / case `109` completed its August 11 approval-letter send, all three signing requests, and durable document persistence, but the historical split send path failed to persist the application-scoped approval-letter-sent marker. The August 15 atomic send-path patch prevents this condition for current sends but did not backfill the historical record.
+
+Repair and evidence:
+
+- Added only `applicationDecisionLetters["27"].decisionLetterSent.approval`, using the durable approval-letter artifact timestamp, and advanced the application concurrency version from `81` to `82`; approval status, lifecycle, outcome, awaiting/closure state, messages, signing requests, documents, notifications, and payments were unchanged.
+- Apply SSM command `19a505fa-5a87-415d-843d-9aecc46b23ca` completed successfully. Independent verification command `2e3408c9-b257-4c91-93d2-d5b7671ac6d6` proved the exact expected after-hash and that removing only the marker restores the full original context hash.
+- Both focused workflow suites passed, 21 tests total. The full live residual inventory found no other currently approved application missing all recognized approval markers.
+- Feedback closeout command `3333fec5-26df-42d4-8dc1-161cfd806282` and independent verification `6417d1c3-0592-4d96-8e2c-cbc0c1a333b7` passed. The submitted feedback queue was independently empty.
+- Preview, function-probe, apply, recovery, and verification artifacts are `sql/ops/prod-application-27-approval-marker-repair-*-20260821.sql`; feedback closeout artifacts are `sql/ops/prod-feedback-182-resolution-*-20260821.sql`.
+
+Notification note:
+
+- No trial-and-error confirmation is required from the reporter. If support chooses to follow up, state that the historical record was repaired and independently verified; refreshing or reopening the file will show the Funding forms and signatures step.
+
+## 2026-08-19 - Denise Chalifoux accidental-denial recovery
+
+Status: guarded PROD recovery applied and independently verified. Application `31` / case `113` is directly with original submitter and assigned Regional Manager Derry Yellowfly for correction and resubmission. No staff or applicant notification was sent by PATH.
+
+Reason: the application status had been manually reset to `in_review`, but authoritative assessment workflow `59` remained `final_decision_recorded` with Madison Coppola's denial. That final workflow stage kept Derry read-only even though staff profile `995581` is both the active case assignee and recorded original workflow submitter.
+
+Repair applied:
+
+- Reopened case `113` to `intake / intake`, retained application `31` at `in_review / in_review`, and moved workflow `59` directly to `returned_to_submitter` with `Submitter` ownership and Derry's original submitter lineage intact.
+- Cleared only the final Decision Maker fields and denial-reporting context. The assessment recommendation and scoped other-funding content remain intact, and the original denial event remains in workflow history.
+- Archived denial-generated action plan `195` and denied packet `11648`, cancelled synthetic interventions `424-425`, and removed untouched pending ESDC seed `496`.
+- Added workflow event `408`, case event `488`, and internal case note `599`. No messages, signatures, proposals, Action Plan items, reminders, CFA records, payments, finance transactions, submitted reporting, or dependent document links existed.
+- Released the exact application lock inside the successful transaction. No applicant communication was generated.
+
+Evidence:
+
+- Recovery artifacts are `sql/ops/prod-denise-chalifoux-assessment-recovery-*-20260819.*`.
+- Aurora snapshot `path-prod-denise-assessment-recovery-20260819-150930` was `available`, encrypted, and 100% complete before apply.
+- Final live-DDL preflight SSM command `bb7271c2-3f8a-4824-98db-97428f3fc3e3` and current-state/dependency preview command `bf75b55b-e416-4d6c-ac46-1d85bda92510` passed on `iset_intake` / MySQL `8.0.42`.
+- Lock command `c16bd845-7b72-49ed-a766-c16210e1e69e` acquired the exact application lock; apply command `6ef2460c-8c4b-489f-b09b-00c9964f04a1` completed successfully.
+- Independent verification command `1d5b4a51-9ae4-4235-a122-d4d2e8f37db4` confirmed the submitter-owned workflow, reopened case, cleared decision fields/context, withdrawn generated artifacts, removed ESDC seed, complete audit history, and no remaining application lock.
+- Focused frontend policy coverage passed all 27 checks, including the dual-role Regional Manager original-submitter edit path. An attempted direct backend-suite invocation did not run assertions because the repository requires its aggregate synthetic `PATH_TEST_ENV_FILE` harness; this did not affect the already-deployed policy or the independent live data verification.
+
+Notification note:
+
+- Tell Derry to refresh or reopen Denise's application. He can now edit the returned assessment and resubmit it for Regional Manager review. Madison does not own the editable record; she remains visible only as the actor on the preserved accidental-denial history.
 
 ## 2026-08-06 - Chrystal Loucks withdrawn application restoration
 

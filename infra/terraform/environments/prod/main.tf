@@ -137,22 +137,22 @@ module "identity" {
 module "compute" {
   source = "../../modules/compute"
 
-  name_prefix           = var.name_prefix
-  vpc_id                = module.networking.vpc_id
-  public_subnet_ids     = module.networking.public_subnet_ids
-  private_subnet_ids    = module.networking.private_subnet_ids
-  db_security_group_id  = module.data.cluster.security_group_id
-  app_instance_type     = var.app_instance_type
-  app_min_size          = var.app_min_size
-  app_max_size          = var.app_max_size
-  app_desired_capacity  = var.app_desired_capacity
-  ami_id                = data.aws_ssm_parameter.app_ami.value
-  key_name              = var.app_key_name
-  alb_certificate_arn   = var.alb_certificate_arn
-  allowed_ingress_cidrs = var.alb_allowed_ingress_cidrs
-  user_data_render      = var.app_user_data
-  admin_domain_name             = var.admin_domain_name
-  portal_domain_name            = var.portal_domain_name
-  portal_additional_domain_names = var.portal_additional_domain_names
-  tags                          = local.tags
+  name_prefix                     = var.name_prefix
+  vpc_id                          = module.networking.vpc_id
+  public_subnet_ids               = module.networking.public_subnet_ids
+  private_subnet_ids              = module.networking.private_subnet_ids
+  db_security_group_id            = module.data.cluster.security_group_id
+  app_instance_type               = var.app_instance_type
+  app_min_size                    = var.app_min_size
+  app_max_size                    = var.app_max_size
+  app_desired_capacity            = var.app_desired_capacity
+  ami_id                          = data.aws_ssm_parameter.app_ami.value
+  key_name                        = var.app_key_name
+  alb_certificate_arn             = var.alb_certificate_arn
+  allowed_ingress_cidrs           = var.alb_allowed_ingress_cidrs
+  user_data_render                = var.app_user_data
+  admin_domain_name               = var.admin_domain_name
+  portal_domain_name              = var.portal_domain_name
+  portal_additional_domain_names  = var.portal_additional_domain_names
+  tags                            = local.tags
 }

@@ -1573,7 +1573,7 @@ function remoteRunner() {
         ...process.env,
         OPENROUTER_API_KEY: 'deployed-configured',
         PRIVACY_DENIAL_NON_ADMIN_STAFF_TOKEN: coordinator.session.idToken,
-        PRIVACY_DENIAL_FINANCE_OR_ADMIN_TOKEN: decisionMaker.session.idToken,
+        PRIVACY_DENIAL_PAYMENT_ADMIN_TOKEN: decisionMaker.session.idToken,
         PRIVACY_DENIAL_CASEWORK_PAYMENTS_TOKEN: coordinator.session.idToken,
         PRIVACY_DENIAL_APPLICANT_A_TOKEN: applicantAToken,
         PRIVACY_DENIAL_APPLICANT_B_TOKEN: applicantBToken,

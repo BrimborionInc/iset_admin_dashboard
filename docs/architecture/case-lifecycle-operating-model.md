@@ -1,7 +1,9 @@
 # Case Lifecycle Operating Model
 
-Version: 0.1.0 (Draft)  
+Version: 0.1.0 (Draft)
 Last Updated: 2025-09-19
+
+Status: historical 2025 design draft retained for provenance; it is not the source of truth for current roles or permissions. The `PA`, `RC`, and `AA` codes below are retired design notation. Current PATH sign-in roles are System Administrator, NWAC Administrator, Regional Manager, and ISET Coordinator; current authorization must be verified in the route matrix and server guards.
 
 ## 1. Scope
 - Covers post-submission lifecycle of an application (public portal submission -> internal processing -> decision & closure).
@@ -44,9 +46,9 @@ Guardrails:
 
 ## 4. Roles & Permissions
 Role definitions (cumulative visibility):
-- Program Administrator (PA): Full visibility. Can assign to anyone. Can assess. Can override or reassign. Records decisions. Configures rules.
-- Regional Coordinator (RC): Visibility limited to cases assigned to themselves or to Application Assessors (AAs) in their region/team. Can self-assign within purview, reassign among their AAs, assess, record decisions for their region.
-- Application Assessor (AA): Only sees cases currently assigned to them. Can assess and submit assessments, respond to revision requests.
+- NWAC Administrator (PA): Full visibility. Can assign to anyone. Can assess. Can override or reassign. Records decisions. Configures rules.
+- Regional Manager (RC): Visibility limited to cases assigned to themselves or to ISET Coordinators (AAs) in their region/team. Can self-assign within purview, reassign among their AAs, assess, record decisions for their region.
+- ISET Coordinator (AA): Only sees cases currently assigned to them. Can assess and submit assessments, respond to revision requests.
 
 Permissions Matrix (excerpt):
 | Action | PA | RC | AA |

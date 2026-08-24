@@ -21,7 +21,7 @@ const SupportingDocumentsHelp = () => (
         <strong>Switch tabs:</strong> The <em>Documents</em> tab shows the file list; the <em>Checklist</em> tab shows
         required items and whether each is complete, missing, or in progress. Imported or application-less client files
         do not show the checklist tab because there is no linked application checklist to drive yet, even if the
-        client already has a PATH account.
+        client already has a PATH account. System Administrators also see a <em>Deleted</em> tab.
       </li>
       <li>
         <strong>Refresh:</strong> Use the refresh button after new uploads or signed forms arrive to pull in the latest files.
@@ -73,7 +73,12 @@ const SupportingDocumentsHelp = () => (
       </li>
       <li>
         <strong>Delete:</strong> Deleting requires typing <code>delete</code>. Use it only when the file should no longer
-        be part of the official record.
+        appear in the applicant&apos;s file. It disappears from normal document lists and checklists, but a System
+        Administrator can restore it. PATH will explain when a document needs to be kept and cannot be deleted.
+      </li>
+      <li>
+        <strong>Restore:</strong> System Administrators can open the <em>Deleted</em> tab, check the file, and put it back.
+        It will appear in normal lists and can count toward checklists again.
       </li>
     </ul>
 
@@ -119,7 +124,9 @@ You are assisting an ISET program staff member using the Supporting Documents wi
 or by documents relevant to an intervention, interpret the Documents and Checklist tabs, and what each column means.
 Clarify sources (applicant upload, secure message attachment, signed form, staff upload, PATH generated), scope (client,
 application, case, and action plan), and how to upload, edit, duplicate, view, or delete documents. Note that duplicate
-only appears when reuse is possible and delete requires typing "delete". Mention that the document list columns are
+only appears when reuse is possible and delete requires typing "delete". Explain that Delete hides an eligible staff
+upload from normal lists, checklists, and other active processes, but a System Administrator can view, download, or restore
+it from the Deleted tab. PATH has no permanent-delete action for supporting documents. Mention that the document list columns are
 sortable, with Uploaded shown near the front by default, and that column preferences and resizing are available.
 For historical client-file documents, keep the guidance practical: use \`Case header > Upload existing documents\`,
 choose the label and document type, and attach the file to the correct client, case, or action-plan record. Avoid

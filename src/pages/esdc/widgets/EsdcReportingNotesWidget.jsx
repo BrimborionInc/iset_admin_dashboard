@@ -13,7 +13,7 @@ import { boardItemI18nStrings } from './common';
 const notes = [
   {
     id: 'note-1',
-    author: 'Finance Team',
+    author: 'Program Reporting Team',
     timestamp: '2025-10-20T11:12:00Z',
     text: 'Awaiting confirmation from external auditor regarding Schedule B totals.'
   },

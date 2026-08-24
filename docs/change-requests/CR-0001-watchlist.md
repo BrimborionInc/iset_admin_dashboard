@@ -6,8 +6,8 @@
 - Generate bell notifications for watched cases using dedicated watcher audience rules instead of role overrides.
 
 ## Background
-- Program Administrators need to monitor cases they do not own and still receive timely updates when those cases change state.
-- The previous idea of reusing “Application Assessor” bell-alert rules for flagged cases would have bypassed Program Administrator notification settings and produced duplicate alerts for real assessors.
+- NWAC Administrators need to monitor cases they do not own and still receive timely updates when those cases change state.
+- The previous idea of reusing “ISET Coordinator” bell-alert rules for flagged cases would have bypassed NWAC Administrator notification settings and produced duplicate alerts for real assessors.
 - A personal watchlist avoids cross-role noise, keeps settings predictable, and aligns with the “follow” metaphor common in case-management tools.
 
 ## Requirements
@@ -15,7 +15,7 @@
 - Watch state is private to the watcher: other users do not see the flag, and no shared priority flag is introduced.
 - Manage Applications widget displays an inline status indicator (e.g., red flag icon) whenever the signed-in user is watching that case, and offers a filter or quick selector for “My watched cases.”
 - Backend persists watches per `(case_id, user_id)` with audit timestamps.
-- Dispatcher emits bell alerts for watched cases whenever the underlying event would have notified an Application Assessor.
+- Dispatcher emits bell alerts for watched cases whenever the underlying event would have notified an ISET Coordinator.
 - Emit new `case_watch_added` and `case_watch_removed` events for auditability and future automations.
 - Prepare for a future “My Watchlist” homepage widget that surfaces the watcher’s cases (out of scope to implement now, but leave discoverable APIs/data).
 

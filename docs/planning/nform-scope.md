@@ -98,7 +98,7 @@ When classifying code during manifest creation:
 
 - `System Administrator` is the only built-in nForm role.
 - Derived solutions define every business role, permission bundle, organizational label, and assignment rule.
-- PATH roles such as NWAC Administrator, Regional Manager, ISET Coordinator, and Finance must not remain as platform defaults or hidden authorization branches.
+- PATH roles such as NWAC Administrator, Regional Manager, and ISET Coordinator must not remain as platform defaults or hidden authorization branches. Finance is an external business/integration boundary, not a PATH role, and must likewise not become an nForm authorization branch.
 
 ## Portal and Identity Boundary
 

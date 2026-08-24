@@ -9,11 +9,11 @@ Legend:
 - `Partial`: role touches some, but not all, workflow surfaces.
 - `Matrix`: route is controlled by role matrix (not hardcoded in route guard here).
 
-| Workflow | ISET Coordinator | Regional Manager | Program Administrator | Notes |
+| Workflow | ISET Coordinator | Regional Manager | NWAC Administrator | Notes |
 |---|---|---|---|---|
 | Application Assessment | Yes | Yes | Yes | Main workspace route: `/application-case/:id` (matrix controlled). |
 | Case Management (Action Plans, Interventions, Payments) | Yes | Yes | Yes | Case workspace route: `/cases/:caseId` (matrix controlled). |
-| ILMP Reporting | Partial | Partial | Yes | `/esdc/reporting` explicitly allows Program Administrator (+ System Administrator). Other ESDC routes are matrix controlled. |
+| ILMP Reporting | Partial | Partial | Yes | `/esdc/reporting` explicitly allows NWAC Administrator (+ System Administrator). Other ESDC routes are matrix controlled. |
 | Payments AP Integrations | Partial | Yes | Yes | Finance Payments route matrix controlled; case payment widgets are in case workspace. |
 
 ## Route References
@@ -21,7 +21,7 @@ Legend:
 - Application Assessment: `/application-case/:id`
 - Case Workspace: `/cases/:caseId`
 - ILMP participant submissions: `/esdc/participants`
-- ILMP participant workspace: `/esdc/participant/:clientId`
+- ILMP participant workspace: `/esdc/participants/:clientId`
 - ILMP reporting packages: `/esdc/reporting`
 - Finance Payments: `/finance/payments`
 - Program Payments (caseworking context): `/iset/payments`

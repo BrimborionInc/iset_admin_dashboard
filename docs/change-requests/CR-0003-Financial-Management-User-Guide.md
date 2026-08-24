@@ -1,6 +1,6 @@
 # ISET Financial Management Module – Executive User Guide
 
-_Audience: Program senior management (Executive Directors, Finance Officers, Operations Leads)_  
+_Audience: Program senior management, Operations Leads, and external Finance stakeholders_
 _Source documents: CR-0003 Functional Requirements, CR-0003 Implementation Log (latest update 2025‑12‑07), CR-0003 Addendum (Payments & Reporting), Finance Enablement Tracker_
 
 ---

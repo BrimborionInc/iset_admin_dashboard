@@ -6,8 +6,8 @@ const FinanceReconciliationDetailHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Provide full visibility into the selected Intacct submission attempt so program admins can
-        identify why a packet failed and where to fix it.
+        Provide full visibility into the selected Intacct submission attempt so authorized PATH
+        administrators can identify why a packet failed and where to fix it.
       </p>
     </Box>
     <Box>

@@ -5,10 +5,10 @@
 **Last Updated:** 2026-04-26
 
 ## Overview
-ISET coordinators should be able to escalate cases to regional managers, who can respond with guidance, take ownership, reassign, or escalate further to Program Admins. The flow must remain auditable, role-gated, and visible in dashboards/work queues.
+ISET coordinators should be able to escalate cases to regional managers, who can respond with guidance, take ownership, reassign, or escalate further to NWAC Administrators. The flow must remain auditable, role-gated, and visible in dashboards/work queues.
 
 ## Roles & Pathways
-- **Coordinator → Regional Manager → Program Admin** (primary path).
+- **Coordinator → Regional Manager → NWAC Administrator** (primary path).
 - Each tier can: respond with guidance, reassign, take ownership, or escalate further (if applicable).
 - Only the current escalation owner can act; originator can view status and receive responses.
 
@@ -36,8 +36,8 @@ ISET coordinators should be able to escalate cases to regional managers, who can
 - Only expose escalation entry points when the application is in a non-terminal status (not `approved/completed/rejected/closed/archived`).
 - Role gating for quick actions:
   - **Coordinators:** may initiate/escalate only.
-  - **Regional Managers:** may both escalate (to Program Admins) and respond/resolve escalations from Coordinators.
-  - **Program Admins:** may respond/resolve escalations received from Regional Managers (no further escalation).
+  - **Regional Managers:** may both escalate (to NWAC Administrators) and respond/resolve escalations from Coordinators.
+  - **NWAC Administrators:** may respond/resolve escalations received from Regional Managers (no further escalation).
 - System Administrators can override terminal statuses for “fix” workflows, but that is outside the normal escalation loop.
 - Require the application lock before allowing quick actions to avoid dueling updates; mirror the same checks server-side (defense in depth).
 
@@ -55,21 +55,21 @@ ISET coordinators should be able to escalate cases to regional managers, who can
 ## Permissions
 - Only eligible roles see the action for their tier; hide/disable otherwise.
 - Only current escalation owner can act on a pending item.
-- Originator and current owner can view history; audit entries visible to Program Admins.
+- Originator and current owner can view history; audit entries visible to NWAC Administrators.
 
 ## Homepage Integration (Work Queues)
 - Use the escalation model as a data source for homepage widgets. Add a fast `has_open_escalation`/`current_escalation_id` marker on `iset_application` to avoid heavy joins for counts.
 - Bucket concepts:
   - **Coordinators:** “Escalations sent” (pending manager response), “Returned with guidance.”
-  - **Regional Managers:** “Escalations pending review” (from coordinators); optional “Escalate to Program Admin” for forwarded items.
-  - **Program Admins:** “Exceptions & Escalations” = open escalations where `current_owner_role` = Program Admin and state is not resolved/closed.
-- Items should map to the Program Admin Work Items widget shape (id, title, bucketId, summary, status, owner, region, due/age) and include escalation state/last action note.
+  - **Regional Managers:** “Escalations pending review” (from coordinators); optional “Escalate to NWAC Administrator” for forwarded items.
+  - **NWAC Administrators:** “Exceptions & Escalations” = open escalations where `current_owner_role` = NWAC Administrator and state is not resolved/closed.
+- Items should map to the NWAC Administrator Work Items widget shape (id, title, bucketId, summary, status, owner, region, due/age) and include escalation state/last action note.
 - Counts for homepage cards derive from the escalation table filtered by role and non-terminal application status; events keep Recent Activity in sync.
 
 ## Quick Action UX (High-Level)
-- Show quick actions only when the application is non-terminal and the user holds the lock; role-gate the menu (coordinator = escalate; regional manager = escalate/respond; program admin = respond only).
+- Show quick actions only when the application is non-terminal and the user holds the lock; role-gate the menu (ISET Coordinator = escalate; Regional Manager = escalate/respond; NWAC Administrator = respond only).
 - Each quick action opens a modal that collects required info and confirms intent:
-  - **Escalate:** reason/category, optional notes/attachments, target (manager/program admin), show resulting escalation state.
+  - **Escalate:** reason/category, optional notes/attachments, target (Regional Manager or NWAC Administrator), show resulting escalation state.
   - **Respond/resolve:** response note, disposition (return with guidance, take ownership/reassign, or escalate up if allowed).
   - **Close (if exposed):** confirm word + note; keep SysAdmin-only for fixes.
 - Modal executes the action (status/escalation change) with loading/error states and lock conflict handling; on success, emit escalation events, refresh case data, and show a success acknowledgment.

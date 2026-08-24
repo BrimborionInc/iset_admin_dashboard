@@ -14,7 +14,7 @@ const getFunctionSource = name => {
 };
 
 describe('application overdue queue coverage', () => {
-  it('counts program-admin overdue rows from SLA timing, not weekly decisions', () => {
+  it('counts NWAC Administrator overdue rows from SLA timing, not weekly decisions', () => {
     const source = getFunctionSource('countProgramAdminOverdue');
 
     expect(source).toContain('fetchAllApplicationSlaRows(pool)');

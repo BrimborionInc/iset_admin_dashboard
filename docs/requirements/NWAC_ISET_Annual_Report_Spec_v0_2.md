@@ -183,7 +183,7 @@ Pulled from manual register:
 ### FR-AR-001 Create a Draft Annual Report Data Pack
 - Input: fiscal year
 - Output: Draft pack with computed tables (AR-1..AR-5) visible in UI.
-- Permissions: Finance roles.
+- Permissions: System Administrator and NWAC Administrator.
 
 ### FR-AR-002 Stream derivation and validation
 - Every included transaction must map to exactly one stream via pot tag (CRF or EI).
@@ -266,4 +266,3 @@ Exports must embed: org name, agreement number, FY, version, generated_at, cutof
   - snapshot/versioning + exports
   - audited statements attachment gating + certification record
   - optional AOP planned-budget import
-

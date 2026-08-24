@@ -53,7 +53,7 @@ Create an end-to-end contact-handling capability for the NWAC ISET portal. Repla
    - Detail view to read message, record notes/response, update status (e.g., `new`, `in-progress`, `resolved`).
 
 2. **RBAC & Audit**
-   - Restrict access to roles such as `SuperAdmin`, `ProgramAdmin`.
+   - Restrict access to `System Administrator` and `NWAC Administrator`.
    - Log user and timestamp when updates occur.
 
 3. **Notifications Integration**

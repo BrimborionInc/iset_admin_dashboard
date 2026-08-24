@@ -74,7 +74,7 @@ The intake renderer should dynamically request a document whenever the applicant
 | Authorization for Release of Student Information | Trigger when `target-program` indicates formal schooling | Determine whether e-sign covers compliance; add upload placeholder otherwise. |
 | Consent for use of image/video/audio | Trigger when applicant opts in | Could live under communications preferences rather than uploads. |
 | Resume | Always required per checklist | Provide dedicated uploader on earlier step so case managers can review before financials. |
-| Monthly Attendance Form | Applies only after living allowance disbursement; exclude from intake but note in docs that finance ops gathers monthly. |
+| Monthly Attendance Form | Applies only after living allowance disbursement; exclude from intake but note in docs that PATH program staff gather it for the Finance handoff. |
 
 ### Disability supports
 | Document | Trigger | Notes |

@@ -66,7 +66,7 @@ NWAC Administrator   → may manage NWAC Administrator, Regional Manager, ISET C
 Regional Manager     → may manage ISET Coordinator only
 ISET Coordinator     → cannot manage administrative users
 ```
-* `normalizeRoleKey` canonicalises friendly labels ("Program Administrator", "System Admin", etc.) before applying the guard.
+* `normalizeRoleKey` normalises the canonical labels (for example, `NWAC Administrator` and `System Administrator`) before applying the guard.
 * The server now resolves the target user's actual Cognito admin group with Cognito `AdminListGroupsForUser` before applying guards. Administrative routes no longer trust `role` or `currentRole` values sent from the browser.
 * Staff region access and staff-profile identity for admin users are DB-backed. For staff/admin accounts, treat `staff_profiles.region_id` plus `staff_region` as the operational region source of truth, and `staff_profiles.id` as the staff identity source after Cognito-sub hydration. Do not rely on Cognito `custom:region_id` or `custom:user_id`. The admin auth middleware ignores those legacy staff token claims so missing DB assignments must be repaired in the database/user-management flow, not by signing in.
 

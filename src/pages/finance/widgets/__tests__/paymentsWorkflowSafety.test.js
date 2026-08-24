@@ -182,7 +182,7 @@ describe("payments workflow safety rails", () => {
       "const recordPaymentPacketSubmissionMeta = async"
     );
 
-    expect(previewRoute).toContain("requireFinanceRole");
+    expect(previewRoute).toContain("requireFinancialManagementAdminAccess");
     expect(previewRoute).toContain("buildPaymentPacketEmailPreviewPayload");
     expect(previewBuilder).toContain("buildPaymentPacketEmail");
     expect(previewBuilder).toContain("bundleLinkIsPlaceholder");

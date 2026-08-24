@@ -2,7 +2,7 @@ export const documentationCategories = [
   {
     id: 'training-compliance',
     title: 'Guidance & Compliance',
-    description: 'Orientation guidance and audit-ready checklists for ISET case managers and PTMA staff.',
+    description: 'Orientation guidance and audit-ready checklists for ISET Coordinators and other PATH staff.',
     items: [
       {
         id: 'iset-orientation-2025',

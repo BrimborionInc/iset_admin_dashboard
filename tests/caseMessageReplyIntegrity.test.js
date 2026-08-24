@@ -324,8 +324,9 @@ describe('case secure-message reply integrity', () => {
     })).resolves.toEqual({ updated: true, replyMessageId: 901 });
     const [sql, params] = successfulConnection.query.mock.calls[0];
     expect(compactSql(sql)).toContain("sender_actor_type = 'applicant_user'");
+    expect(compactSql(sql)).not.toContain("recipient_actor_type = 'applicant_user'");
     expect(compactSql(sql)).toContain("NOT IN ('archived', 'deleted', 'withdrawn')");
-    expect(params).toEqual([901, 10, 20, 20, 500, 500]);
+    expect(params).toEqual([901, 10, 20, 20, 500]);
 
     const missedConnection = {
       query: jest.fn(async () => [{ affectedRows: 0 }, []]),
@@ -342,6 +343,53 @@ describe('case secure-message reply integrity', () => {
     });
   });
 
+  test('a staff follow-up quoting a staff-origin message does not claim that the applicant replied', async () => {
+    const connection = {
+      query: jest.fn(async () => {
+        throw new Error('staff follow-up must not update the quoted message status');
+      }),
+    };
+    const outboundTarget = buildReplyTarget({
+      sender_actor_type: 'staff_profile',
+      sender_user_id: 700,
+      sender_staff_profile_id: 77,
+      recipient_actor_type: 'applicant_user',
+      recipient_user_id: 500,
+      recipient_staff_profile_id: null,
+      status: 'unread',
+    });
+
+    await expect(exported.applyCaseMessageReplyTargetStatus({
+      connection,
+      replyTarget: outboundTarget,
+      replyMessageId: 901,
+      caseId: 10,
+      applicationId: 20,
+      applicantUserId: 500,
+    })).resolves.toEqual({
+      updated: false,
+      reason: 'staff_follow_up',
+      replyMessageId: 901,
+    });
+    expect(connection.query).not.toHaveBeenCalled();
+  });
+
+  test('a staff reply to an applicant-origin message records that the staff recipient replied', async () => {
+    const connection = {
+      query: jest.fn(async () => [{ affectedRows: 1 }, []]),
+    };
+
+    await expect(exported.applyCaseMessageReplyTargetStatus({
+      connection,
+      replyTarget: buildReplyTarget(),
+      replyMessageId: 901,
+      caseId: 10,
+      applicationId: 20,
+      applicantUserId: 500,
+    })).resolves.toEqual({ updated: true, replyMessageId: 901 });
+    expect(connection.query).toHaveBeenCalledTimes(1);
+  });
+
   test('the real send route locks the reply after BEGIN and uses the guarded status writer', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '../isetadminserver.js'), 'utf8');
     const start = source.indexOf('const handlePostCaseSecureMessage = async (req, res) => {');
@@ -350,11 +398,13 @@ describe('case secure-message reply integrity', () => {
     const begin = handler.indexOf('await messageWriteConnection.beginTransaction()');
     const lock = handler.indexOf('await lockAndValidateCaseMessageReplyTarget({');
     const insert = handler.indexOf('`INSERT INTO messages');
-    const mark = handler.indexOf('await markCaseMessageReplyTargetReplied({');
+    const mark = handler.indexOf('await applyCaseMessageReplyTargetStatus({');
 
     expect(begin).toBeGreaterThanOrEqual(0);
     expect(lock).toBeGreaterThan(begin);
     expect(insert).toBeGreaterThan(lock);
     expect(mark).toBeGreaterThan(insert);
+    expect(handler).toContain('lockedReplyTargetMessage = await lockAndValidateCaseMessageReplyTarget({');
+    expect(handler).toContain('replyTarget: lockedReplyTargetMessage');
   });
 });

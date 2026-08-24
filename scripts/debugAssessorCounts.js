@@ -18,9 +18,9 @@ async function main() {
   console.log('Recent staff profiles:');
   console.table(staff);
 
-  const assessors = staff.filter(row => (row.primary_role || '').toLowerCase().replace(/\s+/g, '') === 'applicationassessor');
+  const coordinators = staff.filter(row => (row.primary_role || '').toLowerCase().replace(/\s+/g, '') === 'isetcoordinator');
 
-  const [assessorSummary] = await pool.query(
+  const [coordinatorSummary] = await pool.query(
     `SELECT sp.id, sp.email, COALESCE(c.total, 0) AS assigned_cases
        FROM staff_profiles sp
        LEFT JOIN (
@@ -29,14 +29,14 @@ async function main() {
           WHERE assigned_staff_profile_id IS NOT NULL
           GROUP BY assigned_staff_profile_id
        ) c ON c.assigned_staff_profile_id = sp.id
-      WHERE LOWER(REPLACE(sp.primary_role, ' ', '')) = 'applicationassessor'
+      WHERE LOWER(REPLACE(sp.primary_role, ' ', '')) = 'isetcoordinator'
       ORDER BY assigned_cases DESC, sp.id ASC`
   );
 
-  console.log('\nAssessor assignment summary:');
-  console.table(assessorSummary);
+  console.log('\nISET Coordinator assignment summary:');
+  console.table(coordinatorSummary);
 
-  for (const row of assessorSummary) {
+  for (const row of coordinatorSummary) {
     if (Number(row.assigned_cases) <= 0) continue;
     const [cases] = await pool.query(
       `SELECT id, status, assigned_staff_profile_id AS assigned_to_user_id, updated_at
@@ -46,25 +46,25 @@ async function main() {
         LIMIT 10`,
       [row.id]
     );
-    console.log(`\nCases for assessor ${row.id} (${row.email}):`);
+    console.log(`\nCases for ISET Coordinator ${row.id} (${row.email}):`);
     console.table(cases);
   }
 
-  const preferredId = assessorSummary.find(row => Number(row.assigned_cases) > 0)?.id
-    || assessorSummary[0]?.id
-    || assessors.find(row => row.email && !row.email.endsWith('@placeholder.local'))?.id
-    || assessors[0]?.id;
+  const preferredId = coordinatorSummary.find(row => Number(row.assigned_cases) > 0)?.id
+    || coordinatorSummary[0]?.id
+    || coordinators.find(row => row.email && !row.email.endsWith('@placeholder.local'))?.id
+    || coordinators[0]?.id;
   if (!preferredId) {
-    console.log('No assessor profile found in recent rows.');
+    console.log('No ISET Coordinator profile found in recent rows.');
     process.exit(0);
   }
 
-  const assessorMeta = assessorSummary.find(row => row.id === preferredId)
-    || assessors.find(row => row.id === preferredId)
+  const coordinatorMeta = coordinatorSummary.find(row => row.id === preferredId)
+    || coordinators.find(row => row.id === preferredId)
     || { email: 'unknown', id: preferredId };
 
-  const assessorId = assessorMeta.id;
-  console.log(`\nInspecting cases for assessor ${assessorId} (${assessorMeta.email})`);
+  const coordinatorId = coordinatorMeta.id;
+  console.log(`\nInspecting cases for ISET Coordinator ${coordinatorId} (${coordinatorMeta.email})`);
   const [cases] = await pool.query(
     `SELECT c.id,
             (
@@ -81,7 +81,7 @@ async function main() {
      WHERE c.assigned_staff_profile_id = ?
      ORDER BY c.updated_at DESC
      LIMIT 20`,
-    [assessorId]
+    [coordinatorId]
   );
   console.table(cases);
 
@@ -103,7 +103,7 @@ async function main() {
         SUM(CASE WHEN assigned_staff_profile_id = ? THEN 1 ELSE 0 END) AS assigned,
         SUM(CASE WHEN assigned_staff_profile_id = ? AND status IS NOT NULL AND LOWER(status) IN (${placeholders.map(()=>'?' ).join(',')} ) THEN 1 ELSE 0 END) AS awaiting_applicant
      FROM iset_case`,
-    [assessorId, assessorId, ...placeholders]
+    [coordinatorId, coordinatorId, ...placeholders]
   );
   console.log('\nAggregate counts:');
   console.table(agg);

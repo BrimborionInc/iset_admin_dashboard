@@ -1,6 +1,8 @@
 const { SchemaReadinessError, assertEnumValueReady, assertRuntimeTableReady } = require('../src/lib/schemaReadiness');
 const {
   ADMIN_RUNTIME_SCHEMA_REQUIREMENTS,
+  DOCUMENT_LIFECYCLE_EVENT_RUNTIME_COLUMNS,
+  DOCUMENT_LIFECYCLE_RUNTIME_COLUMNS,
   STAFF_PROFILE_RUNTIME_COLUMNS,
   assertAdminRuntimeSchemaReady,
 } = require('../src/lib/adminRuntimeSchemaContract');
@@ -52,6 +54,32 @@ describe('runtime schema readiness', () => {
     STAFF_PROFILE_RUNTIME_COLUMNS.forEach(column => expect(staffProbe).toContain(`\`${column}\``));
     expect(ADMIN_RUNTIME_SCHEMA_REQUIREMENTS.find(([table]) => table === 'staff_profiles')[1])
       .toBe(STAFF_PROFILE_RUNTIME_COLUMNS);
+    expect(statements.join('\n')).not.toMatch(/\b(?:CREATE|ALTER|DROP|TRUNCATE)\b/iu);
+  });
+
+  test('admin readiness fails closed unless the complete document lifecycle contract is present', async () => {
+    const statements = [];
+    const connection = {
+      query: jest.fn(async (sql) => {
+        statements.push(String(sql));
+        return String(sql).includes('information_schema.columns')
+          ? [[{ column_type: "enum('validated','prepared')" }], []]
+          : [[], []];
+      }),
+    };
+
+    await expect(assertAdminRuntimeSchemaReady(connection)).resolves.toBe(true);
+
+    const expectedContracts = [
+      ['iset_document_lifecycle', DOCUMENT_LIFECYCLE_RUNTIME_COLUMNS],
+      ['iset_document_lifecycle_event', DOCUMENT_LIFECYCLE_EVENT_RUNTIME_COLUMNS],
+    ];
+    expectedContracts.forEach(([table, columns]) => {
+      expect(ADMIN_RUNTIME_SCHEMA_REQUIREMENTS.find(([name]) => name === table)?.[1]).toBe(columns);
+      const probe = statements.find(sql => sql.includes(`FROM \`${table}\``));
+      expect(probe).toBeDefined();
+      columns.forEach(column => expect(probe).toContain(`\`${column}\``));
+    });
     expect(statements.join('\n')).not.toMatch(/\b(?:CREATE|ALTER|DROP|TRUNCATE)\b/iu);
   });
 });

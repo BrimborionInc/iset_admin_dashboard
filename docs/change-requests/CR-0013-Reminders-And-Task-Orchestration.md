@@ -8,7 +8,7 @@ Status: Draft (needs ongoing updates)
 
 ## 1. Problem Statement
 
-Caseworkers, coordinators, and finance reviewers currently rely on ad-hoc notes or spreadsheet trackers to remember follow-ups. The admin dashboard surfaces activity (messages, interventions, submissions) but does not offer:
+Caseworkers and administrators currently rely on ad-hoc notes or spreadsheet trackers to remember follow-ups. The admin dashboard surfaces activity (messages, interventions, submissions) but does not offer:
 
 - Structured tasks with owners, due dates, or completion state.
 - Alerts when a case or application sits idle past our service thresholds.
@@ -76,7 +76,7 @@ As the Case Workspace matures, we need a consistent reminder system that spans c
    - For future calendar: reuse same API but aggregate by due date.
 
 4. **Security**
-   - Enforce RBAC on endpoints. Case staff can CRUD tasks on cases they can access; finance admins limited to finance-related reminders, etc.
+   - Enforce RBAC on endpoints. Staff can manage tasks only on cases they can access; PATH-side payment reminders follow the same four-role object scope. Finance and Sage do not sign in to PATH.
    - Audit trail on create/update/complete actions (store `updated_by_staff_profile_id`).
 
 ## 5. Milestones / Checklist

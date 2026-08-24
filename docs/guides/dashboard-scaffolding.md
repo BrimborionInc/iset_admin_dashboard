@@ -41,7 +41,7 @@ Scaffolding a dashboard means delivering a configurable Cloudscape board that ma
    - Confirm the side navigation already points to the route (or update if needed).
    - Register the new route with the access control tooling:
      - Add a friendly label in `src/widgets/AccessControlMatrix.jsx` (`ROUTE_LABELS`).
-     - Extend `src/config/roleMatrix.json` so the route defaults to `["System Administrator", "Program Administrator"]`.
+     - Extend `src/config/roleMatrix.json` so the route defaults to `["System Administrator", "NWAC Administrator"]`.
    - Verify breadcrumb updates and `renderContent` calls include unique help keys/contexts.
 
 6. **Mock data & events**
@@ -54,7 +54,7 @@ Scaffolding a dashboard means delivering a configurable Cloudscape board that ma
 - [ ] Dashboard-level help panel exists, using migrated placeholder prose, with `aiContext` defined.
 - [ ] Each widget exposes an Info link hooked to a dedicated help file with `aiContext`.
 - [ ] Mock data covers key user goals outlined in CR-0003.
-- [ ] Access Control matrix lists the dashboard with System Administrator and Program Administrator enabled by default.
+- [ ] Access Control matrix lists the dashboard with System Administrator and NWAC Administrator enabled by default.
 - [ ] New modules respect naming/versioning conventions (`finance-<dashboard>-layout-v1`, etc.).
 - [ ] No leftover placeholder components remain for the scaffolded page.
 

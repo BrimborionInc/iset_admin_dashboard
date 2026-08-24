@@ -1,6 +1,6 @@
 # Unified Documents Model (iset_document)
 
-Date: 2026-04-27
+Date: 2026-08-24
 Status: current model overview with explicitly historical sections marked below.
 
 ## Summary
@@ -21,11 +21,24 @@ Key columns:
 - `applicant_user_id` plus `application_id`, `case_id`, or `action_plan_id` for scoping.
 - `origin_message_id` + `source` to trace provenance.
 - `file_path` canonical relative path (unique) + `file_name` original display name.
-- `status` for archival / soft delete.
+- `status` distinguishes active rows, workflow-superseded `archived` rows, and user-deleted `deleted` rows. Do not reuse workflow archive as the user-delete state.
 
 Related tables:
 - `iset_document_intervention` (`document_id`, `intervention_id`) stores action-plan intervention links (many-to-many).
 - `payment_packet_document` stores payment packet evidence links (packet-level; line-level inferred).
+- `iset_document_lifecycle` stores the reversible delete state for a document.
+- `iset_document_lifecycle_event` stores immutable delete and restore transition evidence with actor snapshots.
+
+## Delete and Restore
+
+- `DELETE /api/documents/:id` is a soft delete despite the HTTP method: it changes an eligible active row to `status='deleted'`, writes/updates its lifecycle row, and records a delete event in one database transaction. The stored object is untouched.
+- Normal lists, checklist matching, and active-only processes ignore `status='deleted'`. All four PATH staff roles can request this action within their existing case/object scope.
+- Only ordinary `source='manual_upload'` files can enter this user-delete lifecycle. Applicant submissions, legacy intake uploads, secure-message attachments, PATH-generated files, signing-request documents, CFA/Funding Overview version documents, and payment evidence are protected records.
+- A delete never reverses a submission, signature, approval, payment, message, or other business event.
+- `GET .../documents?view=deleted`, deleted-file preview/download, and `POST /api/documents/:id/restore` are `System Administrator`-only. Restore proves the source object still exists and matches the recorded size and available checksum before setting the row active again.
+- PATH has no permanent-delete UI or API for supporting documents, including manual uploads. The database row and stored bytes remain available for restore.
+- Any exceptional physical removal is a separately reviewed, guarded database/storage operation outside the product workflow.
+- The additive migration `sql/migrations/20260824_0001_add_document_lifecycle_audit.sql` deliberately does not backfill older `status='deleted'` rows because their provenance and reason are unknown.
 
 ## Scope Rules
 - `document_type.scope` supports: `client`, `application`, `case`, `action_plan`, `payment_packet`.
@@ -56,6 +69,8 @@ Related tables:
 - `PUT /api/documents/:id` and `/api/documents/:id/duplicate` update action plan + intervention associations (no `linked_intervention_id`) and preserve the same application-scope fallback rules in case-based mode.
 - `GET /api/documents/:id/presign-download` now treats Word documents specially: for `.doc` / `.docx`, the admin backend generates or reuses a cached PDF preview under the object-storage prefix `WORD_PREVIEW_OBJECT_PREFIX` (default `previews/word`) and returns a presigned URL for that preview instead of the original Office object. Preview artifacts stay out of `iset_document`.
 - `GET /api/documents/:id/presign-download?mode=original` is a separate staff-admin path that bypasses Word preview substitution and forces attachment download of the original stored object. It is server-side restricted to `System Administrator` / `NWAC Administrator`.
+- `GET /api/documents/:id/presign-download` can return a lifecycle-deleted file only to `System Administrator` while it remains restorable.
+- `DELETE /api/documents/:id` and `POST /api/documents/:id/restore` implement the reversible lifecycle described above.
 - `GET /api/admin/messages/:id/attachments` upserts attachments into `iset_document` with message, client, case, application, applicant, and uploader context when a `case_id` query param is provided.
 - `POST /api/finance/payment-packets/:id/documents` validates `iset_document.client_id` matches the packet.
 
@@ -89,7 +104,7 @@ The public intake portal and the admin dashboard SHARE the same MySQL database c
 - Dual-write strategy: Portal upload endpoints insert directly into `iset_document` only when the upload already has deterministic `client_id`, `case_id`, `application_id`, and `applicant_user_id` scope. Pre-submission intake uploads remain in `iset_application_file` plus `input_json_state.doc_refs`; `/api/intake/complete` materializes those references into `iset_document` after creating or resolving the application/case.
 - No HTTP bridge needed: Previous contingency task to call an admin API for ingestion can be deprecated in favor of direct SQL insert.
 - Consistency approach: Uploads must resolve `client_id` before accepting a portal file, but `source='application_submission'` rows are written to `iset_document` only after full application/case scope is available. If a scoped insert fails, the upload or submission should fail and surface the error.
-- Removal / soft delete: Portal deletion (or mark-removed) operations should update `iset_document.status='deleted'` rather than hard deleting the unified record.
+- Removal: the public portal may physically remove only the signed-in applicant's own pre-submission draft upload while it still exists solely in intake upload/draft state. Once a file has been materialized into `iset_document` or referenced by a submission, the portal removal route must refuse it; staff lifecycle actions happen through the admin API.
 
 ### Historical Portal Plan
 This section was previously titled `Planned Portal Changes`. The current portal model no longer writes every upload directly into `iset_document` at upload time. Pre-submission portal uploads remain in intake upload state (`iset_application_file` plus intake `doc_refs`) until the application/case scope is deterministic; completion then materializes those scoped references into `iset_document`.

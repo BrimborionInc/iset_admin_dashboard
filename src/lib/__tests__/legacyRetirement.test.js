@@ -12,6 +12,11 @@ describe('R6b dormant and compatibility cleanup', () => {
     const order = server.slice(listStart, listEnd);
     expect(order.indexOf("'client_applicant_account_event'")).toBeGreaterThan(0);
     expect(order.indexOf("'client_applicant_account_event'")).toBeLessThan(order.indexOf("'client'"));
+    expect(order.indexOf("'iset_document_lifecycle_event'")).toBeGreaterThan(0);
+    expect(order.indexOf("'iset_document_lifecycle_event'")).toBeLessThan(
+      order.indexOf("'iset_document_lifecycle'")
+    );
+    expect(order.indexOf("'iset_document_lifecycle'")).toBeLessThan(order.indexOf("'iset_document'"));
     const routeStart = server.indexOf("app.post('/api/clear-iset-test-data'");
     const routeEnd = server.indexOf('// (Removed duplicate linkage-stats route', routeStart);
     const route = server.slice(routeStart, routeEnd);

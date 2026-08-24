@@ -89,7 +89,7 @@ Requirements:
 ### 5. Configuration & administration notes
 
 Requirements:
-- What can be configured by program admins and where (high-level).
+- What can be configured by NWAC Administrators and where (high-level).
 - What is global vs environment-specific.
 - Impacts of changing settings (behavior changes UAT should expect).
 - Do not teach underlying vendor services (for example, "how Cognito works").

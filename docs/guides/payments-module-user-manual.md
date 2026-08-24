@@ -1,14 +1,17 @@
 # Payments Module User Manual
 
-Purpose: Provide a plain-language guide for using the Payments module dashboards from draft through sending to Finance (email).  
-Audience: Program staff and admin operators; Finance receives emailed payment requests (no sign-in).  
-Last Updated: 2026-04-06
+Status: needs verification; operating-model/manual draft for the partially deployed Payments module. The real Finance email workflow is not rolled out or enabled in PROD.
+Purpose: Describe the intended Payments module workflow for controlled DEV/TEST rehearsal and future staff-manual production.
+Audience: Product owners, program staff reviewers, admin operators, and documentation maintainers.
+Last Updated: 2026-08-21
 
-## 1) Introduction (for new users)
-The Payments module is where payment requests are created and sent to Finance by email. A request starts as a **payment packet** with one or more payment lines; evidence must be attached before it can be sent. The goal is to ensure requests are compliant, auditable, and easy to report.
+> **Do not use the send instructions below as a current PROD procedure.** As of 2026-08-21, the dashboard/model has deployment history and DEV automation, but project guidance says real Finance email routing/sends have not been enabled in PROD. Before converting this draft into a staff manual, complete a fresh target-release verification and obtain explicit approval for any real Finance send.
+
+## 1) Introduction (target workflow)
+The Payments module is designed to prepare payment requests for a Finance email handoff. A request starts as a **payment packet** with one or more payment lines; evidence is required before the target workflow permits a send. The goal is to make requests reviewable, evidenced, and traceable without treating PATH as the accounting system of record.
 
 You will primarily use:
-- **Program Payments** (`/iset/payments`) to create packets, attach evidence, and send requests to Finance.
+- **Program Payments** (`/iset/payments`) to create packets, attach evidence, and—only when the workflow is deliberately enabled—send requests to Finance.
 - **Finance Payments** (`/finance/payments`) is optional for internal oversight; Finance does not sign in.
 
 ## 2) Key concepts
@@ -20,7 +23,7 @@ You will primarily use:
 
 ## 3) Roles and access (high level)
 Access is role-based. If you do not see a button or action, your role likely does not allow it.
-- **Program users** create packets, upload evidence, and send requests to Finance.
+- **Program users** create packets, upload evidence, and, in an enabled/rehearsed rollout, send requests to Finance.
 - **Finance** receives the payment email and processes payment outside the admin system.
 - **Admins** configure finance email routing and evidence rules.
 
@@ -90,7 +93,7 @@ This keeps evidence, claim amounts, and fiscal-year reporting clean. Historical 
 4. Choose an evidence type and upload the file.
 5. Note: Uploading sets evidence to **Received**. Sending is blocked until required evidence is received.
 
-### D) Send to Finance
+### D) Send to Finance (DEV/controlled rehearsal only; not a current PROD procedure)
 1. Click **Validate** once required evidence is received.
 2. If validation passes, PATH automatically marks the packet **Ready to send**.
 3. Click **Send to finance**.
@@ -102,8 +105,8 @@ This keeps evidence, claim amounts, and fiscal-year reporting clean. Historical 
 3. Use **Copy XML** or **Download .xml** for demos.
 4. Note: The preview is read-only and is not transmitted to Intacct.
 
-## 7) Finance (email-only)
-Finance receives the payment email containing the packet summary, evidence list, and line details. Finance still processes payment outside PATH; PATH is then used to record follow-up such as `Sent to finance` and, when known, `Payment confirmed`.
+## 7) Finance (target email-only operating model)
+When the workflow is deliberately enabled, Finance receives the payment email containing the packet summary, evidence list, and line details. Finance still processes payment outside PATH; PATH is then used to record follow-up such as `Sent to finance` and, when known, `Payment confirmed`. This is the target operating model, not proof of current PROD enablement.
 
 Main packet statuses shown to staff:
 - Draft
@@ -182,8 +185,8 @@ Staff can export the ledger extract required for Annual Reporting (if enabled):
 - **Packet locked**: The packet has already been sent to finance; edits are not allowed.
 - **Evidence upload error**: Case or applicant context is missing, or the file type/size is invalid.
 
-## 16) Testing script (manual)
-Run this in order as a full end-to-end check.
+## 16) Testing script (manual, DEV/approved TEST rehearsal only)
+Run this only in an explicitly approved non-PROD rehearsal with synthetic data and safe email/provider configuration. It is not authorization to send a real Finance email.
 
 Prerequisites:
 - Finance email routing configured (optional for email tests).

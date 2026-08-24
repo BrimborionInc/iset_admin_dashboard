@@ -1,7 +1,7 @@
 # Two-Step Review: Upward Approval and Downward Changes
 
 Status: Live staff guide for application assessments, new intervention proposals, and intervention changes.
-Last Updated: 2026-08-08
+Last Updated: 2026-08-21
 
 ## Purpose
 
@@ -78,7 +78,7 @@ The Decision Maker chooses:
 - **Deny**; or
 - **Request changes**.
 
-A denial or request for changes requires a note. Funding approvals of **$20,000 or more** can be approved only by Shelley Stacey. Other Decision Makers may still deny the request or request changes.
+A denial or request for changes requires a note. Funding approvals of **$20,000 or more** require the program's designated high-value approval authority. Other Decision Makers may still deny the request or request changes. Confirm the current internal assignment through approved program guidance; do not publish a named individual's details in an external manual or AI source pack.
 
 ## Moving Down for Changes
 

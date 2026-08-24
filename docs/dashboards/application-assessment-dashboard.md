@@ -64,7 +64,7 @@ The 2026-06-10 workflow smoke also caught and fixed a React render-phase warning
 | Evaluator assignment widget | Define API shape (list, assign/unassign) | dev | Pending |
 | Decision capture | Data model for decisions, audit trail | dev | Pending |
 | Events/timeline | Source of case/application events for timeline | dev | Pending |
-| Document deletion propagation | Sync portal deletions to admin docs | dev | Pending |
+| Document lifecycle boundary | Portal can remove only caller-owned pre-submission draft uploads; staff Delete is a reversible lifecycle-backed hide after materialization | dev | Implemented locally; schema/deploy pending |
 | Workspace React key warning | `npm run smoke:application-workspace:browser` records a unique-key warning from `SupportingDocumentsWidget` modal/`SpaceBetween` composition during workspace render. Target this widget in a future UI cleanup pass. | dev | Pending |
 | Default workspace layout/chrome | Decide whether Application Workspace should keep global board customization controls and the full vertical default board, or move toward task-focused presets/defaults. | product/dev | Pending |
 

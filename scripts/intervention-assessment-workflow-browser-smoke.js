@@ -73,7 +73,7 @@ const roleProfiles = {
   },
   'NWAC Administrator': {
     email: 'program.admin@awentech.ca',
-    name: 'Program Admin',
+    name: 'Decision Maker',
     groups: ['NWAC_Administrator'],
     staffProfileId: STAFF_PROFILE_IDS.decisionMaker,
   },

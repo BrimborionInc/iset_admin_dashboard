@@ -91,7 +91,7 @@ describe('NWAC Hub route authorization', () => {
     { method: 'PUT', pathname: '/api/hubs/1', body: { full_name: 'Updated Hub' } },
   ];
 
-  test.each(['NWAC Administrator', 'Regional Manager', 'ISET Coordinator', 'Program Administrator'])(
+  test.each(['NWAC Administrator', 'Regional Manager', 'ISET Coordinator', 'Unknown Staff Role'])(
     'denies every Hub method to %s before any database access',
     async role => {
       for (const route of routes) {

@@ -78,16 +78,10 @@ const NOTIFICATION_SEVERITY_RANK = Object.freeze({
 const normalizeRoleKey = value => String(value ?? '').trim().toLowerCase();
 const APPLICATION_WORKSPACE_PROMPT_ROLE_KEYS = new Set([
   'iset coordinator',
-  'iset coordinator',
   'nwac administrator',
-  'program admin',
-  'nwac administrator',
-  'regional manager',
   'regional manager'
 ]);
 const NWAC_DECISION_PROMPT_ROLE_KEYS = new Set([
-  'nwac administrator',
-  'program admin',
   'nwac administrator',
   'system administrator'
 ]);

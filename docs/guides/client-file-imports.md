@@ -1,7 +1,8 @@
 # Client File Imports
 
 Date: 2026-04-05
-Last reviewed: 2026-07-29 after the Stephanie Swampy application-less client-file repair.
+Status: current client-file import and historical-backload guidance.
+Last reviewed: 2026-08-21 against the current import commit/account-linking path and widened backload quick-action rules.
 
 ## Summary
 
@@ -48,7 +49,7 @@ This means the database does not require a fake intake history just to preserve 
 ## Current backload operating model
 
 - Imported client files are operationally usable on day one without fabricating historical intake, assessment, or approval data.
-- The Case Workspace now exposes explicit backload quick actions for application-less cases:
+- The Case Workspace exposes explicit historical-entry quick actions on non-archived cases for System Administrator, NWAC Administrator, and Regional Manager, including cases that also have applications:
   - `Add existing action plan`
   - `Add existing intervention`
   - `Upload existing documents`
@@ -80,11 +81,11 @@ This means the database does not require a fake intake history just to preserve 
 - Create or match the `client` first.
 - Create a real `iset_case` for that client without fabricating any application row.
 - Seed `case_context_json` with the participant profile fields imported from the spreadsheet.
-- Create a `user` only when an email is present and there is an actual business reason to support login, secure messaging, or applicant-linked document flows.
+- The current batch-import commit silently creates or links an applicant account only when the row has exactly one clean valid email. It sends no activation email during import; missing, invalid, ambiguous, or multiple emails leave the account for later manual review.
 - Leave assessment rows absent unless they truly existed and need to be modeled explicitly.
 - Allow action plans, interventions, funding/cost lines, and documents to be backloaded later through the explicit case-workspace backload actions rather than by inventing fake intake history.
 - If the organization later decides historical applications matter, import them as a second phase with their own explicit rules rather than fabricating them during client-file setup.
-- Do not create placeholder application, submission, approval, or applicant-account records just to unlock later case-management features.
+- Do not create placeholder application, submission, approval, assessment, plan, or intervention records just to unlock later case-management features. A clean-email account link is a separate identity/activation path, not fabricated historical application evidence.
 
 ## Verified PROD example
 
@@ -120,7 +121,7 @@ On 2026-07-29, Stephanie Swampy was missing from PATH because her pre-PATH appro
   - blank DOB is allowed
   - invalid DOB becomes a warning and imports as blank
 - Current non-goals:
-  - no applicant `user` creation
+  - no applicant account when the email is missing, invalid, ambiguous, or contains multiple values; one clean email may create/link the silent account described above
   - no historical application recreation
   - no placeholder assessment/action-plan/intervention/document rows
   - no global one-case-per-client unique constraint until historical exceptions and cleanup are separately proven

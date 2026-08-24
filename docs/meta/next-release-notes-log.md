@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-08-18
+Last Updated: 2026-08-24
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,10 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-08-24 | Release 20260824-path-maintenance-r1 | Fix/Casework | Participant Details | Authorized staff can save Participant Details corrections after opening a file directly from ISET Clients; PATH no longer incorrectly asks for an application ID. | The save changes only current case-level participant facts, keeps application decisions and assessments untouched, and returns affected ILMP readiness to review without replacing an already submitted or accepted export snapshot. Deployed to TEST; PROD remains unchanged.
+- 2026-08-24 | Release 20260824-path-maintenance-r1 | UX/Documents | Supporting Documents delete message | When PATH needs to keep a document, the Delete dialog now clearly explains why instead of appearing to stop without a result. | The message stays in the dialog in plain English, and the unavailable Delete action changes to Close. Existing document protections are unchanged. Deployed to TEST; PROD remains unchanged.
+- 2026-08-24 | Release 20260824-path-maintenance-r1 | Feature/Documents | Reversible document deletion | Staff can remove an eligible mistaken upload from normal Supporting Documents lists and checklists without destroying the file. | System Administrators can review deleted files and restore them from the Deleted tab. PATH has no permanent-delete action for supporting documents. The code and lifecycle schema are deployed to TEST; PROD remains unchanged.
+- 2026-08-19 | Release 20260824-path-maintenance-r1 | Fix/Messaging | Secure Messaging sent status | A staff follow-up that quotes an earlier sent item no longer makes that item say `Applicant replied`. | The status remains `Sent` or `Read by applicant` according to the applicant mailbox; only a reply actually sent by the applicant produces `Applicant replied`. Three unambiguous historical false statuses were corrected in PROD without changing message content or mailbox placement; the preventive code is now deployed to TEST and PROD code remains unchanged.
 - 2026-08-18 | Release 20260818-admin-workflow-fixes-r2 | Fix/Assessments | Recall submission | The staff member who recalled an assessment can edit it and resubmit it to Regional Manager review. | PATH keeps the original submitter and recall history, preserves unchanged accepted EI eligibility, and clears stale reviewer decisions when the assessment is resubmitted.
 - 2026-08-18 | Release 20260818-admin-workflow-fixes-r2 | Fix/Documents | Supporting Documents | Staff can edit document titles and document types regardless of how the document arrived in PATH. | PATH keeps the original file and source-owned client/case/application history intact. It blocks only unsafe reassignment of evidence already tied to signing, versioned forms, or payments; duplicate and delete keep their stricter safeguards.
 - 2026-08-17 | Release 20260818-admin-workflow-fixes-r1 | Fix/Assessments | Submit for review | Assessment submission now refreshes the selected application before checking for concurrent edits. | Genuine concurrent changes reload the latest assessment; other workflow problems show their actual message instead of the concurrency warning.
@@ -401,7 +405,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-03-29 | Release v0.5.9 | UX/API/Reminders | Case reminders + bell alerts | Reminder due/overdue status now follows the PATH business day in `America/Toronto`, so reminder bells, the events timeline, and case reminder badges classify dates the same way. | Reminder reschedules/reopens also clear prior due/overdue emit flags so later reminder bells can fire again after the date changes.
 - 2026-03-29 | Release v0.5.9 | UX/Notifications | Admin shell bell alerts | Bell alerts in the admin shell now show the notification date/time directly in the heading. | The timestamp uses the notification delivery time when available, otherwise creation time, and is formatted in the viewer browser timezone with `America/Toronto` as fallback.
 - 2026-03-27 | Release v0.5.9 | Fix/Calendar | Case Workspace + Application Workspace > Case Calendar | Fixed the shared case calendar so weekday headers and event dates now stay aligned in Canadian time zones. | The widget now treats date-only `YYYY-MM-DD` reminder, action-plan, and intervention dates as local calendar days instead of shifting them through UTC parsing.
-- 2026-03-26 | Release v0.5.8 | UX/API/Auth | User Management > Applicant Accounts | Added a new `Applicant Accounts` tab to `Manage Users` for imported participant account creation, invitation sending, and activation tracking. | Uses PATH-managed statuses `No account`, `Ready to invite`, `Invitation sent`, and `Activated`; `Application Assessor` can access this tab without gaining staff-user administration.
+- 2026-03-26 | Release v0.5.8 | UX/API/Auth | User Management > Applicant Accounts | Added a new `Applicant Accounts` tab to `Manage Users` for imported participant account creation, invitation sending, and activation tracking. | Uses PATH-managed statuses `No account`, `Ready to invite`, `Invitation sent`, and `Activated`; `ISET Coordinator` can access this tab without gaining staff-user administration.
 - 2026-03-26 | Release v0.5.8 | API/Auth/Import | Client Batch Import + Applicant Accounts | Imported client rows with one clean email now silently create or link an applicant Cognito account with no email sent at import time. | Missing, invalid, partially invalid, or multiple email values suppress applicant-account creation while still allowing valid client/case import work.
 - 2026-03-26 | Release v0.5.8 | UX/Auth/Portal | Applicant activation flow | Added a dedicated `Activate your account` portal page so PATH invitations can start first-time password setup without telling applicants they have forgotten a password. | The portal marks the linked applicant account `Activated` on first successful authenticated sign-in.
 - 2026-03-26 | Release v0.5.8 | UX/API/Casework | Case Workspace > Case header | Added `PATH Account Status` to the case header and a quick action to activate or resend activation for the participant account directly from the case. | Uses the same applicant-account workflow state as `Manage Users > Applicant Accounts`.
@@ -409,7 +413,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-03-24 | Release v0.5.8 | UX/API/Reporting | Data and Results inline drilldown | Non-zero values in `Intake and Assessment` and `Interventions` on `Reporting > Data and Results` now open the contributing records inline directly beneath the clicked row. | Intake drilldowns link applicant names to Application Workspace when a linked case exists; Interventions drilldowns link participant names to Case Workspace. Monthly clicks show the clicked month only; cumulative clicks show fiscal-year-to-date records.
 - 2026-03-24 | Release v0.5.8 | UX/API/Reporting | Data and Results > Intake and Assessment | Added a new `Intake and Assessment` section above `Interventions` on `Reporting > Data and Results`, with province/territory rows, month columns, a `Show` selector for new/approved/denied applications, and a local province filter input. | New applications use submission month; approved and denied counts currently use the application record's latest status update as the decision-month proxy because PATH does not yet store a dedicated application decision timestamp.
 - 2026-03-24 | Release v0.5.8 | UX/API/Home | Homepage > Metrics drilldown | Count metrics on the homepage now open matching records in the shared `Work Queue Items` table instead of acting as static totals. | The Items widget switches into a dedicated metric-results mode with neutral columns and a `Back to work queue` action; currency metrics remain display-only.
-- 2026-03-24 | Release v0.5.8 | Fix/API/Home | Homepage > Metrics scope | Fixed homepage metrics scoping for Regional Coordinators so multi-region assignments honor all resolved `regionIds`. | This keeps tile totals and metric drilldown lists aligned for managers assigned to more than one region.
+- 2026-03-24 | Release v0.5.8 | Fix/API/Home | Homepage > Metrics scope | Fixed homepage metrics scoping for Regional Managers so multi-region assignments honor all resolved `regionIds`. | This keeps tile totals and metric drilldown lists aligned for managers assigned to more than one region.
 - 2026-03-22 | Release v0.5.8 | UX/API/Finance | Budgets and Finance > Salaries | Added a new `Salaries` dashboard for recording annual salary totals by province or territory with explicit budget-pot assignment and derived monthly values for review. | Uses the new `finance_regional_salary_entry` table keyed by fiscal year and seeds the current dev fiscal year with logical salary-pot defaults for each region.
 - 2026-03-22 | Release v0.5.8 | UX/API/Reporting | Regional Snapshot salary wiring | `Regional Snapshot` now pulls `Coordinator Salary ($)` from `Budgets and Finance > Salaries` for the selected region and reporting period instead of storing a separate manual salary value. | Monthly snapshots use one-twelfth of the annual salary, quarterly snapshots use three-twelfths, and annual snapshots use the full annual total.
 - 2026-03-19 | Release v0.5.6 | UX/Reporting | Reporting navigation + dashboard scaffold | Renamed the reporting navigation sections to `ILMP Submissions` and `Reporting`, and added a new `Reporting > Data and Results` dashboard scaffold with standard board controls. | Default access is enabled for System Administrators and NWAC Administrators via the access-control matrix seed.
@@ -498,10 +502,19 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Staff who recall an assessment before decision can edit it and resubmit it to Regional Manager review without losing the recorded submitter or accepted EI status.
-- Staff can correct supporting-document titles and types regardless of how the document arrived, while PATH preserves its source history and any signing, version, or payment relationship.
+- Participant Details corrections can now be saved after opening a file directly from ISET Clients, without requiring an application ID.
+- Eligible staff-uploaded documents can now be removed from normal use and restored by a System Administrator, while protected records explain why PATH must keep them.
+- Secure Messaging now labels an item as `Applicant replied` only when the applicant actually replied.
+- Returning applicants keep earlier application messages and activity attached to the correct application, and can safely remove their own unused draft uploads.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260824-path-maintenance-r1
+
+- Participant Details corrections can now be saved from a client file opened directly through ISET Clients. PATH updates only the changed participant fields and preserves application decisions, assessments, and submitted reporting evidence.
+- Eligible ordinary staff uploads can now be removed from normal document lists without deleting the stored audit history. System Administrators can review and restore them, while protected workflow, signing, message, agreement, and payment documents clearly explain why they must be retained.
+- Secure Messaging now records `Applicant replied` only for a real applicant-origin reply; staff follow-ups no longer change an earlier staff message to that status.
+- Repeat-application portal activity remains attached to the exact application, and applicants can safely remove only their own unused pre-submission draft uploads.
 
 #### Release 20260818-admin-workflow-fixes-r2
 
@@ -513,23 +526,25 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Assessment submission now refreshes the selected application before checking for concurrent edits. Genuine concurrent changes reload the latest assessment; other workflow problems show their actual message.
 - Staff can rename a supporting document's display title without changing its stored file, document type, ownership, workflow links, or audit evidence.
 
-#### Release 20260815-core-workflow-integrity-prod-r1
-
-- Repeat applications now keep assessments, decisions, letters, Action Plans, interventions, EI evidence, ESDC submissions, documents, messages, reminders, notifications, and work-queue links attached to the exact application being worked on.
-- A new application can begin assessment using the staff member's valid case-level conflict declaration. The first successful save advances only that application, while an earlier application and the overall client file remain unchanged.
-- Denying one application no longer closes a client file that still has another open application or active service plan. Decision letters and intervention approval letters now commit their exact message, document, signing and lifecycle records together.
-- Ambiguous historical records now stop for review instead of borrowing the newest application. Historical PROD data correction is a separate controlled operation and is not part of this code release.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Le membre du personnel qui rappelle une évaluation avant la décision peut la modifier et la soumettre de nouveau au gestionnaire régional sans perdre l'identité de la personne ayant soumis le dossier ni le statut d'assurance-emploi accepté.
-- Le personnel peut corriger les titres et les types de documents justificatifs, quelle que soit leur provenance, tandis que PATH préserve leur historique et leurs liens avec les signatures, les versions ou les paiements.
+- Les corrections aux détails du participant peuvent maintenant être enregistrées après l'ouverture directe d'un dossier depuis Clients ISET, sans identifiant de demande.
+- Les téléversements admissibles du personnel peuvent maintenant être retirés de l'utilisation normale et restaurés par un administrateur système, tandis que PATH explique pourquoi les dossiers protégés doivent être conservés.
+- La messagerie sécurisée indique maintenant `Réponse du demandeur` uniquement lorsque la personne participante a réellement répondu.
+- Pour les demandes répétées, les anciens messages et activités restent liés à la bonne demande, et la personne participante peut retirer en toute sécurité ses propres téléversements de brouillon inutilisés.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260824-path-maintenance-r1
+
+- Les corrections aux détails du participant peuvent maintenant être enregistrées depuis un dossier client ouvert directement par Clients ISET. PATH met à jour uniquement les champs modifiés et préserve les décisions, les évaluations et les preuves de rapport déjà soumises.
+- Les téléversements ordinaires admissibles du personnel peuvent maintenant être retirés des listes normales sans supprimer l'historique d'audit. Les administrateurs système peuvent les examiner et les restaurer, tandis que PATH explique clairement pourquoi les documents liés aux processus, aux signatures, aux messages, aux ententes et aux paiements doivent être conservés.
+- La messagerie sécurisée enregistre maintenant `Réponse du demandeur` uniquement pour une véritable réponse provenant de la personne participante; les suivis du personnel ne changent plus ainsi le statut d'un message antérieur du personnel.
+- Pour les demandes répétées, l'activité du portail reste liée à la demande exacte, et les personnes participantes peuvent retirer en toute sécurité uniquement leurs propres téléversements de brouillon inutilisés avant la soumission.
 
 #### Release 20260818-admin-workflow-fixes-r2
 
@@ -540,13 +555,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - La soumission d'une évaluation actualise maintenant d'abord la demande sélectionnée avant de vérifier les modifications simultanées. Les vrais conflits rechargent l'évaluation la plus récente; les autres problèmes du flux de travail affichent leur message réel.
 - Le personnel peut renommer le titre d'affichage d'un document justificatif sans modifier son fichier stocké, son type, son propriétaire, ses liens de flux de travail ni sa preuve d'audit.
-
-#### Release 20260815-core-workflow-integrity-prod-r1
-
-- Les demandes répétées conservent maintenant leurs évaluations, décisions, lettres, plans d'action, interventions, preuves d'assurance-emploi, soumissions EDSC, documents, messages, rappels, notifications et liens de file de travail associés à la demande exacte en cours de traitement.
-- Une nouvelle demande peut commencer son évaluation en utilisant la déclaration de conflit valide du membre du personnel pour le dossier. La première sauvegarde réussie fait avancer uniquement cette demande, sans modifier une demande antérieure ni l'ensemble du dossier client.
-- Le refus d'une demande ne ferme plus un dossier client lorsqu'une autre demande ou un plan de services demeure actif. Les lettres de décision et d'approbation d'intervention enregistrent maintenant ensemble leurs messages, documents, demandes de signature et états de cycle de vie exacts.
-- Les dossiers historiques ambigus sont maintenant bloqués pour révision au lieu d'être associés à la demande la plus récente. La correction des données historiques de PROD constitue une opération contrôlée distincte et ne fait pas partie de cette mise en production du code.
 
 ### Problemes connus (brouillon - FR)
 

@@ -26,7 +26,7 @@ Last Updated: 2026-01-30
 - 2025-02-06: Lookup route ordering for finance pot assignment was fixed after an early shadowing issue on `/:id`.
 - 2025-02-06: Structure Manager wired to live pot API; snapshots backed by `budget_snapshot`/`budget_snapshot_pot` with list/create/read endpoints; Budgets loads snapshots.
 - 2025-12-05: Draft workflows live in Budgets: Draft Budgets tab shows/controls drafts; Structure manager edits selected draft only; publish replaces Active after taking a safety snapshot; restore snapshot creates a new draft. Snapshots and drafts have delete/restore modals; draft labels inline-editable. Pot parent guard prevents self-parenting. Admin % column now reads `adminTargetPct`.
-- 2025-12-05: Roles for finance endpoints limited to `System Administrator` and `Program Administrator`. Snapshot creator stored as NULL to avoid FK issues.
+- 2025-12-05: Roles for finance endpoints limited to `System Administrator` and `NWAC Administrator`. Snapshot creator stored as NULL to avoid FK issues.
 - 2025-12-05: Forecast column remains manual (placeholder); variance = forecast - adjusted. Auto-forecasting deferred.
 - 2025-12-07: Saved views rewired to real API + DB table (`finance_saved_view`); UI now creates/edits/deletes views per active budget version. Loaded view/summary widgets moved to palette by default.
 - 2025-12-07: Pot detail widget refreshed (3-col overview, tabs, actions/export dropdown); CSV export endpoint added (`GET /api/finance/budget-pots/:id/export?format=csv`).
@@ -80,7 +80,7 @@ Goal: Submit payment packets directly to Sage Intacct as AP Bills using the XML 
   - Persist XML payload snapshots and response logs for compliance/audit.
   - Add a submission status timeline entry and success/failure notifications.
 - **Security + access control**:
-  - Restrict submission to finance/admin roles.
+  - Restrict submission to System Administrator and NWAC Administrator.
   - Protect endpoint with auth + rate limiting.
 
 ## Payments — Completion Plan (proposed order)

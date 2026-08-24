@@ -19,6 +19,6 @@ const FinanceSalariesHelp = () => (
 );
 
 FinanceSalariesHelp.aiContext =
-  "Guide finance admins using the Salaries dashboard. Keep the language user-facing: annual salary totals by province or territory, explicit budget-pot assignment, derived monthly amounts, save and refresh workflow, and the fact that PATH is tracking/reporting support rather than the payroll system of record.";
+  "Guide authorized PATH administrators using the Salaries dashboard. Keep the language user-facing: annual salary totals by province or territory, explicit budget-pot assignment, derived monthly amounts, save and refresh workflow, and the fact that PATH is tracking/reporting support rather than the payroll system of record.";
 
 export default FinanceSalariesHelp;

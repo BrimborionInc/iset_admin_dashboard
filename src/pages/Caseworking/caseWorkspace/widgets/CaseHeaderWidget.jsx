@@ -183,7 +183,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [recoveryError, setRecoveryError] = useState(null);
   const canonicalRole = toCanonicalRole(currentUser?.role || null);
   const isSystemAdmin = canonicalRole === "System Administrator";
-  const isProgramAdmin = canonicalRole === "NWAC Administrator";
+  const isNwacAdministrator = canonicalRole === "NWAC Administrator";
   const isRegionalManager = canonicalRole === "Regional Manager";
   const currentRegionIds = useMemo(
     () => (Array.isArray(currentUser?.regionIds) && currentUser.regionIds.length
@@ -732,17 +732,17 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     const isActive = statusKey === "active";
     const isDormant = statusKey === "dormant";
     const isInitiated = statusKey === "initiated";
-    const canAssign = hasCase && !isArchived && (isSystemAdmin || isProgramAdmin || isRegionalManager);
+    const canAssign = hasCase && !isArchived && (isSystemAdmin || isNwacAdministrator || isRegionalManager);
     const canPropose = hasCase && (isInitiated || isActive || isDormant);
     const canMarkReady = hasCase && (isActive || isDormant);
-    const canClose = hasCase && isReadyToClose && (isSystemAdmin || isProgramAdmin || isRegionalManager);
-    const canArchive = hasCase && isClosed && (isSystemAdmin || isProgramAdmin);
-    const canReopenClosed = hasCase && (isReadyToClose || isClosed) && (isSystemAdmin || isProgramAdmin);
+    const canClose = hasCase && isReadyToClose && (isSystemAdmin || isNwacAdministrator || isRegionalManager);
+    const canArchive = hasCase && isClosed && (isSystemAdmin || isNwacAdministrator);
+    const canReopenClosed = hasCase && (isReadyToClose || isClosed) && (isSystemAdmin || isNwacAdministrator);
     const canReopenArchived = hasCase && isArchived && isSystemAdmin;
     const canReopen = canReopenClosed || canReopenArchived;
     const canReopenPlanRecovery =
       hasCase && isSystemAdmin && !isArchived && !hasActiveActionPlan && closedActionPlanOptions.length > 0;
-    const canUseHistoricalEntry = hasCase && !isArchived && (isSystemAdmin || isProgramAdmin || isRegionalManager);
+    const canUseHistoricalEntry = hasCase && !isArchived && (isSystemAdmin || isNwacAdministrator || isRegionalManager);
     const canManagePathAccount = hasCase && Boolean(caseData?.client?.id) && !isArchived;
     const hasPathAccountEmail = Boolean(pathAccount?.email);
 
@@ -795,7 +795,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     caseData?.application_id,
     statusKey,
     isSystemAdmin,
-    isProgramAdmin,
+    isNwacAdministrator,
     isRegionalManager,
     canAddToWatchlist,
     closedActionPlanOptions.length,
@@ -1040,7 +1040,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       const rawStaff = Array.isArray(data) ? data : [];
       const filteredStaff = rawStaff.filter(staff => {
         if (isSystemAdmin) return true;
-        if (isProgramAdmin) {
+        if (isNwacAdministrator) {
           const staffRole = toCanonicalRole(staff?.role || staff?.primary_role || staff?.primaryRole || "");
           return staffRole !== "System Administrator";
         }
@@ -1065,7 +1065,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     } finally {
       setAssignLoading(false);
     }
-  }, [caseData?.owner?.id, currentRegionIds, isProgramAdmin, isRegionalManager, isSystemAdmin]);
+  }, [caseData?.owner?.id, currentRegionIds, isNwacAdministrator, isRegionalManager, isSystemAdmin]);
 
   const handleAssignSubmit = useCallback(async () => {
     const caseId = caseData?.id;

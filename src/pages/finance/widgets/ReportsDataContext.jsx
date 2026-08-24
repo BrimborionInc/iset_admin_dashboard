@@ -101,7 +101,7 @@ const validationSeed = [
     category: "Narrative",
     message: "Update admin flat-rate section to reflect revised GL mapping manager notes.",
     referencedAppendix: "Appendix D",
-    assignedTo: FINANCE_PEOPLE.financeOfficer,
+    assignedTo: FINANCE_PEOPLE.nwacAdministrator,
     status: "resolved",
     linkedWorkspace: "/finance/reports?report=FY24-Q2",
     detectedOn: "2024-10-20T11:42:00Z",

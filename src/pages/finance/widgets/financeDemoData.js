@@ -2,7 +2,7 @@ export const FINANCE_PEOPLE = {
   ceo: "Madeleine Redfern",
   seniorDirector: "Shelley Stacey",
   programLead: "Madison Coppola",
-  financeOfficer: "Priya Singh",
+  nwacAdministrator: "Priya Singh",
   innovationLead: "Samir Deslauriers",
   monitoringLead: "Jordan Rivers",
 };
@@ -62,7 +62,7 @@ export const FINANCE_POT_HIERARCHY = [
         actual: 66_000,
         forecast: 82_000,
         adminShare: 80_000,
-        owner: FINANCE_PEOPLE.financeOfficer,
+        owner: FINANCE_PEOPLE.nwacAdministrator,
     },
     {
         id: "ptma-bc-client",
@@ -104,7 +104,7 @@ export const FINANCE_POT_HIERARCHY = [
         actual: 58_000,
         forecast: 70_000,
         adminShare: 70_000,
-        owner: FINANCE_PEOPLE.financeOfficer,
+        owner: FINANCE_PEOPLE.nwacAdministrator,
     },
     {
         id: "ptma-ab-client",
@@ -146,7 +146,7 @@ export const FINANCE_POT_HIERARCHY = [
         actual: 69_000,
         forecast: 86_000,
         adminShare: 85_000,
-        owner: FINANCE_PEOPLE.financeOfficer,
+        owner: FINANCE_PEOPLE.nwacAdministrator,
     },
     {
         id: "ptma-on-client",
@@ -188,7 +188,7 @@ export const FINANCE_POT_HIERARCHY = [
         actual: 43_000,
         forecast: 55_000,
         adminShare: 55_000,
-        owner: FINANCE_PEOPLE.financeOfficer,
+        owner: FINANCE_PEOPLE.nwacAdministrator,
     },
     {
         id: "ptma-prairies-client",
@@ -230,7 +230,7 @@ export const FINANCE_POT_HIERARCHY = [
         actual: 28_000,
         forecast: 35_000,
         adminShare: 35_000,
-        owner: FINANCE_PEOPLE.financeOfficer,
+        owner: FINANCE_PEOPLE.nwacAdministrator,
     },
     {
         id: "ptma-atlantic-client",
@@ -272,7 +272,7 @@ export const FINANCE_POT_HIERARCHY = [
         actual: 23_000,
         forecast: 31_000,
         adminShare: 30_000,
-        owner: FINANCE_PEOPLE.financeOfficer,
+        owner: FINANCE_PEOPLE.nwacAdministrator,
     },
     {
         id: "ptma-northern-client",
@@ -309,7 +309,7 @@ export const FINANCE_POT_DETAILS = {
       {
         id: "ADJ-2401",
         date: "2025-04-30",
-        user: FINANCE_PEOPLE.financeOfficer,
+        user: FINANCE_PEOPLE.nwacAdministrator,
         amount: 75_000,
         type: "Increase",
         reason: "Additional PTMA top-ups released after Q1 variance review.",
@@ -336,7 +336,7 @@ export const FINANCE_POT_DETAILS = {
       {
         id: "ADJ-2403",
         date: "2025-01-15",
-        user: FINANCE_PEOPLE.financeOfficer,
+        user: FINANCE_PEOPLE.nwacAdministrator,
         amount: -10_000,
         type: "Decrease",
         reason: "Shifted to PTMA top-up reserve after salary savings identified.",
@@ -389,7 +389,7 @@ export const FINANCE_POT_DETAILS = {
       {
         id: "ADJ-BC-CS-05",
         date: "2025-06-11",
-        user: FINANCE_PEOPLE.financeOfficer,
+        user: FINANCE_PEOPLE.nwacAdministrator,
         amount: 18_000,
         type: "Top-up",
         reason: "Client commitments exceeded 95% threshold ahead of summer cohort.",
@@ -415,7 +415,7 @@ export const FINANCE_POT_DETAILS = {
       {
         id: "ADJ-AB-2401",
         date: "2025-05-18",
-        user: FINANCE_PEOPLE.financeOfficer,
+        user: FINANCE_PEOPLE.nwacAdministrator,
         amount: -8_000,
         type: "Reallocation",
         reason: "Shifted to northern PTMA technology supports after uptake slowed.",
@@ -467,7 +467,7 @@ export const FINANCE_POT_DETAILS = {
       {
         id: "ADJ-PRA-2401",
         date: "2025-04-27",
-        user: FINANCE_PEOPLE.financeOfficer,
+        user: FINANCE_PEOPLE.nwacAdministrator,
         amount: 9_000,
         type: "Increase",
         reason: "Cover additional outreach sessions requested by Monitoring.",

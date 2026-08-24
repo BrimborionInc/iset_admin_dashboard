@@ -571,7 +571,7 @@ const handleEditSubmit = async event => {
             <FormField label="Owner" description="Person/role accountable for this pot.">
               <Input
                 value={createForm.owner}
-                placeholder="e.g., Finance Officer"
+placeholder="e.g., NWAC Administrator"
                 onChange={({ detail }) => handleCreateChange("owner", detail.value)}
               />
             </FormField>

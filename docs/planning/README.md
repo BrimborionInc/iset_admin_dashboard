@@ -40,7 +40,8 @@ As of 2026-07-10, these are the main planning docs intentionally linked from `do
 
 ## Current Product/Content Source Briefs
 
-- `path-promo-website-source-brief.md` - source material for drafting a PATH promotional website; useful for product messaging, feature inventory, migration/onboarding positioning, versioned-artifact positioning, and claims to verify before publication.
+- `path-promo-website-source-brief.md` - detailed marketing raw material. Use it only with `../product/path-capability-source-pack.md`, which controls current release/status and publishing boundaries.
+- `../product/README.md` - curated entry point and upload manifest for ChatGPT Pro marketing/manual production.
 
 ## Cleanup Rule
 

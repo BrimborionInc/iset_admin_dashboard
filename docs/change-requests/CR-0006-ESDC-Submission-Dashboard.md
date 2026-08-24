@@ -28,7 +28,7 @@ Administrators lack a dedicated workspace to:
   - `/esdc/participants`: queue, validation summary, recent activity, launch workspace at `/esdc/participants/:clientId`.
   - `/esdc/reporting`: quarterly/annual reporting checklist and history.
 - Mirror the finance scaffolding pattern (Cloudscape board, widget registry, palette, localStorage persistence, help content, mock data). No backend changes in this CR.
-- Access control: limit to System Administrators and Program Administrators via role matrix defaults.
+- Access control: limit to System Administrators and NWAC Administrators via role matrix defaults.
 - Future stories reuse the scaffolds to call dedicated submission APIs (validation, payload generation, history).
 
 ## Dependencies & Assumptions

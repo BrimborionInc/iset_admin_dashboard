@@ -38,7 +38,7 @@ The proposal sent for review follows.
 
 Hi Émilie, Madison and Shelley,
 
-Following Émilie’s suggestion about allowing reviewers to make minor edits to assessments, I have considered how we could give Regional Managers and Program Administrators greater ability to correct records and recover from common mistakes across PATH.
+Following Émilie’s suggestion about allowing reviewers to make minor edits to assessments, I have considered how we could give Regional Managers and NWAC Administrators greater ability to correct records and recover from common mistakes across PATH.
 
 My overall recommendation is that PATH should allow authorized staff to correct routine errors themselves, while retaining stronger controls where a change could affect eligibility, funding, documents, reporting or communication with a participant.
 
@@ -46,7 +46,7 @@ The aim would not be to remove the current workflows. Returning work to a Coordi
 
 I suggest organizing these abilities into three levels:
 
-1. **Routine corrections** that an authorized Regional Manager or Program Administrator can make directly.
+1. **Routine corrections** that an authorized Regional Manager or NWAC Administrator can make directly.
 2. **Controlled reversals** that require a reason and additional checks before PATH allows them.
 3. **High-impact corrections** that continue to require escalation because other records or communications have already relied on the original action.
 
@@ -54,7 +54,7 @@ The detailed proposals are below.
 
 ## 1. Minor assessment edits during review
 
-Regional Managers and Program Administrators reviewing an assessment could make minor corrections without returning it to the Coordinator.
+Regional Managers and NWAC Administrators reviewing an assessment could make minor corrections without returning it to the Coordinator.
 
 This could include:
 

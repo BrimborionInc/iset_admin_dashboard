@@ -106,18 +106,18 @@ function loadLockedMutationContext({ mutationError = null } = {}) {
 }
 
 describe('generic Supporting Documents mutation integrity', () => {
-  test('only ordinary manual and quarantined legacy uploads are generically mutable', () => {
+  test('only ordinary staff uploads are generically mutable', () => {
     const allowlistStart = serverSource.indexOf('const GENERICALLY_MUTABLE_DOCUMENT_SOURCES');
     const helperStart = serverSource.indexOf('async function validateGenericDocumentMutationIntegrity');
     const allowlistSource = serverSource.slice(allowlistStart, helperStart);
     const helperSource = extractFunction(
       'validateGenericDocumentMutationIntegrity',
-      '\nfunction documentMutationTimestamp'
+      '\nconst DOCUMENT_ACTION_BLOCKER_MESSAGES'
     );
 
     expect(allowlistStart).toBeGreaterThanOrEqual(0);
     expect(allowlistSource).toContain("'manual_upload'");
-    expect(allowlistSource).toContain("'legacy_intake_upload'");
+    expect(allowlistSource).not.toContain("'legacy_intake_upload'");
     expect(allowlistSource).not.toContain("'application_submission'");
     expect(allowlistSource).not.toContain("'secure_message_attachment'");
     expect(allowlistSource).not.toContain("'system_generated'");
@@ -126,7 +126,7 @@ describe('generic Supporting Documents mutation integrity', () => {
     expect(helperSource.trim().endsWith('return null;\n}')).toBe(true);
   });
 
-  test.each(['manual_upload', 'legacy_intake_upload'])(
+  test.each(['manual_upload'])(
     '%s remains mutable when no workflow dependency exists',
     async source => {
       const { guard, paymentLinkLookup } = loadIntegrityGuard();
@@ -140,7 +140,7 @@ describe('generic Supporting Documents mutation integrity', () => {
     }
   );
 
-  test.each(['application_submission', 'secure_message_attachment', 'system_generated'])(
+  test.each(['application_submission', 'secure_message_attachment', 'system_generated', 'legacy_intake_upload'])(
     '%s fails closed as an authoritative source',
     async source => {
       const { guard } = loadIntegrityGuard();
@@ -150,7 +150,12 @@ describe('generic Supporting Documents mutation integrity', () => {
 
       await expect(guard({ id: 19, source }, connection)).resolves.toMatchObject({
         status: 409,
-        body: { error: 'document_immutable', reason: 'authoritative_source' },
+        body: {
+          error: 'document_immutable',
+          reason: 'authoritative_source',
+          message:
+            "PATH needs to keep this document in the applicant's file, so it can't be copied or deleted. You can still change its title or document type.",
+        },
       });
     }
   );
@@ -420,7 +425,7 @@ describe('generic Supporting Documents mutation integrity', () => {
     expect(serverSource).toContain("error: 'document_attachment_immutable'");
     expect(serverSource).toContain('status: 409');
     expect(serverSource).toContain(
-      'cannot be duplicated or deleted through Supporting Documents.'
+      "PATH needs to keep this document in the applicant's file, so it can't be copied or deleted."
     );
     expect(serverSource).toContain('The document title and document type can be edited');
   });

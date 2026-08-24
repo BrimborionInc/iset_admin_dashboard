@@ -6,7 +6,7 @@ const FinanceReportsValidationHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Summarise automated validation findings so finance officers can resolve issues before certification.
+Summarise automated validation findings so PATH administrators can resolve issues before certification.
       </p>
     </Box>
     <Box>

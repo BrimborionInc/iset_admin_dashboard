@@ -82,6 +82,17 @@ variable "portal_additional_domain_names" {
   default     = []
 }
 
+variable "draft_upload_cleanup_bucket_arn" {
+  description = "Optional exact upload-bucket ARN on which the portal may fully remove caller-owned pre-submission uploads. Leave empty to grant no cleanup permissions."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.draft_upload_cleanup_bucket_arn == "" || can(regex("^arn:(aws|aws-us-gov|aws-cn):s3:::[^/]+$", var.draft_upload_cleanup_bucket_arn))
+    error_message = "draft_upload_cleanup_bucket_arn must be empty or an exact S3 bucket ARN without an object path."
+  }
+}
+
 variable "app_min_size" {
   description = "Minimum number of application instances in the ASG."
   type        = number

@@ -291,7 +291,11 @@ describe('core repeat-application workflow isolation', () => {
     expect(accessResolver).toContain('applicationId: messageApplicationId');
     expect(accessResolver).toContain('message_application_scope_mismatch');
     expect(messageHandler).toContain('reply_message_application_scope_mismatch');
-    expect(messageHandler).toContain('await markCaseMessageReplyTargetReplied({');
+    expect(messageHandler).toContain(
+      'lockedReplyTargetMessage = await lockAndValidateCaseMessageReplyTarget({'
+    );
+    expect(messageHandler).toContain('await applyCaseMessageReplyTargetStatus({');
+    expect(messageHandler).toContain('replyTarget: lockedReplyTargetMessage');
     expect(messageHandler).toContain('reply_to_message_id: requestedReplyToId || null');
   });
 

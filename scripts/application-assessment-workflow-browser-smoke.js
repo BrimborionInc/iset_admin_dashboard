@@ -31,7 +31,7 @@ const CURRENT_USER_ID = 'smoke-admin-sub';
 const roleProfiles = {
   'System Administrator': {
     email: 'program.admin@awentech.ca',
-    name: 'Program Admin',
+    name: 'System Administrator',
     groups: ['System_Administrator'],
   },
   'ISET Coordinator': {
@@ -262,7 +262,7 @@ function buildApprovalLetterDraft() {
     decision_reason: 'The proposed training aligns with your employment plan.',
     next_step_1: 'Review the attached agreement.',
     next_step_2: 'Return any requested forms through the portal.',
-    coordinator_name: 'Program Admin',
+    coordinator_name: 'Decision Maker',
     organization_name: 'Native Women\'s Association of Canada',
   };
 }
@@ -402,7 +402,7 @@ function buildCasePayload({
     decisionOutcome,
     assigned_staff_profile_id: 1,
     assigned_user_email: 'program.admin@awentech.ca',
-    assigned_user_display_name: 'Program Admin',
+    assigned_user_display_name: 'System Administrator',
     submitted_at: '2026-05-08T16:24:00Z',
     created_at: '2026-05-08T16:24:00Z',
     updated_at: '2026-05-08T17:06:42Z',
@@ -888,7 +888,7 @@ async function installApiStubs(page, state) {
         lock: {
           application_id: APPLICATION_ID,
           owner_user_id: CURRENT_USER_ID,
-          owner_display_name: roleProfiles[state.role]?.name || 'Program Admin',
+          owner_display_name: roleProfiles[state.role]?.name || 'System Administrator',
           owner_email: roleProfiles[state.role]?.email || 'program.admin@awentech.ca',
           expires_at: lockExpiresAt,
         },

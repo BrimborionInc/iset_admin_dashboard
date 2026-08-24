@@ -240,15 +240,6 @@ const getRegistrationValueFromSources = (answers, caseContext, personal) => {
   return found ? String(found) : "";
 };
 
-const getRegistrationTargetKey = answers => {
-  const readAnswer = makeAnswerReader(answers);
-  for (const key of REGISTRATION_KEYS) {
-    const val = readAnswer(key);
-    if (val && String(val).trim() !== "") return key;
-  }
-  return "sfn-registration-number";
-};
-
 const formatCurrency = amount => {
   if (amount === null || typeof amount === "undefined" || amount === "") return "$0";
   const num = Number(amount);
@@ -296,7 +287,7 @@ const NOC_VERSION_OPTIONS = [
 const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const {
     caseData,
-    saveCaseContext,
+    saveParticipantDetails,
     searchNocCodes,
   } = useCaseWorkspace();
   const caseContext = useMemo(() => caseData?.caseContext || {}, [caseData?.caseContext]);
@@ -1096,251 +1087,45 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
   const handleSave = async () => {
     setError(null);
     setSuccess(null);
-    const cleanedSin = cleanSin(form.sin || "");
-    const normalizedSexOther =
-      form.sex === "other" && String(form.sexOther || "").trim()
-        ? String(form.sexOther).trim()
-        : null;
-    const normalizedVisibleMinority = normalizeYesNo(form.visibleMinority);
-    const normalizedHasDisability = normalizeYesNo(form.hasDisability);
-    const normalizedSocialAssistance = normalizeYesNo(form.socialAssistance);
-    const normalizedDisabilitySupport = normalizeYesNo(form.disabilitySupport);
-    const normalizedLoanGrant = normalizeYesNo(form.loanGrant);
-    if (cleanedSin && cleanedSin.length !== 9) {
+    const normalizeParticipantDetails = source => ({
+      ...source,
+      sin: cleanSin(source?.sin || ""),
+      sexOther:
+        source?.sex === "other" && String(source?.sexOther || "").trim()
+          ? String(source.sexOther).trim()
+          : null,
+      visibleMinority: normalizeYesNo(source?.visibleMinority),
+      hasDisability: normalizeYesNo(source?.hasDisability),
+      socialAssistance: normalizeYesNo(source?.socialAssistance),
+      disabilitySupport: normalizeYesNo(source?.disabilitySupport),
+      loanGrant: normalizeYesNo(source?.loanGrant),
+    });
+    const currentParticipantDetails = normalizeParticipantDetails(form);
+    const initialParticipantDetails = normalizeParticipantDetails(initialFormRef.current || {});
+    const participantDetails = Object.keys(currentParticipantDetails).reduce((changed, key) => {
+      if (JSON.stringify(currentParticipantDetails[key]) !== JSON.stringify(initialParticipantDetails[key])) {
+        changed[key] = currentParticipantDetails[key];
+      }
+      return changed;
+    }, {});
+    const cleanedSin = currentParticipantDetails.sin;
+    const sinChanged = Object.prototype.hasOwnProperty.call(participantDetails, "sin");
+    if (sinChanged && cleanedSin && cleanedSin.length !== 9) {
       setError("Social Insurance Number must be 9 digits.");
       return;
     }
-    if (cleanedSin && !isValidSin(cleanedSin)) {
+    if (sinChanged && cleanedSin && !isValidSin(cleanedSin)) {
       setError("Social Insurance Number checksum is invalid.");
+      return;
+    }
+    if (!Object.keys(participantDetails).length) {
+      setSuccess("No participant detail changes to save.");
+      setEditing(false);
       return;
     }
     setSaving(true);
     try {
-      const nextContext = {
-        ...caseContext,
-        firstName: form.firstName || null,
-        lastName: form.lastName || null,
-        preferredName: form.preferredName || null,
-        middleNames: form.middleNames || null,
-        gender: form.gender || null,
-        genderIdentity: form.genderIdentity || null,
-        pronouns: form.pronouns || null,
-        sex: form.sex || null,
-        sexOther: normalizedSexOther,
-        sin: cleanedSin || null,
-        dateOfBirth: form.dateOfBirth || null,
-        address: {
-          line1: form.addressLine1 || null,
-          line2: form.addressLine2 || null,
-          city: form.addressCity || null,
-          province: form.addressProvince || null,
-          postalCode: form.postalCode || null,
-        },
-        mailingAddress: {
-          line1: form.mailingLine1 || null,
-          line2: form.mailingLine2 || null,
-          city: form.mailingCity || null,
-          province: form.mailingProvince || null,
-          postalCode: form.mailingPostal || null,
-        },
-        emailPrimary: form.emailPrimary || null,
-        phonePrimary: form.phonePrimary || null,
-        phoneAlt: form.phoneAlt || null,
-        indigenousIdentity: form.indigenousIdentity || null,
-        indigenousAffiliation: form.indigenousAffiliation || null,
-        registrationNumber: form.registrationNumber || null,
-        languageSpoken: form.languageSpoken || null,
-        preferredLanguage: form.languageSpoken || null,
-        visibleMinority: normalizedVisibleMinority || null,
-        maritalStatus: form.maritalStatus || null,
-        spouseName: form.spouseName || null,
-        dependentChildren: form.dependentChildren || null,
-        agesOfChildren: form.agesOfChildren || null,
-        hasDisability: normalizedHasDisability || null,
-        disabilityDescription: form.disabilityDescription || null,
-        homeCommunity: form.homeCommunity || null,
-        householdComposition: form.householdComposition || null,
-        socialAssistance: normalizedSocialAssistance || null,
-        topUpAmount: form.topUpAmount || null,
-        disabilitySupport: normalizedDisabilitySupport || null,
-        disabilitySupportDetails: form.disabilitySupportDetails || null,
-        employmentStatus: form.labourForceStatus || null,
-        educationLevel: form.highestEducation || null,
-        educationYear: form.educationYear || null,
-        educationProvince: form.educationLocation || null,
-        targetProgram: form.targetProgram || null,
-        employerName: form.employerName || null,
-        employmentNocVersion: form.employmentNocVersion || null,
-        employmentNoc: form.employmentNoc || null,
-        programEmployer: form.programEmployer || null,
-        programNocVersion: form.programNocVersion || null,
-        programNoc: form.programNoc || null,
-        programTrainingProvider: form.programTrainingProvider || null,
-        employmentGoals: form.employmentGoals || null,
-        employmentBarriers: Array.isArray(form.employmentBarriers) ? form.employmentBarriers : [],
-        requestedSupports: Array.isArray(form.requestedSupports) ? form.requestedSupports : [],
-        childcareFunding:
-          Array.isArray(form.childcareFunding) && form.childcareFunding.length ? form.childcareFunding : null,
-        otherBarrier: form.otherBarrier || null,
-        otherRequestedSupport: form.otherRequestedSupport || null,
-        longTermGoal: form.employmentGoalNarrative || null,
-        shortTermGoal: form.shortTermGoal || null,
-        incomeOther: form.incomeOther || null,
-        expensesTransport:
-          Array.isArray(form.expensesTransport) && form.expensesTransport.length ? form.expensesTransport : null,
-        expensesOtherList: form.expensesOtherList || null,
-        loanGrant: normalizedLoanGrant || null,
-        loanGrantDetails: form.loanGrantDetails || null,
-        expensesTransportMileage: form.expensesTransportMileage || null,
-        incomeEmployment: form.incomeEmployment || null,
-        incomeSpousal: form.incomeSpousal || null,
-        incomeSocialAssist: form.incomeSocialAssist || null,
-        incomeChildSupport: form.incomeChildSupport || null,
-        incomeChildBenefit: form.incomeChildBenefit || null,
-        incomeJordans: form.incomeJordans || null,
-        incomeBandFunding: form.incomeBandFunding || null,
-        incomeAlimony: form.incomeAlimony || null,
-        incomeOtherAmount: form.incomeOtherAmount || null,
-        expensesRent: form.expensesRent || null,
-        expensesGroceries: form.expensesGroceries || null,
-        expensesElectricity: form.expensesElectricity || null,
-        expensesHeating: form.expensesHeating || null,
-        expensesWater: form.expensesWater || null,
-        expensesSewerage: form.expensesSewerage || null,
-        expensesGarbage: form.expensesGarbage || null,
-        expensesBusPass: form.expensesBusPass || null,
-        expensesParking: form.expensesParking || null,
-        expensesOtherTotal: form.expensesOtherTotal || null,
-        applicationPersonal: {
-          ...(caseContext.applicationPersonal || {}),
-          first_name: form.firstName || null,
-          last_name: form.lastName || null,
-          preferred_name: form.preferredName || null,
-          middle_names: form.middleNames || null,
-          gender: form.gender || null,
-          gender_identity: form.genderIdentity || null,
-          pronouns: form.pronouns || null,
-          sex: form.sex || null,
-          sex_other: normalizedSexOther,
-          sin: cleanedSin || null,
-          date_of_birth: form.dateOfBirth || null,
-          email: form.emailPrimary || null,
-          phone: form.phonePrimary || null,
-          phone_alt: form.phoneAlt || null,
-          home_community: form.homeCommunity || null,
-          address: {
-            line1: form.addressLine1 || null,
-            line2: form.addressLine2 || null,
-            city: form.addressCity || null,
-            province: form.addressProvince || null,
-            postalCode: form.postalCode || null,
-          },
-          mailing_address: {
-            line1: form.mailingLine1 || null,
-            line2: form.mailingLine2 || null,
-            city: form.mailingCity || null,
-            province: form.mailingProvince || null,
-            postalCode: form.mailingPostal || null,
-          },
-        },
-        applicationAnswers: {
-          ...(caseContext.applicationAnswers || {}),
-          "first-name": form.firstName || null,
-          "last-name": form.lastName || null,
-          "preferred-name": form.preferredName || null,
-          "middle-names": form.middleNames || null,
-          "gender": form.gender || null,
-          "gender_identity": form.genderIdentity || null,
-          "pronouns": form.pronouns || null,
-          "sex": form.sex || null,
-          "sex_other": normalizedSexOther,
-          "biological_sex": form.sex || null,
-          "biological_sex_other": normalizedSexOther,
-          "dob": form.dateOfBirth || null,
-          "social-insurance-number": cleanedSin || null,
-          "address-street-address": form.addressLine1 || null,
-          "address-mailing-address": form.addressLine2 || null,
-          "address-city": form.addressCity || null,
-          "address-province": form.addressProvince || null,
-          "address-postcode": form.postalCode || null,
-          "mailing-address-street": form.mailingLine1 || null,
-          "mailing-address-line2": form.mailingLine2 || null,
-          "mailing-address-city": form.mailingCity || null,
-          "mailing-address-province": form.mailingProvince || null,
-          "mailing-address-postcode": form.mailingPostal || null,
-          "contact-email-address": form.emailPrimary || null,
-          "telephone-day": form.phonePrimary || null,
-          "telephone-alt": form.phoneAlt || null,
-          "emergency-contact-name": form.emergencyName || null,
-          "emergency-contact-telephone": form.emergencyPhone || null,
-          "emergency-contact-relationship": form.emergencyRelationship || null,
-          "legal-indigenous-identity": form.indigenousIdentity || null,
-          "indigenous-affiliation-declaration": form.indigenousAffiliation || null,
-          "registration-number": form.registrationNumber || null,
-          [getRegistrationTargetKey(caseContext.applicationAnswers || caseContext.applicationPayload?.answers || {})]:
-            form.registrationNumber || null,
-          "language-spoken": form.languageSpoken || null,
-          "preferred-language": form.languageSpoken || null,
-          "visible-minority": normalizedVisibleMinority || null,
-          "marital-status": form.maritalStatus || null,
-          "spouses-name": form.spouseName || null,
-          "dependent-children": form.dependentChildren || null,
-          "ages-of-children": form.agesOfChildren || null,
-          "has-disability": normalizedHasDisability || null,
-          "disability-description": form.disabilityDescription || null,
-          "home-community": form.homeCommunity || null,
-          "home-comminuty": form.homeCommunity || null,
-          "household-composition": form.householdComposition || null,
-          "social-assistance": normalizedSocialAssistance || null,
-          "top-up-amount": form.topUpAmount || null,
-          "disability-support": normalizedDisabilitySupport || null,
-          "disability-support_yes_follow": form.disabilitySupportDetails || null,
-          "labour-force-status": form.labourForceStatus || null,
-          "highest-education": form.highestEducation || null,
-          "education-year": form.educationYear || null,
-          "education-location": form.educationLocation || null,
-          "target-program": form.targetProgram || null,
-          "program-employer": form.programEmployer || null,
-          "program-noc-version": form.programNocVersion || null,
-          "program-noc": form.programNoc || null,
-          "program-training-provider": form.programTrainingProvider || null,
-          "employment-goals": form.employmentGoals || null,
-          "barriers": Array.isArray(form.employmentBarriers) ? form.employmentBarriers : null,
-          "other-barrier": form.otherBarrier || null,
-          "requested-supports": Array.isArray(form.requestedSupports) ? form.requestedSupports : null,
-          "childcare-fuding-status":
-            Array.isArray(form.childcareFunding) && form.childcareFunding.length ? form.childcareFunding : null,
-          "other-requested-support": form.otherRequestedSupport || null,
-          "long-term-goal": form.employmentGoalNarrative || null,
-          "short-term-goal": form.shortTermGoal || null,
-          "income-other": form.incomeOther || null,
-          "expenses-other-list": form.expensesOtherList || null,
-          "expenses-transport": Array.isArray(form.expensesTransport) ? form.expensesTransport : null,
-          "expenses_transport_mileage": form.expensesTransportMileage || null,
-          "loan-grant": normalizedLoanGrant || null,
-          "loan-grant-details": form.loanGrantDetails || null,
-          "income-employment": form.incomeEmployment || null,
-          "income-spousal": form.incomeSpousal || null,
-          "income-social-assist": form.incomeSocialAssist || null,
-          "income-child-support": form.incomeChildSupport || null,
-          "income-child-benefit": form.incomeChildBenefit || null,
-          "income-jordans": form.incomeJordans || null,
-          "income-band-funding": form.incomeBandFunding || null,
-          "income-alimony": form.incomeAlimony || null,
-          "income-other-description": form.incomeOtherAmount || null,
-          "expenses-rent": form.expensesRent || null,
-          "expenses-groceries": form.expensesGroceries || null,
-          "expenses-electricity": form.expensesElectricity || null,
-          "expenses-heating": form.expensesHeating || null,
-          "expenses-water": form.expensesWater || null,
-          "expenses-sewerage": form.expensesSewerage || null,
-          "expenses-garbage": form.expensesGarbage || null,
-          "expenses_bus_pass": form.expensesBusPass || null,
-          "expenses-parking": form.expensesParking || null,
-          "expenses-other-total": form.expensesOtherTotal || null,
-        },
-      };
-      await saveCaseContext(nextContext);
+      await saveParticipantDetails(participantDetails);
       setSuccess("Participant details saved.");
       setEditing(false);
     } catch (err) {
