@@ -1,7 +1,7 @@
 # PATH Deploy Orchestrator
 
 Status: current deployment control-plane reference.
-Last reviewed: 2026-08-18 after retiring the general qualification harness and adding explicit unqualified deployment records.
+Last reviewed: 2026-08-25 after a full unqualified PROD release revalidated immutable staging and the target-gated single-instance handoff.
 
 Start with the short operator runbook in `docs/ops/deployments/deployment-quick-guide.md` if you just need the normal commands.
 
@@ -152,7 +152,7 @@ Recommended planned-maintenance sequence:
 3. If a hard outage is required, enable the ALB fixed-response maintenance page.
 4. Run `path:deploy`.
 5. For TEST in-place deploys, keep the maintenance page up until the deploy finishes, then clear it and smoke normal routing.
-6. For PROD ASG refreshes, do not leave the ALB maintenance page up if the refresh stalls on ELB health with `Target.NotInUse` or `insufficient data`; the fixed response makes the target group unused, so clear the fallback once the refreshed instance is in service and let the in-app warning cover final warm-up.
+6. For PROD ASG refreshes, do not leave the ALB maintenance page up if the refresh stalls on ELB health with `Target.NotInUse` or `insufficient data`; the fixed response makes the target group unused. First prove both replacement services locally healthy. On the single-instance all-surface topology, clear admin in another shell, wait for the admin target to become `healthy`, and smoke admin; then clear portal, wait for the portal target to become `healthy`, and smoke both portal hosts. Leave the in-app warning active through this handoff.
 7. Run smoke with normal routing restored.
 8. Clear the warning after normal-routing smoke passes.
 9. For PROD bug/CR releases, reconcile the affected live feedback reports after smoke and targeted recheck: update report status, status history, and internal notes before calling the release complete.
@@ -264,6 +264,8 @@ Current autosave rollout note:
 ## Release manifests
 
 The manifest records `release.preflight` evidence (checks, durations, Git heads, working-tree fingerprints, and evidence ID). A full PROD app package also records immutable object keys/SHA-256 values and the complete release descriptor. The descriptor is durable preparation for the planned pinned-bootstrap rollout; until that activation, rollback still follows the compatibility bootstrap runbook and must not be described as atomic descriptor rollback.
+
+On the deployed host, `.path-release-provenance.json` is the authoritative packaged-source record and `build/path-build-manifest.json` is the authoritative compiled frontend record. Compare exact server/helper hashes when a release needs behavior-level proof. Do not infer the deployed target or Git head from `src/generated/buildInfo.js`: preflight intentionally restores the tracked source copy after building, and the later source-package step can therefore copy an older TEST stamp alongside a valid production bundle. Release `20260824-path-maintenance-r1` demonstrated this distinction while its authoritative manifests and exact runtime source hashes matched clean production source.
 
 Each `plan` or `run` command writes a manifest JSON file under:
 

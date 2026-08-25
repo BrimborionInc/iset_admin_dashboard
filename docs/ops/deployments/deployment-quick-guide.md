@@ -1,7 +1,7 @@
 # PATH Deployment Quick Guide
 
 Status: current primary operator guide for normal TEST/PROD PATH deploys.
-Last reviewed: 2026-08-16 — qualification harness abandoned; `--skip-qualification` replaces `--qualification-evidence` for all current deploys.
+Last reviewed: 2026-08-25 — full PROD refresh revalidated the single-surface handoff, immutable staging, and authoritative provenance checks.
 
 This is the shortest operator guide for normal PATH deployments.
 
@@ -24,6 +24,7 @@ When Bill starts a new Codex thread for deploy work, the agent must first:
 - For PROD app deploys, the deploy orchestrator now fails dirty source trees before mutation. Commit, stash, or isolate the admin/portal/shared source before deploy; use `--allow-dirty --dirty-reason "<specific approved reason>"` only for an explicitly approved emergency exception.
 - Every deploy run records `release.qualification` before `release.preflight` and every mutation boundary. While the retired qualifier is unavailable, pass `--skip-qualification --yes`; the manifest and artifact provenance record `UNQUALIFIED`, and source/build/product-test/lint/privacy/deploy/smoke controls remain mandatory. Do not describe those narrower controls as comprehensive workflow qualification.
 - `--skip-build` requires `build/path-build-manifest.json` for the exact target, release ID, clean Git commit, and untampered build tree. Generate it with `npm run build:manifest` only after building the exact prebuilt release; an older TEST/PROD build cannot be relabelled during deploy.
+- On a deployed host, use `.path-release-provenance.json` for packaged source provenance and `build/path-build-manifest.json` for the compiled frontend target/commit/hash. Do not use the copied `src/generated/buildInfo.js` as deployment evidence: preflight restores the tracked source copy after producing the validated bundle, so that non-runtime file can retain an older TEST stamp even when the deployed production bundle and source are correct.
 - PROD normal-routing smoke uses public `/readyz` for admin and portal so missing canonical runtime schema fails with `503`; use local `/healthz` only to diagnose whether a replacement process has started while ALB routing/fallback is still in transition.
 - `/home/bill/ISET/shared` should be a local Git repo. If it is missing or not a repo, stop and restore/recreate it before deploy unless Bill explicitly approves an emergency exception with marker/checksum verification.
 - State the intended deploy scope before planning. Ordinary TEST/PROD deploys mean the current app build plus planned schema migrations, and use `--skip-data`; runtime/config/data promotion is a separate scope and is not included by default.
@@ -52,7 +53,7 @@ When Bill starts a new Codex thread for deploy work, the agent must first:
 - Before deploy, generate or inspect `src/generated/publicReleaseNotes.js` and confirm that it contains `featurePackages` for the three current release packages, does not expose `Earlier changes`, and has today's/current release package as the first `featurePackages[0]` entry in both languages. A generated file stamped with the new release ID but showing an older package title first is a failed preflight; stop and fix the draft release notes before running `path:deploy`.
 - For fixes that affect audit, auth, support diagnostics, retention, messaging scope, document scope, payment scope, or any other schema-backed operational evidence, verify the deployed DB schema and the writer code before relying on the table. A table existing is not enough; run a focused preflight that proves the writer uses real columns, does not silently swallow failures, and creates/updates at least one safe TEST row or has an equivalent automated test. For PROD investigations, state any evidence gaps plainly instead of implying a broken/empty audit table proves no activity happened.
 - In the current Codex sandbox, `nwac-prod` is the standard role-backed prod operator profile. `default` is only the bootstrap IAM user and direct prod resource calls through it are expected to fail.
-- The reduced `nwac-prod` role covers established compatibility-artifact deploys, prod SQL/dumps via SSM, ASG refresh, automatic prod restore-point snapshots, and the ALB maintenance fallback. It does not currently permit the newer immutable `releases/*` prefix. While bootstrap still consumes `*-latest.zip`, an explicitly reviewed recovery may add `--compatibility-only`; otherwise obtain separate IAM authority. The role also excludes broader infra/admin work such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
+- The reduced `nwac-prod` role covers compatibility artifacts, immutable `releases/*` objects and descriptors through attached policy `PATHProdImmutableReleaseArtifacts`, prod SQL/dumps via SSM, ASG refresh, automatic prod restore-point snapshots, and the ALB maintenance fallback. Release `20260824-path-maintenance-r1` re-proved normal immutable shared/admin/portal staging. `--compatibility-only` remains an explicitly reviewed pre-EA-028 recovery, not the default. The role still excludes broader infra/admin work such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
 - PROD deploys require explicit Bill approval in the current thread plus `--yes`. A prepared fix, passing TEST result, or urgent support issue is not approval to deploy to PROD.
 - PROD app deploys require clean packaged source trees. The orchestrator checks the admin repo for admin artifacts, the portal repo for portal artifacts, and the sibling `shared` repo whenever admin, portal, or shared artifacts include it. A dirty-source override must be named, approved, and recorded with `--allow-dirty --dirty-reason`.
 - The `shared` tree is a Git repo as of 2026-07-08 and tracks private GitHub remote `https://github.com/BrimborionInc/iset_shared.git`. Verify it is clean and pushed before deploys, like admin and portal.
@@ -146,7 +147,9 @@ For a normal app rollout, use the maintenance sequence so smoke runs after norma
 npm run path:maintenance -- set --env prod --surfaces all --start-in 5m --expected-duration 15m --yes
 # wait through the warning window
 npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
+# leave this command running while it waits for the ASG refresh
 npm run path:deploy -- --env prod --skip-data --release-id <release-id> --skip-qualification --skip-smoke --yes
+# after successful refresh, or use the target-gated handoff below if fallback blocks ELB evaluation
 npm run path:maintenance:fallback -- clear --env prod --surfaces all --yes
 npm run path:deploy:smoke -- --env prod
 npm run path:maintenance -- clear --env prod --surfaces all --yes
@@ -155,6 +158,8 @@ npm run path:maintenance -- clear --env prod --surfaces all --yes
 If the ASG refresh reports `Target.NotInUse` or insufficient ELB health data while fallback is active, first verify the replacement instance is actually serving local `/healthz` on the admin/portal ports through SSM. If the host is still bootstrapping (`npm ci`, pm2 not started, or local health failing), keep fallback active and recheck shortly. Once local health passes, clear the fallback in another shell so ELB can evaluate real target health, then let the refresh continue.
 
 On the single-instance PROD topology, local readiness does not prove that the target has already met the ALB healthy-threshold count. For an all-surface refresh, hand routing back one surface at a time: clear admin fallback, wait until the admin target group reports `healthy`, and smoke admin; then clear portal fallback, wait until the portal target group reports `healthy`, and smoke both portal hosts. If an immediate public smoke returns `503`, restore fallback at once and repeat the target-group-gated handoff. Keep the in-app warning active until both target groups and all public readiness checks are green.
+
+`path:maintenance` supports only `set` and `clear`; it has no `status` subcommand. Verify an announcement clear only through a read-only check of the exact live `iset_runtime_config(scope='runtime', k='service.announcement')` row after current target identity and DDL proof. `path:maintenance:fallback status` is valid and should be used to verify listener routing.
 
 Use this when:
 - the change has already been validated in TEST
