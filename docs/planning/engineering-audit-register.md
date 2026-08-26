@@ -1,7 +1,7 @@
 # PATH Engineering Audit Register
 
 Status: current
-Last updated: 2026-07-12
+Last updated: 2026-08-26
 Active cycle: `GPT56-2026-07`
 
 Purpose: persistent control document for model-generation engineering reviews across the PATH admin dashboard, public portal, shared runtime code, database/runtime configuration, deployment tooling, and local Sage Intacct mock. It records audit coverage, evidence-backed findings, dispositions, and verification state so later threads can continue without chat history.
@@ -19,6 +19,11 @@ Purpose: persistent control document for model-generation engineering reviews ac
 ## Active Review Cycle
 
 The `GPT56-2026-07` cycle is the first review using this framework. Framework creation, all nine audit lanes, cycle synthesis, local remediation tranches through `R7`, the post-R7 complete-stack verification boundary, consolidated TEST acceptance, and coordinated PROD application/schema promotion are complete. The register contains 38 `EA-*` findings, four retained specialist findings, explicit priorities, root-cause clusters, and a staged remediation programme. `R0` closed `EA-027`, `EA-035`, and `EA-037`; R1 closed `EA-003` and `EA-019`; R2 closed `EA-016`; R3a closed `EA-022` and `EA-025`; R3b closed `EA-002` and `EA-023`; R3c closed `EA-001`, `EA-021`, `ID-01`, `SM-01`, `SR-01`, and `LG-01`; R4a closed `EA-026`, `EA-029`, and `EA-038` and moved `EA-028` to planned pending bootstrap/launch-template activation; R4b closed `EA-030`, `EA-033`, and `EA-034`; R5a closed `EA-004`, `EA-005`, `EA-007`, and `EA-014`; R5b closed `EA-018` and `EA-020`; R6a closed `EA-008`, `EA-010`, and `EA-011`; R6b closed `EA-006`, `EA-012`, `EA-031`, and `EA-032`; R7 closed `EA-009`, `EA-013`, `EA-015`, `EA-017`, and `EA-024` without activating payments; and the post-R7 harness closed `EA-036`. No `EA-*` finding remains open. `EA-028` remains the one planned item behind separately authorized IAM/bootstrap activation; the 2026-07-13 PROD release did not activate it.
+
+### 2026-08-26 operational follow-ups
+
+- The fresh TEST host reached 87% root-disk usage, with about 1.1 GB free, after one atomic deployment; retained transaction backups and caches are the leading suspected contributor. Before another atomic TEST deployment, establish bounded retention/cleanup and a disk-capacity preflight or replace the host under the normal fallback procedure. This does not authorize use or repair of the retired qualification harness.
+- The TEST host's remote deployment transaction remained `cutover-complete` even though the local successful manifest recorded state `accepted`. Wire the existing acceptance transition into the supported orchestrator path and add a focused regression so remote and local recovery state cannot diverge. This bookkeeping gap did not affect the deployed application or the completed PROD release.
 
 Start snapshot:
 

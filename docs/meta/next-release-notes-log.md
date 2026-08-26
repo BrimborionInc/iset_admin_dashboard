@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-08-25
+Last Updated: 2026-08-26
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,9 +22,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
-- 2026-08-25 | Release 20260825-signing-lineage-r2 | Fix/Secure Messaging | Reliable send retry | A lost connection after Send no longer causes PATH to create the same message, form package, or decision update twice. | PATH reuses the exact original send operation for a retry, returns its committed result, and uses a fresh operation for a later intentional message.
-- 2026-08-25 | Release 20260825-signing-lineage-r2 | Fix/Secure Messaging | Historical conversations and attachments | Authorized users can keep reading and replying to historical messages and attachments after application or account-link changes without PATH rewriting their history. | Ordinary replies use the conversation's recorded participant; a signing form requires the current participant, while optional attachment application differences or a document-indexing failure do not block the authorized file read.
-- 2026-08-25 | Release 20260825-signing-lineage-r2 | Fix/Secure Messaging | Exact form ownership | Applicationless and sibling-application form history no longer blocks an approved application's funding package, and form-specific intervention context is now visible before it is sent. | PATH creates or reuses the agreement version for the exact selected application and Action Plan, preserves unrelated history, and sends intervention context only for form types that use it. Ordinary messages do not inherit hidden workspace scope. Clean-source deployment and focused Regional Manager acceptance passed in TEST; PROD has not been changed.
+- 2026-08-26 | Release 20260826-signing-lineage-r2-copyfix | Fix/Secure Messaging | Reliable send retry | A lost connection after Send no longer causes PATH to create the same message, form package, or decision update twice. | PATH reuses the exact original send operation for a retry, returns its committed result, and uses a fresh operation for a later intentional message. Deployed to TEST and PROD.
+- 2026-08-26 | Release 20260826-signing-lineage-r2-copyfix | Fix/Secure Messaging | Historical conversations and attachments | Authorized users can keep reading and replying to historical messages and attachments after application or account-link changes without PATH rewriting their history. | Ordinary replies use the conversation's recorded participant; a signing form requires the current participant, while optional attachment application differences or a document-indexing failure do not block the authorized file read. Deployed to TEST and PROD.
+- 2026-08-26 | Release 20260826-signing-lineage-r2-copyfix | Fix/Secure Messaging | Exact form ownership | Applicationless and sibling-application form history no longer blocks an approved application's funding package, and form-specific intervention context is now visible before it is sent. | PATH creates or reuses the agreement version for the exact selected application and Action Plan, preserves unrelated history, and sends intervention context only for form types that use it. Ordinary messages do not inherit hidden workspace scope. Clean-source TEST acceptance and the PROD rollout passed; targeted live reporter-role journey verification remains pending.
 - 2026-08-25 | Release 20260825-signing-lineage-r1 | Ops/Release Safety | Superseded TEST candidate | The first TEST candidate is not eligible for PROD promotion. | Re-audit found that it did not cover the normal approval caller and could omit intervention context from an attendance-report send. Release `r2` has a separate identity and must earn new exact-source TEST evidence.
 - 2026-08-24 | Release 20260824-path-maintenance-r1 | Fix/Casework | Participant Details | Authorized staff can save Participant Details corrections after opening a file directly from ISET Clients; PATH no longer incorrectly asks for an application ID. | The save changes only current case-level participant facts, keeps application decisions and assessments untouched, and returns affected ILMP readiness to review without replacing an already submitted or accepted export snapshot. Deployed to TEST and PROD; feedback #195 is resolved.
 - 2026-08-24 | Release 20260824-path-maintenance-r1 | UX/Documents | Supporting Documents delete message | When PATH needs to keep a document, the Delete dialog now clearly explains why instead of appearing to stop without a result. | The message stays in the dialog in plain English, and the unavailable Delete action changes to Close. Existing document protections are unchanged. Deployed to TEST and PROD.
@@ -514,7 +514,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What Changed Packages (draft - EN)
 
-#### Release 20260825-signing-lineage-r2
+#### Release 20260826-signing-lineage-r2-copyfix
 
 - Secure-message and decision-letter retries now reuse the original completed send instead of creating a duplicate message, signing package, agreement version, or decision update after a lost connection.
 - Secure Messaging now creates funding agreements and financial overviews for the exact selected application and Action Plan. Older applicationless and sibling-application forms remain available as history but no longer block or get changed by unrelated work.
@@ -548,7 +548,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Lots de changements (brouillon - FR)
 
-#### Release 20260825-signing-lineage-r2
+#### Release 20260826-signing-lineage-r2-copyfix
 
 - Les nouvelles tentatives d'envoi d'un message sécurisé ou d'une lettre de décision réutilisent maintenant l'envoi déjà terminé, plutôt que de créer un message, une trousse de signature, une version d'entente ou une mise à jour de décision en double après une perte de connexion.
 - La messagerie sécurisée crée maintenant les ententes de financement et les aperçus financiers pour la demande et le plan d'action sélectionnés exactement. Les formulaires sans demande ou liés à une autre demande restent dans l'historique, sans bloquer ni être modifiés par un travail indépendant.
