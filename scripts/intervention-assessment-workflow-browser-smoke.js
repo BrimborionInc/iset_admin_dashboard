@@ -839,7 +839,14 @@ async function installApiStubs(page, state) {
     }
     if (pathname === '/api/workflows') {
       request.respond(jsonResponse([
-        { id: 77, status: 'active', document_type: 'assessment_approval_letter', title: 'Approval letter' },
+        {
+          id: 77,
+          name: 'Letter of Approval',
+          status: 'active',
+          workflow_type: 'consent-cm-prefill',
+          document_type: 'assessment_approval_letter',
+          updated_at: '2026-08-25T12:00:00.000Z',
+        },
       ]));
       return;
     }

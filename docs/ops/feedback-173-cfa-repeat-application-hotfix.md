@@ -61,6 +61,8 @@ Rollback is allowed only while the corrected CFA remains draft and has never bee
 
 ## Release Acceptance
 
+Historical note: the qualification-gate wording below records the July 2026 release process. The general/CFA qualification harness was retired on 2026-08-16 and must not be run, repaired, or treated as current acceptance. Current follow-up work uses ordinary product/full-route tests and explicit non-harness DEV/TEST user-path evidence as directed by `docs/AGENTS.md` and `docs/ops/deployments/deployment-quick-guide.md`.
+
 - Focused admin regressions prove application-scoped plan guards, application-scoped CFA fallback, plan application lineage, and next-version creation.
 - Focused portal regressions prove same-case/application signing, stale-withdrawn denial, canonical signed-document linking, superseded-render archival, and signed-version finalization.
 - The normal exact-source DEV and deployed TEST qualification gates must be `GO`.

@@ -1,5 +1,3 @@
-const fs = require('fs');
-const path = require('path');
 const {
   RUNTIME_METRICS_SQL,
   createRuntimeMetricsGuard,
@@ -8,10 +6,6 @@ const {
   MIGRATION_LEDGER_SQL,
   createMigrationLedgerGuard,
 } = require('../scripts/path-test-migration-ledger');
-
-function source(relativePath) {
-  return fs.readFileSync(path.resolve(__dirname, '..', relativePath), 'utf8');
-}
 
 function column(Field, Type = 'varchar(255)') {
   return {
@@ -93,57 +87,7 @@ const configuredTestIdentity = Object.freeze({
   database: 'iset_intake',
 });
 
-describe('TEST acceptance SQL safety wiring', () => {
-  test('applicant-scope preflights before Cognito and guards every ordinary statement', () => {
-    const text = source('scripts/applicant-scope-guard-test-smoke.js');
-
-    expect(text).toContain("const { createLiveSchemaGuard } = require('./two-step-review-test-smoke');");
-    expect(text.indexOf('const preflight = runRemote({ preflightOnly: true });')).toBeLessThan(
-      text.indexOf('applicantA.sub = createCognitoUser({ ...applicantA, poolId }, options);')
-    );
-    expect(text.indexOf('result.schemaSafety = await schemaGuard.preflight();')).toBeLessThan(
-      text.indexOf('await seedFixture();')
-    );
-    expect(text).toContain('onBeforeStatementExecute: ({ mutating }) => {');
-    expect(text).toContain('if (mutating) fixtureMutationStarted = true;');
-    expect(text).toContain('return schemaGuard.execute(sql, params);');
-    expect(text).not.toMatch(/connection\.(?:query|execute|beginTransaction|commit|rollback)\(/u);
-    expect(text).toContain("throw new Error('--keep-fixture is disabled: release smoke must prove zero TEST residue.');");
-    expect(text).toContain("await query('START TRANSACTION');");
-    expect(text).toContain('await cleanupByMarkerAndEmail({ emails, markerLike });');
-    expect(text).toContain("result.cleanup = 'suppressed_after_schema_safety_failure';");
-  });
-
-  test('postflight uses deployed guarded readers instead of raw SQL transport', () => {
-    const postflight = source('scripts/path-test-runtime-postflight.js');
-    const metrics = source('scripts/path-test-runtime-metrics.js');
-    const ledger = source('scripts/path-test-migration-ledger.js');
-    const deploy = source('scripts/path-deploy.js');
-
-    expect(postflight).not.toContain('run-test-sql-via-ssm.sh');
-    expect(postflight).not.toContain('SELECT COUNT(*) FROM iset_event_delivery');
-    expect(postflight).toContain('node scripts/path-test-runtime-metrics.js');
-    expect(postflight).toContain('node scripts/path-test-migration-ledger.js');
-    expect(deploy).toContain("'lib/live-mysql-schema-guard.js'");
-    expect(deploy).toContain("'lib/test-instance-aws-identity.js'");
-    expect(deploy).toContain("'applicant-scope-guard-test-smoke.js'");
-    expect(deploy).toContain("'path-test-migration-ledger.js'");
-    expect(deploy).toContain("'path-test-runtime-metrics.js'");
-    expect(deploy).toContain("'r1-intake-completion-test-smoke.js'");
-    expect(metrics).toContain("const { createLiveMysqlSchemaGuard } = require('./lib/live-mysql-schema-guard');");
-    expect(ledger).toContain("const { createLiveMysqlSchemaGuard } = require('./lib/live-mysql-schema-guard');");
-    expect(metrics.indexOf('await guard.preflight();')).toBeLessThan(
-      metrics.indexOf('await guard.execute(RUNTIME_METRICS_SQL)')
-    );
-    expect(ledger.indexOf('await guard.preflight();')).toBeLessThan(
-      ledger.indexOf('await guard.execute(MIGRATION_LEDGER_SQL)')
-    );
-    expect(metrics).toContain("version: '8.0.42'");
-    expect(ledger).toContain("version: '8.0.42'");
-    expect(ledger).toContain('summarizeMigrationLedger(result)');
-    expect(postflight).not.toContain('report.rows');
-  });
-
+describe('operational SQL reader safety', () => {
   test('canonical guard validates the finished runtime metrics SQL before execution', async () => {
     const connection = guardedReaderDriver();
     const guard = createRuntimeMetricsGuard(connection, configuredTestIdentity);

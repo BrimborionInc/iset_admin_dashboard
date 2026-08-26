@@ -84,6 +84,7 @@ describe('PATH patch bug guards', () => {
     const schemaBuildIndex = routeSource.indexOf('await buildRequiredSigningWorkflowSchemas(');
     const applicationLockIndex = routeSource.indexOf('FROM iset_application', beginIndex);
     const caseLockIndex = routeSource.indexOf('await lockCaseForVersionedSigning(', beginIndex);
+    const cfaAssessmentIndex = routeSource.indexOf('await assessApplicationScopedCfaDraft(');
     const cfaCreateIndex = routeSource.indexOf('created = await createCfaVersionForPlan({');
     const fundingOverviewCreateIndex = routeSource.indexOf('await createFundingOverviewVersion({');
     const finalSchemaIndex = routeSource.indexOf('prepareCaseMessageSigningSchema({');
@@ -103,11 +104,16 @@ describe('PATH patch bug guards', () => {
     expect(routeSource).toContain('signingRequestIds: createdSigningRequestIds');
     expect(routeSource).toContain('commitOutcome: messageWriteCommitOutcome');
     expect(schemaBuildIndex).toBeGreaterThanOrEqual(0);
-    expect(schemaBuildIndex).toBeLessThan(beginIndex);
     expect(beginIndex).toBeGreaterThanOrEqual(0);
+    // A durable client-operation claim may open the transaction before schema
+    // preparation. The schema must still be proven before form locks or any
+    // message/signing/version write; a failed preflight rolls that claim back.
+    expect(schemaBuildIndex).toBeGreaterThan(beginIndex);
+    expect(schemaBuildIndex).toBeLessThan(applicationLockIndex);
     expect(applicationLockIndex).toBeGreaterThan(beginIndex);
     expect(caseLockIndex).toBeGreaterThan(applicationLockIndex);
-    expect(cfaCreateIndex).toBeGreaterThan(caseLockIndex);
+    expect(cfaAssessmentIndex).toBeGreaterThan(caseLockIndex);
+    expect(cfaCreateIndex).toBeGreaterThan(cfaAssessmentIndex);
     expect(fundingOverviewCreateIndex).toBeGreaterThan(caseLockIndex);
     expect(finalSchemaIndex).toBeGreaterThan(cfaCreateIndex);
     expect(finalSchemaIndex).toBeGreaterThan(fundingOverviewCreateIndex);
@@ -135,17 +141,39 @@ describe('PATH patch bug guards', () => {
       expect(lockIndex).toBeGreaterThanOrEqual(0);
       expect(seriesIndex).toBeGreaterThan(lockIndex);
       expect(maxIndex).toBeGreaterThan(seriesIndex);
-      expect(creatorSource).toContain('filterApplicationScopedVersionRows(');
-      expect(creatorSource).toContain("row?.status === 'signed'");
+      expect(creatorSource).toContain('resolveLatestSignedVersionBaseline(');
       expect(creatorSource).toContain('uploadedObjectKeys: createdObjectKeys');
       expect(creatorSource).toContain('await commitGeneratedVersionWriteTransaction({');
       expect(creatorSource).toContain("commitOutcome = 'uncertain'");
     }
 
-    const scopedDraftSource = extractAdminFunction('resolveApplicationScopedCfaDraft');
-    expect(scopedDraftSource).toContain('filterApplicationScopedVersionRows(rows, normalizedApplicationId)');
-    expect(scopedDraftSource).toContain('applicationRows.map(row => normalisePositiveInteger(row.id)).filter(Boolean)');
-    expect(scopedDraftSource).not.toContain('buildCasePrimaryApplicationJoinSql');
+    expect(cfaPlanSource).toContain('filterCfaActionPlanScopedVersionRows(');
+    expect(cfaPlanSource).toContain('application_id, action_plan_id, version_number');
+    expect(cfaAssessmentSource).toContain('filterApplicationScopedVersionRows(');
+    expect(cfaAssessmentSource).toContain('application_id, action_plan_id, version_number');
+    expect(fundingOverviewSource).toContain('filterApplicationScopedVersionRows(');
+    expect(fundingOverviewSource).toContain('application_id, version_number');
+    expect(cfaPlanSource).toContain('const priorVersionRow = validatedBaseline?.row || null');
+    expect(fundingOverviewSource).toContain('const priorSignedRow = validatedBaseline?.row || null');
+
+    const assessedDraftSource = extractAdminFunction('assessApplicationScopedCfaDraft');
+    expect(assessedDraftSource).toContain('filterCfaActionPlanScopedVersionRows(');
+    expect(assessedDraftSource).toContain('selectedDraft.snapshot_hash');
+    expect(assessedDraftSource).toContain('resolveLatestSignedVersionBaseline(');
+    expect(assessedDraftSource).toContain('validatedBaseline?.row?.id');
+    expect(assessedDraftSource).toContain('cfaDraftSnapshotMateriallyMatches(storedSnapshot, freshSnapshot)');
+    expect(assessedDraftSource).toContain('storedBaselineId !== latestSignedVersionId');
+    expect(assessedDraftSource).toContain('latestUnsignedVersionId !== selectedDraftId');
+    expect(assessedDraftSource).toContain("reason: 'draft_not_latest_unsigned'");
+    expect(assessedDraftSource).not.toMatch(/\b(UPDATE|INSERT|DELETE)\b/);
+    expect(assessedDraftSource).not.toContain('buildCasePrimaryApplicationJoinSql');
+
+    const preparedDraftSource = extractAdminFunction('prepareReusableApplicationScopedCfaDraft');
+    expect(preparedDraftSource).toContain('assessment.exactLineageRows');
+    expect(preparedDraftSource).toContain('assessment.latestUnsignedVersionId');
+    expect(preparedDraftSource).toContain('normalisePositiveInteger(row?.id) !== selectedDraftId');
+    expect(preparedDraftSource).toContain('cancelUnsignedCfaSigningRequests(connection, supersededUnsignedIds)');
+    expect(preparedDraftSource).not.toContain('SET supersedes_version_id');
   });
 
   test('generated CFA and financial-overview uploads retain versioned or request-owned checksum identity', () => {

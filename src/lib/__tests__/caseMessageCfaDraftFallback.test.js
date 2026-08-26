@@ -15,7 +15,7 @@ const extractBetween = (source, start, end) => {
 };
 
 describe("case message CFA draft fallback", () => {
-  test("intervention letter sends can create a missing CFA draft from the action plan", () => {
+  test("funding agreement sends reuse only a verified immutable exact-plan draft and otherwise rebuild", () => {
     const serverSource = readRepoFile("isetadminserver.js");
     const route = extractBetween(
       serverSource,
@@ -23,8 +23,11 @@ describe("case message CFA draft fallback", () => {
       "app.post('/api/cases/:id/messages', handlePostCaseSecureMessage);"
     );
 
+    const planResolutionIndex = route.indexOf("await resolveCfaActionPlanForApplication(");
+    const freshSnapshotIndex = route.indexOf("const freshPlanSnapshot = await buildCfaSnapshot({");
+    const draftAssessmentIndex = route.indexOf("await assessApplicationScopedCfaDraft(");
+    const reusablePrepareIndex = route.indexOf("await prepareReusableApplicationScopedCfaDraft(");
     const planCreateIndex = route.indexOf("created = await createCfaVersionForPlan({");
-    const assessmentCreateIndex = route.indexOf("created = await createCfaVersionFromAssessment({");
 
     expect(route).toContain("let requestedInterventionLetterEligibility = null;");
     expect(route).toContain("await resolveApprovedInterventionProposalLetterEligibility({");
@@ -32,8 +35,22 @@ describe("case message CFA draft fallback", () => {
     expect(route).toContain("i.action_plan_id");
     expect(route).toContain("hasAppliedInterventionRevisionMetadata(sourceMetadata)");
     expect(route).toContain("changeReason: isInterventionRevisionCfaDraft ? 'INTERVENTION_CHANGED' : 'NEW_INTERVENTION_APPROVED'");
+    expect(planResolutionIndex).toBeGreaterThanOrEqual(0);
+    expect(freshSnapshotIndex).toBeGreaterThan(planResolutionIndex);
+    expect(draftAssessmentIndex).toBeGreaterThan(freshSnapshotIndex);
+    expect(reusablePrepareIndex).toBeGreaterThan(draftAssessmentIndex);
     expect(planCreateIndex).toBeGreaterThanOrEqual(0);
-    expect(assessmentCreateIndex).toBeGreaterThan(planCreateIndex);
+    expect(planCreateIndex).toBeGreaterThan(draftAssessmentIndex);
+    expect(serverSource).toContain("cfaActionPlanId: fundingAgreementDraft.actionPlanId");
+    expect(route).not.toContain("created = await createCfaVersionFromAssessment({");
+    expect(route).toContain("cfaSnapshot = created.snapshot || null;");
+    expect(serverSource).toContain("storedHash.toLowerCase() !== computedStoredHash");
+    expect(serverSource).toContain("cfaDraftSnapshotMateriallyMatches(storedSnapshot, freshSnapshot)");
+    expect(serverSource).toContain("storedBaselineId !== latestSignedVersionId");
+    expect(serverSource).not.toContain("SET supersedes_version_id = ?");
+    expect(route).toContain(
+      "normalisePositiveInteger(messageInterventionEligibility?.actionPlanId) ||\n            normalisePositiveInteger(cfaActionPlanId) ||"
+    );
   });
 
   test("manual backload edits still do not auto-create CFA side effects", () => {

@@ -717,7 +717,10 @@ async function resolveClientIdFromApplicantUserId(applicantUserId, connection = 
   const [[row]] = await connection.query(
     `SELECT cl.id
        FROM user u
-       JOIN client cl ON cl.applicant_cognito_sub = u.cognito_sub
+       JOIN client cl
+         ON NULLIF(TRIM(cl.applicant_cognito_sub), '') IS NOT NULL
+        AND NULLIF(TRIM(u.cognito_sub), '') IS NOT NULL
+        AND cl.applicant_cognito_sub = u.cognito_sub
       WHERE u.id = ?
       LIMIT 1`,
     [normalizedUserId]
@@ -1105,10 +1108,11 @@ async function resolveClientIdFromApplicationId(applicationId, connection = pool
       LIMIT 1`,
     [normalizedApplicationId]
   );
-  if (!userRow?.cognito_sub) return null;
+  const userCognitoSub = normaliseString(userRow?.cognito_sub);
+  if (!userCognitoSub) return null;
   const [[clientRow]] = await connection.query(
     'SELECT id FROM client WHERE applicant_cognito_sub = ? LIMIT 1',
-    [userRow.cognito_sub]
+    [userCognitoSub]
   );
   return clientRow?.id ? Number(clientRow.id) : null;
 }
@@ -7803,7 +7807,6 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_case_action_item',
   'iset_review_workflow_event',
   'iset_review_workflow',
-  'iset_case_action_plan',
   'iset_application_assessment',
   'iset_case_assessment',
   'iset_case_compliance_check',
@@ -7844,6 +7847,7 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'budget_snapshot',
   'budget_pot_draft',
   'iset_event_receipt',
+  'iset_event_delivery',
   'iset_event_entry',
   'message_signing_request',
   'signing_request',
@@ -7851,18 +7855,25 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'cfa_version_documents',
   'cfa_version',
   'cfa_series',
+  'funding_overview_version_documents',
+  'funding_overview_version',
+  'funding_overview_series',
+  'iset_case_action_plan',
   'iset_intake.message_attachment',
+  'iset_reminder_lifecycle_event',
   'iset_intake.iset_case_reminder',
-  'iset_intake.messages',
   'documents',
   'iset_document_lifecycle_event',
   'iset_document_lifecycle',
   'iset_document',
+  'message_send_operation',
+  'iset_intake.messages',
   'pending_uploads',
   'iset_application_version',
   'iset_intake.iset_application_escalation',
   'iset_application_draft_dynamic',
   'iset_application_file',
+  'iset_application',
   'iset_application_submission',
   'iset_application_draft',
   'esdc_participant_submission_history',
@@ -7870,10 +7881,12 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'esdc_reporting_note',
   'esdc_reporting_package',
   'system_config_audit',
+  'client_file_import_identity_claim',
+  'iset_client_merge_audit',
+  'iset_case_merge_audit',
   'iset_case',
   'client_applicant_account_event',
   'client',
-  'iset_application',
 ];
 
 const SLA_STAGE_PLACEHOLDER = [
@@ -16816,7 +16829,37 @@ function computeCfaSnapshotSignature(snapshot) {
   return { canonicalJson, hash };
 }
 
-async function buildCfaSnapshot({ connection, caseId, actionPlanId }) {
+function resolveVersionSnapshotParticipantUserId({
+  clientBoundUserId,
+  clientBoundCognitoSub = undefined,
+  submissionUserId,
+  participantUserId = null,
+  conflictCode,
+} = {}) {
+  const clientParticipantId = normalisePositiveInteger(clientBoundUserId);
+  const clientLinkEvidenceProvided = clientBoundCognitoSub !== undefined;
+  const hasPopulatedClientLink = clientLinkEvidenceProvided
+    ? Boolean(normaliseString(clientBoundCognitoSub))
+    : Boolean(clientParticipantId);
+  const submissionParticipantId = normalisePositiveInteger(submissionUserId);
+  const expectedParticipantId = normalisePositiveInteger(participantUserId);
+  if (hasPopulatedClientLink && !clientParticipantId) {
+    throw new Error(conflictCode || 'version_participant_scope_conflict');
+  }
+  const authoritativeParticipantId = clientParticipantId ||
+    (!hasPopulatedClientLink ? submissionParticipantId : null) ||
+    null;
+  if (
+    expectedParticipantId &&
+    authoritativeParticipantId &&
+    expectedParticipantId !== authoritativeParticipantId
+  ) {
+    throw new Error(conflictCode || 'version_participant_scope_conflict');
+  }
+  return expectedParticipantId || authoritativeParticipantId || null;
+}
+
+async function buildCfaSnapshot({ connection, caseId, actionPlanId, participantUserId = null }) {
   const [[planRow]] = await connection.query(
     `SELECT id, application_id, name, funding_stream, agreement_number, effective_date
        FROM iset_case_action_plan
@@ -16838,13 +16881,21 @@ async function buildCfaSnapshot({ connection, caseId, actionPlanId }) {
     `SELECT c.id,
             c.case_number,
             a.id AS application_id,
+            a.client_id AS application_client_id,
             c.client_id,
             c.case_context_json,
-            s.user_id AS applicant_user_id,
+            cl.applicant_cognito_sub AS client_applicant_cognito_sub,
+            s.user_id AS submission_user_id,
+            client_applicant.id AS client_applicant_user_id,
             s.reference_number,
             s.intake_payload
        FROM iset_case c
        ${applicationJoinSql}
+       LEFT JOIN client cl ON cl.id = c.client_id
+       LEFT JOIN user client_applicant
+         ON NULLIF(TRIM(cl.applicant_cognito_sub), '') IS NOT NULL
+        AND NULLIF(TRIM(client_applicant.cognito_sub), '') IS NOT NULL
+        AND client_applicant.cognito_sub = cl.applicant_cognito_sub
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       WHERE c.id = ?
       LIMIT 1`,
@@ -16853,6 +16904,18 @@ async function buildCfaSnapshot({ connection, caseId, actionPlanId }) {
   if (!caseRow) {
     throw new Error('case_not_found');
   }
+  const applicationClientId = normalisePositiveInteger(caseRow.application_client_id);
+  const caseClientId = normalisePositiveInteger(caseRow.client_id);
+  if (applicationClientId && caseClientId && applicationClientId !== caseClientId) {
+    throw new Error('cfa_application_scope_conflict');
+  }
+  const snapshotParticipantUserId = resolveVersionSnapshotParticipantUserId({
+    clientBoundUserId: caseRow.client_applicant_user_id,
+    clientBoundCognitoSub: caseRow.client_applicant_cognito_sub,
+    submissionUserId: caseRow.submission_user_id,
+    participantUserId,
+    conflictCode: 'cfa_participant_scope_conflict',
+  });
   const [interventionRows] = await connection.query(
     `SELECT id, status, intervention_code, start_date, end_date, intervention_cost, budget_amount, approved_amount,
             related_noc, related_noc_version, funding_stream_decision AS funding_stream, metadata_json, notes
@@ -16898,7 +16961,7 @@ async function buildCfaSnapshot({ connection, caseId, actionPlanId }) {
       trackingId: normaliseString(caseRow.reference_number) || normaliseString(caseRow.case_number) || null,
       applicationId: caseRow.application_id || null,
       clientId: caseRow.client_id || null,
-      applicantUserId: caseRow.applicant_user_id || null,
+      applicantUserId: snapshotParticipantUserId,
     },
     client: {
       name: applicantName,
@@ -16915,22 +16978,35 @@ async function buildCfaSnapshot({ connection, caseId, actionPlanId }) {
   };
 }
 
-async function buildCfaSnapshotFromAssessment({ connection, caseId, applicationId = null }) {
+async function buildCfaSnapshotFromAssessment({
+  connection,
+  caseId,
+  applicationId = null,
+  participantUserId = null,
+}) {
   const normalizedApplicationId = normalisePositiveInteger(applicationId);
   const applicationJoinSql = normalizedApplicationId
     ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
-    : buildCasePrimaryApplicationJoinSql('c', 'a');
+    : 'LEFT JOIN iset_application a ON 1 = 0';
   const [[caseRow]] = await connection.query(
     `SELECT c.id,
             c.case_number,
             a.id AS application_id,
+            a.client_id AS application_client_id,
             c.client_id,
             c.case_context_json,
-            s.user_id AS applicant_user_id,
+            cl.applicant_cognito_sub AS client_applicant_cognito_sub,
+            s.user_id AS submission_user_id,
+            client_applicant.id AS client_applicant_user_id,
             s.reference_number,
             s.intake_payload
        FROM iset_case c
        ${applicationJoinSql}
+       LEFT JOIN client cl ON cl.id = c.client_id
+       LEFT JOIN user client_applicant
+         ON NULLIF(TRIM(cl.applicant_cognito_sub), '') IS NOT NULL
+        AND NULLIF(TRIM(client_applicant.cognito_sub), '') IS NOT NULL
+        AND client_applicant.cognito_sub = cl.applicant_cognito_sub
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       WHERE c.id = ?
       LIMIT 1`,
@@ -16939,6 +17015,18 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId, applicationI
   if (!caseRow) {
     throw new Error('case_not_found');
   }
+  const applicationClientId = normalisePositiveInteger(caseRow.application_client_id);
+  const caseClientId = normalisePositiveInteger(caseRow.client_id);
+  if (applicationClientId && caseClientId && applicationClientId !== caseClientId) {
+    throw new Error('cfa_application_scope_conflict');
+  }
+  const snapshotParticipantUserId = resolveVersionSnapshotParticipantUserId({
+    clientBoundUserId: caseRow.client_applicant_user_id,
+    clientBoundCognitoSub: caseRow.client_applicant_cognito_sub,
+    submissionUserId: caseRow.submission_user_id,
+    participantUserId,
+    conflictCode: 'cfa_participant_scope_conflict',
+  });
   const assessmentRow = await fetchApplicationAssessmentRow(connection, {
     caseId,
     applicationId: caseRow.application_id || normalizedApplicationId || null,
@@ -17095,7 +17183,7 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId, applicationI
       trackingId: normaliseString(caseRow.reference_number) || normaliseString(caseRow.case_number) || null,
       applicationId: caseRow.application_id || null,
       clientId: caseRow.client_id || null,
-      applicantUserId: caseRow.applicant_user_id || null,
+      applicantUserId: snapshotParticipantUserId,
     },
     client: {
       name: applicantName,
@@ -17285,6 +17373,7 @@ async function buildCfaRenderSet({
   cfaVersionId = null,
   cfaSeriesId = null,
   supersedesVersionId = null,
+  participantUserId = null,
   preferParticipantRedline = false,
 }) {
   const currentInterventions = Array.isArray(snapshot?.interventions) ? snapshot.interventions : [];
@@ -17296,6 +17385,67 @@ async function buildCfaRenderSet({
       caseManagerName ??
       null
     ) || '';
+  let redlineTokens = null;
+  const explicitVersionId = normalisePositiveInteger(cfaVersionId);
+  const explicitBaselineId = normalisePositiveInteger(supersedesVersionId);
+  let seriesId = normalisePositiveInteger(cfaSeriesId);
+  let currentVersionNumber = null;
+  if (explicitVersionId) {
+    const [[currentVersionRow]] = await connection.query(
+      `SELECT series_id, version_number
+         FROM cfa_version
+        WHERE id = ?
+        LIMIT 1`,
+      [explicitVersionId]
+    );
+    const currentSeriesId = normalisePositiveInteger(currentVersionRow?.series_id);
+    if (!currentSeriesId || (seriesId && seriesId !== currentSeriesId)) {
+      throw createSignedVersionBaselineError('cfa_signed_baseline_scope_conflict', {
+        reason: 'current_version_series_mismatch',
+      });
+    }
+    seriesId = currentSeriesId;
+    currentVersionNumber = normalisePositiveInteger(currentVersionRow?.version_number);
+  }
+  let validatedBaseline = null;
+  if (seriesId) {
+    const versionRows = await loadCfaVersionRowsForCase(connection, { seriesId });
+    const signedCandidates = versionRows.filter(row => (
+      normalisePositiveInteger(row?.id) !== explicitVersionId &&
+      (!currentVersionNumber || Number(row?.version_number) < currentVersionNumber)
+    ));
+    const expectedScope = {
+      seriesId,
+      caseId:
+        normalisePositiveInteger(snapshot?.case?.id) ||
+        normalisePositiveInteger(snapshot?.case?.caseId) ||
+        normalisePositiveInteger(snapshot?.case?.case_id),
+      applicantUserId:
+        normalisePositiveInteger(participantUserId) ||
+        normalisePositiveInteger(snapshot?.case?.applicantUserId) ||
+        normalisePositiveInteger(snapshot?.case?.applicant_user_id),
+    };
+    if (explicitBaselineId) {
+      const explicitBaselineRow = signedCandidates.find(
+        row => normalisePositiveInteger(row?.id) === explicitBaselineId
+      ) || null;
+      validatedBaseline = requireSignedVersionBaseline(
+        explicitBaselineRow,
+        expectedScope,
+        { errorCode: 'cfa_signed_baseline_scope_conflict' }
+      );
+    } else {
+      validatedBaseline = resolveLatestSignedVersionBaseline(
+        signedCandidates,
+        expectedScope,
+        { errorCode: 'cfa_signed_baseline_scope_conflict' }
+      );
+    }
+  } else if (explicitBaselineId) {
+    throw createSignedVersionBaselineError('cfa_signed_baseline_scope_conflict', {
+      reason: 'baseline_series_missing',
+    });
+  }
   const cleanTokens = await buildCfaTemplateTokens({
     connection,
     interventions: currentInterventions,
@@ -17303,54 +17453,8 @@ async function buildCfaRenderSet({
     caseManagerName: resolvedCaseManagerName,
     caseManagerSignedDate,
   });
-
-  let redlineTokens = null;
-  let priorVersionId = normalisePositiveInteger(supersedesVersionId) || null;
-  if (!priorVersionId) {
-    const explicitVersionId = normalisePositiveInteger(cfaVersionId);
-    let seriesId = normalisePositiveInteger(cfaSeriesId) || null;
-    let currentVersionNumber = null;
-    if (explicitVersionId) {
-      const [[currentVersionRow]] = await connection.query(
-        `SELECT series_id, version_number
-           FROM cfa_version
-          WHERE id = ?
-          LIMIT 1`,
-        [explicitVersionId]
-      );
-      if (!seriesId) {
-        seriesId = normalisePositiveInteger(currentVersionRow?.series_id) || null;
-      }
-      currentVersionNumber = normalisePositiveInteger(currentVersionRow?.version_number) || null;
-    }
-    if (seriesId) {
-      const params = [seriesId];
-      let versionFilter = '';
-      if (currentVersionNumber) {
-        versionFilter = 'AND version_number < ?';
-        params.push(currentVersionNumber);
-      }
-      const [[priorVersionRow]] = await connection.query(
-        `SELECT id
-           FROM cfa_version
-          WHERE series_id = ?
-            ${versionFilter}
-          ORDER BY version_number DESC
-          LIMIT 1`,
-        params
-      );
-      priorVersionId = normalisePositiveInteger(priorVersionRow?.id) || null;
-    }
-  }
-  if (priorVersionId) {
-    const [[priorVersionRow]] = await connection.query(
-      `SELECT metadata_json
-         FROM cfa_version
-        WHERE id = ?
-        LIMIT 1`,
-      [priorVersionId]
-    );
-    const priorSnapshot = priorVersionRow?.metadata_json ? safeJsonParse(priorVersionRow.metadata_json, null) : null;
+  if (validatedBaseline) {
+    const priorSnapshot = validatedBaseline.snapshot;
     const priorInterventions = Array.isArray(priorSnapshot?.interventions) ? priorSnapshot.interventions : [];
     if (priorInterventions.length) {
       const diffInterventions = buildCfaInterventionDiffList({
@@ -17603,6 +17707,7 @@ async function buildFundingOverviewSnapshot({
   connection = pool,
   caseId,
   applicationId = null,
+  participantUserId = null,
   actorUserId = null,
   staffProfileId = null,
   preparedByName = '',
@@ -17613,7 +17718,7 @@ async function buildFundingOverviewSnapshot({
   const requestedApplicationId = normalisePositiveInteger(applicationId);
   const applicationJoinSql = requestedApplicationId
     ? 'LEFT JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
-    : buildCasePrimaryApplicationJoinSql('c', 'a');
+    : 'LEFT JOIN iset_application a ON 1 = 0';
   const params = requestedApplicationId ? [requestedApplicationId, normalizedCaseId] : [normalizedCaseId];
   const [[caseRow]] = await connection.query(
     `SELECT c.id AS case_id,
@@ -17624,17 +17729,24 @@ async function buildFundingOverviewSnapshot({
             cl.first_name AS client_first_name,
             cl.last_name AS client_last_name,
             a.id AS application_id,
+            a.client_id AS application_client_id,
             a.created_at AS application_created_at,
             a.submission_id,
             s.reference_number,
             s.user_id AS submission_user_id,
-            applicant.email AS applicant_email,
-            applicant.name AS applicant_name
+            cl.applicant_cognito_sub AS client_applicant_cognito_sub,
+            client_applicant.id AS client_applicant_user_id,
+            COALESCE(client_applicant.email, applicant.email) AS applicant_email,
+            COALESCE(client_applicant.name, applicant.name) AS applicant_name
        FROM iset_case c
        LEFT JOIN client cl ON cl.id = c.client_id
        ${applicationJoinSql}
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
        LEFT JOIN user applicant ON applicant.id = s.user_id
+       LEFT JOIN user client_applicant
+         ON NULLIF(TRIM(cl.applicant_cognito_sub), '') IS NOT NULL
+        AND NULLIF(TRIM(client_applicant.cognito_sub), '') IS NOT NULL
+        AND client_applicant.cognito_sub = cl.applicant_cognito_sub
       WHERE c.id = ?
       LIMIT 1`,
     params
@@ -17644,6 +17756,18 @@ async function buildFundingOverviewSnapshot({
   if (requestedApplicationId && joinedApplicationId !== requestedApplicationId) {
     throw new Error('funding_overview_application_scope_conflict');
   }
+  const applicationClientId = normalisePositiveInteger(caseRow.application_client_id);
+  const caseClientId = normalisePositiveInteger(caseRow.client_id);
+  if (applicationClientId && caseClientId && applicationClientId !== caseClientId) {
+    throw new Error('funding_overview_application_scope_conflict');
+  }
+  const snapshotParticipantUserId = resolveVersionSnapshotParticipantUserId({
+    clientBoundUserId: caseRow.client_applicant_user_id,
+    clientBoundCognitoSub: caseRow.client_applicant_cognito_sub,
+    submissionUserId: caseRow.submission_user_id,
+    participantUserId,
+    conflictCode: 'funding_overview_participant_scope_conflict',
+  });
   const resolvedApplicationId = joinedApplicationId || null;
   let applicationPayload = null;
   if (resolvedApplicationId) {
@@ -17698,7 +17822,7 @@ async function buildFundingOverviewSnapshot({
       caseNumber: normaliseString(caseRow.case_number) || null,
       clientId: normalisePositiveInteger(caseRow.client_id) || null,
       applicationId: resolvedApplicationId,
-      applicantUserId: normalisePositiveInteger(caseRow.submission_user_id) || null,
+      applicantUserId: snapshotParticipantUserId,
       trackingId: referenceNumber,
       receivedAt: receivedAt ? toIsoDateTime(receivedAt) : null,
       assignedStaffProfileId: normalisePositiveInteger(caseRow.assigned_staff_profile_id) || null,
@@ -17762,12 +17886,191 @@ function buildFundingOverviewRenderSet({
 }
 
 function resolveVersionSnapshotApplicationId(rowOrMetadata) {
+  const hasTypedApplicationId = Boolean(
+    rowOrMetadata &&
+    typeof rowOrMetadata === 'object' &&
+    Object.prototype.hasOwnProperty.call(rowOrMetadata, 'application_id') &&
+    rowOrMetadata.application_id !== null &&
+    typeof rowOrMetadata.application_id !== 'undefined'
+  );
+  if (hasTypedApplicationId) {
+    return normalisePositiveInteger(rowOrMetadata.application_id) || null;
+  }
   const metadataValue = rowOrMetadata && typeof rowOrMetadata === 'object' &&
     Object.prototype.hasOwnProperty.call(rowOrMetadata, 'metadata_json')
     ? rowOrMetadata.metadata_json
     : rowOrMetadata;
   const metadata = safeJsonParse(metadataValue, metadataValue) || {};
   return normalisePositiveInteger(metadata?.case?.applicationId) || null;
+}
+
+function resolveVersionSnapshotActionPlanId(rowOrMetadata) {
+  const hasTypedApplicationId = Boolean(
+    rowOrMetadata &&
+    typeof rowOrMetadata === 'object' &&
+    Object.prototype.hasOwnProperty.call(rowOrMetadata, 'application_id') &&
+    rowOrMetadata.application_id !== null &&
+    typeof rowOrMetadata.application_id !== 'undefined'
+  );
+  const hasTypedActionPlanId = Boolean(
+    rowOrMetadata &&
+    typeof rowOrMetadata === 'object' &&
+    Object.prototype.hasOwnProperty.call(rowOrMetadata, 'action_plan_id') &&
+    rowOrMetadata.action_plan_id !== null &&
+    typeof rowOrMetadata.action_plan_id !== 'undefined'
+  );
+  if (hasTypedActionPlanId) {
+    return normalisePositiveInteger(rowOrMetadata.action_plan_id) || null;
+  }
+  // A typed application owner marks a modern row. On those rows NULL is an
+  // authoritative no-plan value; only fully legacy rows may recover plan
+  // lineage from their JSON snapshot.
+  if (hasTypedApplicationId) return null;
+  const metadataValue = rowOrMetadata && typeof rowOrMetadata === 'object' &&
+    Object.prototype.hasOwnProperty.call(rowOrMetadata, 'metadata_json')
+    ? rowOrMetadata.metadata_json
+    : rowOrMetadata;
+  const metadata = safeJsonParse(metadataValue, metadataValue) || {};
+  return normalisePositiveInteger(metadata?.plan?.id) || null;
+}
+
+function assessSignedVersionBaseline(row, {
+  seriesId,
+  caseId,
+  applicantUserId,
+} = {}) {
+  const expectedSeriesId = normalisePositiveInteger(seriesId);
+  const expectedCaseId = normalisePositiveInteger(caseId);
+  const expectedApplicantUserId = normalisePositiveInteger(applicantUserId);
+  if (!expectedSeriesId || !expectedCaseId || !expectedApplicantUserId) {
+    return { eligible: false, reason: 'baseline_expected_scope_missing', snapshot: null };
+  }
+  if (!row || (normaliseString(row.status) || '').toLowerCase() !== 'signed') {
+    return { eligible: false, reason: 'baseline_not_signed', snapshot: null };
+  }
+  if (normalisePositiveInteger(row.series_id) !== expectedSeriesId) {
+    return { eligible: false, reason: 'baseline_series_mismatch', snapshot: null };
+  }
+  if (normalisePositiveInteger(row.case_id) !== expectedCaseId) {
+    return { eligible: false, reason: 'baseline_case_mismatch', snapshot: null };
+  }
+
+  const snapshot = safeJsonParse(row.metadata_json, null);
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    return { eligible: false, reason: 'baseline_snapshot_missing', snapshot: null };
+  }
+  const snapshotCase = snapshot.case && typeof snapshot.case === 'object'
+    ? snapshot.case
+    : {};
+  const snapshotCaseIds = Array.from(new Set([
+    normalisePositiveInteger(snapshotCase.id),
+    normalisePositiveInteger(snapshotCase.caseId),
+    normalisePositiveInteger(snapshotCase.case_id),
+  ].filter(Boolean)));
+  if (snapshotCaseIds.length !== 1 || snapshotCaseIds[0] !== expectedCaseId) {
+    return { eligible: false, reason: 'baseline_snapshot_case_mismatch', snapshot: null };
+  }
+  const signedParticipantId = normalisePositiveInteger(row.signed_by_participant_id);
+  if (signedParticipantId) {
+    if (signedParticipantId !== expectedApplicantUserId) {
+      return { eligible: false, reason: 'baseline_signed_participant_mismatch', snapshot: null };
+    }
+  } else {
+    const snapshotApplicantIds = Array.from(new Set([
+      normalisePositiveInteger(snapshotCase.applicantUserId),
+      normalisePositiveInteger(snapshotCase.applicant_user_id),
+    ].filter(Boolean)));
+    if (
+      snapshotApplicantIds.length !== 1 ||
+      snapshotApplicantIds[0] !== expectedApplicantUserId
+    ) {
+      return { eligible: false, reason: 'baseline_snapshot_participant_mismatch', snapshot: null };
+    }
+  }
+  return { eligible: true, reason: 'eligible', snapshot };
+}
+
+function createSignedVersionBaselineError(errorCode, assessment = null) {
+  const code = normaliseString(errorCode) || 'signed_version_baseline_scope_conflict';
+  const error = new Error(code);
+  error.code = code;
+  error.baselineReason = normaliseString(assessment?.reason) || 'baseline_unverified';
+  return error;
+}
+
+function requireSignedVersionBaseline(row, expectedScope = {}, {
+  errorCode = 'signed_version_baseline_scope_conflict',
+} = {}) {
+  const assessment = assessSignedVersionBaseline(row, expectedScope);
+  if (!assessment.eligible) {
+    throw createSignedVersionBaselineError(errorCode, assessment);
+  }
+  return { row, snapshot: assessment.snapshot };
+}
+
+function resolveLatestSignedVersionBaseline(rows, expectedScope = {}, options = {}) {
+  const latestSignedRow = (Array.isArray(rows) ? rows : []).find(
+    row => (normaliseString(row?.status) || '').toLowerCase() === 'signed'
+  ) || null;
+  if (!latestSignedRow) return null;
+  return requireSignedVersionBaseline(latestSignedRow, expectedScope, options);
+}
+
+function assertTargetVersionLineageConsistent(rows, {
+  applicationId,
+  actionPlanId = null,
+  requireNoActionPlan = false,
+  errorCode = 'version_application_scope_conflict',
+} = {}) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  if (!normalizedApplicationId) throw new Error(errorCode);
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const metadata = safeJsonParse(row?.metadata_json, row?.metadata_json) || {};
+    const hasTypedApplicationId = Boolean(
+      row &&
+      Object.prototype.hasOwnProperty.call(row, 'application_id') &&
+      row.application_id !== null &&
+      typeof row.application_id !== 'undefined'
+    );
+    const typedApplicationId = normalisePositiveInteger(row?.application_id);
+    const metadataApplicationId = normalisePositiveInteger(metadata?.case?.applicationId);
+    const effectiveApplicationId = hasTypedApplicationId
+      ? typedApplicationId
+      : metadataApplicationId;
+    if (effectiveApplicationId !== normalizedApplicationId) continue;
+    const hasCompoundActionPlanTarget = Boolean(
+      normalizedActionPlanId || requireNoActionPlan
+    );
+    const effectiveActionPlanId = hasCompoundActionPlanTarget
+      ? resolveVersionSnapshotActionPlanId(row)
+      : null;
+    if (
+      hasCompoundActionPlanTarget &&
+      (normalizedActionPlanId
+        ? effectiveActionPlanId !== normalizedActionPlanId
+        : effectiveActionPlanId !== null)
+    ) {
+      continue;
+    }
+    if (
+      typedApplicationId === normalizedApplicationId &&
+      metadataApplicationId &&
+      metadataApplicationId !== normalizedApplicationId
+    ) {
+      throw new Error(errorCode);
+    }
+    if (!normalizedActionPlanId) continue;
+    const typedActionPlanId = normalisePositiveInteger(row?.action_plan_id);
+    const metadataActionPlanId = normalisePositiveInteger(metadata?.plan?.id);
+    if (
+      typedActionPlanId === normalizedActionPlanId &&
+      metadataActionPlanId &&
+      metadataActionPlanId !== normalizedActionPlanId
+    ) {
+      throw new Error(errorCode);
+    }
+  }
 }
 
 function filterApplicationScopedVersionRows(rows, applicationId) {
@@ -17778,14 +18081,12 @@ function filterApplicationScopedVersionRows(rows, applicationId) {
   );
 }
 
-function assertNoUnscopedUnsignedVersionRows(rows, errorCode) {
-  const hasUnscopedUnsignedVersion = (Array.isArray(rows) ? rows : []).some(row => (
-    (row?.status === 'draft' || row?.status === 'sent') &&
-    !resolveVersionSnapshotApplicationId(row)
-  ));
-  if (hasUnscopedUnsignedVersion) {
-    throw new Error(errorCode || 'version_application_scope_unknown');
-  }
+function filterCfaActionPlanScopedVersionRows(rows, applicationId, actionPlanId) {
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  if (!normalizedActionPlanId) return [];
+  return filterApplicationScopedVersionRows(rows, applicationId).filter(
+    row => resolveVersionSnapshotActionPlanId(row) === normalizedActionPlanId
+  );
 }
 
 async function lockCaseForVersionedSigning(connection, caseId) {
@@ -17946,6 +18247,11 @@ async function inspectCaseMessageCommitOutcome({
   body,
   urgent,
   signingRequestIds = [],
+  messageSendOperationId = null,
+  clientOperationId = null,
+  requestSha256 = null,
+  responseStatus = null,
+  responseBody = null,
   connection = pool,
 } = {}) {
   const normalizedMessageId = normalisePositiveInteger(messageId);
@@ -18015,6 +18321,39 @@ async function inspectCaseMessageCommitOutcome({
         ));
       if (!exactRequestManifest) {
         return { outcome: 'uncertain', reason: 'message_commit_request_manifest_mismatch', messageId: normalizedMessageId };
+      }
+    }
+    const normalizedOperationId = normalisePositiveInteger(messageSendOperationId);
+    if (normalizedOperationId) {
+      const [[operationRow]] = await connection.query(
+        `SELECT mso.id, mso.client_operation_id, mso.request_sha256,
+                mso.sender_user_id, mso.case_id, mso.application_id,
+                mso.message_id, mso.response_status, mso.response_json,
+                mso.completed_at
+           FROM message_send_operation AS mso
+          WHERE mso.id = ?
+          LIMIT 1`,
+        [normalizedOperationId]
+      );
+      const storedResponse = parseCaseMessageOperationResponseJson(operationRow?.response_json);
+      const operationExact =
+        normalisePositiveInteger(operationRow?.id) === normalizedOperationId &&
+        normaliseString(operationRow?.client_operation_id) === normaliseString(clientOperationId) &&
+        normaliseString(operationRow?.request_sha256) === normaliseString(requestSha256) &&
+        normalisePositiveInteger(operationRow?.sender_user_id) === normalisePositiveInteger(senderUserId) &&
+        normalisePositiveInteger(operationRow?.case_id) === normalizedCaseId &&
+        normalisePositiveInteger(operationRow?.application_id) === normalizedApplicationId &&
+        normalisePositiveInteger(operationRow?.message_id) === normalizedMessageId &&
+        Number(operationRow?.response_status) === Number(responseStatus) &&
+        Boolean(operationRow?.completed_at) &&
+        JSON.stringify(canonicalizeCaseMessageSendValue(storedResponse)) ===
+          JSON.stringify(canonicalizeCaseMessageSendValue(responseBody));
+      if (!operationExact) {
+        return {
+          outcome: 'uncertain',
+          reason: 'message_commit_operation_manifest_mismatch',
+          messageId: normalizedMessageId,
+        };
       }
     }
     return { outcome: 'committed', messageId: normalizedMessageId };
@@ -18265,11 +18604,16 @@ async function rollbackCaseMessageWriteTransaction({
   return originalError;
 }
 
-async function ensureFundingOverviewSeries(connection, { caseId, templateKey, createdByStaffProfileId }) {
+async function ensureFundingOverviewSeries(connection, {
+  caseId,
+  templateKey,
+  createdByStaffProfileId,
+}) {
   const [rows] = await connection.query(
     `SELECT id
        FROM funding_overview_series
-      WHERE case_id = ? AND template_key = ?
+      WHERE case_id = ?
+        AND template_key = ?
       ORDER BY id ASC`,
     [caseId, templateKey]
   );
@@ -18279,11 +18623,34 @@ async function ensureFundingOverviewSeries(connection, { caseId, templateKey, cr
   const row = Array.isArray(rows) ? rows[0] : null;
   if (row?.id) return Number(row.id);
   const [result] = await connection.query(
-    `INSERT INTO funding_overview_series (case_id, template_key, created_by_staff_profile_id)
+    `INSERT INTO funding_overview_series
+      (case_id, template_key, created_by_staff_profile_id)
      VALUES (?, ?, ?)`,
     [caseId, templateKey, createdByStaffProfileId || null]
   );
   return result.insertId;
+}
+
+async function loadFundingOverviewVersionRowsForCase(connection, { seriesId }) {
+  const [rows] = await connection.query(
+    `SELECT v.id,
+            v.series_id,
+            s.case_id,
+            v.application_id,
+            v.version_number,
+            v.status,
+            v.signed_by_participant_id,
+            v.metadata_json,
+            v.snapshot_hash,
+            v.supersedes_version_id,
+            v.created_at
+       FROM funding_overview_version v
+       JOIN funding_overview_series s ON s.id = v.series_id
+      WHERE v.series_id = ?
+      ORDER BY v.version_number DESC, v.id DESC`,
+    [seriesId]
+  );
+  return Array.isArray(rows) ? rows : [];
 }
 
 async function cancelUnsignedFundingOverviewSigningRequests(connection, versionIds = []) {
@@ -18321,6 +18688,7 @@ async function cancelUnsignedCfaSigningRequests(connection, versionIds = []) {
 async function createFundingOverviewVersion({
   caseId,
   applicationId = null,
+  participantUserId = null,
   changeReason = 'FINANCIAL_OVERVIEW_UPDATED',
   changeSummary = 'Financial overview for signature',
   actorUserId,
@@ -18355,6 +18723,7 @@ async function createFundingOverviewVersion({
       connection: runner,
       caseId: normalizedCaseId,
       applicationId,
+      participantUserId,
       actorUserId,
       staffProfileId,
       preparedByName,
@@ -18372,16 +18741,21 @@ async function createFundingOverviewVersion({
       createdByStaffProfileId: staffProfileId || null
     });
 
-    const [versionRows] = await runner.query(
-      `SELECT id, version_number, status, metadata_json
-         FROM funding_overview_version
-        WHERE series_id = ?
-        ORDER BY version_number DESC, id DESC`,
-      [seriesId]
-    );
-    assertNoUnscopedUnsignedVersionRows(
+    const versionRows = await loadFundingOverviewVersionRowsForCase(runner, {
+      seriesId,
+    });
+    assertTargetVersionLineageConsistent(versionRows, {
+      applicationId: snapshotApplicationId,
+      errorCode: 'funding_overview_application_scope_conflict',
+    });
+    const validatedBaseline = resolveLatestSignedVersionBaseline(
       versionRows,
-      'funding_overview_version_application_scope_unknown'
+      {
+        seriesId,
+        caseId: normalizedCaseId,
+        applicantUserId: snapshot?.case?.applicantUserId,
+      },
+      { errorCode: 'funding_overview_signed_baseline_scope_conflict' }
     );
     const applicationVersionRows = filterApplicationScopedVersionRows(
       versionRows,
@@ -18417,17 +18791,18 @@ async function createFundingOverviewVersion({
     );
     const nextVersionNumber = (Number(maxRow?.['MAX(version_number)']) || 0) + 1;
 
-    const priorSignedRow = applicationVersionRows.find(row => row?.status === 'signed') || null;
-    const previousSnapshot = safeJsonParse(priorSignedRow?.metadata_json, null);
+    const priorSignedRow = validatedBaseline?.row || null;
+    const previousSnapshot = validatedBaseline?.snapshot || null;
     const { canonicalJson, hash } = computeFundingOverviewSnapshotSignature(snapshot);
     const [insert] = await runner.query(
       `INSERT INTO funding_overview_version
-        (series_id, version_number, status, supersedes_version_id, change_reason, change_summary,
+        (series_id, application_id, version_number, status, supersedes_version_id, change_reason, change_summary,
          created_by_staff_profile_id, effective_date, snapshot_schema_version, snapshot_hash,
          rendered_template_version, metadata_json)
-       VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         seriesId,
+        snapshotApplicationId,
         nextVersionNumber,
         priorSignedRow?.id || null,
         changeReason || null,
@@ -18568,7 +18943,7 @@ async function regenerateSignedFundingOverviewDocument({
 }) {
   const runner = connection || pool;
   const [[versionRow]] = await runner.query(
-    `SELECT v.id, v.version_number, v.metadata_json, v.supersedes_version_id, s.case_id
+    `SELECT v.id, v.series_id, v.version_number, v.metadata_json, v.supersedes_version_id, s.case_id
        FROM funding_overview_version v
        JOIN funding_overview_series s ON s.id = v.series_id
       WHERE v.id = ?
@@ -18579,17 +18954,40 @@ async function regenerateSignedFundingOverviewDocument({
   const snapshot = safeJsonParse(versionRow.metadata_json, null) || {};
   const caseId = normalisePositiveInteger(versionRow.case_id);
   if (!caseId) return null;
+  const snapshotCaseId =
+    normalisePositiveInteger(snapshot?.case?.id) ||
+    normalisePositiveInteger(snapshot?.case?.caseId) ||
+    normalisePositiveInteger(snapshot?.case?.case_id);
+  const snapshotApplicantUserId =
+    normalisePositiveInteger(snapshot?.case?.applicantUserId) ||
+    normalisePositiveInteger(snapshot?.case?.applicant_user_id);
+  const expectedParticipantUserId = normalisePositiveInteger(participantUserId);
+  const authoritativeParticipantUserId = expectedParticipantUserId || snapshotApplicantUserId;
+  if (snapshotCaseId !== caseId || !authoritativeParticipantUserId) {
+    throw createSignedVersionBaselineError('funding_overview_participant_scope_conflict', {
+      reason: snapshotCaseId !== caseId
+        ? 'current_snapshot_case_mismatch'
+        : 'current_participant_missing',
+    });
+  }
   let previousSnapshot = null;
   const priorVersionId = normalisePositiveInteger(versionRow.supersedes_version_id);
   if (priorVersionId) {
-    const [[priorRow]] = await runner.query(
-      `SELECT metadata_json
-         FROM funding_overview_version
-        WHERE id = ?
-        LIMIT 1`,
-      [priorVersionId]
+    const seriesId = normalisePositiveInteger(versionRow.series_id);
+    const versionRows = await loadFundingOverviewVersionRowsForCase(runner, { seriesId });
+    const priorRow = versionRows.find(
+      row => normalisePositiveInteger(row?.id) === priorVersionId
+    ) || null;
+    const validatedBaseline = requireSignedVersionBaseline(
+      priorRow,
+      {
+        seriesId,
+        caseId,
+        applicantUserId: authoritativeParticipantUserId,
+      },
+      { errorCode: 'funding_overview_signed_baseline_scope_conflict' }
     );
-    previousSnapshot = safeJsonParse(priorRow?.metadata_json, null);
+    previousSnapshot = validatedBaseline.snapshot;
   }
   const clientSignature =
     extractParticipantSignatureNameFromPayload(signedPayload) ||
@@ -18609,7 +19007,7 @@ async function regenerateSignedFundingOverviewDocument({
     caseId,
     applicationId: snapshot?.case?.applicationId || null,
     clientId: snapshot?.case?.clientId || null,
-    applicantUserId: snapshot?.case?.applicantUserId || participantUserId || null,
+    applicantUserId: authoritativeParticipantUserId,
     actorUserId: actorUserId || participantUserId || null,
     versionNumber: Number(versionRow.version_number) || 1,
     trackingId: snapshot?.case?.trackingId || null,
@@ -18694,6 +19092,7 @@ async function finalizeSignedFundingOverviewSubmission({
     connection: runner,
     caseId,
     applicationId: existingSnapshot?.case?.applicationId || null,
+    participantUserId,
     actorUserId: signingRequestRow?.created_by_user_id || participantUserId || null,
     staffProfileId: existingSnapshot?.preparedBy?.staffProfileId || null,
     preparedByName: existingSnapshot?.preparedBy?.name || '',
@@ -18753,7 +19152,7 @@ async function regenerateSignedCfaDocument({
 }) {
   const runner = connection || pool;
   const [[versionRow]] = await runner.query(
-    `SELECT v.id, v.version_number, v.metadata_json, v.supersedes_version_id, s.case_id
+    `SELECT v.id, v.series_id, v.version_number, v.metadata_json, v.supersedes_version_id, s.case_id
        FROM cfa_version v
        JOIN cfa_series s ON s.id = v.series_id
       WHERE v.id = ?
@@ -18767,22 +19166,27 @@ async function regenerateSignedCfaDocument({
 
   const caseId = normalisePositiveInteger(versionRow.case_id);
   if (!caseId) return null;
-  const [[caseRow]] = await runner.query(
-    `SELECT c.id,
-            a.id AS application_id,
-            c.client_id,
-            s.user_id AS applicant_user_id,
-            c.assigned_staff_profile_id AS assigned_to_user_id,
-            s.reference_number,
-            c.case_number
-       FROM iset_case c
-       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
-       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-      WHERE c.id = ?
-      LIMIT 1`,
-    [caseId]
-  );
-  if (!caseRow?.application_id || !caseRow?.client_id) return null;
+  const snapshotCaseId =
+    normalisePositiveInteger(snapshot?.case?.id) ||
+    normalisePositiveInteger(snapshot?.case?.caseId) ||
+    normalisePositiveInteger(snapshot?.case?.case_id);
+  const applicationId = normalisePositiveInteger(snapshot?.case?.applicationId);
+  const clientId = normalisePositiveInteger(snapshot?.case?.clientId);
+  const snapshotApplicantUserId =
+    normalisePositiveInteger(snapshot?.case?.applicantUserId) ||
+    normalisePositiveInteger(snapshot?.case?.applicant_user_id);
+  const expectedParticipantUserId = normalisePositiveInteger(participantUserId);
+  const authoritativeParticipantUserId = expectedParticipantUserId || snapshotApplicantUserId;
+  if (
+    snapshotCaseId !== caseId ||
+    !applicationId ||
+    !clientId ||
+    !authoritativeParticipantUserId
+  ) {
+    throw createSignedVersionBaselineError('cfa_participant_scope_conflict', {
+      reason: 'current_snapshot_scope_mismatch',
+    });
+  }
 
   const resolvedCaseManager = await resolveFundingAgreementCaseManager({
     connection: runner,
@@ -18804,7 +19208,9 @@ async function regenerateSignedCfaDocument({
       caseManagerName,
       caseManagerSignedDate,
       cfaVersionId,
+      cfaSeriesId: versionRow?.series_id || null,
       supersedesVersionId: versionRow?.supersedes_version_id || null,
+      participantUserId: authoritativeParticipantUserId,
       preferParticipantRedline: true,
     });
   const tokens = renderSet.participantTokens;
@@ -18817,13 +19223,16 @@ async function regenerateSignedCfaDocument({
   const targetDocumentType = signedVariantIsRedline ? 'redline' : 'clean';
   const signedDocId = await storeFundingAgreementPdfDocument({
     caseId,
-    applicationId: caseRow.application_id,
+    applicationId,
     actionPlanId: null,
-    clientId: caseRow.client_id,
-    applicantUserId: caseRow.applicant_user_id || participantUserId || null,
+    clientId,
+    applicantUserId: authoritativeParticipantUserId,
     actorUserId: actorUserId || participantUserId || null,
     versionNumber: Number(versionRow.version_number) || 1,
-    trackingId: normaliseString(caseRow.reference_number) || normaliseString(caseRow.case_number) || null,
+    trackingId:
+      normaliseString(snapshot?.case?.trackingId) ||
+      normaliseString(snapshot?.case?.caseNumber) ||
+      null,
     cfaVersionId,
     pdfBuffer: signedBuffer,
     isRedline: signedVariantIsRedline,
@@ -18858,11 +19267,16 @@ async function regenerateSignedCfaDocument({
   return signedDocId;
 }
 
-async function ensureCfaSeries(connection, { caseId, templateKey, createdByStaffProfileId }) {
+async function ensureCfaSeries(connection, {
+  caseId,
+  templateKey,
+  createdByStaffProfileId,
+}) {
   const [rows] = await connection.query(
     `SELECT id
        FROM cfa_series
-      WHERE case_id = ? AND template_key = ?
+      WHERE case_id = ?
+        AND template_key = ?
       ORDER BY id ASC`,
     [caseId, templateKey]
   );
@@ -18872,18 +19286,149 @@ async function ensureCfaSeries(connection, { caseId, templateKey, createdByStaff
   const row = Array.isArray(rows) ? rows[0] : null;
   if (row?.id) return Number(row.id);
   const [result] = await connection.query(
-    `INSERT INTO cfa_series (case_id, template_key, created_by_staff_profile_id)
+    `INSERT INTO cfa_series
+      (case_id, template_key, created_by_staff_profile_id)
      VALUES (?, ?, ?)`,
     [caseId, templateKey, createdByStaffProfileId || null]
   );
   return result.insertId;
 }
 
-async function resolveApplicationScopedCfaDraft(connection, { caseId, applicationId }) {
+async function loadCfaVersionRowsForCase(connection, { seriesId }) {
+  const [rows] = await connection.query(
+    `SELECT v.id,
+            v.series_id,
+            s.case_id,
+            v.application_id,
+            v.action_plan_id,
+            v.version_number,
+            v.status,
+            v.signed_by_participant_id,
+            v.metadata_json,
+            v.snapshot_hash,
+            v.supersedes_version_id,
+            v.created_at
+       FROM cfa_version v
+       JOIN cfa_series s ON s.id = v.series_id
+      WHERE v.series_id = ?
+      ORDER BY v.version_number DESC, v.id DESC`,
+    [seriesId]
+  );
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function resolveCfaActionPlanForApplication(connection, {
+  caseId,
+  applicationId,
+  actionPlanId = null,
+  forUpdate = false,
+} = {}) {
   const normalizedCaseId = normalisePositiveInteger(caseId);
   const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
   if (!normalizedCaseId || !normalizedApplicationId) {
     throw new Error('cfa_application_scope_required');
+  }
+  if (normalizedActionPlanId) {
+    const [[row]] = await connection.query(
+      `SELECT id, case_id, application_id, status, archived_at
+         FROM iset_case_action_plan
+        WHERE id = ?
+        LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
+      [normalizedActionPlanId]
+    );
+    if (
+      !row ||
+      normalisePositiveInteger(row.case_id) !== normalizedCaseId ||
+      normalisePositiveInteger(row.application_id) !== normalizedApplicationId
+    ) {
+      throw new Error('cfa_action_plan_scope_conflict');
+    }
+    if (
+      row.archived_at ||
+      !new Set(['draft', 'active']).has((normaliseString(row.status) || '').toLowerCase())
+    ) {
+      throw new Error('cfa_action_plan_unavailable');
+    }
+    return {
+      id: normalizedActionPlanId,
+      status: normaliseString(row.status) || null,
+    };
+  }
+  const [rows] = await connection.query(
+    `SELECT id, status
+       FROM iset_case_action_plan
+      WHERE case_id = ?
+        AND application_id = ?
+        AND archived_at IS NULL
+        AND status IN ('draft', 'active')
+      ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END,
+               updated_at DESC,
+               id DESC
+      ${forUpdate ? 'FOR UPDATE' : ''}`,
+    [normalizedCaseId, normalizedApplicationId]
+  );
+  const candidates = Array.isArray(rows) ? rows : [];
+  if (candidates.length > 1) throw new Error('cfa_action_plan_selection_required');
+  if (!candidates.length) {
+    throw new Error('cfa_action_plan_missing');
+  }
+  return {
+    id: normalisePositiveInteger(candidates[0].id),
+    status: normaliseString(candidates[0].status) || null,
+  };
+}
+
+function parseCfaSnapshotObject(value) {
+  const parsed = safeJsonParse(value, value);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  return parsed;
+}
+
+function buildCfaMaterialSnapshot(snapshot, { storedSnapshot = false } = {}) {
+  const parsed = parseCfaSnapshotObject(snapshot);
+  if (!parsed) return null;
+  let copy;
+  try {
+    copy = JSON.parse(JSON.stringify(parsed));
+  } catch (_) {
+    return null;
+  }
+  if (storedSnapshot && copy.case && typeof copy.case === 'object') {
+    // These fields identify the staff signer captured when the immutable draft
+    // was created. They do not describe the participant, plan, or funded terms.
+    delete copy.case.assignedStaffProfileId;
+    delete copy.case.assigned_staff_profile_id;
+    delete copy.case.caseManagerName;
+    delete copy.case.case_manager_name;
+  }
+  return canonicalisePreviewValue(copy);
+}
+
+function cfaDraftSnapshotMateriallyMatches(storedSnapshot, freshSnapshot) {
+  const storedMaterial = buildCfaMaterialSnapshot(storedSnapshot, { storedSnapshot: true });
+  const freshMaterial = buildCfaMaterialSnapshot(freshSnapshot);
+  if (!storedMaterial || !freshMaterial) return false;
+  return JSON.stringify(storedMaterial) === JSON.stringify(freshMaterial);
+}
+
+async function assessApplicationScopedCfaDraft(connection, {
+  caseId,
+  applicationId,
+  actionPlanId,
+  freshSnapshot,
+}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  if (!normalizedCaseId || !normalizedApplicationId || !normalizedActionPlanId) {
+    throw new Error('cfa_application_scope_required');
+  }
+  if (
+    resolveVersionSnapshotApplicationId(freshSnapshot) !== normalizedApplicationId ||
+    resolveVersionSnapshotActionPlanId(freshSnapshot) !== normalizedActionPlanId
+  ) {
+    throw new Error('cfa_application_scope_conflict');
   }
   const [seriesRows] = await connection.query(
     `SELECT id
@@ -18895,28 +19440,100 @@ async function resolveApplicationScopedCfaDraft(connection, { caseId, applicatio
   );
   if ((seriesRows || []).length > 1) throw new Error('cfa_series_ambiguous');
   const seriesId = normalisePositiveInteger(seriesRows?.[0]?.id);
-  if (!seriesId) return null;
+  if (!seriesId) {
+    return {
+      reusable: false,
+      reason: 'draft_missing',
+      seriesId: null,
+      selectedDraft: null,
+      exactLineageRows: [],
+      latestUnsignedVersionId: null,
+      latestSignedVersionId: null,
+      freshSnapshot,
+    };
+  }
 
-  const [rows] = await connection.query(
-    `SELECT v.id,
-            v.series_id,
-            v.version_number,
-            v.status,
-            v.metadata_json,
-            v.supersedes_version_id
-       FROM cfa_version v
-      WHERE v.series_id = ?
-      ORDER BY v.version_number DESC, v.id DESC`,
-    [seriesId]
+  const versionRows = await loadCfaVersionRowsForCase(connection, { seriesId });
+  assertTargetVersionLineageConsistent(versionRows, {
+    applicationId: normalizedApplicationId,
+    actionPlanId: normalizedActionPlanId,
+    errorCode: 'cfa_application_scope_conflict',
+  });
+  const validatedBaseline = resolveLatestSignedVersionBaseline(
+    versionRows,
+    {
+      seriesId,
+      caseId: normalizedCaseId,
+      applicantUserId:
+        normalisePositiveInteger(freshSnapshot?.case?.applicantUserId) ||
+        normalisePositiveInteger(freshSnapshot?.case?.applicant_user_id),
+    },
+    { errorCode: 'cfa_signed_baseline_scope_conflict' }
   );
-  assertNoUnscopedUnsignedVersionRows(rows, 'cfa_version_application_scope_unknown');
 
-  const applicationRows = filterApplicationScopedVersionRows(rows, normalizedApplicationId);
-  const selectedDraft = applicationRows.find(row => row?.status === 'draft') || null;
-  if (!selectedDraft) return null;
-
+  const exactLineageRows = filterCfaActionPlanScopedVersionRows(
+    versionRows,
+    normalizedApplicationId,
+    normalizedActionPlanId
+  );
+  const selectedDraft = exactLineageRows.find(row => row?.status === 'draft') || null;
+  const latestUnsignedVersionId = normalisePositiveInteger(
+    exactLineageRows.find(row => row?.status === 'draft' || row?.status === 'sent')?.id
+  ) || null;
+  const latestSignedVersionId = normalisePositiveInteger(validatedBaseline?.row?.id) || null;
+  const baseAssessment = {
+    seriesId,
+    selectedDraft,
+    exactLineageRows,
+    latestUnsignedVersionId,
+    latestSignedVersionId,
+    freshSnapshot,
+  };
+  if (!selectedDraft) {
+    return { reusable: false, reason: 'draft_missing', ...baseAssessment };
+  }
   const selectedDraftId = normalisePositiveInteger(selectedDraft.id);
-  const supersededUnsignedIds = applicationRows
+  if (!selectedDraftId || latestUnsignedVersionId !== selectedDraftId) {
+    return { reusable: false, reason: 'draft_not_latest_unsigned', ...baseAssessment };
+  }
+
+  const storedSnapshot = parseCfaSnapshotObject(selectedDraft.metadata_json);
+  const storedHash = normaliseString(selectedDraft.snapshot_hash);
+  if (!storedSnapshot || !storedHash) {
+    return { reusable: false, reason: 'snapshot_hash_missing', ...baseAssessment };
+  }
+  const computedStoredHash = computeCfaSnapshotSignature(storedSnapshot).hash;
+  if (storedHash.toLowerCase() !== computedStoredHash) {
+    return { reusable: false, reason: 'snapshot_hash_mismatch', ...baseAssessment };
+  }
+  if (!cfaDraftSnapshotMateriallyMatches(storedSnapshot, freshSnapshot)) {
+    return { reusable: false, reason: 'snapshot_stale', ...baseAssessment };
+  }
+  const storedBaselineId = normalisePositiveInteger(selectedDraft.supersedes_version_id) || null;
+  if (storedBaselineId !== latestSignedVersionId) {
+    return { reusable: false, reason: 'signed_baseline_changed', ...baseAssessment };
+  }
+
+  return {
+    reusable: true,
+    reason: 'reusable',
+    ...baseAssessment,
+    storedSnapshot,
+  };
+}
+
+async function prepareReusableApplicationScopedCfaDraft(connection, assessment) {
+  if (!assessment?.reusable || !assessment?.selectedDraft || !assessment?.storedSnapshot) {
+    throw new Error('cfa_draft_not_reusable');
+  }
+  const selectedDraft = assessment.selectedDraft;
+  const selectedDraftId = normalisePositiveInteger(selectedDraft.id);
+  if (!selectedDraftId) throw new Error('cfa_draft_not_reusable');
+  if (normalisePositiveInteger(assessment.latestUnsignedVersionId) !== selectedDraftId) {
+    throw new Error('cfa_draft_not_reusable');
+  }
+
+  const supersededUnsignedIds = assessment.exactLineageRows
     .filter(row => (
       (row?.status === 'draft' || row?.status === 'sent') &&
       normalisePositiveInteger(row?.id) !== selectedDraftId
@@ -18936,38 +19553,30 @@ async function resolveApplicationScopedCfaDraft(connection, { caseId, applicatio
       throw new Error('cfa_supersession_conflict');
     }
   }
-  // No earlier version in this application lineage may retain a pending/viewed
-  // request. This includes the selected draft after an earlier partial send.
-  await cancelUnsignedCfaSigningRequests(
-    connection,
-    applicationRows.map(row => normalisePositiveInteger(row.id)).filter(Boolean)
-  );
-
-  const priorSigned = applicationRows.find(row => row?.status === 'signed') || null;
-  const priorSignedId = normalisePositiveInteger(priorSigned?.id) || null;
-  if ((normalisePositiveInteger(selectedDraft.supersedes_version_id) || null) !== priorSignedId) {
-    const [baselineUpdate] = await connection.query(
-      `UPDATE cfa_version
-          SET supersedes_version_id = ?
-        WHERE id = ?
-          AND status = 'draft'`,
-      [priorSignedId, selectedDraftId]
-    );
-    if (Number(baselineUpdate?.affectedRows || 0) !== 1) {
-      throw new Error('cfa_draft_baseline_conflict');
-    }
-  }
+  // The reusable draft itself remains byte-for-byte immutable. Only older
+  // unsigned rows in this exact application/plan lineage are superseded.
+  await cancelUnsignedCfaSigningRequests(connection, supersededUnsignedIds);
 
   return {
     ...selectedDraft,
-    supersedes_version_id: priorSignedId,
+    metadata_json: JSON.stringify(assessment.storedSnapshot),
+    snapshot: assessment.storedSnapshot,
+    supersedes_version_id: assessment.latestSignedVersionId,
+    reused: true,
   };
+}
+
+async function resolveApplicationScopedCfaDraft(connection, options) {
+  const assessment = await assessApplicationScopedCfaDraft(connection, options);
+  if (!assessment.reusable) return null;
+  return prepareReusableApplicationScopedCfaDraft(connection, assessment);
 }
 
 async function createCfaVersionForPlan({
   caseId,
   actionPlanId,
   applicationId = null,
+  participantUserId = null,
   changeReason,
   changeSummary,
   actorUserId,
@@ -19000,7 +19609,8 @@ async function createCfaVersionForPlan({
     const snapshot = await buildCfaSnapshot({
       connection: runner,
       caseId: normalizedCaseId,
-      actionPlanId
+      actionPlanId,
+      participantUserId,
     });
     const snapshotApplicationId = resolveVersionSnapshotApplicationId(snapshot);
     const expectedApplicationId = normalisePositiveInteger(applicationId);
@@ -19038,17 +19648,27 @@ async function createCfaVersionForPlan({
       createdByStaffProfileId: staffProfileId || null
     });
 
-    const [versionRows] = await runner.query(
-      `SELECT id, version_number, status, metadata_json
-         FROM cfa_version
-        WHERE series_id = ?
-        ORDER BY version_number DESC, id DESC`,
-      [seriesId]
-    );
-    assertNoUnscopedUnsignedVersionRows(versionRows, 'cfa_version_application_scope_unknown');
-    const applicationVersionRows = filterApplicationScopedVersionRows(
+    const versionRows = await loadCfaVersionRowsForCase(runner, {
+      seriesId,
+    });
+    assertTargetVersionLineageConsistent(versionRows, {
+      applicationId: snapshotApplicationId,
+      actionPlanId,
+      errorCode: 'cfa_application_scope_conflict',
+    });
+    const validatedBaseline = resolveLatestSignedVersionBaseline(
       versionRows,
-      snapshotApplicationId
+      {
+        seriesId,
+        caseId: normalizedCaseId,
+        applicantUserId: snapshot?.case?.applicantUserId,
+      },
+      { errorCode: 'cfa_signed_baseline_scope_conflict' }
+    );
+    const applicationVersionRows = filterCfaActionPlanScopedVersionRows(
+      versionRows,
+      snapshotApplicationId,
+      actionPlanId
     );
     const priorApplicationVersionIds = applicationVersionRows
       .map(row => normalisePositiveInteger(row.id))
@@ -19079,7 +19699,7 @@ async function createCfaVersionForPlan({
       [seriesId]
     );
     const nextVersionNumber = (Number(maxRow?.['MAX(version_number)']) || 0) + 1;
-    const priorVersionRow = applicationVersionRows.find(row => row?.status === 'signed') || null;
+    const priorVersionRow = validatedBaseline?.row || null;
 
     const resolvedCaseManager = await resolveFundingAgreementCaseManager({
       connection: runner,
@@ -19101,12 +19721,14 @@ async function createCfaVersionForPlan({
 
     const [insert] = await runner.query(
       `INSERT INTO cfa_version
-        (series_id, version_number, status, supersedes_version_id, change_reason, change_summary,
+        (series_id, application_id, action_plan_id, version_number, status, supersedes_version_id, change_reason, change_summary,
          created_by_staff_profile_id, effective_date, snapshot_schema_version, snapshot_hash,
          rendered_template_version, metadata_json)
-       VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         seriesId,
+        snapshotApplicationId,
+        normalisePositiveInteger(actionPlanId),
         nextVersionNumber,
         priorVersionRow?.id || null,
         changeReason || null,
@@ -19208,6 +19830,7 @@ async function createCfaVersionForPlan({
       cleanDocId: cleanDocId || null,
       supersedesVersionId: priorVersionRow?.id || null,
       applicationId: snapshotApplicationId,
+      actionPlanId: normalisePositiveInteger(actionPlanId),
       snapshot: snapshotWithSigner,
     };
   } catch (error) {
@@ -19250,6 +19873,7 @@ async function createCfaVersionForPlan({
 async function createCfaVersionFromAssessment({
   caseId,
   applicationId = null,
+  participantUserId = null,
   changeReason,
   changeSummary,
   actorUserId,
@@ -19284,7 +19908,8 @@ async function createCfaVersionFromAssessment({
     const snapshot = await buildCfaSnapshotFromAssessment({
       connection: runner,
       caseId: normalizedCaseId,
-      applicationId: expectedApplicationId
+      applicationId: expectedApplicationId,
+      participantUserId,
     });
     const snapshotApplicationId = resolveVersionSnapshotApplicationId(snapshot);
     if (snapshotApplicationId !== expectedApplicationId) {
@@ -19321,18 +19946,27 @@ async function createCfaVersionFromAssessment({
       createdByStaffProfileId: staffProfileId || null
     });
 
-    const [versionRows] = await runner.query(
-      `SELECT id, version_number, status, metadata_json
-         FROM cfa_version
-        WHERE series_id = ?
-        ORDER BY version_number DESC, id DESC`,
-      [seriesId]
+    const versionRows = await loadCfaVersionRowsForCase(runner, {
+      seriesId,
+    });
+    assertTargetVersionLineageConsistent(versionRows, {
+      applicationId: snapshotApplicationId,
+      requireNoActionPlan: true,
+      errorCode: 'cfa_application_scope_conflict',
+    });
+    const validatedBaseline = resolveLatestSignedVersionBaseline(
+      versionRows,
+      {
+        seriesId,
+        caseId: normalizedCaseId,
+        applicantUserId: snapshot?.case?.applicantUserId,
+      },
+      { errorCode: 'cfa_signed_baseline_scope_conflict' }
     );
-    assertNoUnscopedUnsignedVersionRows(versionRows, 'cfa_version_application_scope_unknown');
     const applicationVersionRows = filterApplicationScopedVersionRows(
       versionRows,
       snapshotApplicationId
-    );
+    ).filter(row => !resolveVersionSnapshotActionPlanId(row));
     const priorApplicationVersionIds = applicationVersionRows
       .map(row => normalisePositiveInteger(row.id))
       .filter(Boolean);
@@ -19362,7 +19996,7 @@ async function createCfaVersionFromAssessment({
       [seriesId]
     );
     const nextVersionNumber = (Number(maxRow?.['MAX(version_number)']) || 0) + 1;
-    const priorVersionRow = applicationVersionRows.find(row => row?.status === 'signed') || null;
+    const priorVersionRow = validatedBaseline?.row || null;
 
     const resolvedCaseManager = await resolveFundingAgreementCaseManager({
       connection: runner,
@@ -19383,12 +20017,14 @@ async function createCfaVersionFromAssessment({
 
     const [insert] = await runner.query(
       `INSERT INTO cfa_version
-        (series_id, version_number, status, supersedes_version_id, change_reason, change_summary,
+        (series_id, application_id, action_plan_id, version_number, status, supersedes_version_id, change_reason, change_summary,
          created_by_staff_profile_id, effective_date, snapshot_schema_version, snapshot_hash,
          rendered_template_version, metadata_json)
-       VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         seriesId,
+        snapshotApplicationId,
+        null,
         nextVersionNumber,
         priorVersionRow?.id || null,
         changeReason || null,
@@ -23554,6 +24190,398 @@ const CLEAR_TEST_OBJECT_KEY_SOURCES = [
   { table: 'documents', column: 'storage_key' }
 ];
 
+function createClearTestDataSafetyError(code, details = null) {
+  const error = new Error(code);
+  error.code = code;
+  if (details && typeof details === 'object') error.details = details;
+  return error;
+}
+
+function resolveClearTestDataEnvironmentSafety(environment = process.env) {
+  const indicators = [
+    ['APP_ENV', environment.APP_ENV],
+    ['DEPLOY_ENV', environment.DEPLOY_ENV],
+    ['ENV_NAME', environment.ENV_NAME],
+    ['API_BASE', environment.API_BASE],
+    ['REACT_APP_API_BASE_URL', environment.REACT_APP_API_BASE_URL],
+    ['ALLOWED_ORIGIN', environment.ALLOWED_ORIGIN],
+    ['COGNITO_DOMAIN', environment.COGNITO_DOMAIN],
+    ['OBJECT_BUCKET', environment.OBJECT_BUCKET],
+    ['DB_HOST', environment.DB_HOST],
+    ['COGNITO_USER_POOL_ID', environment.COGNITO_USER_POOL_ID],
+    ['COGNITO_STAFF_USER_POOL_ID', environment.COGNITO_STAFF_USER_POOL_ID],
+  ]
+    .map(([key, value]) => ({
+      key,
+      label: detectSystemAdminEnvironmentLabelFromValue(value),
+    }))
+    .filter(item => Boolean(item.label));
+  const productionIndicators = indicators
+    .filter(item => item.label === 'Production')
+    .map(item => item.key);
+  if (productionIndicators.length) {
+    return {
+      allowed: false,
+      label: 'Production',
+      reason: 'production_indicator_present',
+      indicators: productionIndicators,
+    };
+  }
+  const provenNonProduction = indicators.find(
+    item => item.label === 'Development' || item.label === 'Test'
+  );
+  if (!provenNonProduction) {
+    return {
+      allowed: false,
+      label: 'Unknown',
+      reason: 'non_production_environment_not_proven',
+      indicators: [],
+    };
+  }
+  return {
+    allowed: true,
+    label: provenNonProduction.label,
+    reason: 'non_production_environment_proven',
+    indicators: indicators
+      .filter(item => item.label === provenNonProduction.label)
+      .map(item => item.key),
+  };
+}
+
+function clearTestDataMetadataKey(...parts) {
+  return parts.map(part => String(part || '')).join('\u0000');
+}
+
+function quoteClearTestDataIdentifier(value) {
+  const token = String(value || '');
+  if (!token || token.includes('\u0000')) {
+    throw createClearTestDataSafetyError('clear_test_data_invalid_identifier');
+  }
+  return `\`${token.replace(/`/g, '``')}\``;
+}
+
+function parseClearTestDataTableName(configuredName, currentSchema) {
+  const token = normaliseString(configuredName);
+  const schema = normaliseString(currentSchema);
+  if (!token || !schema) {
+    throw createClearTestDataSafetyError('clear_test_data_invalid_table_target');
+  }
+  const parts = token.split('.');
+  if (
+    (parts.length !== 1 && parts.length !== 2) ||
+    parts.some(part => !/^[A-Za-z0-9_$]+$/.test(part))
+  ) {
+    throw createClearTestDataSafetyError('clear_test_data_invalid_table_target', {
+      table: token,
+    });
+  }
+  const tableSchema = parts.length === 2 ? parts[0] : schema;
+  const tableName = parts.length === 2 ? parts[1] : parts[0];
+  return {
+    configuredName: token,
+    schema: tableSchema,
+    table: tableName,
+    key: clearTestDataMetadataKey(tableSchema, tableName),
+    sqlIdentifier:
+      `${quoteClearTestDataIdentifier(tableSchema)}.${quoteClearTestDataIdentifier(tableName)}`,
+  };
+}
+
+function compileClearTestDataDeletionPlan({
+  currentSchema,
+  configuredTableNames,
+  tableRows,
+  columnRows,
+  foreignKeyRows,
+}) {
+  const configuredTargets = (Array.isArray(configuredTableNames) ? configuredTableNames : [])
+    .map((configuredName, orderIndex) => ({
+      ...parseClearTestDataTableName(configuredName, currentSchema),
+      orderIndex,
+    }));
+  const configuredTargetKeys = new Set();
+  for (const target of configuredTargets) {
+    if (configuredTargetKeys.has(target.key)) {
+      throw createClearTestDataSafetyError('clear_test_data_duplicate_table_target', {
+        table: target.configuredName,
+      });
+    }
+    configuredTargetKeys.add(target.key);
+  }
+
+  const metadataTablesByKey = new Map();
+  for (const row of Array.isArray(tableRows) ? tableRows : []) {
+    const schema = normaliseString(row?.TABLE_SCHEMA);
+    const table = normaliseString(row?.TABLE_NAME);
+    const tableType = normaliseString(row?.TABLE_TYPE);
+    if (!schema || !table) continue;
+    metadataTablesByKey.set(clearTestDataMetadataKey(schema, table), {
+      schema,
+      table,
+      tableType,
+      key: clearTestDataMetadataKey(schema, table),
+      sqlIdentifier:
+        `${quoteClearTestDataIdentifier(schema)}.${quoteClearTestDataIdentifier(table)}`,
+    });
+  }
+
+  const columnKeys = new Set();
+  const nullableColumnKeys = new Set();
+  for (const row of Array.isArray(columnRows) ? columnRows : []) {
+    const schema = normaliseString(row?.TABLE_SCHEMA);
+    const table = normaliseString(row?.TABLE_NAME);
+    const column = normaliseString(row?.COLUMN_NAME);
+    if (schema && table && column) {
+      const columnKey = clearTestDataMetadataKey(schema, table, column);
+      columnKeys.add(columnKey);
+      if ((normaliseString(row?.IS_NULLABLE) || '').toUpperCase() === 'YES') {
+        nullableColumnKeys.add(columnKey);
+      }
+    }
+  }
+
+  const existingTargets = [];
+  const missingTables = [];
+  const targetByKey = new Map();
+  const targetByConfiguredName = new Map();
+  for (const target of configuredTargets) {
+    const metadataTable = metadataTablesByKey.get(target.key);
+    if (!metadataTable) {
+      missingTables.push(target.configuredName);
+      targetByConfiguredName.set(target.configuredName, { ...target, exists: false });
+      continue;
+    }
+    if ((metadataTable.tableType || '').toUpperCase() !== 'BASE TABLE') {
+      throw createClearTestDataSafetyError('clear_test_data_target_is_not_base_table', {
+        table: target.configuredName,
+        tableType: metadataTable.tableType || null,
+      });
+    }
+    const existingTarget = {
+      ...target,
+      exists: true,
+      metadataVerified: true,
+    };
+    existingTargets.push(existingTarget);
+    targetByKey.set(existingTarget.key, existingTarget);
+    targetByConfiguredName.set(existingTarget.configuredName, existingTarget);
+  }
+
+  const outgoingParentsByChild = new Map(
+    existingTargets.map(target => [target.key, new Set()])
+  );
+  const indegreeByKey = new Map(existingTargets.map(target => [target.key, 0]));
+  const unlistedReferencingChildren = new Map();
+  const selfReferenceColumnsByTableKey = new Map();
+  for (const row of Array.isArray(foreignKeyRows) ? foreignKeyRows : []) {
+    const childSchema = normaliseString(row?.TABLE_SCHEMA);
+    const childTable = normaliseString(row?.TABLE_NAME);
+    const parentSchema = normaliseString(row?.REFERENCED_TABLE_SCHEMA);
+    const parentTable = normaliseString(row?.REFERENCED_TABLE_NAME);
+    if (!childSchema || !childTable || !parentSchema || !parentTable) {
+      throw createClearTestDataSafetyError('clear_test_data_foreign_key_metadata_invalid');
+    }
+    const childKey = clearTestDataMetadataKey(childSchema, childTable);
+    const parentKey = clearTestDataMetadataKey(parentSchema, parentTable);
+    const parentTarget = targetByKey.get(parentKey);
+    if (!parentTarget) continue;
+
+    if (childKey === parentKey) {
+      const childColumn = normaliseString(row?.COLUMN_NAME);
+      const referencedColumn = normaliseString(row?.REFERENCED_COLUMN_NAME);
+      const childColumnKey = clearTestDataMetadataKey(
+        childSchema,
+        childTable,
+        childColumn
+      );
+      if (
+        !childColumn ||
+        !referencedColumn ||
+        !columnKeys.has(childColumnKey) ||
+        !nullableColumnKeys.has(childColumnKey)
+      ) {
+        throw createClearTestDataSafetyError(
+          'clear_test_data_self_reference_not_detachable',
+          {
+            table: parentTarget.configuredName,
+            constraint: normaliseString(row?.CONSTRAINT_NAME) || null,
+            column: childColumn || null,
+          }
+        );
+      }
+      if (!selfReferenceColumnsByTableKey.has(childKey)) {
+        selfReferenceColumnsByTableKey.set(childKey, new Set());
+      }
+      selfReferenceColumnsByTableKey.get(childKey).add(childColumn);
+      continue;
+    }
+
+    const childTarget = targetByKey.get(childKey);
+    if (!childTarget) {
+      const childName = `${childSchema}.${childTable}`;
+      unlistedReferencingChildren.set(childKey, childName);
+      continue;
+    }
+    const parents = outgoingParentsByChild.get(childKey);
+    if (!parents.has(parentKey)) {
+      parents.add(parentKey);
+      indegreeByKey.set(parentKey, (indegreeByKey.get(parentKey) || 0) + 1);
+    }
+  }
+  if (unlistedReferencingChildren.size) {
+    throw createClearTestDataSafetyError(
+      'clear_test_data_unlisted_referencing_tables',
+      { tables: [...unlistedReferencingChildren.values()].sort() }
+    );
+  }
+
+  const compareTargets = (left, right) => (
+    left.orderIndex - right.orderIndex ||
+    left.configuredName.localeCompare(right.configuredName)
+  );
+  const ready = existingTargets
+    .filter(target => (indegreeByKey.get(target.key) || 0) === 0)
+    .sort(compareTargets);
+  const deletionOrder = [];
+  while (ready.length) {
+    const child = ready.shift();
+    deletionOrder.push(child);
+    const parentKeys = [...(outgoingParentsByChild.get(child.key) || [])]
+      .sort((left, right) => compareTargets(targetByKey.get(left), targetByKey.get(right)));
+    for (const parentKey of parentKeys) {
+      const nextIndegree = (indegreeByKey.get(parentKey) || 0) - 1;
+      indegreeByKey.set(parentKey, nextIndegree);
+      if (nextIndegree === 0) {
+        ready.push(targetByKey.get(parentKey));
+        ready.sort(compareTargets);
+      }
+    }
+  }
+  if (deletionOrder.length !== existingTargets.length) {
+    const cycleTables = existingTargets
+      .filter(target => (indegreeByKey.get(target.key) || 0) > 0)
+      .map(target => target.configuredName)
+      .sort();
+    throw createClearTestDataSafetyError('clear_test_data_foreign_key_cycle', {
+      tables: cycleTables,
+    });
+  }
+
+  const selfReferenceDetachments = [...selfReferenceColumnsByTableKey.entries()]
+    .map(([tableKey, columns]) => ({
+      table: targetByKey.get(tableKey),
+      columns: [...columns].sort(),
+    }))
+    .sort((left, right) => compareTargets(left.table, right.table));
+
+  return {
+    currentSchema,
+    configuredTargets,
+    deletionOrder,
+    missingTables,
+    metadataTablesByKey,
+    targetByConfiguredName,
+    columnKeys,
+    selfReferenceDetachments,
+  };
+}
+
+async function buildClearTestDataDeletionPlan(
+  connection,
+  configuredTableNames = ISET_TEST_DATA_TABLE_ORDER
+) {
+  const [[databaseRow]] = await connection.query('SELECT DATABASE()');
+  const currentSchema = normaliseString(databaseRow?.['DATABASE()']);
+  if (!currentSchema) {
+    throw createClearTestDataSafetyError('clear_test_data_database_identity_missing');
+  }
+  const parsedTargets = (Array.isArray(configuredTableNames) ? configuredTableNames : [])
+    .map(configuredName => parseClearTestDataTableName(configuredName, currentSchema));
+  const targetSchemas = [...new Set(parsedTargets.map(target => target.schema))].sort();
+  if (!targetSchemas.length) {
+    throw createClearTestDataSafetyError('clear_test_data_table_targets_missing');
+  }
+  const schemaPlaceholders = targetSchemas.map(() => '?').join(',');
+  const [tableRows] = await connection.query(
+    `SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE
+       FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA IN (${schemaPlaceholders})
+      ORDER BY TABLE_SCHEMA, TABLE_NAME`,
+    targetSchemas
+  );
+  const [columnRows] = await connection.query(
+    `SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, IS_NULLABLE, ORDINAL_POSITION
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA IN (${schemaPlaceholders})
+      ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION`,
+    targetSchemas
+  );
+  const [foreignKeyRows] = await connection.query(
+    `SELECT TABLE_SCHEMA,
+            TABLE_NAME,
+            CONSTRAINT_NAME,
+            COLUMN_NAME,
+            REFERENCED_TABLE_SCHEMA,
+            REFERENCED_TABLE_NAME,
+            REFERENCED_COLUMN_NAME,
+            ORDINAL_POSITION
+       FROM information_schema.KEY_COLUMN_USAGE
+      WHERE REFERENCED_TABLE_NAME IS NOT NULL
+        AND (
+          TABLE_SCHEMA IN (${schemaPlaceholders})
+          OR REFERENCED_TABLE_SCHEMA IN (${schemaPlaceholders})
+        )
+      ORDER BY TABLE_SCHEMA, TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION`,
+    [...targetSchemas, ...targetSchemas]
+  );
+  return compileClearTestDataDeletionPlan({
+    currentSchema,
+    configuredTableNames,
+    tableRows,
+    columnRows,
+    foreignKeyRows,
+  });
+}
+
+function resolveClearTestDataMetadataTable(plan, configuredName) {
+  const parsed = parseClearTestDataTableName(configuredName, plan?.currentSchema);
+  return plan?.metadataTablesByKey?.get(parsed.key) || null;
+}
+
+function clearTestDataPlanHasColumn(plan, table, column) {
+  return Boolean(
+    table?.schema &&
+    table?.table &&
+    plan?.columnKeys?.has(clearTestDataMetadataKey(table.schema, table.table, column))
+  );
+}
+
+function assertClearTestDataSupportMetadata(plan) {
+  const budgetPot = resolveClearTestDataMetadataTable(plan, 'budget_pot');
+  if (
+    !budgetPot ||
+    (budgetPot.tableType || '').toUpperCase() !== 'BASE TABLE' ||
+    !clearTestDataPlanHasColumn(plan, budgetPot, 'committed_amount') ||
+    !clearTestDataPlanHasColumn(plan, budgetPot, 'actual_amount')
+  ) {
+    throw createClearTestDataSafetyError('clear_test_data_finance_reset_metadata_missing');
+  }
+
+  const accountEvent = plan.targetByConfiguredName.get('client_applicant_account_event');
+  const client = plan.targetByConfiguredName.get('client');
+  if (accountEvent?.exists || client?.exists) {
+    if (
+      !accountEvent?.exists ||
+      !client?.exists ||
+      !clearTestDataPlanHasColumn(plan, accountEvent, 'client_id') ||
+      !clearTestDataPlanHasColumn(plan, client, 'id')
+    ) {
+      throw createClearTestDataSafetyError('clear_test_data_account_integrity_metadata_missing');
+    }
+  }
+  return { budgetPot, accountEvent, client };
+}
+
 function normalizeObjectKeyForPurge(rawValue) {
   if (typeof rawValue !== 'string') return null;
   const trimmed = rawValue.trim();
@@ -23565,31 +24593,31 @@ function normalizeObjectKeyForPurge(rawValue) {
   return withoutLeadingSlash;
 }
 
-async function collectClearTestObjectKeys(connection) {
+async function collectClearTestObjectKeys(connection, plan) {
   const keys = new Set();
   const report = [];
   for (const source of CLEAR_TEST_OBJECT_KEY_SOURCES) {
-    try {
-      const [rows] = await connection.query(
-        `SELECT ${source.column} AS object_key FROM ${source.table} WHERE ${source.column} IS NOT NULL`
-      );
-      let collected = 0;
-      for (const row of rows || []) {
-        const key = normalizeObjectKeyForPurge(row?.object_key);
-        if (!key) continue;
-        if (!keys.has(key)) {
-          keys.add(key);
-          collected += 1;
-        }
-      }
-      report.push({ table: source.table, column: source.column, collected });
-    } catch (err) {
-      if (isMissingTableErrorLocal(err) || isMissingColumnErrorLocal(err)) {
-        report.push({ table: source.table, column: source.column, skipped: true, reason: 'missing_source' });
-        continue;
-      }
-      throw err;
+    const table = resolveClearTestDataMetadataTable(plan, source.table);
+    if (!table || !clearTestDataPlanHasColumn(plan, table, source.column)) {
+      report.push({ table: source.table, column: source.column, skipped: true, reason: 'missing_source' });
+      continue;
     }
+    const columnIdentifier = quoteClearTestDataIdentifier(source.column);
+    const [rows] = await connection.query(
+      `SELECT ${columnIdentifier}
+         FROM ${table.sqlIdentifier}
+        WHERE ${columnIdentifier} IS NOT NULL`
+    );
+    let collected = 0;
+    for (const row of rows || []) {
+      const key = normalizeObjectKeyForPurge(row?.[source.column]);
+      if (!key) continue;
+      if (!keys.has(key)) {
+        keys.add(key);
+        collected += 1;
+      }
+    }
+    report.push({ table: source.table, column: source.column, collected });
   }
   return { keys: Array.from(keys), report };
 }
@@ -23654,25 +24682,72 @@ async function purgeClearTestObjectKeys(objectKeys = []) {
   }
 }
 
-async function clearTableWithCount(connection, tableName) {
-  try {
-    const [[countRow]] = await connection.query(`SELECT COUNT(*) AS total FROM ${tableName}`);
-    const deleted = Number(countRow?.total ?? 0);
-    await connection.query(`DELETE FROM ${tableName}`);
-    try {
-      await connection.query(`ALTER TABLE ${tableName} AUTO_INCREMENT = 1`);
-    } catch (resetErr) {
-      if (!isMissingTableErrorLocal(resetErr)) {
-        console.warn(`[clear-test] auto_increment reset failed for ${tableName}:`, resetErr.message);
-      }
+async function detachClearTestDataSelfReferences(connection, deletionPlan) {
+  const outcomes = [];
+  for (const detachment of deletionPlan?.selfReferenceDetachments || []) {
+    const table = detachment?.table;
+    const columns = Array.isArray(detachment?.columns) ? detachment.columns : [];
+    if (!table?.metadataVerified || !table?.sqlIdentifier || !columns.length) {
+      throw createClearTestDataSafetyError('clear_test_data_self_reference_plan_invalid');
     }
-    return { table: tableName, deleted };
-  } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return { table: tableName, skipped: true, reason: 'missing_table' };
-    }
-    throw err;
+    const assignments = columns
+      .map(column => `${quoteClearTestDataIdentifier(column)} = NULL`)
+      .join(', ');
+    const [result] = await connection.query(
+      `UPDATE ${table.sqlIdentifier} SET ${assignments}`
+    );
+    outcomes.push({
+      table: table.configuredName,
+      columns,
+      detachedRows: Number(result?.affectedRows || 0),
+    });
   }
+  return outcomes;
+}
+
+async function clearTableWithCount(connection, tableTarget) {
+  if (!tableTarget?.metadataVerified || !tableTarget?.sqlIdentifier) {
+    throw createClearTestDataSafetyError('clear_test_data_unverified_delete_target');
+  }
+  const [[countRow]] = await connection.query(
+    `SELECT COUNT(*) FROM ${tableTarget.sqlIdentifier}`
+  );
+  const deleted = Number(countRow?.['COUNT(*)'] ?? 0);
+  await connection.query(`DELETE FROM ${tableTarget.sqlIdentifier}`);
+  return { table: tableTarget.configuredName, deleted };
+}
+
+async function assertClearTestAccountEventIntegrity(connection, supportMetadata) {
+  const accountEvent = supportMetadata?.accountEvent;
+  const client = supportMetadata?.client;
+  if (!accountEvent?.exists && !client?.exists) return;
+  const clientId = quoteClearTestDataIdentifier('client_id');
+  const id = quoteClearTestDataIdentifier('id');
+  const [[countRow]] = await connection.query(
+    `SELECT COUNT(*)
+       FROM ${accountEvent.sqlIdentifier}
+       LEFT JOIN ${client.sqlIdentifier}
+         ON ${accountEvent.sqlIdentifier}.${clientId} = ${client.sqlIdentifier}.${id}
+      WHERE ${client.sqlIdentifier}.${id} IS NULL`
+  );
+  if (Number(countRow?.['COUNT(*)'] || 0) !== 0) {
+    throw createClearTestDataSafetyError('clear_test_data_integrity_failed', {
+      table: accountEvent.configuredName,
+    });
+  }
+}
+
+async function resetClearTestFinancePotSums(connection, supportMetadata) {
+  const budgetPot = supportMetadata?.budgetPot;
+  if (!budgetPot?.sqlIdentifier) {
+    throw createClearTestDataSafetyError('clear_test_data_finance_reset_metadata_missing');
+  }
+  await connection.query(
+    `UPDATE ${budgetPot.sqlIdentifier}
+        SET ${quoteClearTestDataIdentifier('committed_amount')} = ?,
+            ${quoteClearTestDataIdentifier('actual_amount')} = ?`,
+    [0, 0]
+  );
 }
 
 function clonePayload(payload) {
@@ -24127,8 +25202,9 @@ async function resolveOrCreateCaseForClient(
   };
 }
 
-async function fetchActionPlanWithCase(planId) {
-  const [[row]] = await pool.query(
+async function fetchActionPlanWithCase(planId, connection = pool) {
+  const executor = connection && typeof connection.query === 'function' ? connection : pool;
+  const [[row]] = await executor.query(
     `SELECT
        ap.*,
        ap.esdc_action_plan_json AS esdcActionPlanJson,
@@ -24567,15 +25643,16 @@ async function fetchCaseAccessRowByInterventionId(interventionId, connection = p
     `SELECT
         c.id,
         c.client_id,
-        a.id AS application_id,
+        ap.application_id,
+        i.action_plan_id,
+        ap.case_id AS action_plan_case_id,
         ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
         c.assigned_staff_profile_id,
         c.portfolio_region_id,
         sp.region_id AS owner_region_id
        FROM iset_case_intervention i
        LEFT JOIN iset_case_action_plan ap ON ap.id = i.action_plan_id
-       JOIN iset_case c ON c.id = COALESCE(i.case_id, ap.case_id)
-       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+       JOIN iset_case c ON c.id = i.case_id
        LEFT JOIN staff_profiles sp ON sp.id = ${buildCaseAssignedStaffProfileIdSql('c')}
       WHERE i.id = ?
       LIMIT 1`,
@@ -24591,14 +25668,13 @@ async function fetchCaseAccessRowByActionPlanId(actionPlanId, connection = pool)
     `SELECT
         c.id,
         c.client_id,
-        a.id AS application_id,
+        ap.application_id,
         ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
         c.assigned_staff_profile_id,
         c.portfolio_region_id,
         sp.region_id AS owner_region_id
        FROM iset_case_action_plan ap
        JOIN iset_case c ON c.id = ap.case_id
-       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
        LEFT JOIN staff_profiles sp ON sp.id = ${buildCaseAssignedStaffProfileIdSql('c')}
       WHERE ap.id = ?
       LIMIT 1`,
@@ -24639,41 +25715,51 @@ async function validateCaseAccessByInterventionId(req, interventionId, connectio
   return validateCaseAccessForCaseRow(req, row);
 }
 
-async function resolveApplicantUserIdForApplication(applicationId, connection = pool) {
-  const normalizedApplicationId = normalisePositiveInteger(applicationId);
-  if (!normalizedApplicationId) return null;
-  const [[row]] = await connection.query(
-    `SELECT s.user_id
-       FROM iset_application a
-       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-      WHERE a.id = ?
-      LIMIT 1`,
-    [normalizedApplicationId]
-  );
-  return normalisePositiveInteger(row?.user_id);
-}
-
 async function validateApplicantCaseBinding({ applicantId, caseId, applicationId, connection = pool } = {}) {
   const normalizedApplicantId = normalisePositiveInteger(applicantId);
   if (!normalizedApplicantId) return null;
 
   const normalizedApplicationId = normalisePositiveInteger(applicationId);
-  if (normalizedApplicationId) {
-    const applicationApplicantId = await resolveApplicantUserIdForApplication(normalizedApplicationId, connection);
-    if (applicationApplicantId && applicationApplicantId !== normalizedApplicantId) {
-      return { status: 403, body: { error: 'forbidden', detail: 'applicant_application_mismatch' } };
-    }
+  let normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!normalizedCaseId && normalizedApplicationId) {
+    const applicationCaseRow = await fetchCaseAccessRowByApplicationId(
+      normalizedApplicationId,
+      connection
+    );
+    normalizedCaseId = normalisePositiveInteger(applicationCaseRow?.id);
+  }
+  if (!normalizedCaseId) {
+    return { status: 403, body: { error: 'forbidden', detail: 'applicant_case_scope_missing' } };
   }
 
-  const normalizedCaseId = normalisePositiveInteger(caseId);
-  if (normalizedCaseId) {
-    const context = await resolveCaseApplicantMessagingContext(normalizedCaseId);
-    if (context?.applicant_resolution_conflict) {
-      return { status: 403, body: { error: 'forbidden', detail: 'applicant_case_identity_conflict' } };
-    }
-    if (context?.applicant_user_id && Number(context.applicant_user_id) !== normalizedApplicantId) {
-      return { status: 403, body: { error: 'forbidden', detail: 'applicant_case_mismatch' } };
-    }
+  const context = await resolveCaseApplicantMessagingContext(normalizedCaseId, {
+    applicationId: normalizedApplicationId,
+    connection,
+  });
+  if (!context) {
+    return { status: 403, body: { error: 'forbidden', detail: 'applicant_case_scope_missing' } };
+  }
+  if (context.applicant_resolution_conflict) {
+    return { status: 403, body: { error: 'forbidden', detail: 'applicant_application_scope_conflict' } };
+  }
+  if (
+    normalizedApplicationId &&
+    normalisePositiveInteger(context.application_id) !== normalizedApplicationId
+  ) {
+    return { status: 403, body: { error: 'forbidden', detail: 'applicant_application_mismatch' } };
+  }
+  const resolvedApplicantId = normalisePositiveInteger(context.applicant_user_id);
+  if (!resolvedApplicantId) {
+    return { status: 403, body: { error: 'forbidden', detail: 'applicant_account_link_missing' } };
+  }
+  if (resolvedApplicantId !== normalizedApplicantId) {
+    return {
+      status: 403,
+      body: {
+        error: 'forbidden',
+        detail: normalizedApplicationId ? 'applicant_application_mismatch' : 'applicant_case_mismatch',
+      },
+    };
   }
 
   return null;
@@ -24697,6 +25783,12 @@ async function validateApplicantDocumentContextAccess(req, {
   if (normalizedInterventionId) {
     const caseRow = await fetchCaseAccessRowByInterventionId(normalizedInterventionId, connection);
     if (!caseRow) return { status: 404, body: { error: 'intervention_not_found' } };
+    if (
+      normalisePositiveInteger(caseRow.action_plan_id) &&
+      normalisePositiveInteger(caseRow.action_plan_case_id) !== normalisePositiveInteger(caseRow.id)
+    ) {
+      return { status: 409, body: { error: 'intervention_action_plan_scope_conflict' } };
+    }
     if (!hasGlobalScopedDocumentAccess) {
       const accessError = validateCaseAccessForCaseRow(req, caseRow);
       if (accessError) return accessError;
@@ -24704,7 +25796,7 @@ async function validateApplicantDocumentContextAccess(req, {
     return validateApplicantCaseBinding({
       applicantId,
       caseId: caseRow.id,
-      applicationId: caseRow.application_id || normalizedApplicationId,
+      applicationId: caseRow.application_id || null,
       connection,
     });
   }
@@ -24719,7 +25811,7 @@ async function validateApplicantDocumentContextAccess(req, {
     return validateApplicantCaseBinding({
       applicantId,
       caseId: caseRow.id,
-      applicationId: caseRow.application_id || normalizedApplicationId,
+      applicationId: caseRow.application_id || null,
       connection,
     });
   }
@@ -42875,55 +43967,64 @@ app.post('/api/admin/feedback-reports', (req, res) => {
 
 
 app.post('/api/clear-iset-test-data', requireUnsafeAdminDebugAccess, async (_req, res) => {
+  const environmentSafety = resolveClearTestDataEnvironmentSafety();
+  if (!environmentSafety.allowed) {
+    return res.status(403).json({
+      error: 'clear_test_data_environment_forbidden',
+      message: 'Clear Test Data is available only in a proven Development or Test environment.',
+      environment: environmentSafety.label,
+      reason: environmentSafety.reason,
+    });
+  }
   let connection;
+  let transactionStarted = false;
   const report = [];
   const startedAt = Date.now();
   let objectKeyReport = [];
   let objectKeysToDelete = [];
   let objectPurgeSummary = null;
+  let detachedSelfReferences = [];
   try {
     connection = await pool.getConnection();
+    const deletionPlan = await buildClearTestDataDeletionPlan(connection);
+    const supportMetadata = assertClearTestDataSupportMetadata(deletionPlan);
     await connection.beginTransaction();
-    const collected = await collectClearTestObjectKeys(connection);
+    transactionStarted = true;
+    const collected = await collectClearTestObjectKeys(connection, deletionPlan);
     objectKeyReport = collected.report || [];
     objectKeysToDelete = collected.keys || [];
-    await connection.query('SET FOREIGN_KEY_CHECKS = 0');
-    for (const tableName of ISET_TEST_DATA_TABLE_ORDER) {
+    detachedSelfReferences = await detachClearTestDataSelfReferences(
+      connection,
+      deletionPlan
+    );
+    for (const tableName of deletionPlan.missingTables) {
+      report.push({ table: tableName, skipped: true, reason: 'missing_table' });
+    }
+    for (const tableTarget of deletionPlan.deletionOrder) {
       try {
-        const outcome = await clearTableWithCount(connection, tableName);
+        const outcome = await clearTableWithCount(connection, tableTarget);
         report.push(outcome);
       } catch (err) {
-        err.tableName = tableName;
+        err.tableName = tableTarget.configuredName;
         throw err;
       }
     }
-    const [[accountEventIntegrity]] = await connection.query(
-      `SELECT COUNT(*) AS orphan_count
-         FROM client_applicant_account_event e
-         LEFT JOIN client c ON c.id = e.client_id
-        WHERE c.id IS NULL`
-    );
-    if (Number(accountEventIntegrity?.orphan_count || 0) !== 0) {
-      const integrityError = new Error('Client applicant-account event orphans remain after clear.');
-      integrityError.code = 'clear_test_data_integrity_failed';
-      integrityError.tableName = 'client_applicant_account_event';
-      throw integrityError;
-    }
-    await refreshFinancePotSums(connection);
-    await connection.query('SET FOREIGN_KEY_CHECKS = 1');
+    await assertClearTestAccountEventIntegrity(connection, supportMetadata);
+    await resetClearTestFinancePotSums(connection, supportMetadata);
     await connection.commit();
+    transactionStarted = false;
     objectPurgeSummary = await purgeClearTestObjectKeys(objectKeysToDelete);
     res.json({
       ok: true,
       cleared: report,
       durationMs: Date.now() - startedAt,
+      detachedSelfReferences,
       objectKeySources: objectKeyReport,
       objectPurge: objectPurgeSummary
     });
   } catch (err) {
-    if (connection) {
+    if (connection && transactionStarted) {
       try { await connection.rollback(); } catch (_) {}
-      try { await connection.query('SET FOREIGN_KEY_CHECKS = 1'); } catch (_) {}
     }
     const message = err?.message || 'Failed to clear test data';
     const table = err?.tableName || null;
@@ -42932,6 +44033,8 @@ app.post('/api/clear-iset-test-data', requireUnsafeAdminDebugAccess, async (_req
       error: 'clear_test_data_failed',
       message,
       table,
+      details: err?.details || null,
+      detachedSelfReferences,
       objectKeySources: objectKeyReport,
       objectPurge: objectPurgeSummary
     });
@@ -62435,19 +63538,13 @@ async function resolveCaseApplicantMessagingContext(caseId, {
     return null;
   }
   const requestedApplicationId = normalisePositiveInteger(applicationId);
-  const applicationJoinSql = requestedApplicationId
-    ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
-    : buildCasePrimaryApplicationJoinSql('c', 'a');
-
-  const [[row] = []] = await connection.query(
-    `SELECT
-       c.id AS case_id,
-       c.client_id,
-       a.id AS application_id,
-       c.case_number,
-       c.case_context_json,
-       c.status AS case_status,
-       c.lifecycle_status AS case_lifecycle_status,
+  // A case-only operation must stay case-only. In particular, do not substitute
+  // the mutable primary/latest application: a later repeat or staff-authored
+  // application is a sibling record, not applicant authority for historical
+  // messages, documents, or an applicationless send.
+  const applicationSelectSql = requestedApplicationId
+    ? `a.id AS application_id,
+       a.client_id AS application_client_id,
        a.status AS application_status,
        a.lifecycle_status AS application_lifecycle_status,
        a.decision_outcome AS decision_outcome,
@@ -62457,31 +63554,58 @@ async function resolveCaseApplicantMessagingContext(caseId, {
        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"first-name\"')) AS submission_first_name,
        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
-       applicant_submission.id AS applicant_submission_user_id,
-       applicant_submission_client.id AS applicant_submission_client_id,
+       applicant_submission.id AS applicant_submission_user_id`
+    : `NULL AS application_id,
+       NULL AS application_client_id,
+       NULL AS application_status,
+       NULL AS application_lifecycle_status,
+       NULL AS decision_outcome,
+       NULL AS application_awaiting_reason,
+       NULL AS application_closure_reason,
+       NULL AS submission_reference,
+       NULL AS submission_first_name,
+       NULL AS submission_last_name,
+       NULL AS submission_preferred_name,
+       NULL AS applicant_submission_user_id`;
+  const applicationJoinSql = requestedApplicationId
+    ? `JOIN iset_application a ON a.case_id = c.id AND a.id = ?
+       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+       LEFT JOIN user applicant_submission ON applicant_submission.id = s.user_id`
+    : '';
+
+  const [[row] = []] = await connection.query(
+    `SELECT
+       c.id AS case_id,
+       c.client_id,
+       ${applicationSelectSql},
+       c.case_number,
+       c.case_context_json,
+       c.status AS case_status,
+       c.lifecycle_status AS case_lifecycle_status,
+       cl.applicant_cognito_sub AS client_applicant_cognito_sub,
        applicant_client_sub.id AS applicant_client_sub_user_id,
        cl.first_name AS client_first_name,
        cl.last_name AS client_last_name,
        NULLIF(CONCAT_WS(' ', NULLIF(TRIM(cl.first_name), ''), NULLIF(TRIM(cl.last_name), '')), '') AS client_name,
        NULLIF(TRIM(cl.applicant_account_email), '') AS client_email,
        COALESCE(
-         applicant_submission.name,
          applicant_client_sub.name,
-         JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name')),
+         ${requestedApplicationId ? 'applicant_submission.name,' : ''}
+         ${requestedApplicationId ? "JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name'))," : ''}
          NULLIF(CONCAT_WS(' ', NULLIF(TRIM(cl.first_name), ''), NULLIF(TRIM(cl.last_name), '')), '')
        ) AS applicant_name,
        COALESCE(
-         applicant_submission.email,
          applicant_client_sub.email,
+         ${requestedApplicationId ? 'applicant_submission.email,' : ''}
          NULLIF(TRIM(cl.applicant_account_email), '')
        ) AS applicant_email
 	     FROM iset_case c
 	     LEFT JOIN client cl ON cl.id = c.client_id
 	     ${applicationJoinSql}
-	     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-	     LEFT JOIN user applicant_submission ON applicant_submission.id = s.user_id
-	     LEFT JOIN client applicant_submission_client ON applicant_submission_client.applicant_cognito_sub = applicant_submission.cognito_sub
-	     LEFT JOIN user applicant_client_sub ON applicant_client_sub.cognito_sub = cl.applicant_cognito_sub
+	     LEFT JOIN user applicant_client_sub
+	       ON NULLIF(TRIM(cl.applicant_cognito_sub), '') IS NOT NULL
+	      AND NULLIF(TRIM(applicant_client_sub.cognito_sub), '') IS NOT NULL
+	      AND applicant_client_sub.cognito_sub = cl.applicant_cognito_sub
 	     WHERE c.id = ?
 	     LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
     requestedApplicationId ? [requestedApplicationId, numericCaseId] : [numericCaseId]
@@ -62492,23 +63616,37 @@ async function resolveCaseApplicantMessagingContext(caseId, {
   }
 
   const submissionApplicantUserId = normalisePositiveInteger(row.applicant_submission_user_id);
-  const submissionApplicantClientId = normalisePositiveInteger(row.applicant_submission_client_id);
   const clientSubApplicantUserId = normalisePositiveInteger(row.applicant_client_sub_user_id);
+  const clientApplicantCognitoSub = normaliseString(row.client_applicant_cognito_sub);
+  const hasPopulatedClientApplicantLink = Boolean(
+    clientApplicantCognitoSub || clientSubApplicantUserId
+  );
+  const hasUnresolvedClientApplicantLink = Boolean(
+    hasPopulatedClientApplicantLink && !clientSubApplicantUserId
+  );
   const caseClientId = normalisePositiveInteger(row.client_id);
-  // Manual-intake submissions can be authored under an account that is not the case participant.
-  const hasApplicantUserConflict =
-    submissionApplicantUserId &&
-    clientSubApplicantUserId &&
-    submissionApplicantUserId !== clientSubApplicantUserId;
-  const hasApplicantClientConflict =
-    submissionApplicantUserId &&
-    submissionApplicantClientId &&
+  const applicationClientId = normalisePositiveInteger(row.application_client_id);
+  const hasApplicationClientConflict = Boolean(
+    requestedApplicationId &&
+    applicationClientId &&
     caseClientId &&
-    submissionApplicantClientId !== caseClientId;
-  const hasStrongIdentityConflict = Boolean(hasApplicantUserConflict || hasApplicantClientConflict);
-  const applicantUserId = hasStrongIdentityConflict
+    applicationClientId !== caseClientId
+  );
+  // The case client's populated Cognito link is current participant authority.
+  // A populated link that cannot resolve is a repair condition, not permission
+  // to fall through to a possibly historical submission author. The exact
+  // application's submission user is a fallback only when the link is truly
+  // NULL/blank.
+  const hasApplicantResolutionConflict = Boolean(
+    hasApplicationClientConflict || hasUnresolvedClientApplicantLink
+  );
+  const applicantUserId = hasApplicantResolutionConflict
     ? null
-    : (submissionApplicantUserId || clientSubApplicantUserId || null);
+    : (
+      clientSubApplicantUserId ||
+      (!hasPopulatedClientApplicantLink ? submissionApplicantUserId : null) ||
+      null
+    );
   const clientName = normaliseString(row.client_name) || null;
   const clientEmail = normaliseString(row.client_email) || null;
 
@@ -62516,13 +63654,15 @@ async function resolveCaseApplicantMessagingContext(caseId, {
     ...row,
     applicant_user_id: applicantUserId,
     applicant_resolution_source: applicantUserId
-      ? (submissionApplicantUserId ? 'submission_user_id' : 'client_cognito_sub')
+      ? (clientSubApplicantUserId ? 'client_cognito_sub' : 'exact_application_submission_user_id')
       : null,
-    applicant_resolution_conflict: Boolean(hasStrongIdentityConflict),
-    applicant_name: hasStrongIdentityConflict
+    applicant_resolution_conflict: hasApplicantResolutionConflict,
+    applicant_identity_conflict: hasUnresolvedClientApplicantLink,
+    application_scope_conflict: hasApplicationClientConflict,
+    applicant_name: hasApplicantResolutionConflict
       ? clientName
       : (normaliseString(row.applicant_name) || clientName),
-    applicant_email: hasStrongIdentityConflict
+    applicant_email: hasApplicantResolutionConflict
       ? clientEmail
       : (normaliseString(row.applicant_email) || clientEmail),
     submission_reference: normaliseString(row.submission_reference) || null,
@@ -62707,6 +63847,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 
     let applicantMessagingContext = null;
     try {
+      // Workspace messaging identity belongs to the case participant. Keep the
+      // selected application's fields for application operations, but never
+      // let a stale/mismatched application link hide case history or disable a
+      // plain case message.
       applicantMessagingContext = await resolveCaseApplicantMessagingContext(caseId);
     } catch (err) {
       const noTable = err && err.code === 'ER_NO_SUCH_TABLE';
@@ -65374,6 +66518,8 @@ app.get('/api/cases/:id/cfa-versions', async (req, res) => {
     const [rows] = await pool.query(
       `SELECT v.id,
               v.series_id,
+              v.application_id,
+              v.action_plan_id,
               v.version_number,
               v.status,
               v.change_reason,
@@ -65383,6 +66529,7 @@ app.get('/api/cases/:id/cfa-versions', async (req, res) => {
               v.sent_at,
               v.signed_at,
               v.effective_date,
+              v.metadata_json,
               s.template_key,
               d.document_type,
               d.document_id,
@@ -65403,6 +66550,8 @@ app.get('/api/cases/:id/cfa-versions', async (req, res) => {
         versionsById.set(row.id, {
           id: row.id,
           seriesId: row.series_id,
+          applicationId: resolveVersionSnapshotApplicationId(row),
+          actionPlanId: resolveVersionSnapshotActionPlanId(row),
           templateKey: row.template_key || null,
           versionNumber: row.version_number,
           status: row.status,
@@ -70297,14 +71446,35 @@ app.post('/api/action-plans/:id/archive', async (req, res) => {
   }
 });
 
+async function findRetainedCfaVersionForActionPlan(connection, actionPlanId) {
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  if (!normalizedActionPlanId) return null;
+  const [[row]] = await connection.query(
+    `SELECT id, version_number, status
+       FROM cfa_version
+      WHERE action_plan_id = ?
+      ORDER BY version_number DESC, id DESC
+      LIMIT 1`,
+    [normalizedActionPlanId]
+  );
+  if (!row?.id) return null;
+  return {
+    id: normalisePositiveInteger(row.id),
+    versionNumber: Number(row.version_number) || null,
+    status: normaliseString(row.status) || null,
+  };
+}
+
 app.post('/api/action-plans/:id/delete', async (req, res) => {
   const planId = Number.parseInt(req.params.id, 10);
   if (!Number.isInteger(planId) || planId <= 0) {
     return res.status(400).json({ error: 'invalid_action_plan_id' });
   }
 
+  let deleteConnection = null;
+  let deleteTransactionStarted = false;
   try {
-    const planRow = await fetchActionPlanWithCase(planId);
+    let planRow = await fetchActionPlanWithCase(planId);
     if (!planRow) {
       return res.status(404).json({ error: 'action_plan_not_found' });
     }
@@ -70330,10 +71500,82 @@ app.post('/api/action-plans/:id/delete', async (req, res) => {
       });
     }
 
-    const [interventionRows] = await pool.query(
+    deleteConnection = await pool.getConnection();
+    await deleteConnection.beginTransaction();
+    deleteTransactionStarted = true;
+
+    // Funding-form writers lock the application and then this case before
+    // locking an Action Plan. Taking the same case lock before the plan lock
+    // prevents typed CFA evidence from appearing between the evidence check
+    // and delete, while avoiding a reverse lock order.
+    const [[lockedCaseRow]] = await deleteConnection.query(
+      'SELECT id FROM iset_case WHERE id = ? LIMIT 1 FOR UPDATE',
+      [normalisePositiveInteger(planRow.case_id)]
+    );
+    if (!lockedCaseRow?.id) {
+      throw createCaseMessageHttpError(
+        404,
+        'action_plan_not_found',
+        'The Action Plan no longer belongs to an available case.'
+      );
+    }
+    const [[lockedPlanRow]] = await deleteConnection.query(
+      'SELECT id FROM iset_case_action_plan WHERE id = ? AND case_id = ? LIMIT 1 FOR UPDATE',
+      [planId, normalisePositiveInteger(planRow.case_id)]
+    );
+    if (!lockedPlanRow?.id) {
+      throw createCaseMessageHttpError(
+        409,
+        'action_plan_changed',
+        'The Action Plan changed before it could be deleted. Reload and try again.'
+      );
+    }
+
+    planRow = await fetchActionPlanWithCase(planId, deleteConnection);
+    if (!planRow) {
+      throw createCaseMessageHttpError(404, 'action_plan_not_found', 'Action Plan not found.');
+    }
+    const lockedAccessError = validateCaseAccessForPlan(req, planRow);
+    if (lockedAccessError) {
+      throw createCaseMessageHttpError(
+        lockedAccessError.status,
+        lockedAccessError.body?.error || 'forbidden',
+        lockedAccessError.body?.message || lockedAccessError.body?.detail || 'Access denied.'
+      );
+    }
+    const lockedStatus = (planRow.status || '').toLowerCase();
+    if (lockedStatus === 'active') {
+      throw createCaseMessageHttpError(
+        409,
+        'invalid_status',
+        'Active plans cannot be deleted. Close or archive instead.',
+        { detail: 'active_plans_cannot_be_deleted' }
+      );
+    }
+    if (lockedStatus !== 'draft') {
+      throw createCaseMessageHttpError(
+        409,
+        'invalid_status',
+        'Only draft action plans can be deleted.',
+        { detail: 'only_draft_plans_deletable' }
+      );
+    }
+
+    const retainedCfaVersion = await findRetainedCfaVersionForActionPlan(deleteConnection, planId);
+    if (retainedCfaVersion) {
+      throw createCaseMessageHttpError(
+        409,
+        'retained_cfa_evidence_blocks_plan_delete',
+        'This Action Plan has retained Client Funding Agreement evidence and cannot be deleted. Archive the Action Plan instead.',
+        { cfaVersion: retainedCfaVersion }
+      );
+    }
+
+    const [interventionRows] = await deleteConnection.query(
       `SELECT id, action_plan_id, intervention_code, status, delivery_status, metadata_json
          FROM iset_case_intervention
-        WHERE action_plan_id = ?`,
+        WHERE action_plan_id = ?
+        FOR UPDATE`,
       [planId]
     );
     const {
@@ -70352,26 +71594,72 @@ app.post('/api/action-plans/:id/delete', async (req, res) => {
       .map(mapAppliedRevisionEvidenceRow)
       .filter(Boolean);
     if (mappedInterventions.length > 0 || appliedRevisionEvidence.length > 0) {
-      return res.status(409).json({
-        error: appliedRevisionEvidence.length
+      throw createCaseMessageHttpError(
+        409,
+        appliedRevisionEvidence.length
           ? 'retained_revision_evidence_blocks_plan_delete'
           : 'open_interventions_block_delete',
-        message: appliedRevisionEvidence.length
+        appliedRevisionEvidence.length
           ? 'This plan contains retained revision decision evidence and cannot be deleted. The evidence must remain available for audit.'
           : 'Delete all draft interventions linked to this plan before deleting the plan.',
-        interventions: mappedInterventions,
-        appliedRevisionEvidence,
-        retainedEvidenceCount: appliedRevisionEvidence.length,
-      });
+        {
+          interventions: mappedInterventions,
+          appliedRevisionEvidence,
+          retainedEvidenceCount: appliedRevisionEvidence.length,
+        }
+      );
     }
 
-    await markIlmpNeedsReviewForActionPlan(planRow.case_id, planId);
-    await pool.query('DELETE FROM iset_case_action_plan WHERE id = ? LIMIT 1', [planId]);
-    await recomputeCaseStatus(planRow.case_id, null, { allowReopenFinal: true });
+    await markIlmpNeedsReviewForActionPlan(planRow.case_id, planId, deleteConnection);
+    const [deleteResult] = await deleteConnection.query(
+      'DELETE FROM iset_case_action_plan WHERE id = ? LIMIT 1',
+      [planId]
+    );
+    if (Number(deleteResult?.affectedRows || 0) !== 1) {
+      throw createCaseMessageHttpError(
+        409,
+        'action_plan_changed',
+        'The Action Plan changed before it could be deleted. Reload and try again.'
+      );
+    }
+    await recomputeCaseStatus(planRow.case_id, deleteConnection, { allowReopenFinal: true });
+    await deleteConnection.commit();
+    deleteTransactionStarted = false;
     res.status(200).json({ success: true, deleted: true, id: planId });
   } catch (error) {
+    if (deleteConnection && deleteTransactionStarted) {
+      try {
+        await deleteConnection.rollback();
+      } catch (rollbackError) {
+        console.error('POST /api/action-plans/:id/delete rollback failed:', rollbackError);
+      }
+      deleteTransactionStarted = false;
+    }
+    if (error?.httpStatus && error?.publicError) {
+      return res.status(error.httpStatus).json({
+        error: error.publicError,
+        ...(error.publicMessage ? { message: error.publicMessage } : {}),
+        ...(error.publicDetails || {}),
+      });
+    }
+    if (error?.code === 'ER_ROW_IS_REFERENCED_2' || Number(error?.errno) === 1451) {
+      try {
+        const retainedCfaVersion = await findRetainedCfaVersionForActionPlan(pool, planId);
+        if (retainedCfaVersion) {
+          return res.status(409).json({
+            error: 'retained_cfa_evidence_blocks_plan_delete',
+            message: 'This Action Plan has retained Client Funding Agreement evidence and cannot be deleted. Archive the Action Plan instead.',
+            cfaVersion: retainedCfaVersion,
+          });
+        }
+      } catch (recheckError) {
+        console.error('POST /api/action-plans/:id/delete evidence recheck failed:', recheckError);
+      }
+    }
     console.error('POST /api/action-plans/:id/delete failed:', error);
     res.status(500).json({ error: 'delete_action_plan_failed', detail: error?.message || String(error) });
+  } finally {
+    if (deleteConnection) deleteConnection.release();
   }
 });
 
@@ -72426,6 +73714,27 @@ function mapCaseSecureMessageResponse(row, { applicantUserId = null } = {}) {
   };
 }
 
+function resolveCaseSecureMessageTypedApplicantParticipant(messageRow) {
+  const participantIds = [
+    normaliseString(messageRow?.sender_actor_type) === 'applicant_user'
+      ? normalisePositiveInteger(messageRow?.sender_user_id)
+      : null,
+    normaliseString(messageRow?.recipient_actor_type) === 'applicant_user'
+      ? normalisePositiveInteger(messageRow?.recipient_user_id)
+      : null,
+  ].filter(Boolean);
+  const uniqueParticipantIds = Array.from(new Set(participantIds));
+  return {
+    userId: participantIds.length === 1 && uniqueParticipantIds.length === 1
+      ? uniqueParticipantIds[0]
+      : null,
+    // Sender and recipient cannot both be applicant actors, even when a bad
+    // historical row repeats the same user id in both roles. Direction is part
+    // of the immutable reply contract, not merely the set of participant ids.
+    conflict: participantIds.length > 1,
+  };
+}
+
 async function resolveCaseSecureMessageAccess(req, messageRow, {
   requestedCaseId = null,
   ownerUserId = null,
@@ -72456,7 +73765,7 @@ async function resolveCaseSecureMessageAccess(req, messageRow, {
       connection,
       forUpdate: lockApplicantContext,
     });
-    if (applicantContext?.applicant_resolution_conflict) {
+    if (!messageCaseId && applicantContext?.applicant_resolution_conflict) {
       return { error: { status: 409, body: { error: 'applicant_identity_conflict' } } };
     }
     if (
@@ -72465,7 +73774,16 @@ async function resolveCaseSecureMessageAccess(req, messageRow, {
     ) {
       return { error: { status: 409, body: { error: 'message_application_scope_mismatch' } } };
     }
-    const applicantUserId = normalisePositiveInteger(applicantContext?.applicant_user_id);
+    const typedApplicantParticipant = resolveCaseSecureMessageTypedApplicantParticipant(messageRow);
+    if (typedApplicantParticipant.conflict) {
+      return { error: { status: 409, body: { error: 'message_applicant_actor_conflict' } } };
+    }
+    // A case-linked historical message is authorized by its immutable typed
+    // applicant actor after staff case access is proved. Current account or
+    // application identity drift must not make list/detail/delete unavailable.
+    const applicantUserId = messageCaseId
+      ? (typedApplicantParticipant.userId || normalisePositiveInteger(applicantContext?.applicant_user_id))
+      : normalisePositiveInteger(applicantContext?.applicant_user_id);
     if (!messageCaseId) {
       const caseApplicationId = normalisePositiveInteger(applicantContext?.application_id);
       if (messageApplicationId && caseApplicationId && messageApplicationId !== caseApplicationId) {
@@ -72484,6 +73802,7 @@ async function resolveCaseSecureMessageAccess(req, messageRow, {
       caseId: effectiveCaseId,
       applicationId: messageApplicationId,
       applicantUserId,
+      clientId: normalisePositiveInteger(applicantContext?.client_id),
     };
   }
 
@@ -74577,30 +75896,37 @@ app.get('/api/cases/:id/messages', async (req, res) => {
     }
 
     // Resolve applicant user id for this case
-	    let applicantContext;
+	    let applicantContext = null;
 	    try {
 	      applicantContext = await resolveCaseApplicantMessagingContext(caseId, { applicationId: requestedApplicationId });
     } catch (e) {
       const noTable = e && e.code === 'ER_NO_SUCH_TABLE';
       const badField = e && e.code === 'ER_BAD_FIELD_ERROR';
       if (noTable || badField) {
-        // During migrations or on minimal schemas, return empty thread gracefully
-        return res.json({ applicant_user_id: null, items: [] });
+        // Staff history is still owned by the immutable message rows. A missing
+        // compose-context dependency must not hide that history.
+        if (!isStaffRequester) {
+          return res.json({ applicant_user_id: null, items: [] });
+        }
+        applicantContext = null;
+      } else {
+        throw e;
       }
-      throw e;
     }
     if (!applicantContext) {
-      return res.status(404).json({ error: 'case_not_found' });
+      if (requestedApplicationId) {
+        return res.status(409).json({ error: 'message_application_scope_mismatch' });
+      }
+      if (!isStaffRequester) {
+        return res.status(404).json({ error: 'case_not_found' });
+      }
     }
-    if (applicantContext.applicant_resolution_conflict) {
+    if (!isStaffRequester && applicantContext?.applicant_resolution_conflict) {
       return res.status(409).json({ error: 'applicant_identity_conflict' });
     }
     const applicantId = applicantContext?.applicant_user_id || null;
-    if (!applicantId) {
-      if (!isStaffRequester) {
-        return res.status(403).json({ error: 'forbidden_case_access' });
-      }
-      return res.json({ applicant_user_id: null, items: [] });
+    if (!applicantId && !isStaffRequester) {
+      return res.status(403).json({ error: 'forbidden_case_access' });
     }
     if (!isStaffRequester && Number(ownerUserId) !== Number(applicantId)) {
       return res.status(403).json({ error: 'forbidden_case_access' });
@@ -74719,6 +76045,10 @@ app.get('/api/cases/:id/messages', async (req, res) => {
         Number(r.message_deleted || 0) !== 1 &&
         signingAttachments.length === 0 &&
         fileAttachmentCount === 0;
+      const typedApplicantParticipant = resolveCaseSecureMessageTypedApplicantParticipant(r);
+      const responseApplicantId = typedApplicantParticipant.conflict
+        ? null
+        : (typedApplicantParticipant.userId || applicantId);
       return mapCaseSecureMessageResponse(
         {
           ...r,
@@ -74727,7 +76057,7 @@ app.get('/api/cases/:id/messages', async (req, res) => {
           can_withdraw: baseCanWithdraw ? 1 : 0,
           canWithdraw: Boolean(baseCanWithdraw),
         },
-        { applicantUserId: applicantId }
+        { applicantUserId: responseApplicantId }
       );
     });
 
@@ -74782,6 +76112,279 @@ function normalizeCaseMessageSigningAttachments(attachments) {
     .filter(Boolean);
 }
 
+function resolveCaseMessageClientOperationIdInput(primaryValue, fallbackValue) {
+  const normalize = value => {
+    if (value === null || typeof value === 'undefined') return { valid: true, value: null };
+    if (typeof value !== 'string') return { valid: false, value: null };
+    const token = value.trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(token)) {
+      return { valid: false, value: null };
+    }
+    return { valid: true, value: token };
+  };
+  const primary = normalize(primaryValue);
+  const fallback = normalize(fallbackValue);
+  if (!primary.valid || !fallback.valid) return { valid: false, value: null };
+  if (primary.value && fallback.value && primary.value !== fallback.value) {
+    return { valid: false, value: null };
+  }
+  return { valid: true, value: primary.value || fallback.value || null };
+}
+
+function canonicalizeCaseMessageSendValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalizeCaseMessageSendValue);
+  if (!value || typeof value !== 'object') return value ?? null;
+  return Object.keys(value).sort().reduce((result, key) => {
+    result[key] = canonicalizeCaseMessageSendValue(value[key]);
+    return result;
+  }, {});
+}
+
+function buildCaseMessageSendRequestHash({
+  caseId,
+  applicationId,
+  senderUserId,
+  subject,
+  body,
+  urgent,
+  toDisplayName,
+  fromDisplayName,
+  attachments,
+  interventionId,
+  actionPlanId,
+  expectedApplicationRowVersion,
+  replyToMessageId,
+} = {}) {
+  const canonical = canonicalizeCaseMessageSendValue({
+    version: 2,
+    caseId: normalisePositiveInteger(caseId),
+    applicationId: normalisePositiveInteger(applicationId),
+    senderUserId: normalisePositiveInteger(senderUserId),
+    subject: String(subject ?? ''),
+    body: String(body ?? ''),
+    urgent: Boolean(urgent),
+    toDisplayName: String(toDisplayName ?? ''),
+    fromDisplayName: String(fromDisplayName ?? ''),
+    attachments: Array.isArray(attachments) ? attachments : [],
+    interventionId: normalisePositiveInteger(interventionId),
+    actionPlanId: normalisePositiveInteger(actionPlanId),
+    expectedApplicationRowVersion: normalisePositiveInteger(expectedApplicationRowVersion),
+    replyToMessageId: normalisePositiveInteger(replyToMessageId),
+  });
+  return crypto.createHash('sha256').update(JSON.stringify(canonical), 'utf8').digest('hex');
+}
+
+function assertCaseMessageLockedApplicantContext({
+  preflightContext,
+  lockedContext,
+  immutableReply = false,
+} = {}) {
+  const scopeFields = ['case_id', 'application_id', 'client_id', 'application_client_id'];
+  const scopeChanged = !preflightContext || !lockedContext || scopeFields.some(field => (
+    normalisePositiveInteger(preflightContext?.[field]) !==
+    normalisePositiveInteger(lockedContext?.[field])
+  ));
+  if (scopeChanged) {
+    throw createCaseMessageHttpError(
+      409,
+      'message_send_scope_changed',
+      'The case or application changed before the message could be sent. Please reload and try again.',
+      { retrySafe: true, manualReviewRequired: false }
+    );
+  }
+  if (immutableReply) return lockedContext;
+  const preflightApplicantUserId = normalisePositiveInteger(
+    preflightContext?.applicant_user_id
+  );
+  const lockedApplicantUserId = normalisePositiveInteger(lockedContext?.applicant_user_id);
+  if (
+    preflightContext?.applicant_resolution_conflict ||
+    lockedContext?.applicant_resolution_conflict ||
+    !preflightApplicantUserId ||
+    !lockedApplicantUserId ||
+    preflightApplicantUserId !== lockedApplicantUserId
+  ) {
+    throw createCaseMessageHttpError(
+      409,
+      'applicant_account_changed',
+      'The participant account changed before the message could be sent. Please reload and try again.',
+      { retrySafe: true, manualReviewRequired: false }
+    );
+  }
+  return lockedContext;
+}
+
+function assertCaseMessageSigningReplyApplicantContext({
+  replyTargetApplicantUserId,
+  messagingContext,
+  hasSigningAttachments = false,
+} = {}) {
+  if (!hasSigningAttachments || !normalisePositiveInteger(replyTargetApplicantUserId)) {
+    return messagingContext;
+  }
+  const currentApplicantUserId = normalisePositiveInteger(
+    messagingContext?.applicant_user_id
+  );
+  if (
+    messagingContext?.applicant_resolution_conflict ||
+    !currentApplicantUserId ||
+    currentApplicantUserId !== normalisePositiveInteger(replyTargetApplicantUserId)
+  ) {
+    throw createCaseMessageHttpError(
+      409,
+      'signing_reply_participant_changed',
+      'This conversation belongs to a previous PATH account. Start a new message to send forms to the participant currently linked to the case.',
+      { retrySafe: false, manualReviewRequired: false }
+    );
+  }
+  return messagingContext;
+}
+
+function parseCaseMessageOperationResponseJson(value) {
+  if (value && typeof value === 'object' && !Buffer.isBuffer(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function resolveCaseMessageOperationReplay(row, {
+  applicationId,
+  requestSha256,
+} = {}) {
+  if (!row) return null;
+  const storedApplicationId = normalisePositiveInteger(row.application_id);
+  const expectedApplicationId = normalisePositiveInteger(applicationId);
+  const storedHash = normaliseString(row.request_sha256);
+  if (storedApplicationId !== expectedApplicationId || storedHash !== requestSha256) {
+    throw createCaseMessageHttpError(
+      409,
+      'message_send_operation_payload_conflict',
+      'This send attempt belongs to different message details. Review the draft and send it again.'
+    );
+  }
+  const operationId = normalisePositiveInteger(row.id);
+  const messageId = normalisePositiveInteger(row.message_id);
+  const responseStatus = Number(row.response_status);
+  const responseBody = parseCaseMessageOperationResponseJson(row.response_json);
+  if (
+    !operationId || !messageId || !Number.isInteger(responseStatus) ||
+    responseStatus < 200 || responseStatus > 299 || !responseBody || !row.completed_at
+  ) {
+    throw createCaseMessageHttpError(
+      503,
+      'message_send_operation_incomplete',
+      'PATH could not confirm the earlier send attempt. Do not resend it until support checks the case.'
+    );
+  }
+  if (normalisePositiveInteger(responseBody.messageId) !== messageId) {
+    throw createCaseMessageHttpError(
+      503,
+      'message_send_operation_response_conflict',
+      'PATH could not confirm the earlier send attempt. Do not resend it until support checks the case.'
+    );
+  }
+  return { operationId, messageId, responseStatus, responseBody };
+}
+
+async function findCaseMessageSendOperation(connection, {
+  senderUserId,
+  caseId,
+  clientOperationId,
+  forUpdate = false,
+} = {}) {
+  const [[row]] = await connection.query(
+    `SELECT mso.id, mso.client_operation_id, mso.request_sha256,
+            mso.sender_user_id, mso.sender_staff_profile_id, mso.case_id,
+            mso.application_id, mso.message_id, mso.response_status,
+            mso.response_json, mso.completed_at
+       FROM message_send_operation AS mso
+      WHERE mso.sender_user_id = ?
+        AND mso.case_id = ?
+        AND mso.client_operation_id = ?
+      LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
+    [senderUserId, caseId, clientOperationId]
+  );
+  return row || null;
+}
+
+async function claimCaseMessageSendOperation(connection, {
+  clientOperationId,
+  requestSha256,
+  senderUserId,
+  senderStaffProfileId,
+  caseId,
+  applicationId,
+} = {}) {
+  const normalizedSenderUserId = normalisePositiveInteger(senderUserId);
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!normalizedSenderUserId || !normalizedCaseId) {
+    throw new Error('message_send_operation_scope_invalid');
+  }
+  await connection.query(
+    `INSERT INTO message_send_operation
+       (client_operation_id, request_sha256, sender_user_id,
+        sender_staff_profile_id, case_id, application_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, NOW())
+     ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`,
+    [
+      clientOperationId,
+      requestSha256,
+      normalizedSenderUserId,
+      senderStaffProfileId || null,
+      normalizedCaseId,
+      applicationId || null,
+    ]
+  );
+  const row = await findCaseMessageSendOperation(connection, {
+    senderUserId: normalizedSenderUserId,
+    caseId: normalizedCaseId,
+    clientOperationId,
+    forUpdate: true,
+  });
+  if (!row) throw new Error('message_send_operation_claim_missing');
+  const replay = row.completed_at
+    ? resolveCaseMessageOperationReplay(row, { applicationId, requestSha256 })
+    : null;
+  if (replay) return { replay: true, ...replay };
+  if (
+    normalisePositiveInteger(row.application_id) !== normalisePositiveInteger(applicationId) ||
+    normaliseString(row.request_sha256) !== requestSha256
+  ) {
+    throw createCaseMessageHttpError(
+      409,
+      'message_send_operation_payload_conflict',
+      'This send attempt belongs to different message details. Review the draft and send it again.'
+    );
+  }
+  return { replay: false, operationId: normalisePositiveInteger(row.id) };
+}
+
+async function completeCaseMessageSendOperation(connection, {
+  operationId,
+  messageId,
+  responseStatus,
+  responseBody,
+} = {}) {
+  const [result] = await connection.query(
+    `UPDATE message_send_operation
+        SET message_id = ?,
+            response_status = ?,
+            response_json = ?,
+            completed_at = NOW()
+      WHERE id = ?
+        AND message_id IS NULL
+        AND completed_at IS NULL`,
+    [messageId, responseStatus, JSON.stringify(responseBody), operationId]
+  );
+  if (Number(result?.affectedRows || 0) !== 1) {
+    throw new Error('message_send_operation_completion_conflict');
+  }
+}
+
 function validateCaseMessageSigningAttachmentRequest(rawAttachments, normalizedAttachments) {
   if (rawAttachments === null || typeof rawAttachments === 'undefined') {
     return { valid: true };
@@ -74817,22 +76420,30 @@ function parseOptionalCaseMessageApplicationId(value) {
   return { valid: true, applicationId: numeric };
 }
 
-function resolveCaseMessageApplicationIdInput(primaryValue, fallbackValue) {
+function resolveCaseMessagePositiveIdInput(primaryValue, fallbackValue) {
   const primary = parseOptionalCaseMessageApplicationId(primaryValue);
   const fallback = parseOptionalCaseMessageApplicationId(fallbackValue);
   if (!primary.valid || !fallback.valid) {
-    return { valid: false, applicationId: null };
+    return { valid: false, value: null };
   }
   if (
     primary.applicationId &&
     fallback.applicationId &&
     primary.applicationId !== fallback.applicationId
   ) {
-    return { valid: false, applicationId: null };
+    return { valid: false, value: null };
   }
   return {
     valid: true,
-    applicationId: primary.applicationId || fallback.applicationId || null,
+    value: primary.applicationId || fallback.applicationId || null,
+  };
+}
+
+function resolveCaseMessageApplicationIdInput(primaryValue, fallbackValue) {
+  const resolved = resolveCaseMessagePositiveIdInput(primaryValue, fallbackValue);
+  return {
+    valid: resolved.valid,
+    applicationId: resolved.value,
   };
 }
 
@@ -74842,31 +76453,373 @@ function createCaseMessageHttpError(status, error, message, details = null) {
   routeError.publicError = error || 'failed_to_send_message';
   routeError.publicMessage = message || null;
   routeError.publicDetails = details && typeof details === 'object' ? details : null;
+  if (typeof details?.retrySafe === 'boolean') routeError.retrySafe = details.retrySafe;
+  if (typeof details?.manualReviewRequired === 'boolean') {
+    routeError.manualReviewRequired = details.manualReviewRequired;
+  }
   return routeError;
 }
 
-function resolveCaseMessageFundingSigningWorkflowKind(workflow = {}) {
-  const normalizeKey = value => (
+function normalizeCaseMessageManagedFormKey(value) {
+  return (
     normaliseString(value) || ''
   ).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-  const documentType = normalizeKey(workflow?.document_type ?? workflow?.documentType);
-  const workflowName = normalizeKey(workflow?.name);
+}
+
+const CASE_MESSAGE_APPROVAL_LETTER_IDENTITY_KEYS = new Set([
+  'approval_letter',
+  'letter_of_approval',
+  'application_approval_letter',
+  'assessment_approval_letter',
+]);
+const CASE_MESSAGE_DENIAL_LETTER_IDENTITY_KEYS = new Set([
+  'denial_letter',
+  'letter_of_denial',
+  'application_denial_letter',
+  'assessment_denial_letter',
+]);
+const CASE_MESSAGE_DECISION_LETTER_IDENTITY_KEYS = new Set([
+  'decision_letter',
+  'application_decision_letter',
+  'assessment_decision_letter',
+]);
+
+function resolveCaseMessageManagedDecisionLetterKind(value, { allowEmbeddedAssessment = false } = {}) {
+  const key = normalizeCaseMessageManagedFormKey(value);
+  if (!key) return null;
   if (
-    documentType === 'funding_agreement' ||
-    documentType === 'client_funding_agreement' ||
-    (!documentType && workflowName.includes('funding') && workflowName.includes('agreement'))
+    CASE_MESSAGE_APPROVAL_LETTER_IDENTITY_KEYS.has(key) ||
+    (allowEmbeddedAssessment && /(?:^|_)assessment_approval_letter(?:_|$)/.test(key))
+  ) {
+    return 'assessment_approval_letter';
+  }
+  if (
+    CASE_MESSAGE_DENIAL_LETTER_IDENTITY_KEYS.has(key) ||
+    (allowEmbeddedAssessment && /(?:^|_)assessment_denial_letter(?:_|$)/.test(key))
+  ) {
+    return 'assessment_denial_letter';
+  }
+  if (
+    CASE_MESSAGE_DECISION_LETTER_IDENTITY_KEYS.has(key) ||
+    (
+      allowEmbeddedAssessment &&
+      (
+        /(?:^|_)(?:assessment|application)_decision_letter(?:_|$)/.test(key) ||
+        /^(?:signed_|legacy_|versioned_)?decision_letter(?:_|$)/.test(key)
+      )
+    )
+  ) {
+    return 'decision_letter';
+  }
+  return null;
+}
+
+function resolveCaseMessageManagedDocumentTypeKind(value) {
+  const key = normalizeCaseMessageManagedFormKey(value);
+  if (!key) return null;
+  const keyTokens = key.split('_');
+  const isDistinctMouOrCoFundingAgreement = (
+    keyTokens.includes('mou') || key.includes('co_funding_agreement')
+  );
+  if (
+    !isDistinctMouOrCoFundingAgreement &&
+    (
+      /(?:^|_)funding_agreement(?:_|$)/.test(key) ||
+      /(?:^|_)client_funding_agreement(?:_|$)/.test(key)
+    )
   ) {
     return 'funding_agreement';
   }
   if (
-    documentType === 'eft_form' ||
-    documentType === 'eft_or_wire_transfer_form' ||
-    documentType === 'eft_or_wire_transfer_direct_deposit_form' ||
-    (!documentType && workflowName.split('_').includes('eft'))
+    /(?:^|_)eft(?:_|$)/.test(key) ||
+    /(?:^|_)electronic_funds?_transfer(?:_|$)/.test(key)
   ) {
     return 'eft_form';
   }
+  if (/(?:^|_)financial_overview(?:_|$)/.test(key)) {
+    return 'financial_overview';
+  }
+  if (
+    /(?:^|_)attendance_(?:report|form)(?:_|$)/.test(key) ||
+    /(?:^|_)(?:client_)?monthly_attendance_(?:report|form)(?:_|$)/.test(key)
+  ) {
+    return ATTENDANCE_REPORT_DOCUMENT_TYPE;
+  }
+  return resolveCaseMessageManagedDecisionLetterKind(key, {
+    allowEmbeddedAssessment: true,
+  });
+}
+
+function resolveCaseMessageManagedWorkflowNameKind(value) {
+  const key = normalizeCaseMessageManagedFormKey(value);
+  if (!key) return null;
+  const keyTokens = key.split('_');
+  const identifiesClientFundingAgreement = (
+    keyTokens.includes('cfa') ||
+    /(?:^|_)client_funding_agreement(?:_|$)/.test(key) ||
+    (
+      /(?:^|_)funding_agreement(?:_|$)/.test(key) &&
+      !keyTokens.includes('mou') &&
+      !key.includes('co_funding_agreement')
+    )
+  );
+  if (identifiesClientFundingAgreement) return 'funding_agreement';
+  if (
+    key.split('_').includes('eft') ||
+    (key.includes('electronic') && key.includes('fund') && key.includes('transfer'))
+  ) {
+    return 'eft_form';
+  }
+  if (key.includes('financial') && key.includes('overview')) return 'financial_overview';
+  if (
+    key.includes('attendance') &&
+    (key.includes('report') || key.includes('form'))
+  ) {
+    return ATTENDANCE_REPORT_DOCUMENT_TYPE;
+  }
+  return resolveCaseMessageManagedDecisionLetterKind(key);
+}
+
+function inspectCaseMessageManagedSigningWorkflow(workflow = {}) {
+  return {
+    documentKind: resolveCaseMessageManagedDocumentTypeKind(
+      workflow?.document_type ?? workflow?.documentType
+    ),
+    nameKind: resolveCaseMessageManagedWorkflowNameKind(workflow?.name),
+  };
+}
+
+function resolveCaseMessageFundingSigningWorkflowKind(workflow = {}) {
+  const { documentKind, nameKind } = inspectCaseMessageManagedSigningWorkflow(workflow);
+  if (documentKind === 'funding_agreement' || documentKind === 'eft_form') {
+    return documentKind;
+  }
+  if (nameKind === 'funding_agreement' || nameKind === 'eft_form') return nameKind;
   return null;
+}
+
+const CASE_MESSAGE_SIGNING_WORKFLOW_TYPES = new Set([
+  'consent-no-prefill',
+  'consent-cm-prefill',
+]);
+const CASE_MESSAGE_PREFILL_MANAGED_DOCUMENT_TYPES = new Set([
+  'funding_agreement',
+  'financial_overview',
+  ATTENDANCE_REPORT_DOCUMENT_TYPE,
+]);
+const CASE_MESSAGE_CANONICAL_MANAGED_DOCUMENT_TYPES = new Set([
+  ...CASE_MESSAGE_PREFILL_MANAGED_DOCUMENT_TYPES,
+  'eft_form',
+  'assessment_approval_letter',
+  'assessment_denial_letter',
+]);
+
+function isCaseMessageVersionedParticipantForm(workflow = {}) {
+  const documentType = normaliseString(workflow?.document_type)?.toLowerCase() || null;
+  return documentType === 'funding_agreement' || documentType === 'financial_overview';
+}
+
+function assertCaseMessageVersionedFormClientScope({ applicationClientId, caseClientId } = {}) {
+  const normalizedApplicationClientId = normalisePositiveInteger(applicationClientId);
+  const normalizedCaseClientId = normalisePositiveInteger(caseClientId);
+  if (
+    !normalizedApplicationClientId ||
+    !normalizedCaseClientId ||
+    normalizedApplicationClientId !== normalizedCaseClientId
+  ) {
+    throw createCaseMessageHttpError(
+      409,
+      'versioned_form_client_scope_conflict',
+      'The selected application is not linked to this case participant. Other secure messages remain available.'
+    );
+  }
+}
+const CASE_MESSAGE_LEGACY_EFT_WORKFLOW_ID = 43;
+const CASE_MESSAGE_LEGACY_EFT_WORKFLOW_NAME = 'EFT & Wire Transfer Direct Debit';
+const CASE_MESSAGE_LEGACY_EFT_DOCUMENT_TYPE = 'EFT_form';
+
+function isExactLegacyCaseMessageEftWorkflow(workflow = {}) {
+  // TEST and PROD still use this original catalogue row for funded approval
+  // packages. Keep the exception bound to its complete persisted identity;
+  // it is not permission for other draft rows or EFT aliases to be sent.
+  const status = (normaliseString(workflow?.status) || '').toLowerCase();
+  return (
+    normalisePositiveInteger(workflow?.id) === CASE_MESSAGE_LEGACY_EFT_WORKFLOW_ID &&
+    normaliseString(workflow?.name) === CASE_MESSAGE_LEGACY_EFT_WORKFLOW_NAME &&
+    (status === 'active' || status === 'draft') &&
+    normaliseString(workflow?.workflow_type ?? workflow?.workflowType) === 'consent-no-prefill' &&
+    normaliseString(workflow?.document_type ?? workflow?.documentType) ===
+      CASE_MESSAGE_LEGACY_EFT_DOCUMENT_TYPE
+  );
+}
+
+function assessCaseMessageSigningWorkflowContract(workflow = {}) {
+  const workflowId = normalisePositiveInteger(workflow?.id) || null;
+  const reject = (status, error, message, details = null) => ({
+    valid: false,
+    error: createCaseMessageHttpError(status, error, message, details),
+  });
+  if (!workflowId) {
+    return reject(
+      422,
+      'signing_workflow_ineligible',
+      'A selected workflow is not eligible for secure-message signing.',
+      { workflowId: null }
+    );
+  }
+  const workflowStatus = (normaliseString(workflow?.status) || '').toLowerCase();
+  const exactLegacyEftWorkflow = isExactLegacyCaseMessageEftWorkflow(workflow);
+  if (workflowStatus !== 'active' && !exactLegacyEftWorkflow) {
+    return reject(
+      422,
+      'signing_workflow_inactive',
+      'A selected signing workflow is not active and cannot be sent.',
+      { workflowId }
+    );
+  }
+
+  let workflowType = null;
+  try {
+    workflowType = normalizeWorkflowType(
+      workflow?.workflow_type ?? workflow?.workflowType,
+      { required: true }
+    );
+  } catch (_) {
+    return reject(
+      422,
+      'signing_workflow_ineligible',
+      'A selected workflow is not eligible for secure-message signing.',
+      { workflowId }
+    );
+  }
+  if (!CASE_MESSAGE_SIGNING_WORKFLOW_TYPES.has(workflowType)) {
+    return reject(
+      422,
+      'signing_workflow_ineligible',
+      'A selected workflow is not eligible for secure-message signing.',
+      { workflowId }
+    );
+  }
+
+  const documentType = normaliseString(workflow?.document_type ?? workflow?.documentType);
+  const { documentKind, nameKind } = inspectCaseMessageManagedSigningWorkflow(workflow);
+  const managedKind = documentKind || nameKind;
+  const managedKindConflict = Boolean(
+    documentKind && nameKind && documentKind !== nameKind
+  );
+  if (
+    managedKind &&
+    !exactLegacyEftWorkflow &&
+    (
+      managedKindConflict ||
+      (nameKind && documentKind !== nameKind) ||
+      !CASE_MESSAGE_CANONICAL_MANAGED_DOCUMENT_TYPES.has(managedKind) ||
+      documentType !== managedKind
+    )
+  ) {
+    return reject(
+      422,
+      'signing_workflow_document_type_unsupported',
+      'A selected managed signing form does not use the supported canonical document type.',
+      {
+        workflowId,
+        documentType: documentType || null,
+        documentSemanticKind: documentKind || null,
+        nameSemanticKind: nameKind || null,
+        ...(CASE_MESSAGE_CANONICAL_MANAGED_DOCUMENT_TYPES.has(managedKind)
+          ? { expectedDocumentType: managedKind }
+          : {
+              expectedDocumentType: null,
+              allowedDocumentTypes: [
+                'assessment_approval_letter',
+                'assessment_denial_letter',
+              ],
+            }),
+      }
+    );
+  }
+
+  if (
+    CASE_MESSAGE_PREFILL_MANAGED_DOCUMENT_TYPES.has(documentType) &&
+    workflowType !== 'consent-cm-prefill'
+  ) {
+    return reject(
+      422,
+      'signing_workflow_mode_unsupported',
+      'A selected version-managed form must use the case-manager prefill signing workflow.',
+      { workflowId, documentType, workflowType: workflowType || null }
+    );
+  }
+
+  return {
+    valid: true,
+    workflow: {
+      ...workflow,
+      id: workflowId,
+      status: workflowStatus,
+      workflow_type: workflowType,
+      document_type: documentType || null,
+    },
+  };
+}
+
+function assertCaseMessageSigningWorkflowContract(workflow = {}) {
+  const assessment = assessCaseMessageSigningWorkflowContract(workflow);
+  if (!assessment.valid) throw assessment.error;
+  return assessment.workflow;
+}
+
+function assertCaseMessageAttendanceInterventionScope({
+  interventionRow,
+  caseId,
+  applicationId,
+} = {}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const interventionId = normalisePositiveInteger(interventionRow?.id);
+  const interventionCaseId = normalisePositiveInteger(
+    interventionRow?.case_id ?? interventionRow?.caseId
+  );
+  const reject = reason => {
+    throw createCaseMessageHttpError(
+      422,
+      'attendance_intervention_application_scope_conflict',
+      "The selected attendance-report intervention does not belong to this application. Choose an intervention from the selected application's Action Plan.",
+      {
+        interventionId: interventionId || null,
+        applicationId: normalizedApplicationId || null,
+        reason: normaliseString(reason) || 'scope_mismatch',
+        retrySafe: false,
+        manualReviewRequired: false,
+      }
+    );
+  };
+
+  if (
+    !interventionId ||
+    !normalizedCaseId ||
+    !normalizedApplicationId ||
+    interventionCaseId !== normalizedCaseId
+  ) {
+    reject('case_scope_mismatch');
+  }
+
+  let interventionApplicationId = null;
+  try {
+    interventionApplicationId = resolveInterventionApplicationScopeId(interventionRow, {
+      required: true,
+    });
+  } catch (error) {
+    reject(error?.code || error?.message || 'application_lineage_unverified');
+  }
+  if (interventionApplicationId !== normalizedApplicationId) {
+    reject('application_scope_mismatch');
+  }
+  return {
+    interventionId,
+    caseId: normalizedCaseId,
+    applicationId: normalizedApplicationId,
+  };
 }
 
 function assertCaseMessagePostApprovalSourceApplication({
@@ -75302,10 +77255,15 @@ function validateAutoFundingWorkflowAttachmentResolution(workflowResolution) {
 function assertUniqueVersionedSigningWorkflowAttachments(workflowRows) {
   const versionedDocumentTypes = new Set(['funding_agreement', 'financial_overview']);
   const counts = new Map();
+  let semanticEftCount = 0;
   for (const workflow of Array.isArray(workflowRows) ? workflowRows : []) {
     const documentType = normaliseString(workflow?.document_type);
-    if (!versionedDocumentTypes.has(documentType)) continue;
-    counts.set(documentType, (counts.get(documentType) || 0) + 1);
+    if (versionedDocumentTypes.has(documentType)) {
+      counts.set(documentType, (counts.get(documentType) || 0) + 1);
+    }
+    if (resolveCaseMessageFundingSigningWorkflowKind(workflow) === 'eft_form') {
+      semanticEftCount += 1;
+    }
   }
   for (const [documentType, count] of counts.entries()) {
     if (count > 1) {
@@ -75316,6 +77274,14 @@ function assertUniqueVersionedSigningWorkflowAttachments(workflowRows) {
         { documentType }
       );
     }
+  }
+  if (semanticEftCount > 1) {
+    throw createCaseMessageHttpError(
+      422,
+      'duplicate_funding_signing_form',
+      'Only one EFT or wire-transfer form can be sent in a message.',
+      { documentType: 'eft_form' }
+    );
   }
 }
 
@@ -75329,33 +77295,75 @@ function mapCaseMessagePublicError(error) {
     return createCaseMessageHttpError(
       503,
       'signing_artifact_storage_unavailable',
-      'Signing documents are temporarily unavailable. Please try again later.'
+      'Signing documents are temporarily unavailable. Please try again later.',
+      { retrySafe: true, manualReviewRequired: false }
+    );
+  }
+  const lineageRepairCodes = new Set([
+    'cfa_application_scope_conflict',
+    'cfa_participant_scope_conflict',
+    'cfa_signed_baseline_scope_conflict',
+    'cfa_version_application_scope_unknown',
+    'cfa_series_ambiguous',
+    'funding_overview_application_scope_conflict',
+    'funding_overview_participant_scope_conflict',
+    'funding_overview_signed_baseline_scope_conflict',
+    'funding_overview_version_application_scope_unknown',
+    'funding_overview_series_ambiguous',
+  ]);
+  if (lineageRepairCodes.has(code)) {
+    return createCaseMessageHttpError(
+      409,
+      'signing_lineage_repair_required',
+      'PATH found conflicting ownership information for these signing forms. Support must repair the application lineage before they can be sent.',
+      { retrySafe: false, manualReviewRequired: true }
+    );
+  }
+  if (code === 'cfa_action_plan_scope_conflict') {
+    return createCaseMessageHttpError(
+      422,
+      'cfa_action_plan_scope_conflict',
+      'The selected Action Plan does not belong to this application. Select the intended Action Plan and try again.',
+      { retrySafe: false, manualReviewRequired: false }
+    );
+  }
+  if (code === 'cfa_action_plan_selection_required') {
+    return createCaseMessageHttpError(
+      422,
+      'cfa_action_plan_selection_required',
+      'Choose the intended Action Plan for this application before sending the funding agreement.',
+      { retrySafe: false, manualReviewRequired: false }
+    );
+  }
+  if (code === 'cfa_action_plan_missing') {
+    return createCaseMessageHttpError(
+      422,
+      'cfa_action_plan_missing',
+      'This application has no current Action Plan available for a funding agreement.',
+      { retrySafe: false, manualReviewRequired: false }
+    );
+  }
+  if (code === 'cfa_action_plan_unavailable') {
+    return createCaseMessageHttpError(
+      422,
+      'cfa_action_plan_unavailable',
+      'The selected Action Plan is no longer open for a funding agreement.',
+      { retrySafe: false, manualReviewRequired: false }
     );
   }
   const conflictCodes = new Set([
-    'application_id_required_for_signing_request',
     'application_scope_conflict',
-    'cfa_application_scope_required',
-    'cfa_application_scope_conflict',
-    'cfa_version_application_scope_unknown',
-    'cfa_series_ambiguous',
     'cfa_supersession_conflict',
     'cfa_draft_baseline_conflict',
-    'cfa_document_insert_failed',
-    'cfa_redline_document_insert_failed',
-    'funding_overview_application_scope_conflict',
-    'funding_overview_version_application_scope_unknown',
-    'funding_overview_series_ambiguous',
     'funding_overview_supersession_conflict',
-    'funding_overview_document_insert_failed',
-    'funding_overview_redline_document_insert_failed',
     'document_request_activation_failed',
   ]);
   if (!conflictCodes.has(code)) return error;
   return createCaseMessageHttpError(
     409,
     'signing_message_state_conflict',
-    'The application or signing forms changed before the message could be sent. Please reload and try again.'
+    'The application or signing forms changed before the message could be sent. Please reload and try again.',
+    { retrySafe: true, manualReviewRequired: false }
   );
 }
 
@@ -75557,7 +77565,7 @@ async function resolveEligibleSigningWorkflowRows(
   }
   const placeholders = workflowIds.map(() => '?').join(',');
   const [rows] = await connection.query(
-    `SELECT id, name, workflow_type, document_type
+    `SELECT id, name, status, workflow_type, document_type
        FROM iset_intake.workflow
       WHERE id IN (${placeholders})${forUpdate ? '\n      FOR UPDATE' : ''}`,
     workflowIds
@@ -75587,31 +77595,13 @@ async function resolveEligibleSigningWorkflowRows(
         { workflowId }
       );
     }
-    let workflowType = null;
-    try {
-      workflowType = normalizeWorkflowType(row.workflow_type, { required: true });
-    } catch (_) {
-      throw createCaseMessageHttpError(
-        422,
-        'signing_workflow_ineligible',
-        'A selected workflow is not eligible for secure-message signing.',
-        { workflowId }
-      );
-    }
-    if (workflowType !== 'consent-no-prefill' && workflowType !== 'consent-cm-prefill') {
-      throw createCaseMessageHttpError(
-        422,
-        'signing_workflow_ineligible',
-        'A selected workflow is not eligible for secure-message signing.',
-        { workflowId }
-      );
-    }
-    return {
+    return assertCaseMessageSigningWorkflowContract({
       id: workflowId,
       name: normaliseString(row.name) || `Workflow ${workflowId}`,
-      workflow_type: workflowType,
+      status: row.status,
+      workflow_type: row.workflow_type,
       document_type: normaliseString(row.document_type) || null,
-    };
+    });
   });
 }
 
@@ -75754,6 +77744,7 @@ function prepareCaseMessageSigningSchema({
         cfaVersionId: fundingAgreementDraft.id,
         cfaVersionNumber: fundingAgreementDraft.versionNumber,
         cfaSeriesId: fundingAgreementDraft.seriesId,
+        cfaActionPlanId: fundingAgreementDraft.actionPlanId,
         cfaRenderVariant: fundingAgreementVariant,
       }
     };
@@ -75804,6 +77795,8 @@ function resolveWorkflowDecisionLetterDocumentType(workflowDocumentType) {
 // POST /api/cases/:id/messages  { subject, body, urgent, attachments?: [{ workflow_id, due_at?, financial_overview_mode? }] }
 const handlePostCaseSecureMessage = async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
+  const caseMessageWorkflowSchemaBuilder =
+    appFactoryTestDependencies?.workflowSchemaBuilder || buildWorkflowSchema;
   const {
     subject,
     body,
@@ -75812,8 +77805,13 @@ const handlePostCaseSecureMessage = async (req, res) => {
     fromDisplayName,
 	    attachments,
 	    interventionId,
+	    intervention_id,
+	    actionPlanId,
+	    action_plan_id,
 	    applicationId,
 	    application_id,
+      clientOperationId,
+      client_operation_id,
       expectedApplicationRowVersion,
       expected_application_row_version,
       replyTo,
@@ -75834,6 +77832,25 @@ const handlePostCaseSecureMessage = async (req, res) => {
     return res.status(400).json({ error: 'invalid_application_id' });
   }
   const requestedApplicationId = requestedApplicationIdResolution.applicationId;
+  const clientOperationIdResolution = resolveCaseMessageClientOperationIdInput(
+    clientOperationId,
+    client_operation_id
+  );
+  if (!clientOperationIdResolution.valid) {
+    return res.status(400).json({ error: 'invalid_client_operation_id' });
+  }
+  const requestedClientOperationId = clientOperationIdResolution.value;
+  const requestedInterventionIdResolution = resolveCaseMessagePositiveIdInput(
+    interventionId,
+    intervention_id
+  );
+  let requestedInterventionId = null;
+  const requestedActionPlanIdResolution = resolveCaseMessagePositiveIdInput(
+    actionPlanId,
+    action_plan_id
+  );
+  const requestedActionPlanId = requestedActionPlanIdResolution.value;
+  const requestedActionPlanIdProvided = actionPlanId != null || action_plan_id != null;
   const requestedReplyToRaw = replyTo ?? reply_to;
   const requestedReplyToId = requestedReplyToRaw == null
     ? null
@@ -75867,20 +77884,33 @@ const handlePostCaseSecureMessage = async (req, res) => {
   let messageWriteCommitAttempted = false;
   let messageWriteCommitOutcome = 'not_attempted';
   let messageCommitIdentity = null;
+  let messageSendOperationId = null;
+  let messageSendRequestSha256 = null;
+  let caseMessageSuccessPayload = null;
+  let resolvedSenderStaffProfileIdForForms = resolveActiveStaffProfileId(req) || null;
   const createdSigningRequestIds = [];
   const generatedObjectKeys = [];
+  const rollbackMessageWriteAndRespond = async (status, payload) => {
+    if (messageWriteTransactionStarted && messageWriteConnection) {
+      await messageWriteConnection.rollback();
+      messageWriteTransactionStarted = false;
+    }
+    if (messageWriteConnection) {
+      messageWriteConnection.release();
+      messageWriteConnection = null;
+    }
+    return res.status(status).json(payload);
+  };
   try {
     const accessError = await validateCaseAccessByCaseId(req, caseId);
     if (accessError) return res.status(accessError.status).json(accessError.body);
 
 	    let replyTargetMessage = null;
+      let replyTargetApplicantUserId = null;
       if (requestedReplyToId) {
         replyTargetMessage = await fetchCaseSecureMessageRow(requestedReplyToId);
         if (!replyTargetMessage) {
           return res.status(404).json({ error: 'reply_message_not_found' });
-        }
-        if (isCaseSecureMessageUnavailableForReply(replyTargetMessage)) {
-          return res.status(409).json({ error: 'reply_message_unavailable' });
         }
         const replyCaseId = normalisePositiveInteger(replyTargetMessage.case_id);
         const replyApplicationId = normalisePositiveInteger(replyTargetMessage.application_id);
@@ -75890,32 +77920,110 @@ const handlePostCaseSecureMessage = async (req, res) => {
         if (requestedApplicationId && replyApplicationId !== requestedApplicationId) {
           return res.status(409).json({ error: 'reply_message_application_scope_mismatch' });
         }
+        const typedReplyApplicant = resolveCaseSecureMessageTypedApplicantParticipant(
+          replyTargetMessage
+        );
+        if (typedReplyApplicant.conflict) {
+          return res.status(409).json({ error: 'message_applicant_actor_conflict' });
+        }
+        replyTargetApplicantUserId = normalisePositiveInteger(typedReplyApplicant.userId);
+        if (!replyTargetApplicantUserId) {
+          return res.status(409).json({ error: 'reply_message_applicant_scope_mismatch' });
+        }
       }
 
-	    // Resolve applicant user id
+      const messageApplicationId = replyTargetMessage
+        ? normalisePositiveInteger(replyTargetMessage.application_id)
+        : (attachmentSpecs.length > 0 ? requestedApplicationId : null);
+      const senderId = normalisePositiveInteger(await resolveOrCreateUserIdFromAuth(req));
+      if (!senderId) return res.status(401).json({ error: 'unauthorized' });
+
+      // A completed retry performs no new disclosure. Prove the authenticated
+      // sender and case access above, then replay from the immutable operation
+      // before mutable applicant/application state can hide a committed send.
+      if (requestedClientOperationId) {
+        messageSendRequestSha256 = buildCaseMessageSendRequestHash({
+          caseId,
+          applicationId: messageApplicationId,
+          senderUserId: senderId,
+          subject: subjectValue,
+          body: bodyValue,
+          urgent: !!urgent,
+          toDisplayName: toNameValue,
+          fromDisplayName: fromNameValue,
+          attachments: attachmentSpecs,
+          interventionId: attachmentSpecs.length > 0
+            ? requestedInterventionIdResolution.value
+            : null,
+          actionPlanId: attachmentSpecs.length > 0 ? requestedActionPlanId : null,
+          expectedApplicationRowVersion: attachmentSpecs.length > 0
+            ? expectedApplicationRowVersionNumber
+            : null,
+          replyToMessageId: requestedReplyToId,
+        });
+        const priorOperation = await findCaseMessageSendOperation(pool, {
+          senderUserId: senderId,
+          caseId,
+          clientOperationId: requestedClientOperationId,
+        });
+        if (priorOperation) {
+          const replay = resolveCaseMessageOperationReplay(priorOperation, {
+            applicationId: messageApplicationId,
+            requestSha256: messageSendRequestSha256,
+          });
+          return res.status(replay.responseStatus).json(replay.responseBody);
+        }
+      }
+
+	    // A new plain message is case communication, not an application
+	    // operation. Workspace application/action-plan/intervention state is
+	    // ambient browsing context and must not prevent staff from contacting
+	    // the case participant. Replies retain the immutable target scope, while
+	    // any signing attachment still requires and locks the exact application.
+      const messagingContextApplicationId = replyTargetMessage
+        ? normalisePositiveInteger(replyTargetMessage.application_id)
+        : (attachmentSpecs.length > 0 ? requestedApplicationId : null);
 	    const caseRow = await resolveCaseApplicantMessagingContext(caseId, {
-        applicationId: replyTargetMessage
-          ? normalisePositiveInteger(replyTargetMessage.application_id)
-          : requestedApplicationId,
+        applicationId: messagingContextApplicationId,
       });
     if (!caseRow) return res.status(404).json({ error: 'case_not_found' });
-    if (caseRow.applicant_resolution_conflict) {
+    if (caseRow.applicant_identity_conflict && !replyTargetMessage) {
       console.error(
-        '[messages] refusing case %s because submission user and client Cognito user do not match',
+        '[messages] refusing case %s because its populated participant account link does not resolve',
         caseId
       );
       return res.status(409).json({
-        error: 'applicant_identity_conflict',
-        message: 'The case has conflicting applicant account links. Repair the account mapping before sending secure messages or signing requests.'
+        error: 'applicant_account_link_unresolved',
+        message: 'The participant account link cannot be resolved. Repair the PATH account link before sending a new message or form. Other casework remains available.'
       });
     }
-	    const recipientId = caseRow?.applicant_user_id || null;
-	    if (!recipientId) return res.status(404).json({ error: 'applicant_not_found' });
+    if (caseRow.application_scope_conflict && !replyTargetMessage) {
+      console.error(
+        '[messages] refusing case %s because the selected application client contradicts the case client',
+        caseId
+      );
+      return res.status(409).json({
+        error: 'application_scope_conflict',
+        message: 'The selected application belongs to a different participant record. Repair that application link before sending from it.'
+      });
+    }
+	    const recipientId = replyTargetApplicantUserId || caseRow?.applicant_user_id || null;
+	    if (!recipientId) {
+      return res.status(409).json({
+        error: 'applicant_messaging_unavailable',
+        message: 'This participant does not yet have a linked PATH account. Other casework remains available.',
+      });
+    }
+	    assertCaseMessageSigningReplyApplicantContext({
+	      replyTargetApplicantUserId,
+	      messagingContext: caseRow,
+	      hasSigningAttachments: attachmentSpecs.length > 0,
+	    });
 	    const caseApplicationId = normalisePositiveInteger(caseRow?.application_id);
-	    const messageApplicationId = replyTargetMessage
-        ? normalisePositiveInteger(replyTargetMessage.application_id)
-        : (caseApplicationId || null);
-	    if (requestedApplicationId && requestedApplicationId !== messageApplicationId) {
+	    if (
+        (replyTargetMessage || attachmentSpecs.length > 0) &&
+        caseApplicationId !== messageApplicationId
+      ) {
 	      return res.status(409).json({
 	        error: 'application_scope_conflict',
 	        message: 'The selected application does not belong to this case.',
@@ -75941,8 +78049,6 @@ const handlePostCaseSecureMessage = async (req, res) => {
       normaliseString(caseRow?.case_number) ||
       (caseId ? `CASE-${caseId}` : null);
 
-    const senderId = await resolveOrCreateUserIdFromAuth(req);
-    if (!senderId) return res.status(401).json({ error: 'unauthorized' });
     if (req?.auth?.subjectType === 'staff' && Number(senderId) === Number(recipientId)) {
       console.error(
         '[messages] refusing staff/applicant identity collision for case %s (user_id=%s)',
@@ -75958,6 +78064,62 @@ const handlePostCaseSecureMessage = async (req, res) => {
       return res.status(409).json({ error: 'reply_message_applicant_scope_mismatch' });
     }
 
+    if (!resolvedSenderStaffProfileIdForForms) {
+      resolvedSenderStaffProfileIdForForms = await findStaffProfileIdByUserId(
+        pool,
+        Number(senderId)
+      );
+    }
+    await ensureCaseMessageItemTable();
+    messageWriteConnection = await pool.getConnection();
+    await messageWriteConnection.beginTransaction();
+    messageWriteTransactionStarted = true;
+
+    // Claim before mutable workflow guards. A concurrent duplicate that missed
+    // the initial consistent read waits on this unique key and then replays the
+    // first committed response instead of failing against state changed by it.
+    if (requestedClientOperationId) {
+      const operationClaim = await claimCaseMessageSendOperation(messageWriteConnection, {
+        clientOperationId: requestedClientOperationId,
+        requestSha256: messageSendRequestSha256,
+        senderUserId: senderId,
+        senderStaffProfileId: resolvedSenderStaffProfileIdForForms,
+        caseId,
+        applicationId: messageApplicationId,
+      });
+      if (operationClaim.replay) {
+        return await rollbackMessageWriteAndRespond(
+          operationClaim.responseStatus,
+          operationClaim.responseBody
+        );
+      }
+      messageSendOperationId = operationClaim.operationId;
+      if (!messageSendOperationId) throw new Error('message_send_operation_claim_invalid');
+    }
+
+    const lockedMessagingContext = await resolveCaseApplicantMessagingContext(caseId, {
+      applicationId: messagingContextApplicationId,
+      connection: messageWriteConnection,
+      forUpdate: true,
+    });
+    assertCaseMessageLockedApplicantContext({
+      preflightContext: caseRow,
+      lockedContext: lockedMessagingContext,
+      immutableReply: Boolean(replyTargetMessage),
+    });
+    assertCaseMessageSigningReplyApplicantContext({
+      replyTargetApplicantUserId,
+      messagingContext: lockedMessagingContext,
+      hasSigningAttachments: attachmentSpecs.length > 0,
+    });
+
+    // Completed operations replayed above are already returned. Mutable target
+    // availability applies only to a genuinely new send.
+    if (replyTargetMessage && isCaseSecureMessageUnavailableForReply(replyTargetMessage)) {
+      return await rollbackMessageWriteAndRespond(409, { error: 'reply_message_unavailable' });
+    }
+    const messagePreflightRunner = messageWriteConnection;
+
     // Resolve eligible workflow attachments (consent forms only)
     let attachmentRows = [];
     const decisionLetterTokensByWorkflowId = new Map();
@@ -75965,11 +78127,24 @@ const handlePostCaseSecureMessage = async (req, res) => {
     const decisionLetterDocs = [];
     const serverDocumentTypeFallbackByWorkflowId = new Map();
     let decisionLetterPersistenceResult = null;
-    const requestedInterventionId = normalisePositiveInteger(interventionId);
     let requestedInterventionLetterEligibility = null;
     if (attachmentSpecs.length) {
-      attachmentRows = await resolveEligibleSigningWorkflowRows(pool, attachmentSpecs);
+      attachmentRows = await resolveEligibleSigningWorkflowRows(messagePreflightRunner, attachmentSpecs);
     }
+    const acceptsInterventionScope = attachmentRows.some(row => (
+      row.document_type === 'assessment_approval_letter' ||
+      row.document_type === ATTENDANCE_REPORT_DOCUMENT_TYPE ||
+      Boolean(resolveCaseMessageFundingSigningWorkflowKind(row))
+    ));
+    if (acceptsInterventionScope && !requestedInterventionIdResolution.valid) {
+      return await rollbackMessageWriteAndRespond(400, { error: 'invalid_intervention_id' });
+    }
+    // Intervention ownership is operation-specific. Ambient state on an
+    // ordinary message is deliberately ignored instead of changing the
+    // operation being performed.
+    requestedInterventionId = acceptsInterventionScope
+      ? requestedInterventionIdResolution.value
+      : null;
     const hasApprovalLetterAttachment = attachmentRows.some(
       row => row.document_type === 'assessment_approval_letter'
     );
@@ -75979,7 +78154,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
     let fundingApprovalContext = null;
     if (hasApprovalLetterAttachment || hasSelectedFundingFormAttachment) {
       fundingApprovalContext = await resolveCaseMessageFundingApprovalContext({
-        connection: pool,
+        connection: messagePreflightRunner,
         caseId,
         selectedApplicationId: caseApplicationId,
         requestedInterventionId,
@@ -75994,9 +78169,9 @@ const handlePostCaseSecureMessage = async (req, res) => {
         fundingApprovalContext?.hasFundedCostLines
       );
       if (shouldAttachFundingForms) {
-        const workflowResolution = await resolveAutoFundingFormsAttachments(pool);
+        const workflowResolution = await resolveAutoFundingFormsAttachments(messagePreflightRunner);
         if (workflowResolution.missing.length) {
-          return res.status(409).json({
+          return await rollbackMessageWriteAndRespond(409, {
             error: 'funding_forms_workflows_missing',
             missing: workflowResolution.missing
           });
@@ -76005,7 +78180,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
           workflowResolution
         );
         const autoAttachmentRows = await resolveEligibleSigningWorkflowRows(
-          pool,
+          messagePreflightRunner,
           normalizedAutoAttachments
         );
         if (!autoAttachmentRows.some(row => row.document_type === 'funding_agreement')) {
@@ -76016,7 +78191,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
           );
         }
         const autoEftRows = autoAttachmentRows.filter(
-          row => row.document_type !== 'funding_agreement'
+          row => resolveCaseMessageFundingSigningWorkflowKind(row) === 'eft_form'
         );
         const autoEftRow = autoEftRows.length === 1 ? autoEftRows[0] : null;
         const autoEftSource = autoEftRow
@@ -76049,16 +78224,17 @@ const handlePostCaseSecureMessage = async (req, res) => {
             serverDocumentTypeFallbackByWorkflowId.set(workflowId, serverFallbackDocumentType);
           }
         });
-        const existingFundingAgreement = attachmentRows.some(
-          row => row.document_type === 'funding_agreement'
+        const existingFundingFormKinds = new Set(
+          attachmentRows
+            .map(row => resolveCaseMessageFundingSigningWorkflowKind(row))
+            .filter(Boolean)
         );
         const requiredFormAttachments = normalizedAutoAttachments.filter(item => {
           const workflowId = Number(item.workflow_id);
           const autoRow = autoRowsById.get(workflowId);
           if (existingIds.has(workflowId)) return false;
-          if (autoRow?.document_type === 'funding_agreement' && existingFundingAgreement) {
-            return false;
-          }
+          const autoFundingKind = resolveCaseMessageFundingSigningWorkflowKind(autoRow);
+          if (autoFundingKind && existingFundingFormKinds.has(autoFundingKind)) return false;
           return true;
         });
         if (requiredFormAttachments.length) {
@@ -76071,13 +78247,22 @@ const handlePostCaseSecureMessage = async (req, res) => {
             });
           });
         }
-        attachmentRows = await resolveEligibleSigningWorkflowRows(pool, attachmentSpecs);
+        attachmentRows = await resolveEligibleSigningWorkflowRows(
+          messagePreflightRunner,
+          attachmentSpecs
+        );
       }
     }
     assertUniqueVersionedSigningWorkflowAttachments(attachmentRows);
+    if (attachmentRows.some(row => isCaseMessageVersionedParticipantForm(row))) {
+      assertCaseMessageVersionedFormClientScope({
+        applicationClientId: caseRow?.application_client_id,
+        caseClientId: caseRow?.client_id,
+      });
+    }
     if (attachmentRows.some(row => Boolean(resolveCaseMessageFundingSigningWorkflowKind(row)))) {
       fundingApprovalContext = fundingApprovalContext || await resolveCaseMessageFundingApprovalContext({
-        connection: pool,
+        connection: messagePreflightRunner,
         caseId,
         selectedApplicationId: caseApplicationId,
         requestedInterventionId,
@@ -76105,12 +78290,12 @@ const handlePostCaseSecureMessage = async (req, res) => {
           requestedInterventionLetterEligibility =
             fundingApprovalContext?.interventionEligibility ||
             await resolveApprovedInterventionProposalLetterEligibility({
-              connection: pool,
+              connection: messagePreflightRunner,
               caseId,
               interventionId: requestedInterventionId,
             });
           if (!requestedInterventionLetterEligibility.eligible) {
-            return res.status(422).json({
+            return await rollbackMessageWriteAndRespond(422, {
               error: 'invalid_letter_attachment',
               message: 'Intervention approval letters can only be sent for an approved intervention proposal or approved revision on this case.'
             });
@@ -76125,7 +78310,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
         } else {
           const applicationReviewWorkflow =
             fundingApprovalContext?.reviewWorkflow ||
-            await fetchApplicationAssessmentReviewWorkflow(pool, {
+            await fetchApplicationAssessmentReviewWorkflow(messagePreflightRunner, {
               applicationId: caseApplicationId,
             });
           const decisionLetterAuthorization = assertCaseMessageApplicationDecisionLetters({
@@ -76143,7 +78328,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
         }
         const invalidLetters = letterAttachments.filter(row => !allowedDocTypes.has(row.document_type));
         if (!allowedDocTypes.size || invalidLetters.length) {
-          return res.status(422).json({
+          return await rollbackMessageWriteAndRespond(422, {
             error: 'invalid_letter_attachment',
             message: 'Decision letter forms can only be sent for the current application decision.'
           });
@@ -76195,8 +78380,11 @@ const handlePostCaseSecureMessage = async (req, res) => {
     }
 
     let requiredSigningSchemasByWorkflowId = await buildRequiredSigningWorkflowSchemas(
-      pool,
-      attachmentRows
+      messagePreflightRunner,
+      attachmentRows,
+      {
+        schemaBuilder: caseMessageWorkflowSchemaBuilder,
+      }
     );
     const needsFundingAgreementPrefill = attachmentRows.some(
       row => row.workflow_type === 'consent-cm-prefill' && row.document_type === 'funding_agreement'
@@ -76207,31 +78395,42 @@ const handlePostCaseSecureMessage = async (req, res) => {
     const needsAttendanceReportPrefill = attachmentRows.some(
       row => row.workflow_type === 'consent-cm-prefill' && row.document_type === ATTENDANCE_REPORT_DOCUMENT_TYPE
     );
+    if (
+      needsFundingAgreementPrefill &&
+      (!requestedActionPlanIdResolution.valid || (requestedActionPlanIdProvided && !requestedActionPlanId))
+    ) {
+      return await rollbackMessageWriteAndRespond(400, {
+        error: 'invalid_action_plan_id',
+        message: 'Choose a valid Action Plan before sending the funding agreement.',
+      });
+    }
     let attendanceReportInitialValues = null;
+    let attendanceAssessmentForPrefill = null;
     if (needsAttendanceReportPrefill) {
       let attendanceIntervention = null;
       if (requestedInterventionId) {
-        const [[interventionRow]] = await pool.query(
-          `SELECT id, metadata_json
-             FROM iset_case_intervention
-            WHERE id = ?
-              AND case_id = ?
-            LIMIT 1`,
-          [requestedInterventionId, caseId]
+        const interventionRow = await fetchInterventionWithCase(
+          requestedInterventionId,
+          messagePreflightRunner
         );
         if (interventionRow) {
           assertOperationalInterventionRow(interventionRow, { operation: 'prefill an attendance report for' });
         }
+        assertCaseMessageAttendanceInterventionScope({
+          interventionRow,
+          caseId,
+          applicationId: caseApplicationId,
+        });
         attendanceIntervention = interventionRow || null;
       }
-      const attendanceAssessment = await fetchApplicationAssessmentRow(pool, {
+      attendanceAssessmentForPrefill = await fetchApplicationAssessmentRow(messagePreflightRunner, {
         caseId,
         applicationId: caseRow?.application_id || null,
       });
       attendanceReportInitialValues = buildAttendanceReportInitialValues({
         applicantName: contextApplicantName || caseRow?.applicant_name || '',
         intervention: attendanceIntervention,
-        assessment: attendanceAssessment,
+        assessment: attendanceAssessmentForPrefill,
       });
     }
     const fundingOverviewAttachmentSpec = attachmentSpecs.find(spec => {
@@ -76241,15 +78440,13 @@ const handlePostCaseSecureMessage = async (req, res) => {
     const fundingOverviewSendMode = normalizeFinancialOverviewSendMode(
       fundingOverviewAttachmentSpec?.financial_overview_mode
     );
-    const resolvedSenderStaffProfileIdForForms =
-      resolveActiveStaffProfileId(req) ||
-      await findStaffProfileIdByUserId(pool, Number(senderId));
-
-    await ensureCaseMessageItemTable();
-    messageWriteConnection = await pool.getConnection();
-    await messageWriteConnection.beginTransaction();
-    messageWriteTransactionStarted = true;
-    let lockedReplyTargetMessage = null;
+    if (!resolvedSenderStaffProfileIdForForms) {
+      resolvedSenderStaffProfileIdForForms = await findStaffProfileIdByUserId(
+        messagePreflightRunner,
+        Number(senderId)
+      );
+    }
+	    let lockedReplyTargetMessage = null;
     if (requestedReplyToId) {
       lockedReplyTargetMessage = await lockAndValidateCaseMessageReplyTarget({
         connection: messageWriteConnection,
@@ -76263,7 +78460,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
     }
     if (attachmentRows.length) {
       const [[lockedApplicationRow]] = await messageWriteConnection.query(
-        `SELECT id, status, lifecycle_status, decision_outcome, row_version
+        `SELECT id, client_id, status, lifecycle_status, decision_outcome, row_version
            FROM iset_application
           WHERE id = ?
             AND case_id = ?
@@ -76290,7 +78487,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
       }
       await lockCaseForVersionedSigning(messageWriteConnection, caseId);
       const [[lockedCaseRow]] = await messageWriteConnection.query(
-        `SELECT status, lifecycle_status, case_context_json
+        `SELECT client_id, status, lifecycle_status, case_context_json
            FROM iset_case
           WHERE id = ?
           LIMIT 1`,
@@ -76308,6 +78505,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
       );
       const workflowManifest = rows => rows.map(row => ({
         id: normalisePositiveInteger(row?.id),
+        status: normaliseString(row?.status),
         workflowType: normaliseString(row?.workflow_type),
         documentType: normaliseString(row?.document_type),
       }));
@@ -76323,9 +78521,41 @@ const handlePostCaseSecureMessage = async (req, res) => {
       }
       attachmentRows = lockedAttachmentRows;
       assertUniqueVersionedSigningWorkflowAttachments(attachmentRows);
+      const hasLockedAttendanceReport = attachmentRows.some(row => (
+        row.workflow_type === 'consent-cm-prefill' &&
+        row.document_type === ATTENDANCE_REPORT_DOCUMENT_TYPE
+      ));
+      if (hasLockedAttendanceReport && requestedInterventionId) {
+        const lockedAttendanceIntervention = await fetchInterventionWithCase(
+          requestedInterventionId,
+          messageWriteConnection,
+          { forUpdate: true }
+        );
+        if (lockedAttendanceIntervention) {
+          assertOperationalInterventionRow(lockedAttendanceIntervention, {
+            operation: 'prefill an attendance report for',
+          });
+        }
+        assertCaseMessageAttendanceInterventionScope({
+          interventionRow: lockedAttendanceIntervention,
+          caseId,
+          applicationId: caseApplicationId,
+        });
+        attendanceReportInitialValues = buildAttendanceReportInitialValues({
+          applicantName: contextApplicantName || caseRow?.applicant_name || '',
+          intervention: lockedAttendanceIntervention,
+          assessment: attendanceAssessmentForPrefill,
+        });
+      }
       const hasLockedFundingForms = attachmentRows.some(
         row => Boolean(resolveCaseMessageFundingSigningWorkflowKind(row))
       );
+      if (attachmentRows.some(row => isCaseMessageVersionedParticipantForm(row))) {
+        assertCaseMessageVersionedFormClientScope({
+          applicationClientId: lockedApplicationRow.client_id,
+          caseClientId: lockedCaseRow?.client_id,
+        });
+      }
       const lockedDecisionLetterAttachments = attachmentRows.filter(row => (
         Boolean(resolveWorkflowDecisionLetterDocumentType(row.document_type))
       ));
@@ -76417,150 +78647,155 @@ const handlePostCaseSecureMessage = async (req, res) => {
         }
       }
       requiredSigningSchemasByWorkflowId = await buildRequiredSigningWorkflowSchemas(
-        messageWriteConnection,
-        attachmentRows
+          messageWriteConnection,
+          attachmentRows,
+          {
+            schemaBuilder: caseMessageWorkflowSchemaBuilder,
+          }
       );
     }
 
     let cfaDraft = null;
     let cfaSnapshot = null;
+    let cfaActionPlanId = null;
     let fundingAgreementTokens = null;
     let fundingAgreementVariant = 'clean';
     if (needsFundingAgreementPrefill) {
-      let cfaDraftRow = await resolveApplicationScopedCfaDraft(messageWriteConnection, {
+      const staffProfileId = resolveActiveStaffProfileId(req);
+      const requesterDisplayName = await resolveStaffDisplayName(messageWriteConnection, req);
+      const caseManager = await resolveFundingAgreementCaseManager({
+        connection: messageWriteConnection,
         caseId,
-        applicationId: caseApplicationId,
+        preferredName: requesterDisplayName,
+        createdByUserId: senderId,
       });
-      if (!cfaDraftRow) {
-        const staffProfileId = resolveActiveStaffProfileId(req);
-        const requesterDisplayName = await resolveStaffDisplayName(messageWriteConnection, req);
-        const caseManager = await resolveFundingAgreementCaseManager({
-          connection: messageWriteConnection,
-          caseId,
-          preferredName: requesterDisplayName,
-          createdByUserId: senderId,
-        });
-        let created = null;
-        if (requestedInterventionId) {
-          const [[interventionDraftSourceRow]] = await messageWriteConnection.query(
-            `SELECT i.id,
-                    i.action_plan_id,
-                    i.intervention_code,
-                    i.metadata_json,
-                    p.title AS proposal_title
-               FROM iset_case_intervention i
-               LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = i.id
-              WHERE i.id = ?
-                AND i.case_id = ?
-              LIMIT 1`,
-            [requestedInterventionId, caseId]
-          );
-          if (interventionDraftSourceRow) {
-            assertOperationalInterventionRow(interventionDraftSourceRow, {
-              operation: 'generate a funding agreement for',
-            });
-          }
-          const actionPlanId = normalisePositiveInteger(interventionDraftSourceRow?.action_plan_id);
-          if (actionPlanId) {
-            const sourceMetadata = safeJsonParse(interventionDraftSourceRow?.metadata_json, {}) || {};
-            const isInterventionRevisionCfaDraft =
-              requestedInterventionLetterEligibility?.proposalKind === 'revision' ||
-              hasAppliedInterventionRevisionMetadata(sourceMetadata);
-            const interventionTitle =
-              normaliseString(sourceMetadata?.lastAppliedRevision?.sourceTitle) ||
-              normaliseString(sourceMetadata?.title) ||
-              normaliseString(interventionDraftSourceRow?.proposal_title) ||
-              (interventionDraftSourceRow?.intervention_code
-                ? `Intervention ${interventionDraftSourceRow.intervention_code}`
-                : 'intervention');
-            const changeSummary = (
-              isInterventionRevisionCfaDraft
-                ? `Approved intervention revision: ${interventionTitle}`
-                : `New intervention approved: ${interventionTitle}`
-            ).slice(0, 255);
-            created = await createCfaVersionForPlan({
-              caseId,
-              actionPlanId,
-              applicationId: caseApplicationId,
-              changeReason: isInterventionRevisionCfaDraft ? 'INTERVENTION_CHANGED' : 'NEW_INTERVENTION_APPROVED',
-              changeSummary,
-              actorUserId: senderId,
-              staffProfileId,
-              caseManagerName: caseManager.name || requesterDisplayName || '',
-              connection: messageWriteConnection,
-              uploadedObjectKeys: generatedObjectKeys,
-            });
-          }
-        }
-        if (!created || created.skipped) {
-          created = await createCfaVersionFromAssessment({
-            caseId,
-            applicationId: caseApplicationId,
-            changeReason: 'NEW_INTERVENTION_APPROVED',
-            changeSummary: 'Initial funding agreement',
-            actorUserId: senderId,
-            staffProfileId,
-            caseManagerName: caseManager.name || requesterDisplayName || '',
-            connection: messageWriteConnection,
-            uploadedObjectKeys: generatedObjectKeys,
+      let interventionDraftSourceRow = null;
+      if (requestedInterventionId) {
+        [[interventionDraftSourceRow]] = await messageWriteConnection.query(
+          `SELECT i.id,
+                  i.action_plan_id,
+                  i.intervention_code,
+                  i.metadata_json,
+                  p.title AS proposal_title
+             FROM iset_case_intervention i
+             LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = i.id
+            WHERE i.id = ?
+              AND i.case_id = ?
+            LIMIT 1`,
+          [requestedInterventionId, caseId]
+        );
+        if (interventionDraftSourceRow) {
+          assertOperationalInterventionRow(interventionDraftSourceRow, {
+            operation: 'generate a funding agreement for',
           });
         }
-        if (!created || created.skipped) {
-          throw createCaseMessageHttpError(
-            409,
-            'cfa_draft_missing',
-            'No draft funding agreement is available for this application.'
-          );
-        }
-        cfaDraftRow = await resolveApplicationScopedCfaDraft(messageWriteConnection, {
+      }
+      const interventionActionPlanId = normalisePositiveInteger(
+        interventionDraftSourceRow?.action_plan_id
+      );
+      if (
+        requestedActionPlanId &&
+        interventionActionPlanId &&
+        requestedActionPlanId !== interventionActionPlanId
+      ) {
+        throw new Error('cfa_action_plan_scope_conflict');
+      }
+      const actionPlan = await resolveCfaActionPlanForApplication(
+        messageWriteConnection,
+        {
           caseId,
           applicationId: caseApplicationId,
+          actionPlanId: interventionActionPlanId || requestedActionPlanId,
+          forUpdate: true,
+        }
+      );
+      cfaActionPlanId = actionPlan.id;
+      const sourceMetadata = safeJsonParse(interventionDraftSourceRow?.metadata_json, {}) || {};
+      const isInterventionRevisionCfaDraft = Boolean(
+        requestedInterventionId && (
+          requestedInterventionLetterEligibility?.proposalKind === 'revision' ||
+          hasAppliedInterventionRevisionMetadata(sourceMetadata)
+        )
+      );
+      const interventionTitle =
+        normaliseString(sourceMetadata?.lastAppliedRevision?.sourceTitle) ||
+        normaliseString(sourceMetadata?.title) ||
+        normaliseString(interventionDraftSourceRow?.proposal_title) ||
+        (interventionDraftSourceRow?.intervention_code
+          ? `Intervention ${interventionDraftSourceRow.intervention_code}`
+          : null);
+      const changeSummary = isInterventionRevisionCfaDraft
+        ? `Approved intervention revision: ${interventionTitle || 'intervention'}`
+        : requestedInterventionId
+          ? `New intervention approved: ${interventionTitle || 'intervention'}`
+          : 'Application funding agreement';
+      const freshPlanSnapshot = await buildCfaSnapshot({
+        connection: messageWriteConnection,
+        caseId,
+        actionPlanId: cfaActionPlanId,
+        participantUserId: recipientId,
+      });
+      const draftAssessment = await assessApplicationScopedCfaDraft(
+        messageWriteConnection,
+        {
+          caseId,
+          applicationId: caseApplicationId,
+          actionPlanId: cfaActionPlanId,
+          freshSnapshot: freshPlanSnapshot,
+        }
+      );
+      let created;
+      if (draftAssessment.reusable) {
+        const reusedDraft = await prepareReusableApplicationScopedCfaDraft(
+          messageWriteConnection,
+          draftAssessment
+        );
+        created = {
+          cfaVersionId: normalisePositiveInteger(reusedDraft.id),
+          versionNumber: Number(reusedDraft.version_number),
+          seriesId: normalisePositiveInteger(reusedDraft.series_id),
+          supersedesVersionId:
+            normalisePositiveInteger(reusedDraft.supersedes_version_id) || null,
+          applicationId: caseApplicationId,
+          actionPlanId: cfaActionPlanId,
+          snapshot: reusedDraft.snapshot,
+          reused: true,
+        };
+      } else {
+        created = await createCfaVersionForPlan({
+          caseId,
+          actionPlanId: cfaActionPlanId,
+          applicationId: caseApplicationId,
+          participantUserId: recipientId,
+          changeReason: isInterventionRevisionCfaDraft ? 'INTERVENTION_CHANGED' : 'NEW_INTERVENTION_APPROVED',
+          changeSummary: changeSummary.slice(0, 255),
+          actorUserId: senderId,
+          staffProfileId,
+          caseManagerName: caseManager.name || requesterDisplayName || '',
+          connection: messageWriteConnection,
+          uploadedObjectKeys: generatedObjectKeys,
         });
       }
-      if (!cfaDraftRow) {
-        try {
-          const assessmentDebug = await fetchApplicationAssessmentRow(messageWriteConnection, {
-            caseId,
-            applicationId: caseRow?.application_id || null,
-          });
-          const proposedRaw = assessmentDebug?.proposed_interventions ?? null;
-          const proposedType = Array.isArray(proposedRaw) ? 'array' : typeof proposedRaw;
-          const proposedLen = typeof proposedRaw === 'string'
-            ? proposedRaw.length
-            : Array.isArray(proposedRaw)
-            ? proposedRaw.length
-            : null;
-          console.warn(
-            '[cfa] draft still missing for case %s (assessment_code=%s cost_total=%s proposed_type=%s proposed_len=%s)',
-            caseId,
-            assessmentDebug?.intervention_code ?? null,
-            assessmentDebug?.intervention_cost_total ?? null,
-            proposedType,
-            proposedLen
-          );
-        } catch (err) {
-          console.warn(
-            '[cfa] failed to load assessment debug info for case %s (message=%s)',
-            caseId,
-            err?.message || err
-          );
-        }
+      if (!created || created.skipped) {
         throw createCaseMessageHttpError(
-          409,
-          'cfa_draft_missing',
-          'No draft funding agreement is available for this application.'
+          422,
+          'cfa_action_plan_not_funded',
+          'The selected application Action Plan has no funded interventions for a funding agreement.',
+          { retrySafe: false, manualReviewRequired: false }
         );
       }
       cfaDraft = {
-        id: Number(cfaDraftRow.id),
-        versionNumber: Number(cfaDraftRow.version_number),
-        seriesId: Number(cfaDraftRow.series_id),
-        metadataJson: cfaDraftRow.metadata_json,
-        supersedesVersionId: normalisePositiveInteger(cfaDraftRow.supersedes_version_id) || null,
+        id: Number(created.cfaVersionId),
+        versionNumber: Number(created.versionNumber),
+        seriesId: Number(created.seriesId),
+        actionPlanId: cfaActionPlanId,
+        metadataJson: JSON.stringify(created.snapshot || {}),
+        supersedesVersionId: normalisePositiveInteger(created.supersedesVersionId) || null,
       };
-      cfaSnapshot = safeJsonParse(cfaDraftRow.metadata_json, null);
+      cfaSnapshot = created.snapshot || null;
       if (
         resolveVersionSnapshotApplicationId(cfaSnapshot) !== caseApplicationId ||
+        resolveVersionSnapshotActionPlanId(cfaSnapshot) !== cfaActionPlanId ||
         !Array.isArray(cfaSnapshot?.interventions) ||
         !cfaSnapshot.interventions.length
       ) {
@@ -76570,19 +78805,19 @@ const handlePostCaseSecureMessage = async (req, res) => {
           'The funding agreement draft does not match this application.'
         );
       }
-      const requesterDisplayName = await resolveStaffDisplayName(messageWriteConnection, req);
-      const caseManager = await resolveFundingAgreementCaseManager({
+      const snapshotRequesterDisplayName = await resolveStaffDisplayName(messageWriteConnection, req);
+      const snapshotCaseManager = await resolveFundingAgreementCaseManager({
         connection: messageWriteConnection,
         caseId,
         snapshot: cfaSnapshot,
-        preferredName: requesterDisplayName,
+        preferredName: snapshotRequesterDisplayName,
         createdByUserId: senderId,
       });
-      const caseManagerName = caseManager.name || requesterDisplayName || '';
+      const caseManagerName = snapshotCaseManager.name || snapshotRequesterDisplayName || '';
       const caseManagerSignedDate = formatFundingDate(new Date());
       const assessmentRow = await fetchApplicationAssessmentRow(messageWriteConnection, {
         caseId,
-        applicationId: caseRow?.application_id || null,
+        applicationId: caseApplicationId,
       });
       let interventionRow = null;
       if (requestedInterventionId) {
@@ -76612,10 +78847,10 @@ const handlePostCaseSecureMessage = async (req, res) => {
           `SELECT id, status, start_date, end_date, intervention_cost, budget_amount, approved_amount,
                   intervention_code, metadata_json, esdc_intervention_json, created_at
              FROM iset_case_intervention
-            WHERE case_id = ?
+            WHERE action_plan_id = ?
               AND ${buildOperationalInterventionSql('iset_case_intervention')}
             ORDER BY created_at DESC`,
-          [caseId]
+          [cfaActionPlanId]
         );
         if (Array.isArray(interventionRows) && interventionRows.length) {
           interventionRow = interventionRows.find(row => {
@@ -76662,14 +78897,14 @@ const handlePostCaseSecureMessage = async (req, res) => {
         }
       }
       let submissionPayload = null;
-      if (caseRow?.application_id) {
+      if (caseApplicationId) {
         const [[submissionRow]] = await messageWriteConnection.query(
           `SELECT s.intake_payload
              FROM iset_application a
              JOIN iset_application_submission s ON s.id = a.submission_id
             WHERE a.id = ?
             LIMIT 1`,
-          [caseRow.application_id]
+          [caseApplicationId]
         );
         submissionPayload = safeJsonParse(submissionRow?.intake_payload, null);
       }
@@ -76729,6 +78964,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
         const created = await createFundingOverviewVersion({
           caseId,
           applicationId: caseApplicationId,
+          participantUserId: recipientId,
           changeReason: 'FINANCIAL_OVERVIEW_SIGNATURE_REQUESTED',
           changeSummary: 'Financial overview sent for client signature',
           actorUserId: senderId,
@@ -77081,6 +79317,34 @@ const handlePostCaseSecureMessage = async (req, res) => {
         );
       }
     }
+    caseMessageSuccessPayload = {
+      message: 'Message sent',
+      messageId: result.insertId,
+      replyToMessageId: requestedReplyToId || null,
+      ...(decisionLetterPersistenceResult
+        ? {
+            decisionLetterPersistence: decisionLetterPersistenceResult,
+            ...(decisionLetterPersistenceResult.letterKey === 'denial'
+              ? { denialLetterCompletion: decisionLetterPersistenceResult }
+              : {}),
+          }
+        : {})
+    };
+    if (messageSendOperationId) {
+      await completeCaseMessageSendOperation(messageWriteConnection, {
+        operationId: messageSendOperationId,
+        messageId: result.insertId,
+        responseStatus: 201,
+        responseBody: caseMessageSuccessPayload,
+      });
+      Object.assign(messageCommitIdentity, {
+        messageSendOperationId,
+        clientOperationId: requestedClientOperationId,
+        requestSha256: messageSendRequestSha256,
+        responseStatus: 201,
+        responseBody: caseMessageSuccessPayload,
+      });
+    }
     messageWriteCommitAttempted = true;
     messageWriteCommitOutcome = 'uncertain';
     try {
@@ -77160,6 +79424,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
           application_id: caseApplicationId || null,
           action_plan_id:
             normalisePositiveInteger(messageInterventionEligibility?.actionPlanId) ||
+            normalisePositiveInteger(cfaActionPlanId) ||
             null,
           intervention_id: requestedInterventionId || null,
           proposal_id:
@@ -77174,19 +79439,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
     } catch (notifyErr) {
       console.error('[events] staff_secure_message_sent emit failed', notifyErr?.message || notifyErr);
     }
-    res.status(201).json({
-      message: 'Message sent',
-      messageId: result.insertId,
-      replyToMessageId: requestedReplyToId || null,
-      ...(decisionLetterPersistenceResult
-        ? {
-            decisionLetterPersistence: decisionLetterPersistenceResult,
-            ...(decisionLetterPersistenceResult.letterKey === 'denial'
-              ? { denialLetterCompletion: decisionLetterPersistenceResult }
-              : {}),
-          }
-        : {})
-    });
+    res.status(201).json(caseMessageSuccessPayload);
   } catch (e) {
     const resolvedWriteError = await rollbackCaseMessageWriteTransaction({
       connection: messageWriteConnection,
@@ -77205,6 +79458,12 @@ const handlePostCaseSecureMessage = async (req, res) => {
       error: publicError?.publicError || 'failed_to_send_message',
       ...(publicError?.publicMessage ? { message: publicError.publicMessage } : {}),
       ...(publicError?.publicDetails ? { details: publicError.publicDetails } : {}),
+      ...(typeof publicError?.retrySafe === 'boolean'
+        ? { retrySafe: publicError.retrySafe }
+        : {}),
+      ...(typeof publicError?.manualReviewRequired === 'boolean'
+        ? { manualReviewRequired: publicError.manualReviewRequired }
+        : {}),
     };
     res.status(status).json(responsePayload);
   }
@@ -77214,26 +79473,18 @@ app.post('/api/cases/:id/messages', handlePostCaseSecureMessage);
 
 async function resolveAutoFundingFormsAttachments(connection = pool) {
   const EFT_CHECKLIST_DOC_TYPE = 'EFT_form';
+  const signingWorkflowTypes = Array.from(CASE_MESSAGE_SIGNING_WORKFLOW_TYPES);
   const [rows] = await connection.query(
     `SELECT id, name, status, workflow_type, document_type, updated_at
        FROM iset_intake.workflow
-      WHERE workflow_type IN ('consent-no-prefill', 'consent-cm-prefill')
-      ORDER BY updated_at DESC, id DESC`
+      WHERE (status = ? OR id = ?)
+        AND workflow_type IN (${signingWorkflowTypes.map(() => '?').join(',')})
+      ORDER BY updated_at DESC, id DESC`,
+    ['active', CASE_MESSAGE_LEGACY_EFT_WORKFLOW_ID, ...signingWorkflowTypes]
   );
-  const normalizeKey = value => (normaliseString(value) || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
   const pickBest = (current, candidate) => {
     if (!candidate) return current;
     if (!current) return candidate;
-    const score = row => {
-      const status = (normaliseString(row?.status) || '').toLowerCase();
-      if (status === 'active') return 3;
-      if (status === 'draft') return 2;
-      return 1;
-    };
-    const currentScore = score(current);
-    const candidateScore = score(candidate);
-    if (candidateScore > currentScore) return candidate;
-    if (candidateScore < currentScore) return current;
     const currentUpdated = current?.updated_at ? new Date(current.updated_at).getTime() : 0;
     const candidateUpdated = candidate?.updated_at ? new Date(candidate.updated_at).getTime() : 0;
     if (candidateUpdated > currentUpdated) return candidate;
@@ -77243,39 +79494,40 @@ async function resolveAutoFundingFormsAttachments(connection = pool) {
 
   const selected = {
     funding: null,
-    eft: null
+    canonicalEft: null,
+    legacyEft: null,
   };
 
-  for (const row of rows || []) {
-    const docTypeKey = normalizeKey(row?.document_type);
-    const nameKey = normalizeKey(row?.name);
-    if (docTypeKey === 'funding_agreement') {
+  for (const rawRow of rows || []) {
+    const assessment = assessCaseMessageSigningWorkflowContract(rawRow);
+    if (!assessment.valid) continue;
+    const row = assessment.workflow;
+    if (row.document_type === 'funding_agreement') {
       selected.funding = pickBest(selected.funding, row);
       continue;
     }
-    const eftTypeMatch = docTypeKey === 'eft_form';
-    const eftNameMatch = nameKey.includes('eft') && (nameKey.includes('wire') || nameKey.includes('debit'));
-    if (eftTypeMatch || eftNameMatch) {
-      selected.eft = pickBest(selected.eft, row);
+    if (resolveCaseMessageFundingSigningWorkflowKind(row) === 'eft_form') {
+      if (isExactLegacyCaseMessageEftWorkflow(row)) {
+        selected.legacyEft = pickBest(selected.legacyEft, row);
+      } else if (row.document_type === 'eft_form') {
+        selected.canonicalEft = pickBest(selected.canonicalEft, row);
+      }
     }
   }
+
+  const selectedEft = selected.canonicalEft || selected.legacyEft;
 
   const attachments = [];
   if (selected.funding?.id) {
     attachments.push({ workflow_id: Number(selected.funding.id) });
   }
-  if (selected.eft?.id) {
-    attachments.push({
-      workflow_id: Number(selected.eft.id),
-      ...(!normaliseString(selected.eft.document_type)
-        ? { server_fallback_document_type: EFT_CHECKLIST_DOC_TYPE }
-        : {})
-    });
+  if (selectedEft?.id) {
+    attachments.push({ workflow_id: Number(selectedEft.id) });
   }
 
   const missing = [];
   if (!selected.funding?.id) missing.push('funding_agreement');
-  if (!selected.eft?.id) missing.push(EFT_CHECKLIST_DOC_TYPE);
+  if (!selectedEft?.id) missing.push(EFT_CHECKLIST_DOC_TYPE);
 
   return { attachments, missing };
 }
@@ -86494,8 +88746,14 @@ async function fetchPaymentPacketById(packetId, connection = null) {
        LEFT JOIN client cl ON cl.id = pp.client_id
        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-       LEFT JOIN user applicant_client_sub ON applicant_client_sub.cognito_sub = cl.applicant_cognito_sub
-       LEFT JOIN user applicant_client_email ON applicant_client_email.email = cl.applicant_account_email
+       LEFT JOIN user applicant_client_sub
+         ON NULLIF(TRIM(cl.applicant_cognito_sub), '') IS NOT NULL
+        AND NULLIF(TRIM(applicant_client_sub.cognito_sub), '') IS NOT NULL
+        AND applicant_client_sub.cognito_sub = cl.applicant_cognito_sub
+       LEFT JOIN user applicant_client_email
+         ON NULLIF(TRIM(cl.applicant_account_email), '') IS NOT NULL
+        AND NULLIF(TRIM(applicant_client_email.email), '') IS NOT NULL
+        AND applicant_client_email.email = cl.applicant_account_email
        LEFT JOIN iset_case_intervention ci ON ci.id = pp.intervention_id
        LEFT JOIN user req ON req.id = pp.requester_user_id
        LEFT JOIN user prog ON prog.id = pp.program_approved_by_user_id
@@ -93232,8 +95490,14 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
          LEFT JOIN client cl ON cl.id = pp.client_id
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-         LEFT JOIN user applicant_client_sub ON applicant_client_sub.cognito_sub = cl.applicant_cognito_sub
-         LEFT JOIN user applicant_client_email ON applicant_client_email.email = cl.applicant_account_email
+         LEFT JOIN user applicant_client_sub
+           ON NULLIF(TRIM(cl.applicant_cognito_sub), '') IS NOT NULL
+          AND NULLIF(TRIM(applicant_client_sub.cognito_sub), '') IS NOT NULL
+          AND applicant_client_sub.cognito_sub = cl.applicant_cognito_sub
+         LEFT JOIN user applicant_client_email
+           ON NULLIF(TRIM(cl.applicant_account_email), '') IS NOT NULL
+          AND NULLIF(TRIM(applicant_client_email.email), '') IS NOT NULL
+          AND applicant_client_email.email = cl.applicant_account_email
          LEFT JOIN iset_case_intervention ci ON ci.id = pp.intervention_id
          LEFT JOIN user req ON req.id = pp.requester_user_id
          LEFT JOIN user prog ON prog.id = pp.program_approved_by_user_id
@@ -97811,7 +100075,10 @@ async function fetchManualSelectedClient(connection, selectedClientId) {
             c.applicant_account_email, c.applicant_invited_at, c.applicant_activated_at,
             COALESCE(NULLIF(c.applicant_account_email, ''), NULLIF(u.email, '')) AS identity_email
        FROM client c
-       LEFT JOIN user u ON BINARY u.cognito_sub = BINARY c.applicant_cognito_sub
+       LEFT JOIN user u
+         ON NULLIF(TRIM(c.applicant_cognito_sub), '') IS NOT NULL
+        AND NULLIF(TRIM(u.cognito_sub), '') IS NOT NULL
+        AND BINARY u.cognito_sub = BINARY c.applicant_cognito_sub
       WHERE c.id = ?
       LIMIT 1
       FOR UPDATE`,
@@ -100550,6 +102817,265 @@ app.post('/api/render-njk', requireUnsafeAdminDebugAccess, (req, res) => {
   }
 });
 
+function createMessageAttachmentDocumentScopeError(attachmentId) {
+  const error = new Error('attachment_document_scope_mismatch');
+  error.code = 'attachment_document_scope_mismatch';
+  error.status = 409;
+  error.attachmentId = normalisePositiveInteger(attachmentId);
+  return error;
+}
+
+function isKnownLegacyMessageAttachmentApplicantRelinkCollision(
+  existingDocument,
+  expectedScope
+) {
+  const expectedApplicantUserId = normalisePositiveInteger(expectedScope?.applicant_user_id);
+  const expectedUploaderUserId = normalisePositiveInteger(expectedScope?.user_id);
+  return Boolean(
+    expectedApplicantUserId &&
+    expectedUploaderUserId &&
+    normalisePositiveInteger(existingDocument?.applicant_user_id) &&
+    normalisePositiveInteger(existingDocument?.applicant_user_id) !== expectedApplicantUserId &&
+    normalisePositiveInteger(existingDocument?.case_id) === normalisePositiveInteger(expectedScope?.case_id) &&
+    normalisePositiveInteger(existingDocument?.client_id) === normalisePositiveInteger(expectedScope?.client_id) &&
+    normaliseString(existingDocument?.source) === 'secure_message_attachment' &&
+    normalisePositiveInteger(existingDocument?.origin_message_id) === normalisePositiveInteger(expectedScope?.origin_message_id) &&
+    normalisePositiveInteger(existingDocument?.user_id) === expectedUploaderUserId
+  );
+}
+
+function assertMessageAttachmentDocumentScope(existingDocument, expectedScope) {
+  if (!existingDocument) return;
+  for (const field of [
+    'case_id',
+    'client_id',
+    'applicant_user_id',
+  ]) {
+    const existingValue = normalisePositiveInteger(existingDocument[field]);
+    const expectedValue = normalisePositiveInteger(expectedScope[field]);
+    if (existingValue && existingValue !== expectedValue) {
+      if (
+        field === 'applicant_user_id' &&
+        isKnownLegacyMessageAttachmentApplicantRelinkCollision(
+          existingDocument,
+          expectedScope
+        )
+      ) {
+        continue;
+      }
+      throw createMessageAttachmentDocumentScopeError(expectedScope.attachment_id);
+    }
+  }
+}
+
+function messageAttachmentDocumentHasNonOwnershipScopeDifference(
+  existingDocument,
+  expectedScope
+) {
+  if (!existingDocument) return false;
+  if (isKnownLegacyMessageAttachmentApplicantRelinkCollision(
+    existingDocument,
+    expectedScope
+  )) {
+    return true;
+  }
+  return [
+    'application_id',
+    'user_id',
+    'origin_message_id',
+  ].some(field => {
+    const existingValue = normalisePositiveInteger(existingDocument[field]);
+    const expectedValue = normalisePositiveInteger(expectedScope[field]);
+    return Boolean(existingValue && existingValue !== expectedValue);
+  });
+}
+
+function prepareMessageAttachmentDocumentAdoption(att, {
+  caseId,
+  applicationId,
+  clientId,
+  applicantUserId,
+  messageId,
+}) {
+  const attachmentUploaderUserId = normalisePositiveInteger(att.user_id);
+  const docApplicantUserId = normalisePositiveInteger(applicantUserId) || attachmentUploaderUserId || null;
+  const docUserId = attachmentUploaderUserId || normalisePositiveInteger(applicantUserId) || null;
+  let relativeFilePath = String(att.file_path || '').replace(/\\/g, '/');
+  const uploadsIndex = relativeFilePath.lastIndexOf('uploads/');
+  if (uploadsIndex !== -1) {
+    relativeFilePath = relativeFilePath.substring(uploadsIndex);
+  }
+  relativeFilePath = relativeFilePath.replace(/\\/g, '/');
+  let createdAt = att.uploaded_at ? new Date(att.uploaded_at) : new Date();
+  if (Number.isNaN(createdAt.getTime())) createdAt = new Date();
+  return {
+    attachment: att,
+    attachment_id: normalisePositiveInteger(att.id),
+    case_id: normalisePositiveInteger(caseId),
+    application_id: normalisePositiveInteger(applicationId),
+    client_id: normalisePositiveInteger(clientId),
+    applicant_user_id: docApplicantUserId,
+    user_id: docUserId,
+    origin_message_id: normalisePositiveInteger(messageId),
+    file_name: att.original_filename || 'Attachment',
+    file_path: relativeFilePath,
+    created_at: createdAt,
+  };
+}
+
+async function adoptCaseMessageAttachmentDocuments({
+  attachments,
+  caseId,
+  applicationId,
+  clientId,
+  applicantUserId,
+  messageId,
+}) {
+  const prepared = (Array.isArray(attachments) ? attachments : []).map(att => (
+    prepareMessageAttachmentDocumentAdoption(att, {
+      caseId,
+      applicationId,
+      clientId,
+      applicantUserId,
+      messageId,
+    })
+  ));
+  if (!prepared.length) return [];
+
+  const preparedByPath = new Map();
+  for (const candidate of prepared) {
+    const pathKey = candidate.file_path.toLocaleLowerCase('en-US');
+    const prior = preparedByPath.get(pathKey);
+    if (prior) {
+      assertMessageAttachmentDocumentScope(prior, candidate);
+      assertMessageAttachmentDocumentScope(candidate, prior);
+    } else {
+      preparedByPath.set(pathKey, candidate);
+    }
+  }
+
+  const connection = await pool.getConnection();
+  let transactionStarted = false;
+  try {
+    await connection.beginTransaction();
+    transactionStarted = true;
+
+    // Lock and validate every existing path before the first insert/backfill so
+    // a later conflict cannot leave an earlier attachment partially adopted.
+    for (const candidate of preparedByPath.values()) {
+      const [[existingDocument]] = await connection.query(
+        `SELECT iset_document.id,
+                iset_document.case_id,
+                iset_document.application_id,
+                iset_document.client_id,
+                iset_document.applicant_user_id,
+                iset_document.user_id,
+                iset_document.action_plan_id,
+                iset_document.origin_message_id,
+                iset_document.source,
+                iset_document.file_path
+           FROM iset_document
+          WHERE iset_document.file_path = ?
+          LIMIT 1 FOR UPDATE`,
+        [candidate.file_path]
+      );
+      candidate.existingDocument = existingDocument || null;
+      assertMessageAttachmentDocumentScope(candidate.existingDocument, candidate);
+    }
+
+    let adoptedAttachments = [];
+    for (const candidate of preparedByPath.values()) {
+      const existingDocument = candidate.existingDocument;
+      if (existingDocument) {
+        // The attachment relation remains readable after exact message/case
+        // authorization. A sibling application, uploader, origin, or document
+        // source is an indexing collision, not proof that the authorized bytes
+        // belong to another participant. Preserve the existing index row and
+        // skip opportunistic backfill instead of blocking the user's download.
+        if (messageAttachmentDocumentHasNonOwnershipScopeDifference(
+          existingDocument,
+          candidate
+        )) {
+          continue;
+        }
+        const canBackfillLegacyAttachment = (
+          normaliseString(existingDocument.source) === 'secure_message_attachment'
+        );
+        const needsBackfill = canBackfillLegacyAttachment && [
+          'case_id',
+          'application_id',
+          'client_id',
+          'applicant_user_id',
+          'user_id',
+          'origin_message_id',
+        ].some(field => (
+          !normalisePositiveInteger(existingDocument[field]) &&
+          normalisePositiveInteger(candidate[field])
+        ));
+        if (needsBackfill) {
+          await connection.query(
+            `UPDATE iset_document
+                SET case_id = COALESCE(iset_document.case_id, ?),
+                    application_id = COALESCE(iset_document.application_id, ?),
+                    client_id = COALESCE(iset_document.client_id, ?),
+                    applicant_user_id = COALESCE(iset_document.applicant_user_id, ?),
+                    user_id = COALESCE(iset_document.user_id, ?),
+                    origin_message_id = COALESCE(iset_document.origin_message_id, ?)
+              WHERE iset_document.id = ?`,
+            [
+              candidate.case_id,
+              candidate.application_id,
+              candidate.client_id,
+              candidate.applicant_user_id,
+              candidate.user_id,
+              candidate.origin_message_id,
+              existingDocument.id,
+            ]
+          );
+        }
+        continue;
+      }
+
+      const [insertResult] = await connection.query(
+        `INSERT INTO iset_document
+          (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id,
+           origin_message_id, source, file_name, file_path, label, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'secure_message_attachment', ?, ?, 'Secure Message Attachment', ?)`,
+        [
+          candidate.case_id,
+          candidate.application_id,
+          null,
+          candidate.client_id,
+          candidate.applicant_user_id,
+          candidate.user_id,
+          candidate.origin_message_id,
+          candidate.file_name,
+          candidate.file_path,
+          candidate.created_at,
+        ]
+      );
+      if (Number(insertResult?.affectedRows || 0) !== 1) {
+        throw new Error('attachment_document_insert_failed');
+      }
+      adoptedAttachments.push({
+        fileName: candidate.file_name,
+        agentId: candidate.user_id,
+      });
+    }
+
+    await connection.commit();
+    transactionStarted = false;
+    return adoptedAttachments;
+  } catch (error) {
+    if (transactionStarted) {
+      try { await connection.rollback(); } catch (rollbackError) { error.rollbackError = rollbackError; }
+    }
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 app.get('/api/admin/messages/:id/attachments', async (req, res) => {
   const messageId = normalisePositiveInteger(req.params.id);
   if (!messageId) return res.status(400).json({ error: 'invalid_message_id' });
@@ -100598,32 +103124,27 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
 
     const caseId = accessResult.caseId || null;
     const resolvedApplicationId = accessResult.applicationId || message.application_id || null;
-    let applicantUserId = accessResult.applicantUserId || null;
-    if (!applicantUserId) {
-      if (messageActorMatchesUser(message, 'sender', 'applicant_user', message.sender_user_id)) {
-        applicantUserId = message.sender_user_id;
-      } else if (messageActorMatchesUser(message, 'recipient', 'applicant_user', message.recipient_user_id)) {
-        applicantUserId = message.recipient_user_id;
-      }
+    const typedApplicantParticipant = resolveCaseSecureMessageTypedApplicantParticipant(message);
+    if (typedApplicantParticipant.conflict) {
+      return res.status(409).json({ error: 'message_applicant_actor_conflict' });
     }
+    const applicantUserId = typedApplicantParticipant.userId || null;
 
-    const adoptedAttachments = [];
+    let adoptedAttachments = [];
 
     if (caseId) {
-      let resolvedClientId = null;
-      try {
-        resolvedClientId = await resolveClientIdForDocument({
-          applicantUserId,
-          caseId,
-          applicationId: resolvedApplicationId,
-        });
-        if (!resolvedClientId) {
-          return res.status(422).json({ error: 'client_id_required' });
-        }
-      } catch (err) {
-        const errorCode = err?.code || 'client_id_resolution_failed';
-        return res.status(400).json({ error: errorCode });
-      }
+      const resolvedClientId = normalisePositiveInteger(accessResult.clientId);
+      const applicantAuthoredMessage = messageActorMatchesUser(
+        message,
+        'sender',
+        'applicant_user',
+        applicantUserId
+      );
+      // Prove every attachment is safe to disclose before adopting any of
+      // them. Application lineage controls opportunistic document indexing,
+      // not same-case attachment access: a populated mismatch is returned to
+      // the authorized user but excluded from adoption without rewriting it.
+      const adoptionEligibleAttachments = [];
       for (const att of attachments) {
         const attachmentCaseId = normalisePositiveInteger(att.case_id);
         if (attachmentCaseId && caseId && attachmentCaseId !== Number(caseId)) {
@@ -100632,65 +103153,57 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
         const attachmentApplicationId = normalisePositiveInteger(att.application_id);
         if (
           attachmentApplicationId &&
-          resolvedApplicationId &&
-          attachmentApplicationId !== Number(resolvedApplicationId)
+          attachmentApplicationId !== normalisePositiveInteger(resolvedApplicationId)
         ) {
-          return res.status(409).json({ error: 'attachment_application_scope_mismatch', attachment_id: att.id });
+          console.warn(
+            '[admin:messages:attachments] skipping document adoption for attachment %s: attachment_application_scope_mismatch',
+            att.id
+          );
+        } else {
+          adoptionEligibleAttachments.push(att);
         }
         const attachmentClientId = normalisePositiveInteger(att.client_id);
         if (attachmentClientId && resolvedClientId && attachmentClientId !== Number(resolvedClientId)) {
           return res.status(409).json({ error: 'attachment_client_scope_mismatch', attachment_id: att.id });
         }
-        const docApplicantUserId =
-          applicantUserId ||
-          att.applicant_user_id ||
-          att.user_id ||
-          null;
-        const docUserId = att.user_id || applicantUserId || null;
-
-        let relativeFilePath = att.file_path.replace(/\\/g, '/');
-        const uploadsIndex = relativeFilePath.lastIndexOf('uploads/');
-        if (uploadsIndex !== -1) {
-          relativeFilePath = relativeFilePath.substring(uploadsIndex);
+        const attachmentUploaderUserId = normalisePositiveInteger(att.user_id);
+        if (
+          applicantAuthoredMessage &&
+          attachmentUploaderUserId &&
+          attachmentUploaderUserId !== applicantUserId
+        ) {
+          return res.status(409).json({
+            error: 'attachment_applicant_uploader_mismatch',
+            attachment_id: att.id,
+          });
         }
-        relativeFilePath = relativeFilePath.replace(/\\/g, '/');
-
-        let createdAt = att.uploaded_at ? new Date(att.uploaded_at) : new Date();
-        if (Number.isNaN(createdAt.getTime())) {
-          createdAt = new Date();
-        }
-
+      }
+      if (resolvedClientId && applicantUserId && adoptionEligibleAttachments.length) {
         try {
-          const [insertResult] = await pool.query(
-            `INSERT INTO iset_document (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, origin_message_id, source, file_name, file_path, label, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'secure_message_attachment', ?, ?, 'Secure Message Attachment', ?)
-             ON DUPLICATE KEY UPDATE applicant_user_id = VALUES(applicant_user_id), application_id = VALUES(application_id), action_plan_id = VALUES(action_plan_id), client_id = VALUES(client_id), user_id = VALUES(user_id), origin_message_id = VALUES(origin_message_id), updated_at = NOW()` ,
-            [
-              caseId,
-              resolvedApplicationId,
-              null,
-              resolvedClientId,
-              docApplicantUserId,
-              docUserId,
-              messageId,
-              att.original_filename || 'Attachment',
-              relativeFilePath,
-              createdAt
-            ]
+          adoptedAttachments = await adoptCaseMessageAttachmentDocuments({
+            attachments: adoptionEligibleAttachments,
+            caseId,
+            applicationId: resolvedApplicationId,
+            clientId: resolvedClientId,
+            applicantUserId,
+            messageId,
+          });
+        } catch (adoptionError) {
+          if (
+            Number(adoptionError?.status) === 409 &&
+            adoptionError?.code === 'attachment_document_scope_mismatch'
+          ) {
+            throw adoptionError;
+          }
+          // Document adoption is an indexing convenience after message access
+          // is proved. A transient index failure must not turn an authorized
+          // attachment read into a user-facing outage.
+          console.warn(
+            '[admin:messages:attachments] document adoption skipped for message %s: %s',
+            messageId,
+            adoptionError?.message || adoptionError
           );
-          if (insertResult && insertResult.affectedRows === 1) {
-            adoptedAttachments.push({
-              fileName: att.original_filename || 'Attachment',
-              agentId: docUserId || null,
-            });
-          }
-        } catch (err) {
-          if (err && (err.code === 'ER_DUP_ENTRY' || err.code === '23505')) {
-            continue;
-          } else {
-            console.error('Error inserting into iset_document:', err);
-            throw err;
-          }
+          adoptedAttachments = [];
         }
       }
     }
@@ -100737,8 +103250,14 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
 
     res.status(200).json(attachmentsWithLinks);
   } catch (error) {
+    if (Number(error?.status) === 409 && error?.code) {
+      return res.status(409).json({
+        error: error.code,
+        attachment_id: error.attachmentId || null,
+      });
+    }
     console.error('Error fetching message attachments:', error);
-    res.status(500).json({ error: 'Failed to fetch message attachments' });
+    return res.status(500).json({ error: 'Failed to fetch message attachments' });
   }
 });
 
@@ -106762,6 +109281,14 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
 
 const adminRepairExports = {
   pool,
+  ISET_TEST_DATA_TABLE_ORDER,
+  resolveClearTestDataEnvironmentSafety,
+  compileClearTestDataDeletionPlan,
+  buildClearTestDataDeletionPlan,
+  assertClearTestDataSupportMetadata,
+  collectClearTestObjectKeys,
+  detachClearTestDataSelfReferences,
+  clearTableWithCount,
   lockActivePaymentEvidenceDocument,
   attachSupportingDocumentsToPaymentPacket,
   createPaymentFollowUpEvent,
@@ -106828,7 +109355,9 @@ const adminRepairExports = {
   interventionHasCfaFunding,
   cfaSnapshotHasFunding,
   shouldIncludeFundedInterventionForCfa,
+  createFundingOverviewVersion,
   createCfaVersionForPlan,
+  createCfaVersionFromAssessment,
   ensureAutoPlanAndInterventionFromAssessment,
   resolveOrCreateCaseForClient,
   buildDeniedReportingCaseContext,
@@ -106873,15 +109402,32 @@ const adminRepairExports = {
   resolveInterventionApplicationScopeId,
   fetchAssessmentPdfSignatureContext,
   buildRegionalSnapshotPayload,
+  resolveCaseApplicantMessagingContext,
+  fetchCaseAccessRowByInterventionId,
+  fetchCaseAccessRowByActionPlanId,
+  validateApplicantCaseBinding,
+  validateApplicantDocumentContextAccess,
   resolveSigningRequestMessageScope,
   reconcileApplicationDocumentRequestAfterSigning,
   isDocsRequestedSigningDocumentType,
   setDocsRequestedFromSecureMessage,
   normalizeCaseMessageSigningAttachments,
   validateCaseMessageSigningAttachmentRequest,
+  resolveCaseMessageClientOperationIdInput,
+  buildCaseMessageSendRequestHash,
+  assertCaseMessageLockedApplicantContext,
+  assertCaseMessageSigningReplyApplicantContext,
+  resolveCaseMessageOperationReplay,
+  findCaseMessageSendOperation,
+  claimCaseMessageSendOperation,
+  completeCaseMessageSendOperation,
   parseOptionalCaseMessageApplicationId,
+  resolveCaseMessagePositiveIdInput,
   resolveCaseMessageApplicationIdInput,
   resolveCaseMessageFundingSigningWorkflowKind,
+  assessCaseMessageSigningWorkflowContract,
+  assertCaseMessageSigningWorkflowContract,
+  assertCaseMessageAttendanceInterventionScope,
   assertCaseMessagePostApprovalSourceApplication,
   assertCaseMessageFundingFormsPostApproval,
   resolveCaseMessageDecisionOutcome,
@@ -106891,12 +109437,14 @@ const adminRepairExports = {
   validateAutoFundingWorkflowAttachmentResolution,
   assertUniqueVersionedSigningWorkflowAttachments,
   resolveEligibleSigningWorkflowRows,
+  resolveAutoFundingFormsAttachments,
   assertValidSigningWorkflowSchema,
   buildRequiredSigningWorkflowSchemas,
   prepareCaseMessageSigningSchema,
   mapCaseMessagePublicError,
   persistCaseMessageDecisionLetterArtifacts,
   isCaseSecureMessageUnavailableForReply,
+  resolveCaseSecureMessageTypedApplicantParticipant,
   caseSecureMessageHasApplicantParticipant,
   lockAndValidateCaseMessageReplyTarget,
   markCaseMessageReplyTargetReplied,
@@ -106917,6 +109465,8 @@ const adminRepairExports = {
   inspectAssessmentResubmissionCommitOutcome,
   commitAssessmentResubmissionTransaction,
   recoverAssessmentResubmissionFailure,
+  resolveClientIdFromApplicantUserId,
+  resolveClientIdForDocument,
   adminDocumentUploadRowMatchesManifest,
   inspectAdminDocumentUploadManifest,
   writeAdminDocumentUploadManifest,
@@ -106926,8 +109476,27 @@ const adminRepairExports = {
   buildAdminDocumentUploadResponseRow,
   handleAdminDocumentUpload,
   resolveVersionSnapshotApplicationId,
+  resolveVersionSnapshotActionPlanId,
+  resolveVersionSnapshotParticipantUserId,
+  assessSignedVersionBaseline,
+  requireSignedVersionBaseline,
+  resolveLatestSignedVersionBaseline,
+  buildCfaSnapshot,
+  buildCfaSnapshotFromAssessment,
+  buildFundingOverviewSnapshot,
+  buildCfaRenderSet,
+  isCaseMessageVersionedParticipantForm,
+  assertCaseMessageVersionedFormClientScope,
+  computeCfaSnapshotSignature,
+  cfaDraftSnapshotMateriallyMatches,
+  assertTargetVersionLineageConsistent,
   filterApplicationScopedVersionRows,
+  filterCfaActionPlanScopedVersionRows,
+  resolveCfaActionPlanForApplication,
+  assessApplicationScopedCfaDraft,
+  prepareReusableApplicationScopedCfaDraft,
   resolveApplicationScopedCfaDraft,
+  findRetainedCfaVersionForActionPlan,
   deleteUploadedObjectKeysBestEffort,
   inspectCaseMessageCommitOutcome,
   inspectGeneratedVersionCommitOutcome,

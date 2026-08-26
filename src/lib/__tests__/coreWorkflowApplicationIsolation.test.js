@@ -247,7 +247,7 @@ describe('core repeat-application workflow isolation', () => {
     );
     expect(messageHandler).toContain('decisionLetterPersistence: decisionLetterPersistenceResult');
     expect(assessmentWidgetSource).toContain(
-      'payload.expectedApplicationRowVersion = saved.updatedRowVersion'
+      '? { expectedApplicationRowVersion: saved.updatedRowVersion }'
     );
     expect(assessmentWidgetSource).toContain('if (letterResult.applicationCompleted)');
   });

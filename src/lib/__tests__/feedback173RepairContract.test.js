@@ -46,7 +46,7 @@ describe('feedback 173 guarded recovery contract', () => {
     expect(repairSource).toContain("AND submission_status = 'pending'");
   });
 
-  test('packages the exact reviewed repair with the qualified admin release artifact', () => {
-    expect(deploySource).toContain("'prod-repair-feedback-173.js'");
+  test('keeps the completed one-off PROD repair out of later runtime release artifacts', () => {
+    expect(deploySource).not.toContain("'prod-repair-feedback-173.js'");
   });
 });

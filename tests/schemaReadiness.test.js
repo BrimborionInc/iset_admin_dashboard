@@ -82,4 +82,39 @@ describe('runtime schema readiness', () => {
     });
     expect(statements.join('\n')).not.toMatch(/\b(?:CREATE|ALTER|DROP|TRUNCATE)\b/iu);
   });
+
+  test('admin readiness requires typed lineage on version rows without changing series ownership', async () => {
+    const cfaContract = ADMIN_RUNTIME_SCHEMA_REQUIREMENTS.find(([table]) => table === 'cfa_version');
+    const fundingContract = ADMIN_RUNTIME_SCHEMA_REQUIREMENTS.find(
+      ([table]) => table === 'funding_overview_version'
+    );
+
+    expect(cfaContract?.[1]).toEqual(['application_id', 'action_plan_id']);
+    expect(fundingContract?.[1]).toEqual(['application_id']);
+    expect(ADMIN_RUNTIME_SCHEMA_REQUIREMENTS.some(([table]) => table === 'cfa_series')).toBe(false);
+    expect(
+      ADMIN_RUNTIME_SCHEMA_REQUIREMENTS.some(([table]) => table === 'funding_overview_series')
+    ).toBe(false);
+  });
+
+  test('admin readiness requires the complete durable secure-message operation contract', () => {
+    const operationContract = ADMIN_RUNTIME_SCHEMA_REQUIREMENTS.find(
+      ([table]) => table === 'message_send_operation'
+    );
+
+    expect(operationContract?.[1]).toEqual([
+      'id',
+      'client_operation_id',
+      'request_sha256',
+      'sender_user_id',
+      'sender_staff_profile_id',
+      'case_id',
+      'application_id',
+      'message_id',
+      'response_status',
+      'response_json',
+      'created_at',
+      'completed_at',
+    ]);
+  });
 });

@@ -1,7 +1,7 @@
 # PATH Workflow Policy Uncertainty Register
 
 Status: current
-Last Updated: 2026-08-18
+Last Updated: 2026-08-25
 
 ## Purpose
 
@@ -121,6 +121,26 @@ Status: confirmed principle; exact dependency-recovery matrix remains unresolved
 - Permitted operation: return the assessment to the recorded original submitter, reopen current case/application state, clear current decision fields, and retract dependency-free generated denial artifacts from operational use while appending recovery audit history.
 - Forbidden operation: erase the original denial event, silently transfer correction ownership to the Decision Maker, retain a final-denial lock behind an `in_review` label, or withdraw artifacts that have communication, signing, agreement, reporting, payment, finance, proposal, reminder, or other consequential reliance.
 - Downstream result and regression scenarios: Derry can edit/save/resubmit; another Regional Manager remains denied; active RM, Decision Maker, and final stages remain read-only; resubmission restarts RM review and clears stale reviewer/decision data; a discovered downstream dependency must fail closed and require its domain owner rather than use this recovery path.
+
+### `WP-09-D1` — Applicationless history cannot veto exact application work
+
+Status: confirmed containment principle; concurrent-application and multiple-Action-Plan policy remains partial.
+
+- A long-lived case may contain applicationless imported/manual history and artifacts from several applications. Their continued presence is not itself an integrity defect.
+- When an operation has an exact selected application and, where required, an exact Action Plan, PATH must read and mutate only that operation's ownership lineage. An unrelated applicationless, sibling-application, or sibling-plan record may remain visible history but must not block or be changed by the operation.
+- A populated typed owner is authoritative. Legacy embedded metadata is a fallback only when the typed owner is absent; metadata may confirm but may not override a populated typed owner.
+- A contradiction in the exact selected version or owner may block that consequential form generation/signing operation. It must not lock the whole case, ordinary messaging, or independent sibling work.
+- Case-owned version series and their numbering remain continuous. Version ownership narrows mutation and signing scope without splitting the case history into invented per-application series.
+- A missing Action Plan is a workflow prerequisite and multiple eligible plans require explicit selection. Neither condition should be described as general data corruption. This decision does not settle when additional or concurrent plans are permitted.
+
+#### 2026-08-25 bug policy brief — Feedback 196 applicationless CFA veto
+
+- Reported path and actor: a Regional Manager used the approved application's communication step to send its decision/funding package.
+- Exact scope and states: case `76`, approved application `123`, application-owned Action Plan `184`, and the new CFA/Financial Overview/message/signing artifacts. Older applicationless Action Plan `3` and sent CFA version `19` are unrelated retained history.
+- Failure: a case-wide unsigned-version guard stopped the application-backed send with `cfa_version_application_scope_unknown`, despite the selected application's ownership being known.
+- Permitted result: create and send the next case-series version from the exact selected plan, preserve continuous numbering and the read-only latest-signed baseline, and leave unrelated history untouched.
+- Forbidden result: infer an owner for the old CFA, cancel or withdraw it as a side effect, reuse it as the new application's draft, split the case series, or block ordinary secure messaging.
+- Detailed behavior and the required Regional Manager DEV/TEST scenario matrix are recorded in `docs/ops/feedback-196-applicationless-signing-lineage.md`.
 
 ### `WP-13-D1` — Business reopen authority is not technical support authority
 

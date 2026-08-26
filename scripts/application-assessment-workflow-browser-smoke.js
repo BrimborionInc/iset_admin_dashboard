@@ -1013,13 +1013,19 @@ async function installApiStubs(page, state) {
       request.respond(jsonResponse([
         {
           id: 9001,
-          workflow_type: 'consent-no-prefill',
+          name: 'Letter of Approval',
+          status: 'active',
+          workflow_type: 'consent-cm-prefill',
           document_type: 'assessment_approval_letter',
+          updated_at: '2026-08-25T12:00:00.000Z',
         },
         {
           id: 9002,
-          workflow_type: 'consent-no-prefill',
+          name: 'Letter of Denial',
+          status: 'active',
+          workflow_type: 'consent-cm-prefill',
           document_type: 'assessment_denial_letter',
+          updated_at: '2026-08-25T12:00:00.000Z',
         },
       ]));
       return;

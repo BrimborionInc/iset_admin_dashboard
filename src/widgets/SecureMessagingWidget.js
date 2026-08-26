@@ -33,6 +33,49 @@ export const resolveSecureMessageReplyScope = message => ({
   replyToMessageId: toPositiveIntegerOrNull(message?.id),
 });
 
+const resolveActorType = (message, actor) => (
+  message?.[actor]?.actorType ||
+  message?.[actor]?.actor_type ||
+  message?.[`${actor}_actor_type`] ||
+  null
+);
+
+const resolveActorUserId = (message, actor) => toPositiveIntegerOrNull(
+  message?.[actor]?.userId ??
+  message?.[actor]?.user_id ??
+  message?.[`${actor}_user_id`]
+);
+
+export const resolveSecureMessageDirection = message => {
+  if (!message) return null;
+  const canonicalDirection = String(message.direction || '').trim().toLowerCase();
+  const senderIsApplicant = resolveActorType(message, 'sender') === 'applicant_user';
+  const recipientIsApplicant = resolveActorType(message, 'recipient') === 'applicant_user';
+  if (senderIsApplicant && recipientIsApplicant) return null;
+  const typedDirection = senderIsApplicant
+    ? 'received'
+    : recipientIsApplicant
+      ? 'sent'
+      : null;
+  if (
+    typedDirection &&
+    (canonicalDirection === 'received' || canonicalDirection === 'sent') &&
+    canonicalDirection !== typedDirection
+  ) return null;
+  return typedDirection || (
+    canonicalDirection === 'received' || canonicalDirection === 'sent'
+      ? canonicalDirection
+      : null
+  );
+};
+
+export const resolveSecureMessageApplicantUserId = message => {
+  const direction = resolveSecureMessageDirection(message);
+  if (direction === 'received') return resolveActorUserId(message, 'sender');
+  if (direction === 'sent') return resolveActorUserId(message, 'recipient');
+  return null;
+};
+
 const TAB_IDS = {
   inbox: 'inbox',
   sent: 'sent',
@@ -76,32 +119,34 @@ const isMessageDeleted = message => {
   return false;
 };
 
-const isSentToApplicant = (message, applicantUserId) => {
-  return isApplicantRecipient(message, applicantUserId) && !isApplicantSender(message, applicantUserId);
+export const partitionSecureMessagesByDirection = messages => {
+  const partitions = { inbox: [], sent: [], deleted: [] };
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (!message) continue;
+    if (isMessageDeleted(message)) {
+      partitions.deleted.push(message);
+    } else if (resolveSecureMessageDirection(message) === 'sent') {
+      partitions.sent.push(message);
+    } else {
+      // Keep malformed legacy rows visible exactly once for staff repair.
+      partitions.inbox.push(message);
+    }
+  }
+  return partitions;
 };
 
-const isApplicantSender = (message, applicantUserId) => {
-  const applicantId = Number(applicantUserId);
-  if (!message || !Number.isFinite(applicantId) || applicantId <= 0) return false;
-  const senderActorType = message.sender?.actorType || message.sender?.actor_type || message.sender_actor_type;
-  const senderUserId = message.sender?.userId ?? message.sender?.user_id ?? message.sender_user_id;
-  return senderActorType === 'applicant_user' && Number(senderUserId) === applicantId;
-};
+const isSentToApplicant = message => resolveSecureMessageDirection(message) === 'sent';
 
-const isApplicantRecipient = (message, applicantUserId) => {
-  const applicantId = Number(applicantUserId);
-  if (!message || !Number.isFinite(applicantId) || applicantId <= 0) return false;
-  const recipientActorType = message.recipient?.actorType || message.recipient?.actor_type || message.recipient_actor_type;
-  const recipientUserId = message.recipient?.userId ?? message.recipient?.user_id ?? message.recipient_user_id;
-  return recipientActorType === 'applicant_user' && Number(recipientUserId) === applicantId;
-};
+const isApplicantSender = message => resolveSecureMessageDirection(message) === 'received';
+
+const isApplicantRecipient = message => resolveSecureMessageDirection(message) === 'sent';
 
 const getMailboxStatusKey = message => normalizeStatusValue(message?.mailbox_status || message?.status);
 
 const getRecipientStatusKey = message => normalizeStatusValue(message?.recipient_status);
 
-const getDisplayStatusKey = (message, applicantUserId) => {
-  if (isSentToApplicant(message, applicantUserId)) {
+export const resolveSecureMessageDisplayStatusKey = message => {
+  if (isSentToApplicant(message)) {
     const recipientStatus = getRecipientStatusKey(message);
     if (recipientStatus === 'replied') return 'applicant_replied';
     if (recipientStatus === 'read') return 'read_by_applicant';
@@ -191,7 +236,7 @@ const SecureMessagingWidget = ({
     rawApplicantUserId == null || rawApplicantUserId === '' || Number.isNaN(applicantUserIdNum)
       ? null
       : applicantUserIdNum;
-  const messagingAvailable = Boolean(applicantUserId);
+  const canStartNewMessage = Boolean(applicantUserId);
 
   const selectedInterventionNum = Number(selectedInterventionId);
   const interventionId =
@@ -254,7 +299,7 @@ const SecureMessagingWidget = ({
 
   const loadMessages = useCallback(
     async (options = {}) => {
-      if (!caseId || !messagingAvailable) {
+      if (!caseId) {
         setMessages([]);
         setLoadError(null);
         setLoading(false);
@@ -293,11 +338,11 @@ const SecureMessagingWidget = ({
         }
       }
     },
-    [caseId, messagingAvailable]
+    [caseId]
   );
 
   useEffect(() => {
-    if (!caseId || !messagingAvailable) {
+    if (!caseId) {
       setMessages([]);
       setLoadError(null);
       setLoading(false);
@@ -305,7 +350,7 @@ const SecureMessagingWidget = ({
       return;
     }
     loadMessages();
-  }, [caseId, loadMessages, messagingAvailable]);
+  }, [caseId, loadMessages]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -328,12 +373,17 @@ const SecureMessagingWidget = ({
         ? scopeOverrides.applicationId
         : applicationId,
       replyToMessageId: scopeOverrides.replyToMessageId ?? null,
-      applicantUserId,
+      applicantUserId: Object.prototype.hasOwnProperty.call(scopeOverrides, 'applicantUserId')
+        ? toPositiveIntegerOrNull(scopeOverrides.applicantUserId)
+        : applicantUserId,
       applicantName: applicantName || 'Applicant',
       toName: toName || applicantName || 'Applicant',
       fromName: currentStaffName || 'Case Worker',
       caseReference: caseReference || (caseId ? `Case ${caseId}` : null),
-      interventionId: isCaseWorkspace ? interventionId : null,
+      // Workspace row selection is browsing state, not authority for a send.
+      // Keep it only as a visible suggestion that the composer can ask the
+      // staff member to confirm for an intervention follow-up.
+      suggestedInterventionId: isCaseWorkspace ? interventionId : null,
       isCaseWorkspace
     }),
     [
@@ -361,10 +411,14 @@ const SecureMessagingWidget = ({
   const getSenderName = useCallback(
     message => {
       if (!message) return '';
-      if (isApplicantSender(message, applicantUserId)) {
-        return message.sender_name || applicantName;
+      if (isApplicantSender(message)) {
+        const historicalApplicantId = resolveSecureMessageApplicantUserId(message);
+        const fallbackName = historicalApplicantId === toPositiveIntegerOrNull(applicantUserId)
+          ? applicantName
+          : 'Applicant';
+        return message.sender_name || message.sender?.name || fallbackName;
       }
-      return message.sender_name || 'Staff';
+      return message.sender_name || message.sender?.name || 'Staff';
     },
     [applicantUserId, applicantName]
   );
@@ -372,32 +426,25 @@ const SecureMessagingWidget = ({
   const getRecipientName = useCallback(
     message => {
       if (!message) return '';
-      if (isApplicantRecipient(message, applicantUserId)) {
-        return message.recipient_name || applicantName;
+      if (isApplicantRecipient(message)) {
+        const historicalApplicantId = resolveSecureMessageApplicantUserId(message);
+        const fallbackName = historicalApplicantId === toPositiveIntegerOrNull(applicantUserId)
+          ? applicantName
+          : 'Applicant';
+        return message.recipient_name || message.recipient?.name || fallbackName;
       }
-      return message.recipient_name || 'Staff';
+      return message.recipient_name || message.recipient?.name || 'Staff';
     },
     [applicantUserId, applicantName]
   );
 
-  const inboxMessages = useMemo(() => {
-    if (!applicantUserId) return messages.filter(msg => !isMessageDeleted(msg));
-    return messages.filter(
-      msg => msg && isApplicantSender(msg, applicantUserId) && !isMessageDeleted(msg)
-    );
-  }, [messages, applicantUserId]);
-
-  const sentMessages = useMemo(() => {
-    if (!applicantUserId) return messages.filter(msg => !isMessageDeleted(msg));
-    return messages.filter(
-      msg => msg && isApplicantRecipient(msg, applicantUserId) && !isMessageDeleted(msg)
-    );
-  }, [messages, applicantUserId]);
-
-  const deletedMessages = useMemo(
-    () => messages.filter(msg => isMessageDeleted(msg)),
+  const messagePartitions = useMemo(
+    () => partitionSecureMessagesByDirection(messages),
     [messages]
   );
+  const inboxMessages = messagePartitions.inbox;
+  const sentMessages = messagePartitions.sent;
+  const deletedMessages = messagePartitions.deleted;
 
   const filteringTextLower = filteringText.trim().toLowerCase();
 
@@ -409,7 +456,7 @@ const SecureMessagingWidget = ({
         const haystack = [
           msg.subject,
           msg.body,
-          formatStatusLabel(getDisplayStatusKey(msg, applicantUserId)),
+          formatStatusLabel(resolveSecureMessageDisplayStatusKey(msg)),
           getSenderName(msg),
           getRecipientName(msg)
         ]
@@ -419,7 +466,7 @@ const SecureMessagingWidget = ({
         return haystack.includes(filteringTextLower);
       });
     },
-    [filteringTextLower, getSenderName, getRecipientName, applicantUserId]
+    [filteringTextLower, getSenderName, getRecipientName]
   );
 
   const getMessageFormsCount = useCallback(message => {
@@ -433,8 +480,8 @@ const SecureMessagingWidget = ({
       setSelectedMessage(message);
       setViewModalOpen(true);
       const isFromApplicant =
-        isApplicantSender(message, applicantUserId) &&
-        !isApplicantRecipient(message, applicantUserId);
+        isApplicantSender(message) &&
+        !isApplicantRecipient(message);
       if (isFromApplicant && isUnread(message)) {
         try {
           const response = await apiFetch(`/api/admin/messages/${message.id}/status`, {
@@ -456,7 +503,7 @@ const SecureMessagingWidget = ({
         }
       }
     },
-    [applicantUserId]
+    []
   );
 
   const columnDefinitions = useMemo(
@@ -513,12 +560,12 @@ const SecureMessagingWidget = ({
         header: 'Status',
         cell: item => (
           <span style={{ fontWeight: isUnread(item) ? 'bold' : 'normal' }}>
-            {formatStatusLabel(getDisplayStatusKey(item, applicantUserId))}
+            {formatStatusLabel(resolveSecureMessageDisplayStatusKey(item))}
           </span>
         ),
         sortingComparator: (a, b) =>
-          formatStatusLabel(getDisplayStatusKey(a, applicantUserId))
-            .localeCompare(formatStatusLabel(getDisplayStatusKey(b, applicantUserId))),
+          formatStatusLabel(resolveSecureMessageDisplayStatusKey(a))
+            .localeCompare(formatStatusLabel(resolveSecureMessageDisplayStatusKey(b))),
         minWidth: 180
       },
       {
@@ -555,7 +602,7 @@ const SecureMessagingWidget = ({
         minWidth: 80
       }
     ],
-    [getSenderName, openMessage, applicantUserId, getMessageFormsCount]
+    [getSenderName, openMessage, getMessageFormsCount]
   );
 
   const activeSortingColumn = useMemo(
@@ -634,7 +681,7 @@ const SecureMessagingWidget = ({
   };
 
   const handleNewMessage = () => {
-    if (!caseId || !messagingAvailable) return;
+    if (!caseId || !canStartNewMessage) return;
     openSecureMessageCompose(createComposeContext({ mode: 'new' }));
   };
 
@@ -648,10 +695,18 @@ const SecureMessagingWidget = ({
           .map(line => `> ${line}`)
           .join('\n')
       : '';
-    const replyToName = getSenderName(selectedMessage) || applicantName || 'Applicant';
+    const selectedDirection = resolveSecureMessageDirection(selectedMessage);
+    const replyApplicantUserId = resolveSecureMessageApplicantUserId(selectedMessage);
+    if (!replyApplicantUserId) return;
+    const replyToName = (
+      selectedDirection === 'received'
+        ? getSenderName(selectedMessage)
+        : getRecipientName(selectedMessage)
+    ) || 'Applicant';
     const nextContext = createComposeContext({
       mode: 'reply',
       toName: replyToName,
+      applicantUserId: replyApplicantUserId,
       ...resolveSecureMessageReplyScope(selectedMessage),
     });
     const opened = openSecureMessageCompose({
@@ -960,9 +1015,9 @@ const SecureMessagingWidget = ({
                 iconName="refresh"
                 ariaLabel="Refresh"
                 onClick={handleRefresh}
-                disabled={loading || refreshing || !caseId || !messagingAvailable}
+                disabled={loading || refreshing || !caseId}
               />
-              <Button variant="primary" onClick={handleNewMessage} disabled={!caseId || !messagingAvailable}>
+              <Button variant="primary" onClick={handleNewMessage} disabled={!caseId || !canStartNewMessage}>
                 New Message
               </Button>
             </SpaceBetween>
@@ -1007,16 +1062,19 @@ const SecureMessagingWidget = ({
         </Box>
         {!caseId ? (
           <Box color="text-status-warning">Messages will be available once the case is fully loaded.</Box>
-        ) : !messagingAvailable ? (
-          <Box color="text-body-secondary">
-            Secure messaging becomes available after a participant applicant account is linked to this case.
-          </Box>
         ) : (
-          <Tabs
-            activeTabId={activeTabId}
-            onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
-            tabs={tabs}
-          />
+          <SpaceBetween size="s">
+            {!canStartNewMessage ? (
+              <Box color="text-body-secondary">
+                New messages require a participant account linked to this case. Existing case messages remain available.
+              </Box>
+            ) : null}
+            <Tabs
+              activeTabId={activeTabId}
+              onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
+              tabs={tabs}
+            />
+          </SpaceBetween>
         )}
       </SpaceBetween>
       <Modal
@@ -1025,7 +1083,11 @@ const SecureMessagingWidget = ({
         header="Message Details"
         footer={
           <SpaceBetween direction="horizontal" size="xs">
-            <Button variant="primary" onClick={handleReply} disabled={!selectedMessage}>
+            <Button
+              variant="primary"
+              onClick={handleReply}
+              disabled={!selectedMessage || !resolveSecureMessageApplicantUserId(selectedMessage)}
+            >
               Reply
             </Button>
             {selectedMessage && canWithdrawMessage(selectedMessage) ? (

@@ -141,8 +141,6 @@
     "data:sync:apply": "node scripts/path-data-sync.js apply",
     "test:db:refresh": "node scripts/path-test-db-refresh.js run",
     "test:db:refresh:plan": "node scripts/path-test-db-refresh.js plan",
-    "release:qualify": "node scripts/path-release-qualify.js",
-    "release:test:postflight": "node scripts/path-test-runtime-postflight.js",
     "deploy-admin-prod": "powershell -ExecutionPolicy Bypass -File scripts/deploy-admin-prod.ps1",
     "deploy-admin-to-prod": "powershell -ExecutionPolicy Bypass -File scripts/deploy-admin-prod.ps1",
     "deploy-shared-to-prod": "powershell -ExecutionPolicy Bypass -File scripts/deploy-shared-prod.ps1",

@@ -49,7 +49,25 @@ function readGeneratedBuildInfo(repoRoot) {
   return JSON.parse(match[1]);
 }
 
-function writeBuildManifest({ repoRoot, buildPath = path.join(repoRoot, 'build') }) {
+function normalizeBuildExternalInputs(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.keys(value).sort().reduce((result, key) => {
+    const input = value[key];
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return result;
+    result[key] = {
+      purpose: String(input.purpose || ''),
+      sha256: String(input.sha256 || ''),
+      bytes: Number(input.bytes || 0),
+    };
+    return result;
+  }, {});
+}
+
+function writeBuildManifest({
+  repoRoot,
+  buildPath = path.join(repoRoot, 'build'),
+  externalInputs = {},
+}) {
   const buildInfo = readGeneratedBuildInfo(repoRoot);
   const assets = hashDirectory(buildPath);
   const manifest = {
@@ -57,6 +75,7 @@ function writeBuildManifest({ repoRoot, buildPath = path.join(repoRoot, 'build')
     generatedAt: new Date().toISOString(),
     buildInfo,
     assets,
+    externalInputs: normalizeBuildExternalInputs(externalInputs),
   };
   fs.writeFileSync(path.join(buildPath, BUILD_MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   return manifest;
@@ -79,6 +98,13 @@ function validatePrebuiltBuild({ repoRoot, buildPath = path.join(repoRoot, 'buil
     }
   });
   if (info.gitDirty && !expected.allowDirty) throw new Error('Prebuilt manifest was produced from a dirty source tree');
+  if (expected.externalInputs) {
+    const actualInputs = normalizeBuildExternalInputs(manifest.externalInputs);
+    const expectedInputs = normalizeBuildExternalInputs(expected.externalInputs);
+    if (JSON.stringify(actualInputs) !== JSON.stringify(expectedInputs)) {
+      throw new Error('Prebuilt external input mismatch');
+    }
+  }
   const assets = hashDirectory(buildPath);
   if (assets.sha256 !== manifest.assets?.sha256 || assets.fileCount !== manifest.assets?.fileCount) {
     throw new Error('Prebuilt asset checksum mismatch');
@@ -114,7 +140,15 @@ function buildImmutableArtifactRecord({ component, releaseId, archivePath }) {
   };
 }
 
-function createReleaseDescriptor({ releaseId, environment, requiredComponents, artifacts, source, preflight }) {
+function createReleaseDescriptor({
+  releaseId,
+  environment,
+  requiredComponents,
+  artifacts,
+  source,
+  preflight,
+  externalInputs = {},
+}) {
   const artifactMap = artifacts || {};
   const missing = requiredComponents.filter(component => !artifactMap[component]?.sha256 || !artifactMap[component]?.key);
   if (missing.length) throw new Error(`Release descriptor is incomplete: missing ${missing.join(', ')}`);
@@ -124,6 +158,7 @@ function createReleaseDescriptor({ releaseId, environment, requiredComponents, a
     environment,
     source,
     preflight,
+    externalInputs: normalizeBuildExternalInputs(externalInputs),
     artifacts: Object.fromEntries(requiredComponents.map(component => [component, artifactMap[component]])),
   };
   return { ...descriptor, descriptorSha256: sha256Buffer(JSON.stringify(descriptor)) };

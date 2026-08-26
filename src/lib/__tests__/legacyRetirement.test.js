@@ -17,12 +17,85 @@ describe('R6b dormant and compatibility cleanup', () => {
       order.indexOf("'iset_document_lifecycle'")
     );
     expect(order.indexOf("'iset_document_lifecycle'")).toBeLessThan(order.indexOf("'iset_document'"));
+    for (const versionTable of [
+      "'cfa_version_documents'",
+      "'cfa_version'",
+      "'cfa_series'",
+      "'funding_overview_version_documents'",
+      "'funding_overview_version'",
+      "'funding_overview_series'",
+    ]) {
+      expect(order.indexOf(versionTable)).toBeGreaterThan(0);
+      expect(order.indexOf(versionTable)).toBeLessThan(order.indexOf("'iset_case_action_plan'"));
+      expect(order.indexOf(versionTable)).toBeLessThan(order.indexOf("'iset_application'"));
+      expect(order.indexOf(versionTable)).toBeLessThan(order.indexOf("'iset_case'"));
+    }
+    expect(order.indexOf("'iset_application'")).toBeLessThan(
+      order.indexOf("'iset_application_submission'")
+    );
+    expect(order.indexOf("'iset_application'")).toBeLessThan(order.indexOf("'iset_case'"));
+    expect(order.indexOf("'iset_application'")).toBeLessThan(order.indexOf("'client'"));
+    expect(order.indexOf("'iset_document'")).toBeLessThan(
+      order.indexOf("'iset_intake.messages'")
+    );
+    expect(order.indexOf("'iset_event_delivery'")).toBeLessThan(
+      order.indexOf("'iset_event_entry'")
+    );
+    expect(order.indexOf("'iset_reminder_lifecycle_event'")).toBeLessThan(
+      order.indexOf("'iset_intake.iset_case_reminder'")
+    );
+    for (const referencingTable of [
+      "'client_file_import_identity_claim'",
+      "'iset_client_merge_audit'",
+      "'iset_case_merge_audit'",
+    ]) {
+      expect(order.indexOf(referencingTable)).toBeGreaterThan(0);
+      expect(order.indexOf(referencingTable)).toBeLessThan(order.indexOf("'iset_case'"));
+      expect(order.indexOf(referencingTable)).toBeLessThan(order.indexOf("'client'"));
+    }
+    const clearHelperStart = server.indexOf('async function clearTableWithCount');
+    const clearHelperEnd = server.indexOf('\nfunction clonePayload', clearHelperStart);
+    const clearHelper = server.slice(clearHelperStart, clearHelperEnd);
+    expect(clearHelper).toContain('DELETE FROM ${tableTarget.sqlIdentifier}');
+    expect(clearHelper).not.toContain('ALTER TABLE');
+    expect(clearHelper).not.toContain('AUTO_INCREMENT');
     const routeStart = server.indexOf("app.post('/api/clear-iset-test-data'");
     const routeEnd = server.indexOf('// (Removed duplicate linkage-stats route', routeStart);
     const route = server.slice(routeStart, routeEnd);
-    expect(route).toContain('accountEventIntegrity');
-    expect(route).toContain('clear_test_data_integrity_failed');
-    expect(route.indexOf('accountEventIntegrity')).toBeLessThan(route.indexOf('connection.commit()'));
+    expect(route).toContain('assertClearTestAccountEventIntegrity');
+    expect(server).toContain('clear_test_data_integrity_failed');
+    expect(route).not.toContain('FOREIGN_KEY_CHECKS');
+    expect(route.indexOf('resolveClearTestDataEnvironmentSafety()')).toBeLessThan(
+      route.indexOf('pool.getConnection()')
+    );
+    expect(route.indexOf('buildClearTestDataDeletionPlan(connection)')).toBeLessThan(
+      route.indexOf('connection.beginTransaction()')
+    );
+    expect(route.indexOf('connection.beginTransaction()')).toBeLessThan(
+      route.indexOf('detachClearTestDataSelfReferences(')
+    );
+    expect(route.indexOf('detachClearTestDataSelfReferences(')).toBeLessThan(
+      route.indexOf('clearTableWithCount(connection, tableTarget)')
+    );
+    expect(route.indexOf('assertClearTestAccountEventIntegrity')).toBeLessThan(
+      route.indexOf('connection.commit()')
+    );
+    expect(route).toContain('connection.rollback()');
+  });
+
+  test('draft Action Plan deletion preserves typed CFA evidence and directs staff to archive', () => {
+    const server = read('isetadminserver.js');
+    const routeStart = server.indexOf("app.post('/api/action-plans/:id/delete'");
+    const routeEnd = server.indexOf("app.patch('/api/action-plans/:id'", routeStart);
+    const route = server.slice(routeStart, routeEnd);
+    const retainedEvidenceCheck = route.indexOf(
+      'await findRetainedCfaVersionForActionPlan(deleteConnection, planId)'
+    );
+    const deleteMutation = route.indexOf('DELETE FROM iset_case_action_plan');
+    expect(retainedEvidenceCheck).toBeGreaterThanOrEqual(0);
+    expect(retainedEvidenceCheck).toBeLessThan(deleteMutation);
+    expect(route).toContain("error: 'retained_cfa_evidence_blocks_plan_delete'");
+    expect(route).toContain('Archive the Action Plan instead.');
   });
 
   test('intake authoring exposes static options only and no longer calls a retired catalogue', () => {

@@ -10,6 +10,10 @@ import { BoardItem } from '@cloudscape-design/board-components';
 import { findOptionByValue } from '../pages/finance/widgets/paymentOptions';
 import { getCurrencyInputDisplayValue } from '../utils/currencyFormat';
 import { buildApplicantFacingReasonSentence, normalizeTemplateSentence } from '../utils/decisionLetterText';
+import {
+  selectExactFundingActionPlans,
+  selectLatestSupportedSigningWorkflow,
+} from '../lib/signingWorkflowAvailability';
 import { closePendingDocumentWindow, navigateDocumentWindow, openPendingDocumentWindow } from '../utils/documentOpen';
 import {
   APPLICATION_FINAL_STATUSES,
@@ -2265,7 +2269,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [letterBody, setLetterBody] = useState('');
   const [approvalLetterPackTabId, setApprovalLetterPackTabId] = useState('client');
   const [approvalLetterPackGenerated, setApprovalLetterPackGenerated] = useState(false);
-  const initialApplicationId = caseData?.application_id ?? caseData?.applicationId ?? application_id ?? null;
+  const resolvedApplicationId = caseData?.application_id ?? caseData?.applicationId ?? application_id ?? null;
+  const initialApplicationId = resolvedApplicationId;
   const [savedApprovalLetterPackDrafts, setSavedApprovalLetterPackDrafts] = useState(
     () => getDecisionLetterPackDrafts(caseData?.caseContext, initialApplicationId) || null
   );
@@ -2274,6 +2279,11 @@ const CoordinatorAssessmentWidget = forwardRef(
   );
   const letterBodyDirtyRef = useRef(false);
   const lastActiveLetterKeyRef = useRef(null);
+  const decisionLetterSendInFlightRef = useRef(false);
+  const decisionLetterSendAttemptRef = useRef(null);
+  const fundingActionPlanLoadGenerationRef = useRef(0);
+  const fundingActionPlanScopeRef = useRef(null);
+  const previousFundingActionPlanScopeRef = useRef(null);
   const [denialReasonModalVisible, setDenialReasonModalVisible] = useState(false);
   const [denialReasonChoice, setDenialReasonChoice] = useState(
     () => getApplicationAssessmentContext(caseData?.caseContext, initialApplicationId)?.[FUNDING_DECISION_REASON_CODE_KEY] || ''
@@ -2310,6 +2320,12 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [draftingLetterError, setDraftingLetterError] = useState(null);
   const [sendingLetter, setSendingLetter] = useState(false);
   const [sendingLetterError, setSendingLetterError] = useState(null);
+  const [fundingActionPlans, setFundingActionPlans] = useState([]);
+  const [fundingActionPlansLoading, setFundingActionPlansLoading] = useState(false);
+  const [fundingActionPlansLoaded, setFundingActionPlansLoaded] = useState(false);
+  const [fundingActionPlansError, setFundingActionPlansError] = useState(null);
+  const [selectedFundingActionPlanId, setSelectedFundingActionPlanId] = useState(null);
+  const [serverDemandedFundingActionPlan, setServerDemandedFundingActionPlan] = useState(false);
   const [letterWorkflows, setLetterWorkflows] = useState({ approval: null, denial: null });
   const [letterWorkflowsLoading, setLetterWorkflowsLoading] = useState(false);
   const [letterWorkflowsError, setLetterWorkflowsError] = useState(null);
@@ -2393,7 +2409,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     releaseLock,
     refreshLock: refreshLockHeartbeat,
     isLockedByMe
-  } = useApplicationLock(application_id);
+  } = useApplicationLock(resolvedApplicationId);
   const [lockingAssessment, setLockingAssessment] = useState(false);
   const {
     userId: currentUserId,
@@ -2453,6 +2469,18 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     return Number.isFinite(overallCostTotal) && overallCostTotal > 0;
   }, [overallCostTotal, proposedInterventions]);
+  const fundingActionPlanRequired = approvalHasFundingPackage || serverDemandedFundingActionPlan;
+  const fundingActionPlanSelectOptions = useMemo(
+    () => fundingActionPlans.map(plan => ({
+      value: String(plan.id),
+      label: plan.label,
+      description: `Action Plan ${plan.id} - ${plan.status}`,
+    })),
+    [fundingActionPlans]
+  );
+  const selectedFundingActionPlanOption = fundingActionPlanSelectOptions.find(
+    option => Number(option.value) === Number(selectedFundingActionPlanId)
+  ) || null;
   const isHighValueFundingApprovalBlocked =
     Number.isFinite(overallCostTotal) &&
     overallCostTotal >= HIGH_VALUE_FUNDING_APPROVAL_THRESHOLD &&
@@ -2579,9 +2607,88 @@ const CoordinatorAssessmentWidget = forwardRef(
     return persistedDecisionOutcome;
   }, [assessment.nwacReviewStatus, persistedDecisionOutcome]);
   const activeLetterKey = decisionOutcome === 'approved' ? 'approval' : decisionOutcome === 'denied' ? 'denial' : null;
+  useEffect(() => {
+    if (activeLetterKey === 'approval') return;
+    setServerDemandedFundingActionPlan(false);
+  }, [activeLetterKey]);
   const applicantUserId = caseData?.applicant_user_id ?? caseData?.applicantUserId ?? null;
-  const applicationId = caseData?.application_id ?? caseData?.applicationId ?? application_id ?? null;
+  const applicationId = resolvedApplicationId;
   const caseId = caseData?.id ?? caseData?.case_id ?? null;
+  const fundingActionPlanScope = `${Number(caseId) || ''}:${Number(applicationId) || ''}`;
+  fundingActionPlanScopeRef.current = fundingActionPlanScope;
+  const loadFundingActionPlans = useCallback(async () => {
+    const loadGeneration = fundingActionPlanLoadGenerationRef.current + 1;
+    fundingActionPlanLoadGenerationRef.current = loadGeneration;
+    const expectedScope = fundingActionPlanScope;
+    const loadIsCurrent = () => (
+      fundingActionPlanLoadGenerationRef.current === loadGeneration &&
+      fundingActionPlanScopeRef.current === expectedScope
+    );
+    const normalizedCaseId = Number(caseId);
+    const normalizedApplicationId = Number(applicationId);
+    if (!Number.isInteger(normalizedCaseId) || normalizedCaseId < 1 ||
+        !Number.isInteger(normalizedApplicationId) || normalizedApplicationId < 1) {
+      if (loadIsCurrent()) {
+        setFundingActionPlans([]);
+        setFundingActionPlansLoading(false);
+        setFundingActionPlansLoaded(true);
+      }
+      return [];
+    }
+    setFundingActionPlansLoading(true);
+    setFundingActionPlansError(null);
+    try {
+      const locallyLoadedPlans = Array.isArray(caseData?.actionPlans) ? caseData.actionPlans : [];
+      let rawPlans;
+      try {
+        const params = new URLSearchParams({ applicationId: String(normalizedApplicationId) });
+        const response = await apiFetch(`/api/cases/${normalizedCaseId}/workspace?${params.toString()}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        if (!Array.isArray(payload?.actionPlans)) throw new Error('Invalid Action Plan response');
+        rawPlans = payload.actionPlans;
+      } catch (error) {
+        if (!selectExactFundingActionPlans(locallyLoadedPlans, normalizedApplicationId).length) {
+          throw error;
+        }
+        rawPlans = locallyLoadedPlans;
+      }
+      const exactPlans = selectExactFundingActionPlans(rawPlans, normalizedApplicationId);
+      if (!loadIsCurrent()) return [];
+      setFundingActionPlans(exactPlans);
+      setFundingActionPlansLoaded(true);
+      setSelectedFundingActionPlanId(current => {
+        if (current && exactPlans.some(plan => Number(plan.id) === Number(current))) return current;
+        return exactPlans.length === 1 ? exactPlans[0].id : null;
+      });
+      return exactPlans;
+    } catch (_) {
+      if (!loadIsCurrent()) return [];
+      setFundingActionPlans([]);
+      setFundingActionPlansLoaded(false);
+      setFundingActionPlansError(
+        'Action Plans could not be loaded. PATH will validate the application when you send.'
+      );
+      return [];
+    } finally {
+      if (loadIsCurrent()) setFundingActionPlansLoading(false);
+    }
+  }, [applicationId, caseData?.actionPlans, caseId, fundingActionPlanScope]);
+  useEffect(() => {
+    const previousScope = previousFundingActionPlanScopeRef.current;
+    previousFundingActionPlanScopeRef.current = fundingActionPlanScope;
+    if (previousScope === null || previousScope === fundingActionPlanScope) return;
+    fundingActionPlanLoadGenerationRef.current += 1;
+    setFundingActionPlans([]);
+    setFundingActionPlansLoading(false);
+    setFundingActionPlansLoaded(false);
+    setFundingActionPlansError(null);
+    setSelectedFundingActionPlanId(null);
+    setServerDemandedFundingActionPlan(false);
+    setShowSendApprovalLetterConfirmModal(false);
+    setSendingLetterError(null);
+    setHasSubmitted(false);
+  }, [fundingActionPlanScope]);
   const assignedStaffProfileId =
     caseData?.assigned_staff_profile_id ??
     caseData?.assignedStaffProfileId ??
@@ -3547,15 +3654,14 @@ const CoordinatorAssessmentWidget = forwardRef(
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json().catch(() => []);
         const rows = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
-        const filtered = rows
-          .map(r => ({
-            id: r.id,
-            workflowType: (r.workflow_type || r.workflowType || '').trim(),
-            documentType: (r.document_type || r.documentType || '').trim()
-          }))
-          .filter(r => r.workflowType === 'consent-no-prefill' || r.workflowType === 'consent-cm-prefill');
-        const approval = filtered.find(r => r.documentType === 'assessment_approval_letter');
-        const denial = filtered.find(r => r.documentType === 'assessment_denial_letter');
+        const approval = selectLatestSupportedSigningWorkflow(
+          rows,
+          'assessment_approval_letter'
+        );
+        const denial = selectLatestSupportedSigningWorkflow(
+          rows,
+          'assessment_denial_letter'
+        );
         if (!cancelled) {
           setLetterWorkflows({
             approval: approval?.id || null,
@@ -4063,7 +4169,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     if (caseData?.lock_owner_user_id || caseData?.lock_owner_display_name || caseData?.lock_owner_email) {
       return {
-        applicationId: application_id || caseData?.application_id || null,
+        applicationId: applicationId || null,
         ownerUserId: caseData?.lock_owner_user_id ? String(caseData.lock_owner_user_id) : null,
         ownerDisplayName: caseData?.lock_owner_display_name || null,
         ownerEmail: caseData?.lock_owner_email || null,
@@ -4076,8 +4182,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     return null;
   }, [
-    application_id,
-    caseData?.application_id,
+    applicationId,
     caseData?.lock_expires_at,
     caseData?.lock_owner_display_name,
     caseData?.lock_owner_email,
@@ -6552,7 +6657,8 @@ const CoordinatorAssessmentWidget = forwardRef(
     updateRowVersion
   ]);
   const ensureLockForOperation = useCallback(async () => {
-    if (!application_id) {
+    const lockApplicationId = Number(applicationId);
+    if (!Number.isInteger(lockApplicationId) || lockApplicationId < 1) {
       showLockAlert({ reason: 'invalid_application_id' }, 'error');
       return { ok: false, localOwner: false };
     }
@@ -6575,7 +6681,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   }, [
     acquireLock,
     activeLock,
-    application_id,
+    applicationId,
     lockHeldByCurrentUser,
     lockedByAnotherUser,
     lockState.owned,
@@ -7847,23 +7953,48 @@ ${JSON.stringify(aiContext, null, 2)}`;
       setSendingLetterError('Letter workflow is not configured yet.');
       return { ok: false };
     }
+    if (decisionLetterSendInFlightRef.current) {
+      return { ok: false, reason: 'in_flight' };
+    }
+    decisionLetterSendInFlightRef.current = true;
     setSendingLetter(true);
     setSendingLetterError(null);
     try {
+      const sourceLetterDraft = {
+        ...(activeLetterDraft || {}),
+        decision_date: null,
+      };
+      const draftIntentFingerprint = JSON.stringify({
+        caseId,
+        applicationId: applicationId || null,
+        letterKey: activeLetterKey,
+        workflowId: letterWorkflowId,
+        actionPlanId:
+          activeLetterKey === 'approval' && selectedFundingActionPlanId
+            ? selectedFundingActionPlanId
+            : null,
+        applicantName: applicantName || 'Applicant',
+        senderName: currentUserName || 'Case Worker',
+        letterDraft: sourceLetterDraft,
+      });
+      const retainedSendAttempt =
+        decisionLetterSendAttemptRef.current?.fingerprint === draftIntentFingerprint
+          ? decisionLetterSendAttemptRef.current
+          : null;
       const sendDecisionDate = formatDate(new Date());
-      const refreshedActiveLetterDraft = {
-        ...activeLetterDraft,
-        decision_date: sendDecisionDate
-      };
-      const refreshedLetterDrafts = {
-        ...(letterDrafts || {}),
-        [activeLetterKey]: refreshedActiveLetterDraft
-      };
+      const refreshedActiveLetterDraft = retainedSendAttempt?.refreshedActiveLetterDraft
+        ? { ...retainedSendAttempt.refreshedActiveLetterDraft }
+        : {
+            ...activeLetterDraft,
+            decision_date: sendDecisionDate
+          };
+      const refreshedLetterDrafts = retainedSendAttempt?.refreshedLetterDrafts
+        ? { ...retainedSendAttempt.refreshedLetterDrafts }
+        : {
+            ...(letterDrafts || {}),
+            [activeLetterKey]: refreshedActiveLetterDraft
+          };
       setLetterDrafts(refreshedLetterDrafts);
-      const saved = await persistLetterDraft({ silent: true, letterDraftsOverride: refreshedLetterDrafts });
-      if (!saved.ok) {
-        throw new Error('Save the letter draft before sending.');
-      }
       const subject =
         activeLetterKey === 'approval'
           ? 'Letter of Approval'
@@ -7880,19 +8011,52 @@ ${JSON.stringify(aiContext, null, 2)}`;
         (activeLetterKey === 'approval'
           ? 'Please review your approval letter in the portal.'
           : 'Please review your decision letter in the portal.');
-      const payload = {
+      const sendIntent = {
+        caseId,
+        letterKey: activeLetterKey,
         subject,
         body,
         urgent: false,
         toDisplayName: applicantName || 'Applicant',
         fromDisplayName: currentUserName || 'Case Worker',
-        attachments: [{ workflow_id: letterWorkflowId }]
+        attachments: [{ workflow_id: letterWorkflowId }],
+        applicationId: applicationId || null,
+        actionPlanId:
+          activeLetterKey === 'approval' && selectedFundingActionPlanId
+            ? selectedFundingActionPlanId
+            : null,
       };
-      if (applicationId) {
-        payload.applicationId = applicationId;
-      }
-      if (saved.updatedRowVersion) {
-        payload.expectedApplicationRowVersion = saved.updatedRowVersion;
+      const sendIntentFingerprint = draftIntentFingerprint;
+      let saved = retainedSendAttempt?.saved || null;
+      let payload = retainedSendAttempt
+        ? { ...retainedSendAttempt.payload }
+        : null;
+      if (!payload) {
+        saved = await persistLetterDraft({ silent: true, letterDraftsOverride: refreshedLetterDrafts });
+        if (!saved.ok) {
+          throw new Error('Save the letter draft before sending.');
+        }
+        payload = {
+          subject: sendIntent.subject,
+          body: sendIntent.body,
+          urgent: sendIntent.urgent,
+          toDisplayName: sendIntent.toDisplayName,
+          fromDisplayName: sendIntent.fromDisplayName,
+          attachments: sendIntent.attachments,
+          clientOperationId: buildUuid(),
+          ...(sendIntent.applicationId ? { applicationId: sendIntent.applicationId } : {}),
+          ...(sendIntent.actionPlanId ? { actionPlanId: sendIntent.actionPlanId } : {}),
+          ...(saved.updatedRowVersion
+            ? { expectedApplicationRowVersion: saved.updatedRowVersion }
+            : {}),
+        };
+        decisionLetterSendAttemptRef.current = {
+          fingerprint: sendIntentFingerprint,
+          payload: { ...payload },
+          saved: { ...saved },
+          refreshedActiveLetterDraft: { ...refreshedActiveLetterDraft },
+          refreshedLetterDrafts: { ...refreshedLetterDrafts },
+        };
       }
       const response = await apiFetch(`/api/cases/${caseId}/messages`, {
         method: 'POST',
@@ -7913,16 +8077,25 @@ ${JSON.stringify(aiContext, null, 2)}`;
             detail = responseData.message || responseData.error || '';
           }
         }
-        throw new Error(detail || 'Failed to send the decision letter.');
+        const sendError = new Error(detail || 'Failed to send the decision letter.');
+        sendError.code = responseData?.error || null;
+        throw sendError;
       }
+      decisionLetterSendAttemptRef.current = null;
+      setServerDemandedFundingActionPlan(false);
       setAlert({
         type: 'success',
         content: 'Decision letter sent to the applicant.',
         dismissible: true,
         statusIconAriaLabel: 'Success'
       });
-      dispatchSupportingDocsRefresh();
-      await loadDocumentChecklist();
+      try {
+        dispatchSupportingDocsRefresh();
+        await loadDocumentChecklist();
+      } catch (_) {
+        // The server has already confirmed the send. A refresh failure must not
+        // turn that committed operation into a second intentional send.
+      }
       const serverPersistence =
         responseData?.decisionLetterPersistence || responseData?.denialLetterCompletion || null;
       if (serverPersistence?.letterKey === activeLetterKey) {
@@ -7955,9 +8128,20 @@ ${JSON.stringify(aiContext, null, 2)}`;
         applicationCompleted: false
       };
     } catch (err) {
+      if (new Set([
+        'cfa_action_plan_selection_required',
+        'cfa_action_plan_scope_conflict',
+        'cfa_action_plan_unavailable',
+      ]).has(err?.code)) {
+        setServerDemandedFundingActionPlan(true);
+        setSelectedFundingActionPlanId(null);
+        await loadFundingActionPlans();
+        setShowSendApprovalLetterConfirmModal(true);
+      }
       setSendingLetterError(err?.message || 'Failed to send the decision letter.');
       return { ok: false, error: err };
     } finally {
+      decisionLetterSendInFlightRef.current = false;
       setSendingLetter(false);
     }
   };
@@ -8789,7 +8973,13 @@ ${JSON.stringify(aiContext, null, 2)}`;
       return;
     }
     if (decisionOutcome === 'approved') {
+      setSendingLetterError(null);
       setShowSendApprovalLetterConfirmModal(true);
+      if (fundingActionPlanRequired) {
+        setFundingActionPlansLoaded(false);
+        setSelectedFundingActionPlanId(null);
+        loadFundingActionPlans();
+      }
       return;
     }
     setHasSubmitted(true);
@@ -8833,11 +9023,32 @@ ${JSON.stringify(aiContext, null, 2)}`;
     });
   };
   const handleConfirmSendApprovalLetter = async () => {
-    if (sendingLetter) return;
-    setShowSendApprovalLetterConfirmModal(false);
+    if (sendingLetter || decisionLetterSendInFlightRef.current) return;
+    if (fundingActionPlanRequired && fundingActionPlansLoading) return;
+    if (
+      fundingActionPlanRequired &&
+      fundingActionPlansLoaded &&
+      fundingActionPlans.length > 1 &&
+      !selectedFundingActionPlanId
+    ) {
+      setSendingLetterError('Choose the Action Plan for this funding agreement.');
+      return;
+    }
+    if (
+      fundingActionPlanRequired &&
+      fundingActionPlansLoaded &&
+      fundingActionPlans.length === 0
+    ) {
+      setSendingLetterError('This application has no open Action Plan available for a funding agreement.');
+      return;
+    }
     setHasSubmitted(true);
     const letterResult = await handleSendDecisionLetter();
-    if (!letterResult.ok) return;
+    if (!letterResult.ok) {
+      setHasSubmitted(false);
+      return;
+    }
+    setShowSendApprovalLetterConfirmModal(false);
     setHasSubmitted(false);
   };
   const handleWizardNavigate = async ({ detail }) => {
@@ -12281,7 +12492,12 @@ ${JSON.stringify(aiContext, null, 2)}`;
         {checklistUploadModal}
         <Modal
           visible={showSendApprovalLetterConfirmModal}
-          onDismiss={() => setShowSendApprovalLetterConfirmModal(false)}
+          onDismiss={() => {
+            if (sendingLetter) return;
+            setShowSendApprovalLetterConfirmModal(false);
+            setSendingLetterError(null);
+            setHasSubmitted(false);
+          }}
           header="Send Client Approval letter?"
           footer={
             <SpaceBetween direction="horizontal" size="xs">
@@ -12289,12 +12505,27 @@ ${JSON.stringify(aiContext, null, 2)}`;
                 variant="primary"
                 onClick={handleConfirmSendApprovalLetter}
                 loading={sendingLetter}
+                disabled={
+                  fundingActionPlansLoading ||
+                  (
+                    fundingActionPlanRequired &&
+                    fundingActionPlansLoaded &&
+                    (
+                      fundingActionPlans.length === 0 ||
+                      (fundingActionPlans.length > 1 && !selectedFundingActionPlanId)
+                    )
+                  )
+                }
               >
                 Send Client Approval letter
               </Button>
               <Button
                 variant="normal"
-                onClick={() => setShowSendApprovalLetterConfirmModal(false)}
+                onClick={() => {
+                  setShowSendApprovalLetterConfirmModal(false);
+                  setSendingLetterError(null);
+                  setHasSubmitted(false);
+                }}
                 disabled={sendingLetter}
               >
                 Cancel
@@ -12303,11 +12534,51 @@ ${JSON.stringify(aiContext, null, 2)}`;
           }
         >
           <SpaceBetween size="s">
+            {sendingLetterError ? (
+              <Alert type="error" statusIconAriaLabel="Error">
+                {sendingLetterError}
+              </Alert>
+            ) : null}
             <Box>
-              {approvalHasFundingPackage
+              {fundingActionPlanRequired
                 ? 'This will send the Letter of Approval to the client with attached Client Funding Agreement and EFT/Wire Transfer form for completion.'
                 : 'This will send the Letter of Approval to the client. No Client Funding Agreement or funding forms will be attached because the approved intervention does not include funded cost lines.'}
             </Box>
+            {fundingActionPlanRequired ? (
+              <FormField
+                label="Action Plan for the funding agreement"
+                description="Only open Action Plans belonging to this application are available."
+                errorText={
+                  fundingActionPlansLoaded && fundingActionPlans.length > 1 && !selectedFundingActionPlanId
+                    ? 'Choose an Action Plan.'
+                    : undefined
+                }
+              >
+                {fundingActionPlansLoading ? (
+                  <StatusIndicator type="loading">Loading Action Plans</StatusIndicator>
+                ) : fundingActionPlanSelectOptions.length ? (
+                  <Select
+                    selectedOption={selectedFundingActionPlanOption}
+                    onChange={({ detail }) => {
+                      const value = Number(detail.selectedOption?.value);
+                      setSelectedFundingActionPlanId(Number.isInteger(value) && value > 0 ? value : null);
+                      setSendingLetterError(null);
+                    }}
+                    options={fundingActionPlanSelectOptions}
+                    placeholder="Choose an Action Plan"
+                    disabled={sendingLetter || fundingActionPlanSelectOptions.length === 1}
+                  />
+                ) : fundingActionPlansLoaded ? (
+                  <Alert type="error" statusIconAriaLabel="Error">
+                    This application has no open Action Plan available for a funding agreement.
+                  </Alert>
+                ) : fundingActionPlansError ? (
+                  <Alert type="warning" statusIconAriaLabel="Warning">
+                    {fundingActionPlansError}
+                  </Alert>
+                ) : null}
+              </FormField>
+            ) : null}
             <Box>
               Institution letters and letters to other funders are not sent by the system. Send those manually as needed.
             </Box>

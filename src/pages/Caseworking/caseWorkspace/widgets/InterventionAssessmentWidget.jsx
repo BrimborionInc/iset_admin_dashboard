@@ -48,6 +48,7 @@ import {
   canRecallInterventionAssessmentSubmission,
 } from "../../../../utils/interventionAssessmentEditAccess.js";
 import { isActionPlanSelectableForApplication } from "../../../../utils/interventionApplicationPlanScope.js";
+import { selectLatestSupportedSigningWorkflow } from "../../../../lib/signingWorkflowAvailability.js";
 import styles from "./InterventionAssessmentWidget.module.css";
 
 const BARRIER_OPTIONS = [
@@ -895,6 +896,48 @@ const buildUuid = () => {
     return crypto.randomUUID();
   }
   return `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+};
+
+export const beginRetainedSecureMessageSendAttempt = ({
+  inFlightRef,
+  attemptRef,
+  fingerprint,
+  createPayload,
+} = {}) => {
+  if (!inFlightRef || !attemptRef || typeof createPayload !== "function") {
+    throw new Error("secure_message_send_attempt_invalid");
+  }
+  if (inFlightRef.current) return null;
+  inFlightRef.current = true;
+
+  let attempt = attemptRef.current?.fingerprint === fingerprint
+    ? attemptRef.current
+    : null;
+  try {
+    if (!attempt) {
+      attempt = {
+        fingerprint,
+        payload: createPayload(),
+      };
+      attemptRef.current = attempt;
+    }
+  } catch (error) {
+    inFlightRef.current = false;
+    throw error;
+  }
+
+  let finished = false;
+  return {
+    payload: { ...attempt.payload },
+    finish: ({ committed = false } = {}) => {
+      if (finished) return;
+      finished = true;
+      if (committed && attemptRef.current === attempt) {
+        attemptRef.current = null;
+      }
+      inFlightRef.current = false;
+    },
+  };
 };
 
 const normalizeOtherFundingInvolved = value => {
@@ -1754,6 +1797,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const [editableLoanProviderApprovalLetters, setEditableLoanProviderApprovalLetters] = useState([]);
   const [sendingLetter, setSendingLetter] = useState(false);
   const [sendingLetterError, setSendingLetterError] = useState(null);
+  const decisionLetterSendInFlightRef = useRef(false);
+  const decisionLetterSendAttemptRef = useRef(null);
   const [showSendApprovalLetterConfirmModal, setShowSendApprovalLetterConfirmModal] = useState(false);
   const [eiVerificationFile, setEiVerificationFile] = useState(null);
   const [eiVerificationFileError, setEiVerificationFileError] = useState(null);
@@ -2911,30 +2956,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         const resp = await apiFetch("/api/workflows");
         if (!resp.ok) throw new Error(`Failed to load letter workflows (${resp.status})`);
         const rows = await resp.json().catch(() => []);
-        const list = Array.isArray(rows) ? rows : [];
-        const normalizeDocType = value => String(value || "").trim().toLowerCase();
-        const chooseBest = (current, candidate) => {
-          if (!candidate) return current;
-          if (!current) return candidate;
-          const statusRank = value => {
-            const key = String(value || "").trim().toLowerCase();
-            if (key === "active") return 3;
-            if (key === "draft") return 2;
-            return 1;
-          };
-          const currentRank = statusRank(current.status);
-          const candidateRank = statusRank(candidate.status);
-          if (candidateRank > currentRank) return candidate;
-          if (candidateRank < currentRank) return current;
-          return Number(candidate.id || 0) > Number(current.id || 0) ? candidate : current;
-        };
-        let approval = null;
-        list.forEach(row => {
-          const docType = normalizeDocType(row?.document_type);
-          if (docType === "assessment_approval_letter") {
-            approval = chooseBest(approval, row);
-          }
-        });
+        const list = Array.isArray(rows) ? rows : Array.isArray(rows?.data) ? rows.data : [];
+        const approval = selectLatestSupportedSigningWorkflow(
+          list,
+          "assessment_approval_letter"
+        );
         if (!cancelled) {
           setLetterWorkflows({
             approval: approval?.id ? Number(approval.id) : null,
@@ -5762,45 +5788,70 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     ? letterWorkflows.approval
     : null;
   const handleSendDecisionLetter = useCallback(async ({ interventionId: requestedInterventionId } = {}) => {
-    if (!caseId || !activeLetterWorkflowId) {
+    if (!caseId) {
+      setSendingLetterError("The case is not available for this approval letter.");
+      return { ok: false };
+    }
+    if (!activeLetterWorkflowId) {
       setSendingLetterError("Letter workflow is not configured yet.");
       return { ok: false };
     }
-      setSendingLetter(true);
-      setSendingLetterError(null);
-      try {
-      const subject = isApprovedDecisionOutcome
+    const parsedInterventionId = Number(requestedInterventionId);
+    if (!Number.isInteger(parsedInterventionId) || parsedInterventionId < 1) {
+      setSendingLetterError("Select the exact approved intervention before sending its approval letter.");
+      return { ok: false, reason: "intervention_id_required" };
+    }
+    const subject = isApprovedDecisionOutcome
+      ? (isRevisionMode
+        ? (approvalHasFundingPackage ? "Funding Revision Approval" : "Intervention Change Approval")
+        : "Letter of Approval")
+      : "";
+    const body = String(clientLetterBody || "").trim()
+      || (isApprovedDecisionOutcome
         ? (isRevisionMode
-          ? (approvalHasFundingPackage ? "Funding Revision Approval" : "Intervention Change Approval")
-          : "Letter of Approval")
-        : "";
-      const body = String(clientLetterBody || "").trim()
-        || (isApprovedDecisionOutcome
-          ? (isRevisionMode
-            ? (approvalHasFundingPackage
-              ? "Please review your funding revision letter in the portal."
-              : "Please review your intervention change approval letter in the portal.")
-            : "Please review your approval letter in the portal.")
-          : "");
-      const payload = {
-        subject,
-        body,
-        urgent: false,
-        toDisplayName: participantLegalName || applicantSalutationName || "Applicant",
-        fromDisplayName: currentUserName || "Case Worker",
-        attachments: [{ workflow_id: activeLetterWorkflowId }],
-      };
-      if (applicationId) {
-        payload.applicationId = applicationId;
-      }
-      const parsedInterventionId = Number.parseInt(requestedInterventionId, 10);
-      if (Number.isInteger(parsedInterventionId) && parsedInterventionId > 0) {
-        payload.interventionId = parsedInterventionId;
-      }
+          ? (approvalHasFundingPackage
+            ? "Please review your funding revision letter in the portal."
+            : "Please review your intervention change approval letter in the portal.")
+          : "Please review your approval letter in the portal.")
+        : "");
+    const sendIntent = {
+      caseId,
+      applicationId: applicationId || null,
+      interventionId: parsedInterventionId,
+      subject,
+      body,
+      urgent: false,
+      toDisplayName: participantLegalName || applicantSalutationName || "Applicant",
+      fromDisplayName: currentUserName || "Case Worker",
+      attachments: [{ workflow_id: activeLetterWorkflowId }],
+    };
+    const sendIntentFingerprint = JSON.stringify(sendIntent);
+    const sendAttempt = beginRetainedSecureMessageSendAttempt({
+      inFlightRef: decisionLetterSendInFlightRef,
+      attemptRef: decisionLetterSendAttemptRef,
+      fingerprint: sendIntentFingerprint,
+      createPayload: () => ({
+        subject: sendIntent.subject,
+        body: sendIntent.body,
+        urgent: sendIntent.urgent,
+        toDisplayName: sendIntent.toDisplayName,
+        fromDisplayName: sendIntent.fromDisplayName,
+        attachments: sendIntent.attachments,
+        clientOperationId: buildUuid(),
+        ...(sendIntent.applicationId ? { applicationId: sendIntent.applicationId } : {}),
+        interventionId: sendIntent.interventionId,
+      }),
+    });
+    if (!sendAttempt) {
+      return { ok: false, reason: "in_flight" };
+    }
+    setSendingLetter(true);
+    setSendingLetterError(null);
+    try {
       const response = await apiFetch(`/api/cases/${caseId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(sendAttempt.payload),
       });
       if (!response.ok) {
         let detail = "";
@@ -5818,11 +5869,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         }
         throw new Error(detail || "Failed to send the approval letter.");
       }
+      sendAttempt.finish({ committed: true });
       return { ok: true };
     } catch (err) {
       setSendingLetterError(err?.message || "Failed to send the approval letter.");
       return { ok: false, error: err };
     } finally {
+      sendAttempt.finish();
       setSendingLetter(false);
     }
   }, [

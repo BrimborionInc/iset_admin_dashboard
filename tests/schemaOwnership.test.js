@@ -6,8 +6,7 @@ const read = filename => fs.readFileSync(filename, 'utf8');
 
 describe('canonical runtime schema ownership', () => {
   test('admin, portal, AI guidance, and shared event runtime paths contain no schema DDL', () => {
-    const admin = read(path.join(root, 'isetadminserver.js'))
-      .replace(/await connection\.query\(`ALTER TABLE \$\{tableName\} AUTO_INCREMENT = 1`\);/u, '');
+    const admin = read(path.join(root, 'isetadminserver.js'));
     const sources = [
       admin,
       read(path.join(root, 'src', 'server', 'adminAiGuidanceService.js')),
@@ -45,4 +44,3 @@ describe('canonical runtime schema ownership', () => {
     expect(admin).not.toMatch(/ALTER TABLE esdc_participant_submission_history/u);
   });
 });
-
