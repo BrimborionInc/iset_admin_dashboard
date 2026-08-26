@@ -1,7 +1,7 @@
 # Feedback 196 Applicationless Signing-Lineage Repair
 
-Status: **Corrected `r2` TEST acceptance passed; PROD remains NO-GO.** The clean-source application/schema rollout and the focused Regional Manager Decision Letter journey passed in TEST. PROD remains unchanged and read-only; this evidence does not waive the existing PROD release-control blocker or authorize deployment.
-Last updated: 2026-08-25.
+Status: **Corrected `r2` TEST acceptance passed; PROD app cutover is pending a TEST-proven deployer correction.** Bill authorized the PROD release. Its first orchestrated attempt applied the two additive migrations and staged immutable artifacts, then stopped before refresh on an unnecessary object-tagging permission check. The prior application release remains live behind all-surface fallback.
+Last updated: 2026-08-26.
 
 ## Reported journey
 
@@ -82,7 +82,7 @@ A subsequent hostile pass rejected another intermediate checkpoint. Blank Cognit
 
 The same pass exercised asynchronous browser interleavings introduced or touched by this release. A delayed reply-status acknowledgement can no longer clear attachments or display success after the applicant has navigated to another reply target. A delayed signing response can no longer mark a newly opened document as submitted, replace it with the former document's error, or continue retrying the former request. Disabled messaging guidance distinguishes an unassigned case from a missing staff-user mapping and is not shown in Deleted items. Each case has a deferred-promise navigation regression.
 
-The release-control audit separately rejected TEST deployment until all remote staging occurs after a durable manifest and local admission, retired harness files are absent from real archives, the exact detached clean sources are enforced, and a two-application TEST install can automatically restore both previously running applications after any partial failure. The earlier dirty `r1` artifacts are not trusted as rollback sources. PROD remains blocked additionally by existing `EA-028`; this work does not authorize or perform a PROD change.
+The release-control audit separately rejected TEST deployment until all remote staging occurs after a durable manifest and local admission, retired harness files are absent from real archives, the exact detached clean sources are enforced, and a two-application TEST install can automatically restore both previously running applications after any partial failure. The earlier dirty `r1` artifacts are not trusted as rollback sources. `EA-028` remains separately planned; before its activation a PROD release uses all-surface fallback and a verified exact prior compatibility-artifact recovery set.
 
 These corrections are backed by both permissive and restrictive regressions: applicationless history, sibling applications, unlinked/blank legacy identities, old typed participants, attachment application differences, index failure, and text-only historical replies remain usable; concrete participant or hard ownership contradictions stop only the affected form or disclosure boundary, and every injected failure proves rollback/no residue.
 
@@ -101,6 +101,12 @@ Focused acceptance used the dedicated Cognito identity as staff profile `61753`,
 The focused pre-send state was then restored only on the synthetic TEST fixture. Product API generation created exact application `811` / Action Plan `361` CFA draft `135`, series `130`, version `3`. Live TEST identity, full `iset_case` DDL, and live `JSON_EXTRACT`, `JSON_UNQUOTE`, and `JSON_REMOVE` metadata were proved before a guarded reset removed only the prior synthetic approval-sent marker; SSM command `60786bdb-300e-48a0-bb76-3d75cef273ed` verified the resulting context. The exact application Decision Letter request then supplied workflow `46`, application `811`, and a stable client operation ID, with no Action Plan or intervention field. It returned `201 Message sent`, message `299`. The server reused draft `135` and changed it from `draft` to `sent` without creating version `4`; older applicationless CFA `132`, series `130`, version `1`, Action Plan `360`, remained `sent`. The Cognito user was globally signed out and returned to `FORCE_CHANGE_PASSWORD`, and the tunnel was closed.
 
 This is the focused deployed TEST result for feedback `#196`: unrelated applicationless history no longer blocks the Regional Manager application Decision Letter send. It does not authorize or perform any PROD change.
+
+## 2026-08-26 PROD pre-refresh stop and deployer correction
+
+Bill explicitly authorized the PROD deployment. Orchestrator run `20260825-signing-lineage-r2--2026-08-26T03-36-58-254Z` recorded `UNQUALIFIED`, captured available restore point `path-prod-20260825-signing-lineage-r2-20260826034332`, and successfully applied/verified both additive migrations. It then uploaded all three SHA-addressed immutable artifacts and the complete release descriptor. During compatibility promotion, shared was copied, the admin copy was denied on `s3:GetObjectTagging`, and the orchestrator restored the attempted shared/admin aliases from its snapshots. Portal promotion was never attempted and no ASG refresh began. Read-only verification proved all three compatibility artifacts exactly match prior release `20260824-path-maintenance-r1`; that prior application runtime remains healthy behind all-surface fallback with the forward-compatible schema.
+
+The denial came from AWS CLI v2's default S3-to-S3 copy-properties mode, which attempts to preserve object tags. PATH does not attach tags to these artifacts; it requires only the `sha256` user metadata. The narrow correction makes verified alias copies pass `--copy-props metadata-directive`, retaining the metadata while avoiding unnecessary tagging APIs. A focused maintained regression passes `62/62`. No IAM widening, compatibility-only downgrade, database restore, case repair, or app cutover is warranted. The corrected helper must be exercised through TEST before the normal PROD orchestrator is retried.
 
 ## 2026-08-25 DEV and TEST evidence
 

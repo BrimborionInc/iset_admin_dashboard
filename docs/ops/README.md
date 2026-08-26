@@ -1,7 +1,7 @@
 # Operations Docs
 
 Status: operational guidance and runbooks. Verify before acting.
-Last reviewed: 2026-08-25 after the retired qualification-runbook pointer was removed.
+Last reviewed: 2026-08-26 after the feedback `#196` PROD pre-refresh stop was recorded.
 
 This directory contains deployment guides, environment guides, migration-runner notes, incident notes, and infrastructure runbooks. Operational docs can become dangerous when stale, so treat code, package scripts, AWS/DB live checks, and current `docs/AGENTS.md` guardrails as higher authority.
 
@@ -15,7 +15,7 @@ This directory contains deployment guides, environment guides, migration-runner 
 - For PROD NAT gateway consolidation, use `runbooks/prod-nat-gateway-consolidation.md`; current live state keeps only the `ca-central-1d` NAT and the temporary policy `NWACProdNatConsolidationTemporaryOperator` should be removed after the rollback watch window.
 - For TEST environment work, use `environments/test-env-config-map.md`, `environments/test-env-db-refresh.md`, and current rehearsal notes when relevant.
 - For feedback `#179`, use `feedback-179-amanda-response-draft-20260809.md` together with the testing assurance and future PROD rollout plan; the email remains a draft until the exact live Application 123 recheck is complete.
-- For feedback `#196`, use `feedback-196-applicationless-signing-lineage.md`; the first deployed TEST acceptance is superseded, the corrected `r2` candidate has passed its hostile local audit and maintained gates, and PROD remains unchanged and **NO-GO** pending a clean-source TEST release and fresh product-path acceptance.
+- For feedback `#196`, use `feedback-196-applicationless-signing-lineage.md`; corrected `r2` passed its clean-source TEST acceptance, the first authorized PROD attempt applied its additive schema but stopped before app refresh on a deployer copy-mode regression, and the prior app release remains live behind fallback pending TEST proof of the narrow correction.
 - For privacy ERM migration work, use `environments/privacy-erm-grand-cleanup-rehearsal.md` with the controlling planning docs.
 - For Terraform, use `runbooks/` and verify against `infra/terraform/`.
 

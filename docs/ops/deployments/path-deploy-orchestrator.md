@@ -1,7 +1,7 @@
 # PATH Deploy Orchestrator
 
 Status: current deployment control-plane reference.
-Last reviewed: 2026-08-25 after a full unqualified PROD release revalidated immutable staging and the target-gated single-instance handoff.
+Last reviewed: 2026-08-26 after the immutable-to-compatibility copy contract was made metadata-only.
 
 Start with the short operator runbook in `docs/ops/deployments/deployment-quick-guide.md` if you just need the normal commands.
 
@@ -13,6 +13,8 @@ Operator runtime caveat: in the current Codex sandbox, the trusted operator AWS 
 TEST app rollout is WSL-native in `scripts/path-deploy.js`: it builds/packages the WSL admin repo, sibling portal repo, and sibling shared tree, uploads artifacts with WSL AWS CLI, and runs the in-place SSM update commands directly. Do not route TEST deploys through stale Windows checkout instructions.
 Since 2026-06-08, TEST is cost-pruned to one steady-state app instance and one NAT gateway. The orchestrator already discovers healthy `nwac-test-asg` instances dynamically, so a current TEST deploy normally updates one host. Do not hard-code old TEST instance IDs or require two target-group targets when reading smoke output.
 PROD app rollout is also WSL-native in `scripts/path-deploy.js`. It stages SHA-256-addressed immutable component objects and, for a complete shared/admin/portal release, one checksummed descriptor before refresh. It currently also updates `shared/shared-latest.zip`, `admin/admin-dashboard-latest.zip`, and `portal/portal-latest.zip` because the live bootstrap has not yet been activated to consume descriptors; this compatibility path remains the planned `EA-028` boundary and is not atomic.
+
+Immutable-to-compatibility S3 copies must use `--copy-props metadata-directive`. PATH records and verifies the archive SHA-256 as S3 user metadata but does not use object tags. Leaving AWS CLI v2 on its default copy mode can add unnecessary `GetObjectTagging` and `PutObjectTagging` calls and make the reduced PROD operator fail before refresh. Do not widen IAM for tagging or use `--copy-props none`; the former is unnecessary and the latter drops the verified SHA metadata. Treat an object-tagging denial in this helper as a deployer regression, keep fallback active, verify the compatibility aliases, and correct/prove the helper in TEST before retrying PROD.
 
 Use this from the WSL admin repo:
 

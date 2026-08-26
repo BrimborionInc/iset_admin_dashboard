@@ -25,6 +25,7 @@ const {
   buildAdminTestRemoteCommands,
   buildGitRepoState,
   buildReleaseId,
+  buildVerifiedS3ArtifactCopyArgs,
   buildPortalTestRemoteCommands,
   buildRemoteServiceHealthCommands,
   buildTestAtomicPrepareCommands,
@@ -605,6 +606,19 @@ describe('release admission', () => {
     expect(() => assertStagedArtifactUnchanged(artifact, 'admin'))
       .toThrow('Staged admin artifact changed before upload');
     fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('verified S3 artifact copies preserve metadata without requesting object tags', () => {
+    expect(buildVerifiedS3ArtifactCopyArgs({
+      bucket: 'artifact-bucket',
+      sourceKey: 'releases/release-1/admin/admin-sha.zip',
+      destinationKey: 'admin/admin-dashboard-latest.zip',
+    })).toEqual([
+      's3', 'cp',
+      's3://artifact-bucket/releases/release-1/admin/admin-sha.zip',
+      's3://artifact-bucket/admin/admin-dashboard-latest.zip',
+      '--copy-props', 'metadata-directive',
+    ]);
   });
 
   test('TEST app deployment rejects every dirty source repository before packaging', () => {

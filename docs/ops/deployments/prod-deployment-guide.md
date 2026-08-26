@@ -1,7 +1,7 @@
 # Prod Deployment Guide
 
 Status: current WSL-native PROD deployment guide. Verify live AWS state before any mutating command.
-Last reviewed: 2026-08-25 after full release `20260824-path-maintenance-r1`.
+Last reviewed: 2026-08-26 after the `20260825-signing-lineage-r2` pre-refresh copy stop.
 
 Use `deployment-quick-guide.md` for the current authorization and execution sequence. The retired qualification runbook remains historical evidence only. Current deploys use `--skip-qualification --yes`, record `UNQUALIFIED`, and retain ordinary source/build/product-test/lint/privacy/deploy/smoke controls.
 
@@ -21,6 +21,7 @@ This guide records the PROD safety sequence. The active app artifact rollout is 
 - Uploading artifacts does not update the live instance by itself. The orchestrator and the low-level manual flow both trigger a prod instance refresh after uploads.
 - The dedicated prod operator profile is `nwac-prod`. In the current Codex sandbox it assumes the reduced role `nwac-prod-codex-operator` from `default`; `default` is only the bootstrap IAM user and direct prod resource calls through it are expected to fail.
 - The reduced `nwac-prod` role covers compatibility-artifact deploys, prod SQL/dumps via SSM, ASG refresh, automatic prod restore-point capture, and the ALB `path:maintenance:fallback` flow. Customer-managed policy `PATHProdImmutableReleaseArtifacts`, attached on 2026-07-13, now also permits scoped immutable `releases/*` staging and read-back verification without delete. Release `20260713-prod-incident-requalification` proved the normal immutable-first portal path; `--compatibility-only` remains an explicit pre-EA-028 recovery, not the default. The role still does not cover broader infra/admin tasks such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
+- S3-to-S3 promotion deliberately uses `--copy-props metadata-directive`: it preserves the archive's required `sha256` user metadata without asking the reduced operator to read or write unused object tags. A `GetObjectTagging` or `PutObjectTagging` denial during promotion is a deploy-helper regression, not a reason to widen IAM. Keep fallback active, prove current aliases and refresh state, correct and exercise the helper in TEST, then rerun through the normal orchestrator.
 - In the current Codex sandbox, trusted operator AWS profiles live in the bash/WSL-side AWS CLI config. The PATH control-plane scripts already route AWS-backed checks through `bash`; if you write new operator helpers, follow the same pattern.
 - Current prod DB helper assumption: `nwac-prod-db-credentials` currently contains only `username` and `password`, so `bash scripts/run-prod-sql-via-ssm.sh` defaults the host/database/port to `nwac-prod-db.cluster-c3g4iamg8j38.ca-central-1.rds.amazonaws.com`, `iset_intake`, and `3306`.
 - `bash scripts/run-db-dump-via-ssm.sh` now exports temporary credentials from the active AWS profile before uploading the dump back to S3, so the role-backed `nwac-prod` profile works for prod dump capture as well.

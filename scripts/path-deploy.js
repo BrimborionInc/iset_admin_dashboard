@@ -1765,12 +1765,21 @@ function uploadContentAddressedArtifact({ archivePath, bucket, component, releas
   return immutable;
 }
 
-function copyVerifiedS3Artifact({ bucket, sourceKey, destinationKey, sha256, bytes, envConfig }) {
-  runAwsNoOutput([
+function buildVerifiedS3ArtifactCopyArgs({ bucket, sourceKey, destinationKey }) {
+  return [
     's3', 'cp',
     `s3://${bucket}/${sourceKey}`,
     `s3://${bucket}/${destinationKey}`,
-  ], envConfig);
+    '--copy-props', 'metadata-directive',
+  ];
+}
+
+function copyVerifiedS3Artifact({ bucket, sourceKey, destinationKey, sha256, bytes, envConfig }) {
+  runAwsNoOutput(buildVerifiedS3ArtifactCopyArgs({
+    bucket,
+    sourceKey,
+    destinationKey,
+  }), envConfig);
   const head = runAwsJson([
     's3api', 'head-object', '--bucket', bucket, '--key', destinationKey,
   ], envConfig);
@@ -4293,6 +4302,7 @@ module.exports = {
   assertStagedArtifactUnchanged,
   assertSafeReleaseId,
   buildReleaseId,
+  buildVerifiedS3ArtifactCopyArgs,
   buildPlanIntent,
   buildRemoteServiceHealthCommands,
   buildTestAtomicContext,
