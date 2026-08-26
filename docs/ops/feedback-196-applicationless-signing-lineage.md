@@ -1,6 +1,6 @@
 # Feedback 196 Applicationless Signing-Lineage Repair
 
-Status: **PROD NO-GO.** The first implementation and its TEST acceptance were re-audited before promotion and found incomplete. Corrective implementation and a new exact-source TEST qualification are required. PROD remains unchanged and read-only.
+Status: **Corrected `r2` TEST acceptance passed; PROD remains NO-GO.** The clean-source application/schema rollout and the focused Regional Manager Decision Letter journey passed in TEST. PROD remains unchanged and read-only; this evidence does not waive the existing PROD release-control blocker or authorize deployment.
 Last updated: 2026-08-25.
 
 ## Reported journey
@@ -88,7 +88,19 @@ These corrections are backed by both permissive and restrictive regressions: app
 
 The final maintained local gate passed `103` admin frontend suites / `637` tests and `68` backend/tooling suites / `767` tests (`1,404` total), plus `20` portal frontend suites / `97` tests and `297` portal backend tests (`394` total). Admin and portal lint and production builds passed; the admin privacy-route check, server/deploy/migration syntax checks, and both repository diff checks passed. The release-control failure-injection set passed `12` suites / `149` tests, including a final `3`-suite / `75`-test rerun after the last change. The maintained aggregate no longer requires retired qualification utilities to be packaged; no retired qualifier was run or repaired.
 
-These are local source gates, not deployed acceptance. A clean committed source candidate and new TEST deployment/product journey remain mandatory. No corrected `r2` TEST deployment has occurred at this point in the ledger, and PROD remains **NO-GO** and untouched.
+These local source gates were followed by the clean-source deployment and focused product-path evidence below. PROD remains **NO-GO** and untouched.
+
+## Corrected `r2` TEST deployment and focused bug acceptance
+
+Release `20260825-signing-lineage-r2` deployed once to TEST from clean detached sources: admin commit `8fcd9ab27f67f5da6f905a8c810419d8b3e253cb`, portal commit `9bd0f3bc75076dc9793eaeb490d645144c090a7f`, and unchanged shared commit `f81519d74ab0553b19713cff33961386dd0887da`. The release manifest is `/tmp/path-r2-release.C3gMzU/admin-dashboard/tmp/path-deploy/test/20260825-signing-lineage-r2--2026-08-26T02-38-14-463Z.json`, SHA-256 `1e96f736de77ae539ed05babf708e59d510d893751d4b473d2a4250e0caf68e0`. It records `successful`, clean-source rechecks, accepted two-application recovery state, successful prepare/cutover/postflight, healthy admin and portal targets, and promoted TEST aliases. The manifest truthfully records `UNQUALIFIED`; no retired qualifier or signing harness was used.
+
+The canonical TEST migration dispatch revalidated `20260825_0001_add_typed_cfa_funding_lineage.sql` with final operation states at target and applied/verified `20260825_0002_add_secure_message_send_idempotency.sql` with `message_send_operation` at target. Both bounded executors returned `COMPLETE`, no operational warning or failure, exact TEST account `124355655255`, database `iset_intake`, host `ip-172-16-0-199`, runtime user `app_admin@10.48.%`, and MySQL `8.0.42`. The release then passed normal-routing target smoke. TEST admin routing was left normal; the public TEST portal was returned to its required idle-protection page.
+
+Focused acceptance used the dedicated Cognito identity as staff profile `61753`, role `Regional Manager`, through a temporary Session Manager tunnel to the deployed TEST admin process. The retained `r1` fixture was already in a sent state and therefore could not be replayed unchanged. A first diagnostic request incorrectly supplied intervention `494`; it correctly returned `422 invalid_letter_attachment` because that invokes the separate intervention-proposal letter contract. The corrected application request omitted both `interventionId` and `actionPlanId`; while the old sent marker was still present it correctly returned `409 decision_letter_persistence_failed`. Both responses occurred inside the message transaction and produced no message/package write.
+
+The focused pre-send state was then restored only on the synthetic TEST fixture. Product API generation created exact application `811` / Action Plan `361` CFA draft `135`, series `130`, version `3`. Live TEST identity, full `iset_case` DDL, and live `JSON_EXTRACT`, `JSON_UNQUOTE`, and `JSON_REMOVE` metadata were proved before a guarded reset removed only the prior synthetic approval-sent marker; SSM command `60786bdb-300e-48a0-bb76-3d75cef273ed` verified the resulting context. The exact application Decision Letter request then supplied workflow `46`, application `811`, and a stable client operation ID, with no Action Plan or intervention field. It returned `201 Message sent`, message `299`. The server reused draft `135` and changed it from `draft` to `sent` without creating version `4`; older applicationless CFA `132`, series `130`, version `1`, Action Plan `360`, remained `sent`. The Cognito user was globally signed out and returned to `FORCE_CHANGE_PASSWORD`, and the tunnel was closed.
+
+This is the focused deployed TEST result for feedback `#196`: unrelated applicationless history no longer blocks the Regional Manager application Decision Letter send. It does not authorize or perform any PROD change.
 
 ## 2026-08-25 DEV and TEST evidence
 
