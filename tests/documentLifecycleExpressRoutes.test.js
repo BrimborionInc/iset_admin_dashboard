@@ -194,6 +194,15 @@ function createDocumentLifecycleDatabase() {
         ? [[clone(state.caseRow)], []]
         : [[], []];
     }
+    if (
+      normalized.includes('FROM iset_application a') &&
+      normalized.includes('JOIN iset_case c ON c.id = a.case_id') &&
+      normalized.includes('WHERE a.id = ?')
+    ) {
+      return Number(params[0]) === Number(state.caseRow.application_id)
+        ? [[{ id: state.caseRow.id }], []]
+        : [[], []];
+    }
 
     if (normalized.startsWith('SELECT cvd.document_id FROM cfa_version_documents cvd')) return [[], []];
     if (normalized.startsWith('SELECT fvd.document_id FROM funding_overview_version_documents fvd')) return [[], []];
@@ -453,12 +462,15 @@ describe('Supporting Documents lifecycle through the real Express routes', () =>
     if (syntheticTestEnvironment) expect(syntheticTestEnvironment.cleanup()).toBe(true);
   });
 
-  test.each([
-    ['System Administrator', 11, 1, 11, 1],
-    ['NWAC Administrator', 12, 1, 99, 2],
-    ['Regional Manager', 13, 1, 99, 1],
-    ['ISET Coordinator', 14, 1, 14, 2],
-  ])('%s can reversibly delete a manual upload inside normal scope', async (
+  test.each(
+    ['manual_upload', 'application_submission'].flatMap(source => [
+      ['System Administrator', 11, 1, 11, 1],
+      ['NWAC Administrator', 12, 1, 99, 2],
+      ['Regional Manager', 13, 1, 99, 1],
+      ['ISET Coordinator', 14, 1, 14, 2],
+    ].map(roleCase => [source, ...roleCase]))
+  )('%s: %s can reversibly delete an in-scope document', async (
+    source,
     role,
     actorId,
     actorRegionId,
@@ -473,6 +485,13 @@ describe('Supporting Documents lifecycle through the real Express routes', () =>
       owner_region_id: portfolioRegionId,
       portfolio_region_id: portfolioRegionId,
     };
+    const document = database.state.documents.get(1);
+    document.source = source;
+    if (source === 'application_submission') {
+      document.application_id = 20;
+      document.applicant_user_id = 30;
+      database.state.caseRow.application_id = 20;
+    }
 
     const response = await requestJson(server, '/api/documents/1', {
       method: 'DELETE',
@@ -489,6 +508,7 @@ describe('Supporting Documents lifecycle through the real Express routes', () =>
       lifecycle_generation: 1,
       deleted_by_staff_profile_id: actorId,
       delete_reason: 'Uploaded the wrong scan',
+      source_snapshot: source,
     });
     expect(database.state.events).toEqual([
       expect.objectContaining({
@@ -545,8 +565,8 @@ describe('Supporting Documents lifecycle through the real Express routes', () =>
     expect(database.state.transactionCounts.begun).toBe(0);
   });
 
-  test('an authoritative document is refused with a plain explanation before any transaction', async () => {
-    database.state.documents.get(1).source = 'application_submission';
+  test('a PATH-generated document is refused with a plain explanation before any transaction', async () => {
+    database.state.documents.get(1).source = 'system_generated';
 
     const response = await requestJson(server, '/api/documents/1', { method: 'DELETE' });
 
@@ -555,7 +575,29 @@ describe('Supporting Documents lifecycle through the real Express routes', () =>
       body: {
         error: 'document_immutable',
         reason: 'authoritative_source',
-        message: "PATH needs to keep this document in the applicant's file, so it can't be copied or deleted. You can still change its title or document type.",
+        message: "PATH needs to keep this document in the applicant's file, so it can't be deleted. You can still change its title or document type.",
+      },
+    });
+    expect(database.state.documents.get(1).status).toBe('active');
+    expect(database.state.transactionCounts.begun).toBe(0);
+  });
+
+  test('an applicant upload linked to a signing request remains protected', async () => {
+    const document = database.state.documents.get(1);
+    document.source = 'application_submission';
+    document.application_id = 20;
+    document.applicant_user_id = 30;
+    document.metadata = JSON.stringify({ signing_request_id: 81 });
+    database.state.caseRow.application_id = 20;
+
+    const response = await requestJson(server, '/api/documents/1', { method: 'DELETE' });
+
+    expect(response).toEqual({
+      status: 409,
+      body: {
+        error: 'document_immutable',
+        reason: 'signing_request_link',
+        message: "PATH needs to keep this document in the applicant's file, so it can't be deleted. You can still change its title or document type.",
       },
     });
     expect(database.state.documents.get(1).status).toBe('active');

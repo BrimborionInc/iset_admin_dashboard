@@ -35,6 +35,7 @@ function loadIntegrityGuard({ paymentLinkCount = 0 } = {}) {
     'normalisePositiveInteger',
     'normaliseString',
     'fetchDocumentPaymentLinkCount',
+    'parseMetadata',
     'pool',
     `${implementation}\nreturn validateGenericDocumentMutationIntegrity;`
   );
@@ -48,6 +49,46 @@ function loadIntegrityGuard({ paymentLinkCount = 0 } = {}) {
       return typeof value === 'string' && value.trim() ? value.trim() : null;
     },
     paymentLinkLookup,
+    value => {
+      if (!value) return null;
+      if (typeof value === 'object') return value;
+      try { return JSON.parse(value); } catch (_) { return null; }
+    },
+    { query: jest.fn() }
+  );
+  return { guard, paymentLinkLookup };
+}
+
+function loadArchiveIntegrityGuard({ paymentLinkCount = 0 } = {}) {
+  const start = serverSource.indexOf('const ARCHIVABLE_DOCUMENT_SOURCES');
+  const end = serverSource.indexOf('\nasync function fetchCaseAccessRowsForDocument', start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const implementation = serverSource.slice(start, end);
+  const paymentLinkLookup = jest.fn().mockResolvedValue(paymentLinkCount);
+  const factory = new Function(
+    'normalisePositiveInteger',
+    'normaliseString',
+    'fetchDocumentPaymentLinkCount',
+    'parseMetadata',
+    'pool',
+    `${implementation}\nreturn validateDocumentArchiveIntegrity;`
+  );
+  const guard = factory(
+    value => {
+      const numeric = Number(value);
+      return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+    },
+    value => {
+      if (value === null || typeof value === 'undefined') return null;
+      return typeof value === 'string' && value.trim() ? value.trim() : null;
+    },
+    paymentLinkLookup,
+    value => {
+      if (!value) return null;
+      if (typeof value === 'object') return value;
+      try { return JSON.parse(value); } catch (_) { return null; }
+    },
     { query: jest.fn() }
   );
   return { guard, paymentLinkLookup };
@@ -121,9 +162,8 @@ describe('generic Supporting Documents mutation integrity', () => {
     expect(allowlistSource).not.toContain("'application_submission'");
     expect(allowlistSource).not.toContain("'secure_message_attachment'");
     expect(allowlistSource).not.toContain("'system_generated'");
-    expect(helperSource).toContain('GENERICALLY_MUTABLE_DOCUMENT_SOURCES.has(source)');
-    expect(helperSource).toContain("buildImmutableDocumentMutationError('authoritative_source')");
-    expect(helperSource.trim().endsWith('return null;\n}')).toBe(true);
+    expect(helperSource).toContain('allowedSources: GENERICALLY_MUTABLE_DOCUMENT_SOURCES');
+    expect(helperSource).toContain("operation: 'copied'");
   });
 
   test.each(['manual_upload'])(
@@ -154,11 +194,72 @@ describe('generic Supporting Documents mutation integrity', () => {
           error: 'document_immutable',
           reason: 'authoritative_source',
           message:
-            "PATH needs to keep this document in the applicant's file, so it can't be copied or deleted. You can still change its title or document type.",
+            "PATH needs to keep this document in the applicant's file, so it can't be copied. You can still change its title or document type.",
         },
       });
     }
   );
+
+  test('Delete has a separate source boundary that includes applicant uploads only', () => {
+    const archiveStart = serverSource.indexOf('const ARCHIVABLE_DOCUMENT_SOURCES');
+    const genericStart = serverSource.indexOf('const GENERICALLY_MUTABLE_DOCUMENT_SOURCES');
+    const archiveAllowlistSource = serverSource.slice(archiveStart, genericStart);
+    const archiveGuardSource = extractFunction(
+      'validateDocumentArchiveIntegrity',
+      '\nconst DOCUMENT_ACTION_BLOCKER_MESSAGES'
+    );
+
+    expect(archiveStart).toBeGreaterThanOrEqual(0);
+    expect(archiveAllowlistSource).toContain("'manual_upload'");
+    expect(archiveAllowlistSource).toContain("'application_submission'");
+    expect(archiveAllowlistSource).not.toContain("'legacy_intake_upload'");
+    expect(archiveAllowlistSource).not.toContain("'secure_message_attachment'");
+    expect(archiveAllowlistSource).not.toContain("'system_generated'");
+    expect(archiveGuardSource).toContain('allowedSources: ARCHIVABLE_DOCUMENT_SOURCES');
+    expect(archiveGuardSource).toContain("operation: 'deleted'");
+  });
+
+  test.each(['manual_upload', 'application_submission'])(
+    '%s can be archived when no workflow dependency exists',
+    async source => {
+      const { guard, paymentLinkLookup } = loadArchiveIntegrityGuard();
+      const connection = { query: jest.fn().mockResolvedValue([[]]) };
+
+      await expect(guard({ id: 18, source }, connection)).resolves.toBeNull();
+      expect(connection.query).toHaveBeenCalledTimes(2);
+      expect(paymentLinkLookup).toHaveBeenCalledWith(18, connection);
+    }
+  );
+
+  test.each(['secure_message_attachment', 'system_generated', 'legacy_intake_upload'])(
+    '%s remains protected from archive',
+    async source => {
+      const { guard } = loadArchiveIntegrityGuard();
+      const connection = { query: jest.fn().mockResolvedValue([[]]) };
+
+      await expect(guard({ id: 19, source }, connection)).resolves.toMatchObject({
+        status: 409,
+        body: {
+          error: 'document_immutable',
+          reason: 'authoritative_source',
+          message:
+            "PATH needs to keep this document in the applicant's file, so it can't be deleted. You can still change its title or document type.",
+        },
+      });
+    }
+  );
+
+  test('an applicant upload materialized from a signing request remains protected', async () => {
+    const { guard } = loadArchiveIntegrityGuard();
+
+    await expect(guard({
+      id: 20,
+      source: 'application_submission',
+      metadata: JSON.stringify({ signing_request_id: 81 }),
+    }, { query: jest.fn() })).resolves.toMatchObject({
+      body: { reason: 'signing_request_link' },
+    });
+  });
 
   test('a missing or unknown source fails closed', async () => {
     const connection = { query: jest.fn().mockResolvedValue([[]]) };
@@ -217,24 +318,24 @@ describe('generic Supporting Documents mutation integrity', () => {
     ).resolves.toMatchObject({ body: { reason: 'payment_evidence_link' } });
   });
 
-  test('the central guard rejects every authoritative dependency class', () => {
+  test('the shared source-specific guard rejects every authoritative dependency class', () => {
     const helperSource = extractFunction(
-      'validateGenericDocumentMutationIntegrity',
-      '\nfunction documentMutationTimestamp'
+      'validateDocumentMutationIntegrityForSources',
+      '\nasync function validateGenericDocumentMutationIntegrity'
     );
 
-    expect(helperSource).toContain('documentRow.signing_request_id');
-    expect(helperSource).toContain("buildImmutableDocumentMutationError('signing_request_link')");
+    expect(helperSource).toContain('resolveDocumentSigningRequestDependencyId(documentRow)');
+    expect(helperSource).toContain("buildImmutableDocumentMutationError('signing_request_link', operation)");
     expect(helperSource).toContain('documentRow.origin_message_id');
-    expect(helperSource).toContain("buildImmutableDocumentMutationError('secure_message_origin')");
+    expect(helperSource).toContain("buildImmutableDocumentMutationError('secure_message_origin', operation)");
     expect(helperSource).toContain('FROM cfa_version_documents cvd');
     expect(helperSource).toContain('WHERE cvd.document_id = ?');
-    expect(helperSource).toContain("buildImmutableDocumentMutationError('cfa_version_link')");
+    expect(helperSource).toContain("buildImmutableDocumentMutationError('cfa_version_link', operation)");
     expect(helperSource).toContain('FROM funding_overview_version_documents fvd');
     expect(helperSource).toContain('WHERE fvd.document_id = ?');
-    expect(helperSource).toContain("buildImmutableDocumentMutationError('funding_overview_version_link')");
+    expect(helperSource).toContain("buildImmutableDocumentMutationError('funding_overview_version_link', operation)");
     expect(helperSource).toContain('fetchDocumentPaymentLinkCount(normalizedDocumentId, connection)');
-    expect(helperSource).toContain("buildImmutableDocumentMutationError('payment_evidence_link')");
+    expect(helperSource).toContain("buildImmutableDocumentMutationError('payment_evidence_link', operation)");
   });
 
   test.each([
@@ -292,7 +393,10 @@ describe('generic Supporting Documents mutation integrity', () => {
     ['delete', '/api/documents/:id'],
   ])('%s %s loads provenance and invokes the integrity guard before mutation', (method, route) => {
     const routeSource = extractRoute(method, route);
-    const guardIndex = routeSource.indexOf('validateGenericDocumentMutationIntegrity(');
+    const guardName = method === 'delete'
+      ? 'validateDocumentArchiveIntegrity('
+      : 'validateGenericDocumentMutationIntegrity(';
+    const guardIndex = routeSource.indexOf(guardName);
 
     expect(routeSource).toContain('source');
     expect(routeSource).toContain('origin_message_id');
@@ -425,8 +529,10 @@ describe('generic Supporting Documents mutation integrity', () => {
     expect(serverSource).toContain("error: 'document_attachment_immutable'");
     expect(serverSource).toContain('status: 409');
     expect(serverSource).toContain(
-      "PATH needs to keep this document in the applicant's file, so it can't be copied or deleted."
+      "PATH needs to keep this document in the applicant's file, so it can't be ${operation}."
     );
+    expect(serverSource).toContain("operation: 'copied'");
+    expect(serverSource).toContain("operation: 'deleted'");
     expect(serverSource).toContain('The document title and document type can be edited');
   });
 });

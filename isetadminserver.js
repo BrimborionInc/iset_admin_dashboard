@@ -25375,6 +25375,71 @@ function resolveInterventionApplicationScopeId(row = {}, { required = false } = 
   return resolvedApplicationId;
 }
 
+function resolveRevisionProposalApplicationId({
+  interventionRow = {},
+  sourceInterventionId = null,
+  sourceRow = null,
+  actionPlanApplicationId = null,
+} = {}) {
+  const normalizedSourceInterventionId = normalisePositiveInteger(sourceInterventionId);
+  const normalizedActionPlanApplicationId = normalisePositiveInteger(actionPlanApplicationId);
+  if (!normalizedSourceInterventionId) {
+    return normalizedActionPlanApplicationId || null;
+  }
+
+  const sourceRowId = normalisePositiveInteger(sourceRow?.id);
+  const targetCaseId = normalisePositiveInteger(interventionRow?.case_id);
+  const sourceCaseId = normalisePositiveInteger(sourceRow?.case_id);
+  const targetActionPlanId = normalisePositiveInteger(interventionRow?.action_plan_id);
+  const sourceActionPlanId = normalisePositiveInteger(sourceRow?.action_plan_id);
+  if (
+    sourceRowId !== normalizedSourceInterventionId ||
+    !targetCaseId ||
+    sourceCaseId !== targetCaseId ||
+    !targetActionPlanId ||
+    sourceActionPlanId !== targetActionPlanId
+  ) {
+    const error = new Error('intervention_revision_source_scope_conflict');
+    error.code = 'intervention_revision_source_scope_conflict';
+    error.status = 409;
+    error.publicMessage =
+      'The intervention revision source does not belong to the same case and Action Plan.';
+    throw error;
+  }
+
+  const sourceApplicationId = resolveInterventionApplicationScopeId(sourceRow, {
+    required: false,
+  });
+  if (
+    sourceApplicationId &&
+    normalizedActionPlanApplicationId &&
+    sourceApplicationId !== normalizedActionPlanApplicationId
+  ) {
+    const error = new Error('intervention_application_scope_conflict');
+    error.code = 'intervention_application_scope_conflict';
+    error.status = 409;
+    error.publicMessage =
+      'The intervention revision source and Action Plan point to different applications.';
+    throw error;
+  }
+  return sourceApplicationId || normalizedActionPlanApplicationId || null;
+}
+
+function buildInterventionSubmissionApplicationScopeRow(interventionRow = {}, planRow = {}) {
+  const proposalApplicationId = normalisePositiveInteger(
+    interventionRow?.proposal_application_id
+  );
+  return {
+    ...interventionRow,
+    case_id: interventionRow?.case_id,
+    proposal_application_id: proposalApplicationId,
+    action_plan_application_id: normalisePositiveInteger(planRow?.application_id),
+    resolved_application_case_id: proposalApplicationId
+      ? interventionRow?.resolved_application_case_id
+      : planRow?.application_case_id,
+  };
+}
+
 const REVISION_ELIGIBLE_INTERVENTION_STATUSES = new Set(['approved', 'in_progress', 'suspended']);
 const OPEN_INTERVENTION_PROPOSAL_STATUSES = new Set(['draft', 'submitted', 'in_review', 'changes_requested']);
 const HISTORICAL_PAYMENT_PACKET_STATUSES = new Set([
@@ -25982,42 +26047,61 @@ async function fetchDocumentPaymentLinkCount(documentId, connection = pool) {
   );
 }
 
+const ARCHIVABLE_DOCUMENT_SOURCES = new Set([
+  'manual_upload',
+  'application_submission',
+]);
+
 const GENERICALLY_MUTABLE_DOCUMENT_SOURCES = new Set([
   'manual_upload',
 ]);
 
-function buildImmutableDocumentMutationError(reason) {
+function buildImmutableDocumentMutationError(reason, operation = 'copied') {
   return {
     status: 409,
     body: {
       error: 'document_immutable',
       reason,
       message:
-        "PATH needs to keep this document in the applicant's file, so it can't be copied or deleted. You can still change its title or document type.",
+        `PATH needs to keep this document in the applicant's file, so it can't be ${operation}. You can still change its title or document type.`,
     },
   };
 }
 
-async function validateGenericDocumentMutationIntegrity(documentRow, connection = pool) {
+function resolveDocumentSigningRequestDependencyId(documentRow = {}) {
+  const metadata = parseMetadata(documentRow?.metadata);
+  return normalisePositiveInteger(
+    documentRow?.signing_request_id ||
+    metadata?.signing_request_id ||
+    metadata?.signingRequestId
+  );
+}
+
+async function validateDocumentMutationIntegrityForSources({
+  documentRow,
+  allowedSources,
+  operation,
+  connection = pool,
+} = {}) {
   if (!documentRow) {
     return { status: 404, body: { error: 'document_not_found' } };
   }
 
-  if (normalisePositiveInteger(documentRow.signing_request_id)) {
-    return buildImmutableDocumentMutationError('signing_request_link');
+  if (resolveDocumentSigningRequestDependencyId(documentRow)) {
+    return buildImmutableDocumentMutationError('signing_request_link', operation);
   }
   if (normalisePositiveInteger(documentRow.origin_message_id)) {
-    return buildImmutableDocumentMutationError('secure_message_origin');
+    return buildImmutableDocumentMutationError('secure_message_origin', operation);
   }
 
   const normalizedDocumentId = normalisePositiveInteger(documentRow.id);
   if (!normalizedDocumentId) {
-    return buildImmutableDocumentMutationError('invalid_document_identity');
+    return buildImmutableDocumentMutationError('invalid_document_identity', operation);
   }
 
   const source = (normaliseString(documentRow.source) || '').toLowerCase();
-  if (!GENERICALLY_MUTABLE_DOCUMENT_SOURCES.has(source)) {
-    return buildImmutableDocumentMutationError('authoritative_source');
+  if (!allowedSources?.has(source)) {
+    return buildImmutableDocumentMutationError('authoritative_source', operation);
   }
 
   const [[cfaVersionLink]] = await connection.query(
@@ -26028,7 +26112,7 @@ async function validateGenericDocumentMutationIntegrity(documentRow, connection 
     [normalizedDocumentId]
   );
   if (normalisePositiveInteger(cfaVersionLink?.document_id)) {
-    return buildImmutableDocumentMutationError('cfa_version_link');
+    return buildImmutableDocumentMutationError('cfa_version_link', operation);
   }
 
   const [[fundingOverviewVersionLink]] = await connection.query(
@@ -26039,15 +26123,33 @@ async function validateGenericDocumentMutationIntegrity(documentRow, connection 
     [normalizedDocumentId]
   );
   if (normalisePositiveInteger(fundingOverviewVersionLink?.document_id)) {
-    return buildImmutableDocumentMutationError('funding_overview_version_link');
+    return buildImmutableDocumentMutationError('funding_overview_version_link', operation);
   }
 
   const paymentLinkCount = await fetchDocumentPaymentLinkCount(normalizedDocumentId, connection);
   if (paymentLinkCount > 0) {
-    return buildImmutableDocumentMutationError('payment_evidence_link');
+    return buildImmutableDocumentMutationError('payment_evidence_link', operation);
   }
 
   return null;
+}
+
+async function validateGenericDocumentMutationIntegrity(documentRow, connection = pool) {
+  return validateDocumentMutationIntegrityForSources({
+    documentRow,
+    allowedSources: GENERICALLY_MUTABLE_DOCUMENT_SOURCES,
+    operation: 'copied',
+    connection,
+  });
+}
+
+async function validateDocumentArchiveIntegrity(documentRow, connection = pool) {
+  return validateDocumentMutationIntegrityForSources({
+    documentRow,
+    allowedSources: ARCHIVABLE_DOCUMENT_SOURCES,
+    operation: 'deleted',
+    connection,
+  });
 }
 
 const DOCUMENT_ACTION_BLOCKER_MESSAGES = Object.freeze({
@@ -26127,10 +26229,10 @@ async function fetchDocumentRelationshipBlockers(documentIds, connection = pool)
 }
 
 function getDocumentArchiveBlocker(documentRow, relationshipBlockers = new Set()) {
-  if (normalisePositiveInteger(documentRow?.signing_request_id)) return 'signing_request_link';
+  if (resolveDocumentSigningRequestDependencyId(documentRow)) return 'signing_request_link';
   if (normalisePositiveInteger(documentRow?.origin_message_id)) return 'secure_message_origin';
   const source = (normaliseString(documentRow?.source) || '').toLowerCase();
-  if (!GENERICALLY_MUTABLE_DOCUMENT_SOURCES.has(source)) return 'authoritative_source';
+  if (!ARCHIVABLE_DOCUMENT_SOURCES.has(source)) return 'authoritative_source';
   for (const reason of [
     'cfa_version_link',
     'funding_overview_version_link',
@@ -28691,7 +28793,15 @@ async function syncInterventionProposalCompatibility(interventionRow, connection
     connection,
     interventionRow.action_plan_id
   );
-  const applicationId = actionPlanApplicationId || null;
+  const sourceRow = sourceInterventionId
+    ? await fetchInterventionWithCase(sourceInterventionId, connection)
+    : null;
+  const applicationId = resolveRevisionProposalApplicationId({
+    interventionRow,
+    sourceInterventionId,
+    sourceRow,
+    actionPlanApplicationId,
+  });
   const title =
     metadata.title ||
     metadata.snapshot?.title ||
@@ -61224,7 +61334,7 @@ app.delete('/api/documents/:id', async (req, res) => {
   try {
     const [[doc]] = await pool.query(
       `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id,
-              source, origin_message_id, signing_request_id, updated_at
+              source, origin_message_id, signing_request_id, metadata, updated_at
          FROM iset_document
         WHERE id = ? AND status = 'active'
         LIMIT 1`,
@@ -61237,7 +61347,7 @@ app.delete('/api/documents/:id', async (req, res) => {
     if (accessError) {
       return res.status(accessError.status).json(accessError.body);
     }
-    const mutationError = await validateGenericDocumentMutationIntegrity(doc);
+    const mutationError = await validateDocumentArchiveIntegrity(doc);
     if (mutationError) {
       return res.status(mutationError.status).json(mutationError.body);
     }
@@ -61248,10 +61358,19 @@ app.delete('/api/documents/:id', async (req, res) => {
       req,
       expectedUpdatedAt: doc.updated_at,
       connection,
+      requireIntegrityCheck: false,
     });
     if (locked.error) {
       await connection.rollback();
       return res.status(locked.error.status).json(locked.error.body);
+    }
+    const lockedArchiveError = await validateDocumentArchiveIntegrity(
+      locked.documentRow,
+      connection
+    );
+    if (lockedArchiveError) {
+      await connection.rollback();
+      return res.status(lockedArchiveError.status).json(lockedArchiveError.body);
     }
     const [[existingLifecycle]] = await connection.query(
       `SELECT id, current_state, lifecycle_generation
@@ -69559,12 +69678,10 @@ app.patch('/api/interventions/:id', async (req, res) => {
       previousInterventionState.reviewStatus !== 'submitted';
     if (shouldStartInterventionReviewWorkflow) {
       try {
-        resolveInterventionApplicationScopeId({
-          ...interventionRow,
-          case_id: interventionRow.case_id,
-          action_plan_application_id: planRow?.application_id,
-          resolved_application_case_id: planRow?.application_case_id,
-        }, { required: true });
+        resolveInterventionApplicationScopeId(
+          buildInterventionSubmissionApplicationScopeRow(interventionRow, planRow),
+          { required: true }
+        );
       } catch (error) {
         return res.status(Number.isInteger(error?.status) ? error.status : 409).json({
           error: error?.code || error?.message || 'intervention_application_scope_required',
@@ -109400,6 +109517,8 @@ const adminRepairExports = {
   generateAndStoreRevisionAssessmentPdf,
   fetchInterventionWithCase,
   resolveInterventionApplicationScopeId,
+  resolveRevisionProposalApplicationId,
+  buildInterventionSubmissionApplicationScopeRow,
   fetchAssessmentPdfSignatureContext,
   buildRegionalSnapshotPayload,
   resolveCaseApplicantMessagingContext,

@@ -324,6 +324,10 @@ describe('Supporting Document archive/payment relationship concurrency', () => {
       'async function lockGenericDocumentMutationContext',
       'async function fetchCaseAccessRowsForDocument'
     );
+    const deleteRoute = sourceBetween(
+      "app.delete('/api/documents/:id'",
+      "app.post('/api/documents/:id/restore'"
+    );
 
     expect(autoAttachment.indexOf('lockActivePaymentEvidenceDocument'))
       .toBeLessThan(autoAttachment.indexOf('INSERT INTO payment_packet_document'));
@@ -341,6 +345,12 @@ describe('Supporting Document archive/payment relationship concurrency', () => {
     expect(manualAttachment).toContain('await connection.commit()');
     expect(archiveLock.indexOf('FOR UPDATE'))
       .toBeLessThan(archiveLock.indexOf('validateGenericDocumentMutationIntegrity'));
+    expect(deleteRoute).toContain('requireIntegrityCheck: false');
+    const lockedArchiveGuardIndex = deleteRoute.indexOf('const lockedArchiveError');
+    expect(deleteRoute.indexOf('lockGenericDocumentMutationContext({'))
+      .toBeLessThan(lockedArchiveGuardIndex);
+    expect(lockedArchiveGuardIndex)
+      .toBeLessThan(deleteRoute.indexOf("SET status = 'deleted'"));
 
     expect(serverSource.match(/INSERT INTO payment_packet_document/gu)).toHaveLength(3);
     expect(serverSource.match(/INSERT INTO payment_followup_event/gu)).toHaveLength(2);

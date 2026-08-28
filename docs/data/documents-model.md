@@ -1,6 +1,6 @@
 # Unified Documents Model (iset_document)
 
-Date: 2026-08-24
+Date: 2026-08-28
 Status: current model overview with explicitly historical sections marked below.
 
 ## Summary
@@ -33,7 +33,8 @@ Related tables:
 
 - `DELETE /api/documents/:id` is a soft delete despite the HTTP method: it changes an eligible active row to `status='deleted'`, writes/updates its lifecycle row, and records a delete event in one database transaction. The stored object is untouched.
 - Normal lists, checklist matching, and active-only processes ignore `status='deleted'`. All four PATH staff roles can request this action within their existing case/object scope.
-- Only ordinary `source='manual_upload'` files can enter this user-delete lifecycle. Applicant submissions, legacy intake uploads, secure-message attachments, PATH-generated files, signing-request documents, CFA/Funding Overview version documents, and payment evidence are protected records.
+- `source='manual_upload'` and applicant-uploaded `source='application_submission'` files can enter this user-delete lifecycle when no protected dependency exists. This Delete-specific boundary does not authorize duplicating applicant uploads. Legacy intake uploads, secure-message attachments, PATH-generated files, signing-request documents or supporting uploads, CFA/Funding Overview version documents, and payment evidence remain protected records.
+- Deleting an applicant upload hides the materialized supporting-document row from active use; it does not rewrite the submitted application's answers, immutable payload, ownership, or history.
 - A delete never reverses a submission, signature, approval, payment, message, or other business event.
 - `GET .../documents?view=deleted`, deleted-file preview/download, and `POST /api/documents/:id/restore` are `System Administrator`-only. Restore proves the source object still exists and matches the recorded size and available checksum before setting the row active again.
 - PATH has no permanent-delete UI or API for supporting documents, including manual uploads. The database row and stored bytes remain available for restore.
@@ -54,7 +55,7 @@ Related tables:
 - Privacy-sensitive document FKs for user, applicant user, client, case, application, and origin message use `ON DELETE RESTRICT` so parent deletion cannot silently un-scope document records.
 
 ## Source Values
-- `application_submission`: Uploaded or generated as part of the original application submission.
+- `application_submission`: Uploaded by the applicant and materialized into the case/application document record after deterministic submission scope exists; the same source is used for applicant supporting uploads collected through a signing request, which remain protected when their signing-request dependency is present.
 - `legacy_intake_upload`: Historical portal upload metadata that could not be safely attached to an application/case during migration.
 - `secure_message_attachment`: Attached to a secure message in the admin workspace.
 - `system_generated`: Generated case/client artifacts such as signed digital forms, assessment PDFs, and payment packet bundles.

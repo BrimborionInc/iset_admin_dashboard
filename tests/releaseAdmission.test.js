@@ -32,6 +32,7 @@ const {
   buildTestAtomicCutoverCommands,
   buildTestExactPostflightCommands,
   buildTestRecoveryCommands,
+  buildTestRetentionCleanupCommands,
   captureAdminDeployConfig,
   copyAdminRuntimeSql,
   copyAdmittedGitSourceDirectory,
@@ -861,6 +862,8 @@ describe('release admission', () => {
       "'app.postflight'",
       "'smoke.check'",
       "'app.alias-promote'",
+      "'app.accept'",
+      "'app.retention-cleanup'",
     ];
     let prior = -1;
     orderedSteps.forEach(step => {
@@ -897,6 +900,47 @@ describe('release admission', () => {
     expect(postflight).toContain('/readyz');
     expect(postflight).toContain('path-build-manifest.json');
     expect(postflight).toContain('.path-release-provenance.json');
+  });
+
+  test('TEST acceptance is recorded remotely before bounded rollback payload cleanup', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'path-test-atomic-acceptance-'));
+    const txRoot = path.join(root, 'opt', 'nwac', '.path-release-transactions', 'release-r2');
+    for (const directory of [
+      'backup',
+      'failed',
+      'archives',
+      'npm-cache-admin',
+      'npm-cache-portal',
+      'candidate-admin',
+      'candidate-portal',
+      'candidate-shared',
+      'candidate-home-admin-build',
+    ]) {
+      fs.mkdirSync(path.join(txRoot, directory), { recursive: true });
+      fs.writeFileSync(path.join(txRoot, directory, 'retained-byte'), 'release payload');
+    }
+    fs.writeFileSync(path.join(txRoot, 'state'), 'cutover-complete\n');
+    fs.writeFileSync(path.join(txRoot, 'recovery-context.json'), '{"releaseId":"release-r2"}\n');
+
+    const acceptanceCommands = buildTestRecoveryCommands(
+      { releaseId: 'release-r2' },
+      { markAccepted: true }
+    ).map(command => command.replaceAll('/opt/nwac', path.join(root, 'opt', 'nwac')));
+    const accepted = spawnSync('bash', ['-c', acceptanceCommands.join('\n')], { encoding: 'utf8' });
+    expect(accepted.status).toBe(0);
+    expect(fs.readFileSync(path.join(txRoot, 'state'), 'utf8').trim()).toBe('accepted');
+    expect(fs.existsSync(path.join(txRoot, 'backup'))).toBe(true);
+
+    const cleanupCommands = buildTestRetentionCleanupCommands({ releaseId: 'release-r2' })
+      .map(command => command.replaceAll('/opt/nwac', path.join(root, 'opt', 'nwac')));
+    const cleaned = spawnSync('bash', ['-c', cleanupCommands.join('\n')], { encoding: 'utf8' });
+    expect(cleaned.status).toBe(0);
+    expect(fs.readFileSync(path.join(txRoot, 'state'), 'utf8').trim()).toBe('accepted');
+    expect(fs.readFileSync(path.join(txRoot, 'recovery-context.json'), 'utf8'))
+      .toContain('release-r2');
+    expect(fs.existsSync(path.join(txRoot, 'backup'))).toBe(false);
+    expect(fs.existsSync(path.join(txRoot, 'archives'))).toBe(false);
+    expect(fs.existsSync(path.join(txRoot, 'npm-cache-admin'))).toBe(false);
   });
 
   test('failure recovery swaps both untouched app backups back and is idempotently verifiable', () => {

@@ -16,7 +16,9 @@ describe('document lifecycle routes', () => {
   test('active document lists expose server-derived delete capability', () => {
     expect(serverSource).toContain('async function decorateDocumentsWithLifecycleCapabilities');
     expect(serverSource).toContain('can_delete: isActive && !archiveBlocker');
-    expect(serverSource).toContain("'manual_upload'");
+    expect(serverSource).toContain('const ARCHIVABLE_DOCUMENT_SOURCES');
+    expect(serverSource).toContain("'application_submission'");
+    expect(serverSource).toContain('ARCHIVABLE_DOCUMENT_SOURCES.has(source)');
     expect(serverSource).toContain("'payment_evidence_link'");
     expect(serverSource).toContain('payment_followup_event pfe');
   });

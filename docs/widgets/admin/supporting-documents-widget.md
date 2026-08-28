@@ -1,6 +1,6 @@
 # Supporting Documents widget
 
-Date: 2026-08-24
+Date: 2026-08-28
 
 ## Workflow
 
@@ -55,9 +55,10 @@ manual uploads, and generated forms, then compares them against the relevant che
     - `/api/cases/:case_id/documents/upload` for case-backed document mode when the file has no safe applicant account context
 - Refresh behavior: listens for `iset:supporting-documents:refresh`, mainly from Secure Messaging attachment adoption.
 - Delete behavior:
-  - all four PATH staff roles can use `Delete` when they already have access to the file and the file is an ordinary staff upload with no protected workflow dependency
+  - all four PATH staff roles can use `Delete` when they already have access to the file and the file is an eligible staff upload or a document shown with source `Applicant upload`
   - `Delete` is reversible: PATH marks the document deleted, removes it from normal document lists and checklist/process matching, and leaves the stored file in place
-  - generated files, applicant submissions, documents linked to PATH signing requests, secure-message attachments, version evidence, payment evidence, and other authoritative records cannot be deleted through the widget; the disabled action explains why in plain language
+  - deleting an applicant upload does not alter the submitted application's answers, payload, ownership, or history, and it does not make applicant uploads eligible for Duplicate
+  - generated files, documents linked to PATH signing requests, secure-message attachments, version evidence, payment evidence, legacy/unknown-source files, and other authoritative records cannot be deleted through the widget; the disabled action explains why in plain language
   - deleting a document does not undo a signature, payment, approval, submission, or any other business event
 - Deleted view:
   - only `System Administrator` sees the `Deleted` tab and can view, download, or restore files deleted through this lifecycle

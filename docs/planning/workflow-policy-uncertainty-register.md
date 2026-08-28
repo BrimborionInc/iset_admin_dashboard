@@ -1,7 +1,7 @@
 # PATH Workflow Policy Uncertainty Register
 
 Status: current
-Last Updated: 2026-08-25
+Last Updated: 2026-08-28
 
 ## Purpose
 
@@ -173,10 +173,10 @@ Status: confirmed principle; destructive-operation policy remains partial.
 
 ### `WP-06-D3` — Supporting-document Delete is reversible hiding only
 
-Status: confirmed principle.
+Status: confirmed principle; applicant-upload extension confirmed 2026-08-28.
 
-- For an eligible ordinary staff upload, `Delete` means hide it from normal Supporting Documents lists, checklist matching, and other active-only processes. The database row and stored file remain intact.
-- All four PATH roles may use Delete only within their existing object/case scope. The normal source and dependency guards still protect applicant submissions, signed/generated documents, secure-message attachments, version evidence, payment evidence, and other authoritative records.
+- For an eligible staff upload or applicant-uploaded application-submission document, `Delete` means hide it from normal Supporting Documents lists, checklist matching, and other active-only processes. The database row and stored file remain intact.
+- All four PATH roles may use Delete only within their existing object/case scope. Deleting an applicant upload does not rewrite the submitted application or authorize duplication. The normal dependency guards still protect signing-request uploads, signed/generated documents, secure-message attachments, version evidence, payment evidence, legacy/unknown sources, and other authoritative records.
 - Delete does not undo a submission, signature, approval, payment, message, or any other business event.
 - Only System Administrator can see the Deleted view, open or download a deleted file, and restore it. Restore returns the same document to active use after PATH verifies the stored object still exists and matches the recorded identity information.
 - PATH has no permanent-delete UI or API for supporting documents, including manual uploads. Any exceptional physical removal is a separately reviewed database/storage operation outside the product workflow.

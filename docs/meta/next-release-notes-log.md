@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-08-26
+Last Updated: 2026-08-28
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-08-28 | Release 20260828-admin-document-lineage-r1 | Feature/Documents | Supporting Documents | Staff can remove an eligible applicant-uploaded file from normal use through the same reversible Delete workflow as an eligible staff upload. | The stored file and submitted application remain intact; only System Administrators can restore it. Signing, message, generated, version, payment, legacy, and unknown records remain protected, and Applicant uploads are not enabled for Duplicate.
+- 2026-08-28 | Release 20260828-admin-document-lineage-r1 | Fix/Casework | Intervention revisions | A revision created from an application-linked intervention now keeps that exact application even when its mixed historical/current Action Plan is intentionally case-owned. | PATH proves the source belongs to the same case and Action Plan and refuses contradictory application lineage instead of silently changing it.
 - 2026-08-26 | Release 20260826-signing-lineage-r2-copyfix | Fix/Secure Messaging | Reliable send retry | A lost connection after Send no longer causes PATH to create the same message, form package, or decision update twice. | PATH reuses the exact original send operation for a retry, returns its committed result, and uses a fresh operation for a later intentional message. Deployed to TEST and PROD.
 - 2026-08-26 | Release 20260826-signing-lineage-r2-copyfix | Fix/Secure Messaging | Historical conversations and attachments | Authorized users can keep reading and replying to historical messages and attachments after application or account-link changes without PATH rewriting their history. | Ordinary replies use the conversation's recorded participant; a signing form requires the current participant, while optional attachment application differences or a document-indexing failure do not block the authorized file read. Deployed to TEST and PROD.
 - 2026-08-26 | Release 20260826-signing-lineage-r2-copyfix | Fix/Secure Messaging | Exact form ownership | Applicationless and sibling-application form history no longer blocks an approved application's funding package, and form-specific intervention context is now visible before it is sent. | PATH creates or reuses the agreement version for the exact selected application and Action Plan, preserves unrelated history, and sends intervention context only for form types that use it. Ordinary messages do not inherit hidden workspace scope. Clean-source TEST acceptance and the PROD rollout passed; targeted live reporter-role journey verification remains pending.
@@ -506,13 +508,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Approved application funding packages are no longer blocked by unrelated applicationless or earlier-application agreement history on the same client file.
-- Participant Details corrections can now be saved after opening a file directly from ISET Clients, without requiring an application ID.
-- Eligible staff-uploaded documents can now be removed from normal use and restored by a System Administrator, while protected records explain why PATH must keep them.
-- Secure Messaging now labels an item as `Applicant replied` only when the applicant actually replied.
-- Returning applicants keep earlier application messages and activity attached to the correct application, and can safely remove their own unused draft uploads.
+- Eligible Applicant upload files can now be removed from normal use through reversible Delete while the submitted application and stored file remain intact.
+- Intervention revisions now keep the exact application of their source intervention on mixed historical/current Action Plans and refuse contradictory lineage.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260828-admin-document-lineage-r1
+
+- All four PATH staff roles can use reversible Delete for an eligible Applicant upload they can already access. The file leaves normal lists and checklists, while a System Administrator can restore it.
+- Applicant-upload deletion does not change the submitted application and does not enable Duplicate. Signing, secure-message, generated, version, payment, legacy, and unknown records remain protected.
+- Intervention revisions created on mixed historical/current Action Plans now preserve the exact application of their source intervention after PATH proves the same case and Action Plan.
 
 #### Release 20260826-signing-lineage-r2-copyfix
 
@@ -529,24 +534,24 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Secure Messaging now records `Applicant replied` only for a real applicant-origin reply; staff follow-ups no longer change an earlier staff message to that status.
 - Repeat-application portal activity remains attached to the exact application, and applicants can safely remove only their own unused pre-submission draft uploads.
 
-#### Release 20260818-admin-workflow-fixes-r2
-
-- Recalled assessments now return to an editable submitter-correction state and can be resubmitted through the normal Regional Manager review path. PATH preserves the original submitter and recall history and clears stale reviewer decisions.
-- Supporting-document titles and types can now be corrected for applicant uploads, secure-message attachments, staff uploads, generated documents, and older records. Source ownership and dependent signing, version, and payment evidence remain protected.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
+- An administrator-only Operations Report will help NWAC review workload, backlog, workflow timing, and communication measures after its live reporting source is ready.
+
 ### Nouveautes (brouillon - FR)
 
-- Les trousses de financement d'une demande approuvée ne sont plus bloquées par l'historique d'ententes sans demande ou d'une demande antérieure dans le même dossier client.
-- Les corrections aux détails du participant peuvent maintenant être enregistrées après l'ouverture directe d'un dossier depuis Clients ISET, sans identifiant de demande.
-- Les téléversements admissibles du personnel peuvent maintenant être retirés de l'utilisation normale et restaurés par un administrateur système, tandis que PATH explique pourquoi les dossiers protégés doivent être conservés.
-- La messagerie sécurisée indique maintenant `Réponse du demandeur` uniquement lorsque la personne participante a réellement répondu.
-- Pour les demandes répétées, les anciens messages et activités restent liés à la bonne demande, et la personne participante peut retirer en toute sécurité ses propres téléversements de brouillon inutilisés.
+- Les fichiers admissibles affichés comme Téléversement du demandeur peuvent maintenant être retirés de l'utilisation normale au moyen de la suppression réversible, sans modifier la demande soumise ni le fichier stocké.
+- Les révisions d'intervention conservent maintenant la demande exacte de leur intervention source dans les plans d'action mixtes historiques et actuels, et PATH refuse toute filiation contradictoire.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260828-admin-document-lineage-r1
+
+- Les quatre rôles du personnel PATH peuvent utiliser la suppression réversible pour un Téléversement du demandeur admissible auquel ils ont déjà accès. Le fichier disparaît des listes et listes de contrôle normales, et un administrateur système peut le restaurer.
+- La suppression d'un téléversement du demandeur ne modifie pas la demande soumise et n'autorise pas la duplication. Les dossiers liés aux signatures, aux messages sécurisés, aux documents générés, aux versions, aux paiements, aux sources anciennes ou inconnues demeurent protégés.
+- Les révisions d'intervention créées dans un plan d'action mixte historique et actuel conservent maintenant la demande exacte de l'intervention source après vérification du même dossier et du même plan d'action.
 
 #### Release 20260826-signing-lineage-r2-copyfix
 
@@ -563,11 +568,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - La messagerie sécurisée enregistre maintenant `Réponse du demandeur` uniquement pour une véritable réponse provenant de la personne participante; les suivis du personnel ne changent plus ainsi le statut d'un message antérieur du personnel.
 - Pour les demandes répétées, l'activité du portail reste liée à la demande exacte, et les personnes participantes peuvent retirer en toute sécurité uniquement leurs propres téléversements de brouillon inutilisés avant la soumission.
 
-#### Release 20260818-admin-workflow-fixes-r2
-
-- Les évaluations rappelées redeviennent modifiables par la personne enregistrée comme les ayant soumises et peuvent être soumises de nouveau selon le processus normal de révision du gestionnaire régional. PATH préserve l'historique du rappel et efface les anciennes décisions des réviseurs.
-- Les titres et les types des documents justificatifs peuvent maintenant être corrigés pour les téléversements des demandeurs, les pièces jointes aux messages sécurisés, les téléversements du personnel, les documents générés et les anciens dossiers. La provenance et les preuves liées aux signatures, aux versions et aux paiements demeurent protégées.
-
 ### Problemes connus (brouillon - FR)
 
 ### A venir (brouillon - FR)
+
+- Un rapport des opérations réservé aux administrateurs aidera l'AFAC à examiner la charge de travail, les dossiers en attente, les délais des processus et les communications lorsque sa source de rapports en direct sera prête.

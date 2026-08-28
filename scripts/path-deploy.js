@@ -2642,6 +2642,20 @@ function buildTestRecoveryCommands(context, { markAccepted = false } = {}) {
   ];
 }
 
+function buildTestRetentionCleanupCommands(context) {
+  const { releaseId } = context || {};
+  assertSafeReleaseId(releaseId);
+  return [
+    'set -euo pipefail',
+    'umask 077',
+    `PATH_RELEASE_ID=${quoteBashArgument(releaseId)}`,
+    'TX_ROOT="/opt/nwac/.path-release-transactions/$PATH_RELEASE_ID"',
+    'test "$(cat "$TX_ROOT/state")" = accepted',
+    'rm -rf "$TX_ROOT/backup" "$TX_ROOT/failed" "$TX_ROOT/archives" "$TX_ROOT/npm-cache-admin" "$TX_ROOT/npm-cache-portal" "$TX_ROOT/candidate-admin" "$TX_ROOT/candidate-portal" "$TX_ROOT/candidate-shared" "$TX_ROOT/candidate-home-admin-build"',
+    'du -sk "$TX_ROOT"',
+  ];
+}
+
 function runTestSsmPhase(context, envConfig, label, commandBuilder) {
   const results = [];
   for (const instanceId of context.instanceIds) {
@@ -3379,6 +3393,19 @@ function verifyTestAtomicRollout(context, envConfig) {
   return runTestSsmPhase(context, envConfig, 'postflight', buildTestExactPostflightCommands);
 }
 
+function acceptTestAtomicRollout(context, envConfig) {
+  return runTestSsmPhase(
+    context,
+    envConfig,
+    'accept',
+    recoveryContext => buildTestRecoveryCommands(recoveryContext, { markAccepted: true })
+  );
+}
+
+function cleanupAcceptedTestAtomicRollout(context, envConfig) {
+  return runTestSsmPhase(context, envConfig, 'retention-cleanup', buildTestRetentionCleanupCommands);
+}
+
 async function recoverTestAtomicRollout(context, envConfig, smokeTargets) {
   const remote = runTestSsmPhase(
     context,
@@ -4114,7 +4141,20 @@ async function handleRun(args, envConfig, identity) {
         'app.alias-promote',
         async () => promoteTestArtifactsAfterSmoke(appResult, smokeResult, envConfig)
       );
+      manifest.testRecovery.acceptance = await runStep(
+        manifest,
+        manifestPath,
+        'app.accept',
+        async () => acceptTestAtomicRollout(args.testRecoveryContext, envConfig)
+      );
       manifest.testRecovery.state = 'accepted';
+      writeManifest(manifestPath, manifest);
+      manifest.testRecovery.retentionCleanup = await runStep(
+        manifest,
+        manifestPath,
+        'app.retention-cleanup',
+        async () => cleanupAcceptedTestAtomicRollout(args.testRecoveryContext, envConfig)
+      );
       writeManifest(manifestPath, manifest);
     }
 
@@ -4310,6 +4350,7 @@ module.exports = {
   buildTestAtomicCutoverCommands,
   buildTestExactPostflightCommands,
   buildTestRecoveryCommands,
+  buildTestRetentionCleanupCommands,
   copyAdminRuntimeSql,
   copyAdmittedGitSourceDirectory,
   copyValidatedFrontendBuild,

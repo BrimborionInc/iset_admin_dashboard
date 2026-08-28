@@ -25,6 +25,9 @@ jest.mock('axios', () => ({
 describe('intervention application lineage and assessment signatures', () => {
   const previousRepairExports = process.env.PATH_REPAIR_EXPORTS;
   let resolveInterventionApplicationScopeId;
+  let resolveRevisionProposalApplicationId;
+  let buildInterventionSubmissionApplicationScopeRow;
+  let syncInterventionProposalCompatibility;
   let fetchAssessmentPdfSignatureContext;
 
   beforeAll(() => {
@@ -32,6 +35,9 @@ describe('intervention application lineage and assessment signatures', () => {
     process.env.PATH_REPAIR_EXPORTS = '1';
     ({
       resolveInterventionApplicationScopeId,
+      resolveRevisionProposalApplicationId,
+      buildInterventionSubmissionApplicationScopeRow,
+      syncInterventionProposalCompatibility,
       fetchAssessmentPdfSignatureContext,
     } = require('../isetadminserver'));
   });
@@ -83,6 +89,105 @@ describe('intervention application lineage and assessment signatures', () => {
         publicMessage: expect.stringContaining(message),
       });
     }
+  });
+
+  test('an application-linked revision inherits the exact source intervention application on a case-owned plan', () => {
+    const sourceRow = {
+      id: 219,
+      case_id: 44,
+      action_plan_id: 15,
+      proposal_application_id: 88,
+      action_plan_application_id: null,
+      resolved_application_case_id: 44,
+    };
+    expect(resolveRevisionProposalApplicationId({
+      interventionRow: { id: 290, case_id: 44, action_plan_id: 15 },
+      sourceInterventionId: 219,
+      sourceRow,
+      actionPlanApplicationId: null,
+    })).toBe(88);
+
+    const submissionScope = buildInterventionSubmissionApplicationScopeRow({
+      id: 290,
+      case_id: 44,
+      proposal_application_id: 88,
+      action_plan_application_id: null,
+      resolved_application_case_id: 44,
+    }, {
+      id: 15,
+      application_id: null,
+      application_case_id: null,
+    });
+    expect(resolveInterventionApplicationScopeId(submissionScope, { required: true })).toBe(88);
+  });
+
+  test('revision compatibility writes inherit source proposal lineage without attaching the mixed Action Plan', async () => {
+    const statements = [];
+    const connection = {
+      query: jest.fn(async (sql, params = []) => {
+        const statement = String(sql);
+        statements.push({ statement, params });
+        if (statement.includes('SELECT application_id') && statement.includes('FROM iset_case_action_plan')) {
+          return [[{ application_id: null }], []];
+        }
+        if (statement.includes('FROM iset_case_intervention ci') && statement.includes('WHERE ci.id = ?')) {
+          return [[{
+            id: 219,
+            case_id: 44,
+            action_plan_id: 15,
+            status: 'in_progress',
+            delivery_status: 'in_progress',
+            proposal_application_id: 88,
+            action_plan_application_id: null,
+            resolved_application_case_id: 44,
+          }], []];
+        }
+        if (statement.includes('INSERT INTO iset_intervention_proposal')) {
+          return [{ affectedRows: 1 }, []];
+        }
+        throw new Error(`unexpected_query:${statement}`);
+      }),
+    };
+
+    await syncInterventionProposalCompatibility({
+      id: 290,
+      case_id: 44,
+      action_plan_id: 15,
+      intervention_code: 11,
+      status: 'draft',
+      delivery_status: null,
+      intervention_cost: 4885,
+      metadata_json: JSON.stringify({
+        revision: { sourceInterventionId: 219 },
+      }),
+    }, connection);
+
+    const proposalWrite = statements.find(({ statement }) => (
+      statement.includes('INSERT INTO iset_intervention_proposal')
+    ));
+    expect(proposalWrite).toBeTruthy();
+    expect(proposalWrite.params[2]).toBe(88);
+    expect(proposalWrite.params[4]).toBe(219);
+    expect(proposalWrite.params[5]).toBe('revision');
+  });
+
+  test('revision lineage refuses a source outside the exact case or Action Plan', () => {
+    expect(() => resolveRevisionProposalApplicationId({
+      interventionRow: { id: 290, case_id: 44, action_plan_id: 15 },
+      sourceInterventionId: 219,
+      sourceRow: {
+        id: 219,
+        case_id: 45,
+        action_plan_id: 15,
+        proposal_application_id: 88,
+        action_plan_application_id: null,
+        resolved_application_case_id: 45,
+      },
+      actionPlanApplicationId: null,
+    })).toThrow(expect.objectContaining({
+      code: 'intervention_revision_source_scope_conflict',
+      status: 409,
+    }));
   });
 
   test('exact workflow stamps are authoritative before current-request fallbacks', async () => {

@@ -5,7 +5,7 @@ Last reviewed: 2026-08-26 — release `20260826-signing-lineage-r2-copyfix` reva
 
 This is the shortest operator guide for normal PATH deployments.
 
-**Current TEST hard stop (2026-08-26):** Do not run another atomic TEST app deployment on instance `i-0b91c2f03fbd20f0d`. Its root volume was already at 87% use with about 1.1 GB free after the last deployment, and its remote transaction remained `cutover-complete` while the successful local manifest recorded state `accepted`. Before the next atomic TEST deploy, either complete a reviewed bounded retention/capacity correction and prove enough disk space, or replace the host under the normal fallback procedure; then recheck remote/local transaction-state handling. This is an orchestrator operations issue and does not authorize use or repair of the retired qualification harness.
+**TEST capacity follow-up cleared (2026-08-28):** Read-only verification proved instance `i-0b91c2f03fbd20f0d` was healthy on exact release `20260826-signing-lineage-r2-copyfix`, both immutable recovery artifacts retained their recorded SHA-256 metadata, and the only transaction was the successfully completed release left at `cutover-complete`. The transaction was marked `accepted` and only its local backup/archive/npm-cache payload was removed, reducing the transaction from 1.8 GB to 24 KB and root use from 88% to 66% with 2.8 GB free. Atomic TEST acceptance now records the remote `accepted` state after alias promotion and then performs the same bounded cleanup. Continue checking disk capacity before each TEST rollout; do not use the retired qualification harness.
 
 The qualification harness (`path-release-qualify.js`) was permanently abandoned on 2026-08-16. Use `--skip-qualification` in place of `--qualification-evidence` for all TEST and PROD deploys. This flag bypasses only the GO evidence gate; source checks, builds, lint, privacy, smoke, and rollback recording still run. The decision is recorded as `UNQUALIFIED` in the manifest and artifact provenance. `--qualification-evidence` remains available in the CLI for future use if a new qualification system is established.
 
@@ -73,8 +73,6 @@ When Bill starts a new Codex thread for deploy work, the agent must first:
 ## Most Common Commands
 
 ### 1. Deploy current code to TEST
-
-The current TEST hard stop above must be cleared before using these commands.
 
 ```bash
 npm run path:deploy -- --env test --skip-data --release-id <release-id> --skip-qualification --yes
