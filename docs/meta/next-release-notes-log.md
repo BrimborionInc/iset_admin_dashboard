@@ -22,7 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
-- 2026-08-29 | Release TBD | Feature/Documents | Supporting Documents | Staff can delete ordinary documents they are authorized to manage, regardless of how the document reached PATH. | PATH keeps generated signed documents, documents currently out for signature, formal CFA and Financial Overview version history, and payment-record evidence. A secure-message attachment remains in its original message, and deletion does not move a completed workflow step backwards.
+- 2026-08-29 | Release 20260829-supporting-document-deletion-r1 | Feature/Documents | Supporting Documents | Staff can delete ordinary documents they are authorized to manage, regardless of how the document reached PATH. | PATH keeps generated signed documents, documents currently out for signature, formal CFA and Financial Overview version history, and payment-record evidence. A secure-message attachment remains in its original message, and deletion does not move a completed workflow step backwards.
 - 2026-08-28 | Release 20260828-admin-document-lineage-r1 | Feature/Documents | Supporting Documents | Staff can remove an eligible applicant-uploaded file from normal use through the same reversible Delete workflow as an eligible staff upload. | The stored file and submitted application remain intact; only System Administrators can restore it. Signing, message, generated, version, payment, legacy, and unknown records remain protected, and Applicant uploads are not enabled for Duplicate.
 - 2026-08-28 | Release 20260828-admin-document-lineage-r1 | Fix/Casework | Intervention revisions | A revision created from an application-linked intervention now keeps that exact application even when its mixed historical/current Action Plan is intentionally case-owned. | PATH proves the source belongs to the same case and Action Plan and refuses contradictory application lineage instead of silently changing it.
 - 2026-08-26 | Release 20260826-signing-lineage-r2-copyfix | Fix/Secure Messaging | Reliable send retry | A lost connection after Send no longer causes PATH to create the same message, form package, or decision update twice. | PATH reuses the exact original send operation for a retry, returns its committed result, and uses a fresh operation for a later intentional message. Deployed to TEST and PROD.
@@ -514,7 +514,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What Changed Packages (draft - EN)
 
-#### Release TBD
+#### Release 20260829-supporting-document-deletion-r1
 
 - Supporting Documents now uses one simple deletion rule: staff can delete an ordinary document they are authorized to manage, while PATH keeps signed documents, files currently out for signature, CFA and Financial Overview version history, and payment evidence.
 - Deleting a secure-message attachment from Supporting Documents leaves the original message and attachment intact. Deleting a checklist document does not move the workflow backwards, though it can block a current or future checklist that still requires the document.
@@ -547,7 +547,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Lots de changements (brouillon - FR)
 
-#### Release TBD
+#### Release 20260829-supporting-document-deletion-r1
 
 - Les documents de soutien suivent maintenant une règle de suppression simple : le personnel peut supprimer un document ordinaire qu'il est autorisé à gérer, tandis que PATH conserve les documents signés, les fichiers en cours de signature, l'historique des versions des ententes de financement et des aperçus financiers, ainsi que les preuves de paiement.
 - La suppression d'une pièce jointe de la liste des documents de soutien laisse le message sécurisé et sa pièce jointe intacts. La suppression d'un document de liste de contrôle ne fait pas reculer le processus, mais peut bloquer une vérification actuelle ou future qui exige encore ce document.
