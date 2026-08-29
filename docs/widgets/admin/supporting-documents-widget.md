@@ -1,6 +1,6 @@
 # Supporting Documents widget
 
-Date: 2026-08-28
+Date: 2026-08-29
 
 ## Workflow
 
@@ -55,11 +55,15 @@ manual uploads, and generated forms, then compares them against the relevant che
     - `/api/cases/:case_id/documents/upload` for case-backed document mode when the file has no safe applicant account context
 - Refresh behavior: listens for `iset:supporting-documents:refresh`, mainly from Secure Messaging attachment adoption.
 - Delete behavior:
-  - all four PATH staff roles can use `Delete` when they already have access to the file and the file is an eligible staff upload or a document shown with source `Applicant upload`
-  - `Delete` is reversible: PATH marks the document deleted, removes it from normal document lists and checklist/process matching, and leaves the stored file in place
+  - all four PATH staff roles can use `Delete` for ordinary documents within their existing object scope; deletion is no longer limited by document source
+  - the confirmation is exactly `Delete this document?`, with `Cancel` and `Delete` actions and no typed confirmation
+  - `Delete` removes the document from normal document lists and active checklist/process matching
   - deleting an applicant upload does not alter the submitted application's answers, payload, ownership, or history, and it does not make applicant uploads eligible for Duplicate
-  - generated files, documents linked to PATH signing requests, secure-message attachments, version evidence, payment evidence, legacy/unknown-source files, and other authoritative records cannot be deleted through the widget; the disabled action explains why in plain language
-  - deleting a document does not undo a signature, payment, approval, submission, or any other business event
+  - deletion is blocked for PATH-generated signed documents, documents whose signing request is currently pending or viewed, documents linked to CFA or Financial Overview version history, and documents tied to payment records
+  - manually uploaded scans are not treated as signed evidence merely because the file contains a signature
+  - deleting an adopted secure-message attachment removes it from Supporting Documents only; the original message, message attachment, and message download remain intact, and reopening the message does not reactivate the deleted document entry
+  - deleting a checklist document before a checkpoint can prevent that checkpoint from passing; deleting it after a checkpoint does not roll the workflow back, but the missing document can block any current or future checkpoint that requires it
+  - deleting a document does not reverse a completed approval, submission, message, or other business event
 - Deleted view:
   - only `System Administrator` sees the `Deleted` tab and can view, download, or restore files deleted through this lifecycle
   - historical rows that already had `iset_document.status='deleted'` before this feature are not treated as lifecycle deletions and do not appear in the tab
@@ -82,7 +86,7 @@ manual uploads, and generated forms, then compares them against the relevant che
   - client-scoped modal saves and duplicate-document saves include hidden case/application context only so the backend can validate access and resolve client scope; staff are not asked to attach client-scoped documents to an application
   - application-submission documents keep their source-required `application_id` lineage when edited through the modal, even when the selected document type is client-scoped
   - the modal preloads an existing application/action-plan attachment even when the document is not classified yet; when an older unscoped row is edited, it defaults attachment controls from the current workspace filter/context when possible
-  - duplicate and delete remain separate operations and retain the stricter source/dependency integrity guard
+  - duplicate and delete remain separate operations: Duplicate retains its stricter source policy, while Delete is governed by the signing, version-history, and payment dependencies above
 - Download behavior:
   - the inline `Download` action is shown only to `System Administrator` and `NWAC Administrator`
   - it requires an explicit privacy warning confirmation
@@ -127,9 +131,9 @@ manual uploads, and generated forms, then compares them against the relevant che
 - If an edit-details or duplicate save fails for a client-scoped type such as `identity_document` or `status_card`, verify the widget request includes `caseId` or `applicationId` even though the document remains client-scoped in storage. If the row has `source='application_submission'`, also verify the backend preserves the existing `application_id`; PROD's source-lineage CHECK constraint requires submission documents to keep `client_id`, `case_id`, `application_id`, and `applicant_user_id`.
 - If `chk_iset_document_manual_upload_scope` fails for a staff upload, treat it as a backend context-resolution bug first. Manual uploads must carry `client_id` and `case_id`; application-linked uploads must also carry `application_id` and `applicant_user_id`.
 - If `Delete` is disabled, use the reason shown by PATH. Do not detach, reclassify, or rewrite provenance merely to make an authoritative file deletable.
+- If a secure-message attachment is deleted from Supporting Documents, verify it remains available in the original message; reopening the message must not recreate or reactivate its document-list entry.
+- If a checklist document is deleted, verify only current and future checklist evaluation changes. A checkpoint already passed must remain passed and the workflow must not move backwards.
 - If a newly deleted file is missing from the `Deleted` tab, verify the lifecycle schema migration is present and the delete transaction wrote `iset_document_lifecycle`; do not backfill older `status='deleted'` rows by assumption.
-- Release gate: current admin uploads store and verify `path-sha256` object metadata, but older `manual_upload` objects may predate it. Do not roll out reversible Delete until PATH either verifies object identity before allowing Delete (and gives a plain refusal for unverifiable legacy files) or supports a reviewed full-object checksum fallback. Otherwise an older file could be hidden successfully and then fail the restore check.
-- Release gate: assessment and intervention-decision paths that rely on an active manual document must lock and recheck that document inside their write transaction. A pre-transaction check alone can race Delete and commit a decision against a document that has just become hidden.
-- Release gate: payment evidence must remain protected after it enters finance history, even if a user later removes the visible packet link. Prospective unlink/packet/line operations can be blocked once normalized payment transactions exist; protecting already-stale historical document IDs requires a reviewed normalized finance-transaction/document history record and guarded backfill rather than relying on JSON or comma-separated IDs.
+- If `Delete` is disabled for payment evidence, remove a draft-stage evidence link through the payment workflow when appropriate. Evidence tied to a submitted payment record remains protected.
 - A preview/download URL issued before Delete remains usable until its short expiry. Delete prevents new ordinary-user access after the lifecycle change, but it cannot revoke a URL or copy that was already issued.
 - Do not add placeholder application, assessment, or action-plan rows just to make document management work.

@@ -33,6 +33,7 @@ The surfaces should differ by scope and navigation context only. They should not
 - The packet status endpoint is the only code path allowed to send the Finance email.
 - Direct email endpoints must not bypass validation, status transitions, communication logging, or ledger creation.
 - Every Finance email or external accounting handoff must have a committed durable attempt before dispatch. Accepted outcomes must replay without resending; uncertain provider outcomes require review and must never be retried blindly.
+- Payment evidence may be unlinked only while the packet is `draft` or `ready_to_send`. Once submitted to Finance, the evidence link is part of the retained payment record. Supporting Documents must protect any document with a payment-record link; staff working on a draft or ready-to-send packet must remove that link in the payment workflow before using Delete in Supporting Documents.
 - Payment follow-up evidence must belong to the selected packet's client/case as well as being accessible to the actor.
 - The old `Mark paid` behavior must not be used as an operations-side shortcut for unreliable Finance feedback. It should be replaced by explicit follow-up tracking.
 - PATH may record operationally reported or evidenced payment fulfillment, but visible copy and help text must avoid presenting that as Sage-confirmed accounting truth unless an actual Sage import/integration proves it.

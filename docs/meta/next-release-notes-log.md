@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-08-28
+Last Updated: 2026-08-29
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-08-29 | Release TBD | Feature/Documents | Supporting Documents | Staff can delete ordinary documents they are authorized to manage, regardless of how the document reached PATH. | PATH keeps generated signed documents, documents currently out for signature, formal CFA and Financial Overview version history, and payment-record evidence. A secure-message attachment remains in its original message, and deletion does not move a completed workflow step backwards.
 - 2026-08-28 | Release 20260828-admin-document-lineage-r1 | Feature/Documents | Supporting Documents | Staff can remove an eligible applicant-uploaded file from normal use through the same reversible Delete workflow as an eligible staff upload. | The stored file and submitted application remain intact; only System Administrators can restore it. Signing, message, generated, version, payment, legacy, and unknown records remain protected, and Applicant uploads are not enabled for Duplicate.
 - 2026-08-28 | Release 20260828-admin-document-lineage-r1 | Fix/Casework | Intervention revisions | A revision created from an application-linked intervention now keeps that exact application even when its mixed historical/current Action Plan is intentionally case-owned. | PATH proves the source belongs to the same case and Action Plan and refuses contradictory application lineage instead of silently changing it.
 - 2026-08-26 | Release 20260826-signing-lineage-r2-copyfix | Fix/Secure Messaging | Reliable send retry | A lost connection after Send no longer causes PATH to create the same message, form package, or decision update twice. | PATH reuses the exact original send operation for a retry, returns its committed result, and uses a fresh operation for a later intentional message. Deployed to TEST and PROD.
@@ -508,10 +509,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Eligible Applicant upload files can now be removed from normal use through reversible Delete while the submitted application and stored file remain intact.
+- Staff can now delete ordinary Supporting Documents regardless of how the file reached PATH. Signed documents, files currently out for signature, formal version history, and payment evidence remain protected.
 - Intervention revisions now keep the exact application of their source intervention on mixed historical/current Action Plans and refuse contradictory lineage.
 
 ### What Changed Packages (draft - EN)
+
+#### Release TBD
+
+- Supporting Documents now uses one simple deletion rule: staff can delete an ordinary document they are authorized to manage, while PATH keeps signed documents, files currently out for signature, CFA and Financial Overview version history, and payment evidence.
+- Deleting a secure-message attachment from Supporting Documents leaves the original message and attachment intact. Deleting a checklist document does not move the workflow backwards, though it can block a current or future checklist that still requires the document.
+- Delete now asks only “Delete this document?”; payment evidence can be removed only while its packet is Draft or Ready to send.
 
 #### Release 20260828-admin-document-lineage-r1
 
@@ -527,13 +534,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Forms that use an intervention, including attendance reports, show that context before sending. Ordinary messages do not silently inherit the intervention or Action Plan selected elsewhere in the workspace.
 - Historical conversations and authorized attachments remain available after application or account-link changes. PATH preserves their recorded ownership; only a signing form aimed at a former account or a proven file-ownership conflict stops the affected action.
 
-#### Release 20260824-path-maintenance-r1
-
-- Participant Details corrections can now be saved from a client file opened directly through ISET Clients. PATH updates only the changed participant fields and preserves application decisions, assessments, and submitted reporting evidence.
-- Eligible ordinary staff uploads can now be removed from normal document lists without deleting the stored audit history. System Administrators can review and restore them, while protected workflow, signing, message, agreement, and payment documents clearly explain why they must be retained.
-- Secure Messaging now records `Applicant replied` only for a real applicant-origin reply; staff follow-ups no longer change an earlier staff message to that status.
-- Repeat-application portal activity remains attached to the exact application, and applicants can safely remove only their own unused pre-submission draft uploads.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
@@ -542,10 +542,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
-- Les fichiers admissibles affichés comme Téléversement du demandeur peuvent maintenant être retirés de l'utilisation normale au moyen de la suppression réversible, sans modifier la demande soumise ni le fichier stocké.
+- Le personnel peut maintenant supprimer les documents de soutien ordinaires, peu importe leur provenance. Les documents signés, les fichiers en cours de signature, l'historique officiel des versions et les preuves de paiement demeurent protégés.
 - Les révisions d'intervention conservent maintenant la demande exacte de leur intervention source dans les plans d'action mixtes historiques et actuels, et PATH refuse toute filiation contradictoire.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release TBD
+
+- Les documents de soutien suivent maintenant une règle de suppression simple : le personnel peut supprimer un document ordinaire qu'il est autorisé à gérer, tandis que PATH conserve les documents signés, les fichiers en cours de signature, l'historique des versions des ententes de financement et des aperçus financiers, ainsi que les preuves de paiement.
+- La suppression d'une pièce jointe de la liste des documents de soutien laisse le message sécurisé et sa pièce jointe intacts. La suppression d'un document de liste de contrôle ne fait pas reculer le processus, mais peut bloquer une vérification actuelle ou future qui exige encore ce document.
+- La confirmation demande seulement « Supprimer ce document? »; une preuve de paiement peut être retirée uniquement lorsque sa trousse est à l'état Brouillon ou Prête à envoyer.
 
 #### Release 20260828-admin-document-lineage-r1
 
@@ -560,13 +566,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - PATH conserve un historique continu des ententes du dossier. Seule une contradiction dans le formulaire exact en cours de création ou de signature bloque cette opération; les messages ordinaires et les autres travaux au dossier restent disponibles.
 - Les formulaires qui utilisent une intervention, y compris les rapports de présence, affichent ce contexte avant l'envoi. Les messages ordinaires n'héritent pas silencieusement de l'intervention ou du plan d'action sélectionné ailleurs dans l'espace de travail.
 - Les conversations historiques et les pièces jointes autorisées restent accessibles après un changement de demande ou de compte lié. PATH préserve leur propriété enregistrée; seul un formulaire de signature destiné à un ancien compte ou un conflit de propriété de fichier prouvé bloque l'action concernée.
-
-#### Release 20260824-path-maintenance-r1
-
-- Les corrections aux détails du participant peuvent maintenant être enregistrées depuis un dossier client ouvert directement par Clients ISET. PATH met à jour uniquement les champs modifiés et préserve les décisions, les évaluations et les preuves de rapport déjà soumises.
-- Les téléversements ordinaires admissibles du personnel peuvent maintenant être retirés des listes normales sans supprimer l'historique d'audit. Les administrateurs système peuvent les examiner et les restaurer, tandis que PATH explique clairement pourquoi les documents liés aux processus, aux signatures, aux messages, aux ententes et aux paiements doivent être conservés.
-- La messagerie sécurisée enregistre maintenant `Réponse du demandeur` uniquement pour une véritable réponse provenant de la personne participante; les suivis du personnel ne changent plus ainsi le statut d'un message antérieur du personnel.
-- Pour les demandes répétées, l'activité du portail reste liée à la demande exacte, et les personnes participantes peuvent retirer en toute sécurité uniquement leurs propres téléversements de brouillon inutilisés avant la soumission.
 
 ### Problemes connus (brouillon - FR)
 

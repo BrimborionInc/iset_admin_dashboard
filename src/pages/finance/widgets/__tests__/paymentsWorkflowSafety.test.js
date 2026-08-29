@@ -205,6 +205,15 @@ describe("payments workflow safety rails", () => {
     expect(detailWidgetSource).toContain("lineId: activeEvidenceRow.lineId || null");
   });
 
+  test("payment evidence editing fails closed outside draft and ready-to-send packets", () => {
+    expect(detailWidgetSource).toContain(
+      '["draft", "ready_to_send"].includes(packetStatusValue)'
+    );
+    expect(serverSource).toContain(
+      "const PAYMENT_EVIDENCE_REMOVABLE_PACKET_STATUSES = new Set([\n  'draft',\n  'ready_to_send',"
+    );
+  });
+
   test("payment evidence baseline is funding agreement plus signed EFT form only", () => {
     expect(serverSource).toContain("required: ['FundingAgreement', 'SignedEftBankingForm']");
     expect(serverSource).toContain("eft_form: ['SignedEftBankingForm']");

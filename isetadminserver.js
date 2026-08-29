@@ -4376,6 +4376,8 @@ async function storeDecisionLetterPdfDocument({
   const metadata = JSON.stringify(pruneNullish({
     label,
     document_type: docType,
+    generated_kind: 'signing_request_source_document',
+    signing_request_id: normalisePositiveInteger(signingRequestId),
     decision_letter_owner: normalizedOwner.kind,
     application_id: normalizedOwner.applicationId,
     action_plan_id:
@@ -26047,14 +26049,35 @@ async function fetchDocumentPaymentLinkCount(documentId, connection = pool) {
   );
 }
 
-const ARCHIVABLE_DOCUMENT_SOURCES = new Set([
-  'manual_upload',
-  'application_submission',
-]);
-
 const GENERICALLY_MUTABLE_DOCUMENT_SOURCES = new Set([
   'manual_upload',
 ]);
+
+const ACTIVE_DOCUMENT_SIGNING_REQUEST_STATUSES = new Set([
+  'pending',
+  'viewed',
+]);
+
+const TERMINAL_DOCUMENT_SIGNING_REQUEST_STATUSES = new Set([
+  'signed',
+  'cancelled',
+  'expired',
+]);
+
+const DECISION_LETTER_DOCUMENT_CATEGORIES = new Set([
+  'assessment_approval_letter',
+  'assessment_denial_letter',
+]);
+
+const DOCUMENT_ACTION_BLOCKER_MESSAGES = Object.freeze({
+  signed_document:
+    'Signed documents form part of the evidence and contracting record and cannot be deleted. Contact a System Administrator if one was created and sent in error.',
+  signing_request_in_progress: 'This document is currently out for signature and cannot be deleted.',
+  signing_request_legacy: 'This document is part of a signing request and cannot be deleted.',
+  cfa_version_link: 'This document is part of the version history and cannot be deleted.',
+  funding_overview_version_link: 'This document is part of the version history and cannot be deleted.',
+  payment_evidence_link: 'This document is part of a payment record and cannot be deleted.',
+});
 
 function buildImmutableDocumentMutationError(reason, operation = 'copied') {
   return {
@@ -26075,6 +26098,35 @@ function resolveDocumentSigningRequestDependencyId(documentRow = {}) {
     metadata?.signing_request_id ||
     metadata?.signingRequestId
   );
+}
+
+function resolveDocumentGeneratedKind(documentRow = {}) {
+  const metadata = parseMetadata(documentRow?.metadata);
+  return (normaliseString(metadata?.generated_kind || metadata?.generatedKind) || '').toLowerCase();
+}
+
+function isPathGeneratedSignedDocument(documentRow = {}) {
+  return Boolean(
+    normalisePositiveInteger(documentRow?.signing_request_id) ||
+    resolveDocumentGeneratedKind(documentRow) === 'signed_form'
+  );
+}
+
+function resolveSigningRequestSourceDocumentId(documentRow = {}) {
+  if (resolveDocumentGeneratedKind(documentRow) !== 'signing_request_source_document') {
+    return null;
+  }
+  const metadata = parseMetadata(documentRow?.metadata);
+  return normalisePositiveInteger(metadata?.signing_request_id || metadata?.signingRequestId);
+}
+
+function isLegacyDecisionLetterSigningDocument(documentRow = {}) {
+  if ((normaliseString(documentRow?.source) || '').toLowerCase() !== 'system_generated') {
+    return false;
+  }
+  const documentCategory = (normaliseString(documentRow?.document_category) || '').toLowerCase();
+  if (!DECISION_LETTER_DOCUMENT_CATEGORIES.has(documentCategory)) return false;
+  return resolveDocumentGeneratedKind(documentRow) !== 'signing_request_source_document';
 }
 
 async function validateDocumentMutationIntegrityForSources({
@@ -26143,23 +26195,32 @@ async function validateGenericDocumentMutationIntegrity(documentRow, connection 
   });
 }
 
-async function validateDocumentArchiveIntegrity(documentRow, connection = pool) {
-  return validateDocumentMutationIntegrityForSources({
-    documentRow,
-    allowedSources: ARCHIVABLE_DOCUMENT_SOURCES,
-    operation: 'deleted',
-    connection,
-  });
+function buildDocumentDeleteIntegrityError(reason) {
+  return {
+    status: 409,
+    body: {
+      error: 'document_immutable',
+      reason,
+      message: DOCUMENT_ACTION_BLOCKER_MESSAGES[reason] || 'This document cannot be deleted.',
+    },
+  };
 }
 
-const DOCUMENT_ACTION_BLOCKER_MESSAGES = Object.freeze({
-  signing_request_link: 'PATH needs to keep this signed document.',
-  secure_message_origin: 'PATH needs to keep documents that came from secure messages.',
-  authoritative_source: 'PATH needs to keep this file as part of the official record.',
-  cfa_version_link: 'PATH needs to keep documents used in a funding agreement version.',
-  funding_overview_version_link: 'PATH needs to keep documents used in a funding overview version.',
-  payment_evidence_link: 'PATH needs to keep documents used as payment evidence.',
-});
+async function validateDocumentDeleteIntegrity(documentRow, connection = pool) {
+  if (!documentRow) {
+    return { status: 404, body: { error: 'document_not_found' } };
+  }
+  const normalizedDocumentId = normalisePositiveInteger(documentRow.id);
+  if (!normalizedDocumentId) {
+    return buildDocumentDeleteIntegrityError('invalid_document_identity');
+  }
+  const blockerMap = await fetchDocumentRelationshipBlockers([documentRow], connection);
+  const blocker = getDocumentDeleteBlocker(
+    documentRow,
+    blockerMap.get(normalizedDocumentId) || new Set()
+  );
+  return blocker ? buildDocumentDeleteIntegrityError(blocker) : null;
+}
 
 function addDocumentRelationshipBlocker(blockers, documentId, reason) {
   const normalizedDocumentId = normalisePositiveInteger(documentId);
@@ -26168,14 +26229,73 @@ function addDocumentRelationshipBlocker(blockers, documentId, reason) {
   blockers.get(normalizedDocumentId).add(reason);
 }
 
-async function fetchDocumentRelationshipBlockers(documentIds, connection = pool) {
+async function fetchDocumentRelationshipBlockers(documentRows, connection = pool) {
+  const rows = (Array.isArray(documentRows) ? documentRows : [documentRows])
+    .filter(row => row && typeof row === 'object');
   const ids = Array.from(new Set(
-    (Array.isArray(documentIds) ? documentIds : [documentIds])
-      .map(normalisePositiveInteger)
+    rows
+      .map(row => normalisePositiveInteger(row.id))
       .filter(Boolean)
   ));
   const blockers = new Map(ids.map(id => [id, new Set()]));
   if (!ids.length) return blockers;
+
+  const signingRequestSourceDocuments = new Map();
+  for (const row of rows) {
+    const documentId = normalisePositiveInteger(row.id);
+    if (!documentId) continue;
+    if (isPathGeneratedSignedDocument(row)) {
+      addDocumentRelationshipBlocker(blockers, documentId, 'signed_document');
+      continue;
+    }
+    if (isLegacyDecisionLetterSigningDocument(row)) {
+      addDocumentRelationshipBlocker(blockers, documentId, 'signing_request_legacy');
+      continue;
+    }
+    if (resolveDocumentGeneratedKind(row) !== 'signing_request_source_document') continue;
+    const signingRequestId = resolveSigningRequestSourceDocumentId(row);
+    if (!signingRequestId) {
+      addDocumentRelationshipBlocker(blockers, documentId, 'signing_request_legacy');
+      continue;
+    }
+    if (!signingRequestSourceDocuments.has(signingRequestId)) {
+      signingRequestSourceDocuments.set(signingRequestId, []);
+    }
+    signingRequestSourceDocuments.get(signingRequestId).push(row);
+  }
+
+  if (signingRequestSourceDocuments.size) {
+    const signingRequestIds = Array.from(signingRequestSourceDocuments.keys());
+    const signingPlaceholders = signingRequestIds.map(() => '?').join(',');
+    const [signingRequestRows] = await connection.query(
+      `SELECT signing_request.id, signing_request.case_id, signing_request.status
+         FROM signing_request
+        WHERE signing_request.id IN (${signingPlaceholders})`,
+      signingRequestIds
+    );
+    const signingRequestsById = new Map(
+      (signingRequestRows || []).map(row => [normalisePositiveInteger(row.id), row])
+    );
+    for (const [signingRequestId, sourceDocuments] of signingRequestSourceDocuments.entries()) {
+      const signingRequest = signingRequestsById.get(signingRequestId);
+      for (const sourceDocument of sourceDocuments) {
+        const documentId = normalisePositiveInteger(sourceDocument.id);
+        const documentCaseId = normalisePositiveInteger(sourceDocument.case_id);
+        const signingCaseId = normalisePositiveInteger(signingRequest?.case_id);
+        if (!signingRequest || (documentCaseId && signingCaseId !== documentCaseId)) {
+          addDocumentRelationshipBlocker(blockers, documentId, 'signing_request_legacy');
+          continue;
+        }
+        const signingStatus = (normaliseString(signingRequest.status) || '').toLowerCase();
+        if (ACTIVE_DOCUMENT_SIGNING_REQUEST_STATUSES.has(signingStatus)) {
+          addDocumentRelationshipBlocker(blockers, documentId, 'signing_request_in_progress');
+        } else if (!TERMINAL_DOCUMENT_SIGNING_REQUEST_STATUSES.has(signingStatus)) {
+          addDocumentRelationshipBlocker(blockers, documentId, 'signing_request_legacy');
+        }
+      }
+    }
+  }
+
   const placeholders = ids.map(() => '?').join(',');
   const relationshipQueries = [
     {
@@ -26228,12 +26348,11 @@ async function fetchDocumentRelationshipBlockers(documentIds, connection = pool)
   return blockers;
 }
 
-function getDocumentArchiveBlocker(documentRow, relationshipBlockers = new Set()) {
-  if (resolveDocumentSigningRequestDependencyId(documentRow)) return 'signing_request_link';
-  if (normalisePositiveInteger(documentRow?.origin_message_id)) return 'secure_message_origin';
-  const source = (normaliseString(documentRow?.source) || '').toLowerCase();
-  if (!ARCHIVABLE_DOCUMENT_SOURCES.has(source)) return 'authoritative_source';
+function getDocumentDeleteBlocker(documentRow, relationshipBlockers = new Set()) {
+  if (isPathGeneratedSignedDocument(documentRow)) return 'signed_document';
   for (const reason of [
+    'signing_request_in_progress',
+    'signing_request_legacy',
     'cfa_version_link',
     'funding_overview_version_link',
     'payment_evidence_link',
@@ -26244,13 +26363,13 @@ function getDocumentArchiveBlocker(documentRow, relationshipBlockers = new Set()
 }
 
 function buildDocumentLifecycleCapabilities(documentRow, relationshipBlockers = new Set()) {
-  const archiveBlocker = getDocumentArchiveBlocker(documentRow, relationshipBlockers);
+  const deleteBlocker = getDocumentDeleteBlocker(documentRow, relationshipBlockers);
   const lifecycleState = normaliseString(documentRow?.lifecycle_state);
   const isActive = documentRow?.status === 'active';
   const isDeleted = documentRow?.status === 'deleted';
   return {
-    can_delete: isActive && !archiveBlocker,
-    delete_disabled_reason: archiveBlocker ? DOCUMENT_ACTION_BLOCKER_MESSAGES[archiveBlocker] : null,
+    can_delete: isActive && !deleteBlocker,
+    delete_disabled_reason: deleteBlocker ? DOCUMENT_ACTION_BLOCKER_MESSAGES[deleteBlocker] : null,
     can_restore: isDeleted && lifecycleState === 'deleted',
     restore_disabled_reason:
       isDeleted && lifecycleState !== 'deleted'
@@ -26261,8 +26380,7 @@ function buildDocumentLifecycleCapabilities(documentRow, relationshipBlockers = 
 
 async function decorateDocumentsWithLifecycleCapabilities(rows, connection = pool) {
   const documentRows = Array.isArray(rows) ? rows : [];
-  const documentIds = documentRows.map(row => row?.id);
-  const blockerMap = await fetchDocumentRelationshipBlockers(documentIds, connection);
+  const blockerMap = await fetchDocumentRelationshipBlockers(documentRows, connection);
   return documentRows.map(row => ({
     ...row,
     ...buildDocumentLifecycleCapabilities(
@@ -61334,7 +61452,8 @@ app.delete('/api/documents/:id', async (req, res) => {
   try {
     const [[doc]] = await pool.query(
       `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id,
-              source, origin_message_id, signing_request_id, metadata, updated_at
+              source, origin_message_id, signing_request_id, file_name, metadata,
+              document_category, updated_at
          FROM iset_document
         WHERE id = ? AND status = 'active'
         LIMIT 1`,
@@ -61347,7 +61466,7 @@ app.delete('/api/documents/:id', async (req, res) => {
     if (accessError) {
       return res.status(accessError.status).json(accessError.body);
     }
-    const mutationError = await validateDocumentArchiveIntegrity(doc);
+    const mutationError = await validateDocumentDeleteIntegrity(doc);
     if (mutationError) {
       return res.status(mutationError.status).json(mutationError.body);
     }
@@ -61364,13 +61483,13 @@ app.delete('/api/documents/:id', async (req, res) => {
       await connection.rollback();
       return res.status(locked.error.status).json(locked.error.body);
     }
-    const lockedArchiveError = await validateDocumentArchiveIntegrity(
+    const lockedDeleteError = await validateDocumentDeleteIntegrity(
       locked.documentRow,
       connection
     );
-    if (lockedArchiveError) {
+    if (lockedDeleteError) {
       await connection.rollback();
-      return res.status(lockedArchiveError.status).json(lockedArchiveError.body);
+      return res.status(lockedDeleteError.status).json(lockedDeleteError.body);
     }
     const [[existingLifecycle]] = await connection.query(
       `SELECT id, current_state, lifecycle_generation
@@ -61457,7 +61576,7 @@ app.delete('/api/documents/:id', async (req, res) => {
       reason,
     });
     await connection.commit();
-    return res.json({ ok: true, deleted: true, archived: true });
+    return res.json({ ok: true, deleted: true });
   } catch (err) {
     if (connection) {
       try { await connection.rollback(); } catch (_) {}
@@ -80895,6 +81014,11 @@ const normalizePacketWorkflowStage = status => {
   return 'submitted';
 };
 
+const PAYMENT_EVIDENCE_REMOVABLE_PACKET_STATUSES = new Set([
+  'draft',
+  'ready_to_send',
+]);
+
 function requirePaymentsRole(req, res) {
   const roleRaw = inferUserRole(req);
   const role = canonicaliseAccessRole(roleRaw);
@@ -99379,32 +99503,87 @@ app.delete('/api/finance/payment-documents/:id', async (req, res) => {
   if (!documentLinkId) {
     return res.status(400).json({ error: 'invalid_payment_document_id' });
   }
+  let connection = null;
+  let transactionStarted = false;
   try {
-    const [[row]] = await pool.query(
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    transactionStarted = true;
+
+    const [[linkReference]] = await connection.query(
       'SELECT payment_packet_id FROM payment_packet_document WHERE id = ? LIMIT 1',
       [documentLinkId]
     );
-    if (!row) {
+    if (!linkReference) {
+      await connection.rollback();
+      transactionStarted = false;
       return res.status(404).json({ error: 'payment_document_not_found' });
     }
-    const accessError = await validatePaymentPacketAccess(req, row.payment_packet_id);
+
+    const packetId = normalisePositiveInteger(linkReference.payment_packet_id);
+    const [[packetRow]] = await connection.query(
+      'SELECT id, status FROM payment_packet WHERE id = ? LIMIT 1 FOR UPDATE',
+      [packetId]
+    );
+    if (!packetRow) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+
+    const accessError = await validatePaymentPacketAccess(req, packetId, { connection });
     if (accessError) {
+      await connection.rollback();
+      transactionStarted = false;
       return res.status(accessError.status).json(accessError.body);
     }
-    const [result] = await pool.query(
-      'DELETE FROM payment_packet_document WHERE id = ?',
-      [documentLinkId]
+
+    const packetStatus = normalizePaymentStatus(packetRow.status);
+    if (!PAYMENT_EVIDENCE_REMOVABLE_PACKET_STATUSES.has(packetStatus)) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({
+        error: 'packet_not_editable',
+        message: 'This payment evidence can no longer be removed.',
+      });
+    }
+
+    const [[lockedLink]] = await connection.query(
+      `SELECT id, payment_packet_id
+         FROM payment_packet_document
+        WHERE id = ? AND payment_packet_id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [documentLinkId, packetId]
     );
-    if (!result?.affectedRows) {
+    if (!lockedLink) {
+      await connection.rollback();
+      transactionStarted = false;
       return res.status(404).json({ error: 'payment_document_not_found' });
     }
-    if (row.payment_packet_id) {
-      await clearPaymentPacketValidation({ packetId: row.payment_packet_id, connection: pool });
+
+    const [result] = await connection.query(
+      'DELETE FROM payment_packet_document WHERE id = ? AND payment_packet_id = ?',
+      [documentLinkId, packetId]
+    );
+    if (!result?.affectedRows) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(404).json({ error: 'payment_document_not_found' });
     }
+
+    await clearPaymentPacketValidation({ packetId, connection });
+    await connection.commit();
+    transactionStarted = false;
     res.status(200).json({ ok: true, deleted: true, id: String(documentLinkId) });
   } catch (err) {
+    if (transactionStarted && connection) {
+      try { await connection.rollback(); } catch (_) {}
+    }
     console.error('[payments] failed to delete payment document', err);
     res.status(500).json({ error: 'failed_to_delete_payment_document' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

@@ -70,13 +70,15 @@ function createTransactionalConnection({
       if (sql.startsWith('INSERT INTO iset_document')) {
         if (failDocumentInsert) throw new Error('injected_document_insert_failure');
         const replacementId = 42;
+        const metadata = JSON.parse(params[10]);
         working.documents.push({
           id: replacementId,
           applicationId: Number(params[1]),
           documentCategory: params[params.length - 1],
           status: 'archived',
           filePath: params[8],
-          owner: JSON.parse(params[10]).decision_letter_owner,
+          owner: metadata.decision_letter_owner,
+          metadata,
         });
         return [{ insertId: replacementId, affectedRows: 1 }, []];
       }
@@ -385,7 +387,14 @@ describe('decision-letter artifact atomicity', () => {
     ))).toEqual(['insert', 'archive_previous', 'activate_replacement']);
     expect(connection.workingState().documents).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 41, status: 'archived' }),
-      expect.objectContaining({ id: 42, status: 'active' }),
+      expect.objectContaining({
+        id: 42,
+        status: 'active',
+        metadata: expect.objectContaining({
+          generated_kind: 'signing_request_source_document',
+          signing_request_id: 201,
+        }),
+      }),
     ]));
     expect(uploadedObjects[0]).toMatchObject({
       documentId: 42,

@@ -59,20 +59,19 @@ function loadIntegrityGuard({ paymentLinkCount = 0 } = {}) {
   return { guard, paymentLinkLookup };
 }
 
-function loadArchiveIntegrityGuard({ paymentLinkCount = 0 } = {}) {
-  const start = serverSource.indexOf('const ARCHIVABLE_DOCUMENT_SOURCES');
+function loadDeleteIntegrityGuard() {
+  const start = serverSource.indexOf('const GENERICALLY_MUTABLE_DOCUMENT_SOURCES');
   const end = serverSource.indexOf('\nasync function fetchCaseAccessRowsForDocument', start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
   const implementation = serverSource.slice(start, end);
-  const paymentLinkLookup = jest.fn().mockResolvedValue(paymentLinkCount);
   const factory = new Function(
     'normalisePositiveInteger',
     'normaliseString',
     'fetchDocumentPaymentLinkCount',
     'parseMetadata',
     'pool',
-    `${implementation}\nreturn validateDocumentArchiveIntegrity;`
+    `${implementation}\nreturn validateDocumentDeleteIntegrity;`
   );
   const guard = factory(
     value => {
@@ -83,7 +82,7 @@ function loadArchiveIntegrityGuard({ paymentLinkCount = 0 } = {}) {
       if (value === null || typeof value === 'undefined') return null;
       return typeof value === 'string' && value.trim() ? value.trim() : null;
     },
-    paymentLinkLookup,
+    jest.fn().mockResolvedValue(0),
     value => {
       if (!value) return null;
       if (typeof value === 'object') return value;
@@ -91,7 +90,42 @@ function loadArchiveIntegrityGuard({ paymentLinkCount = 0 } = {}) {
     },
     { query: jest.fn() }
   );
-  return { guard, paymentLinkLookup };
+  return { guard };
+}
+
+function createDeleteIntegrityConnection({
+  signingRequests = [],
+  cfaDocumentIds = [],
+  fundingOverviewDocumentIds = [],
+  packetDocumentIds = [],
+  proofDocumentIds = [],
+  followUpDocumentIds = [],
+} = {}) {
+  return {
+    query: jest.fn(async (sql, params = []) => {
+      const normalizedSql = String(sql).replace(/\s+/g, ' ').trim();
+      if (normalizedSql.includes('FROM signing_request')) {
+        const requestedIds = new Set(params.map(Number));
+        return [signingRequests.filter(row => requestedIds.has(Number(row.id)))];
+      }
+      if (normalizedSql.includes('FROM cfa_version_documents cvd')) {
+        return [cfaDocumentIds.map(document_id => ({ document_id }))];
+      }
+      if (normalizedSql.includes('FROM funding_overview_version_documents fvd')) {
+        return [fundingOverviewDocumentIds.map(document_id => ({ document_id }))];
+      }
+      if (normalizedSql.includes('FROM payment_packet_document ppd')) {
+        return [packetDocumentIds.map(document_id => ({ document_id }))];
+      }
+      if (normalizedSql.includes('FROM payment_packet_line ppl')) {
+        return [proofDocumentIds.map(payment_proof_document_id => ({ payment_proof_document_id }))];
+      }
+      if (normalizedSql.includes('FROM payment_followup_event pfe')) {
+        return [followUpDocumentIds.map(document_id => ({ document_id }))];
+      }
+      throw new Error(`Unexpected delete-integrity SQL: ${normalizedSql}`);
+    }),
+  };
 }
 
 function loadAttachmentIntegrityGuard({ paymentLinkCount = 0 } = {}) {
@@ -149,11 +183,14 @@ function loadLockedMutationContext({ mutationError = null } = {}) {
 describe('generic Supporting Documents mutation integrity', () => {
   test('only ordinary staff uploads are generically mutable', () => {
     const allowlistStart = serverSource.indexOf('const GENERICALLY_MUTABLE_DOCUMENT_SOURCES');
-    const helperStart = serverSource.indexOf('async function validateGenericDocumentMutationIntegrity');
-    const allowlistSource = serverSource.slice(allowlistStart, helperStart);
+    const allowlistEnd = serverSource.indexOf(
+      'const ACTIVE_DOCUMENT_SIGNING_REQUEST_STATUSES',
+      allowlistStart
+    );
+    const allowlistSource = serverSource.slice(allowlistStart, allowlistEnd);
     const helperSource = extractFunction(
       'validateGenericDocumentMutationIntegrity',
-      '\nconst DOCUMENT_ACTION_BLOCKER_MESSAGES'
+      '\nfunction buildDocumentDeleteIntegrityError'
     );
 
     expect(allowlistStart).toBeGreaterThanOrEqual(0);
@@ -200,65 +237,174 @@ describe('generic Supporting Documents mutation integrity', () => {
     }
   );
 
-  test('Delete has a separate source boundary that includes applicant uploads only', () => {
-    const archiveStart = serverSource.indexOf('const ARCHIVABLE_DOCUMENT_SOURCES');
-    const genericStart = serverSource.indexOf('const GENERICALLY_MUTABLE_DOCUMENT_SOURCES');
-    const archiveAllowlistSource = serverSource.slice(archiveStart, genericStart);
-    const archiveGuardSource = extractFunction(
-      'validateDocumentArchiveIntegrity',
-      '\nconst DOCUMENT_ACTION_BLOCKER_MESSAGES'
+  test('Delete has a dependency-only boundary rather than a source allowlist', () => {
+    const deleteGuardSource = extractFunction(
+      'validateDocumentDeleteIntegrity',
+      '\nfunction addDocumentRelationshipBlocker'
+    );
+    const blockerSource = serverSource.slice(
+      serverSource.indexOf('function getDocumentDeleteBlocker'),
+      serverSource.indexOf('\nfunction buildDocumentLifecycleCapabilities')
     );
 
-    expect(archiveStart).toBeGreaterThanOrEqual(0);
-    expect(archiveAllowlistSource).toContain("'manual_upload'");
-    expect(archiveAllowlistSource).toContain("'application_submission'");
-    expect(archiveAllowlistSource).not.toContain("'legacy_intake_upload'");
-    expect(archiveAllowlistSource).not.toContain("'secure_message_attachment'");
-    expect(archiveAllowlistSource).not.toContain("'system_generated'");
-    expect(archiveGuardSource).toContain('allowedSources: ARCHIVABLE_DOCUMENT_SOURCES');
-    expect(archiveGuardSource).toContain("operation: 'deleted'");
+    expect(serverSource).not.toContain('ARCHIVABLE_DOCUMENT_SOURCES');
+    expect(deleteGuardSource).toContain('fetchDocumentRelationshipBlockers([documentRow], connection)');
+    expect(deleteGuardSource).toContain('getDocumentDeleteBlocker(');
+    expect(blockerSource).not.toContain('documentRow?.origin_message_id');
+    expect(blockerSource).not.toContain('authoritative_source');
   });
 
-  test.each(['manual_upload', 'application_submission'])(
-    '%s can be archived when no workflow dependency exists',
+  test.each([
+    'manual_upload',
+    'application_submission',
+    'secure_message_attachment',
+    'system_generated',
+    'legacy_intake_upload',
+    'unrecognised_source',
+    null,
+  ])(
+    '%s can be deleted when no concrete dependency exists',
     async source => {
-      const { guard, paymentLinkLookup } = loadArchiveIntegrityGuard();
-      const connection = { query: jest.fn().mockResolvedValue([[]]) };
+      const { guard } = loadDeleteIntegrityGuard();
+      const connection = createDeleteIntegrityConnection();
 
       await expect(guard({ id: 18, source }, connection)).resolves.toBeNull();
-      expect(connection.query).toHaveBeenCalledTimes(2);
-      expect(paymentLinkLookup).toHaveBeenCalledWith(18, connection);
+      expect(connection.query).toHaveBeenCalledTimes(5);
     }
   );
 
-  test.each(['secure_message_attachment', 'system_generated', 'legacy_intake_upload'])(
-    '%s remains protected from archive',
-    async source => {
-      const { guard } = loadArchiveIntegrityGuard();
-      const connection = { query: jest.fn().mockResolvedValue([[]]) };
+  test('an ordinary applicant upload materialized from a signing request remains deletable', async () => {
+    const { guard } = loadDeleteIntegrityGuard();
 
-      await expect(guard({ id: 19, source }, connection)).resolves.toMatchObject({
-        status: 409,
+    await expect(guard({
+      id: 20,
+      source: 'application_submission',
+      metadata: JSON.stringify({
+        materialized_from: 'signing_request_payload',
+        signing_request_id: 81,
+      }),
+    }, createDeleteIntegrityConnection())).resolves.toBeNull();
+  });
+
+  test.each([
+    ['metadata marker', { metadata: JSON.stringify({ generated_kind: 'signed_form' }) }],
+    ['direct signing link', { signing_request_id: 81 }],
+  ])('a PATH-generated signed document is protected by its %s', async (_label, documentFields) => {
+    const { guard } = loadDeleteIntegrityGuard();
+    await expect(guard({
+      id: 21,
+      source: 'application_submission',
+      ...documentFields,
+    }, createDeleteIntegrityConnection())).resolves.toMatchObject({
+      status: 409,
+      body: {
+        error: 'document_immutable',
+        reason: 'signed_document',
+        message:
+          'Signed documents form part of the evidence and contracting record and cannot be deleted. Contact a System Administrator if one was created and sent in error.',
+      },
+    });
+  });
+
+  test.each(['pending', 'viewed'])(
+    'a decision letter in %s signing status is protected while out for signature',
+    async status => {
+      const { guard } = loadDeleteIntegrityGuard();
+      const connection = createDeleteIntegrityConnection({
+        signingRequests: [{ id: 82, case_id: 10, status }],
+      });
+      await expect(guard({
+        id: 22,
+        case_id: 10,
+        source: 'system_generated',
+        document_category: 'assessment_approval_letter',
+        metadata: JSON.stringify({
+          generated_kind: 'signing_request_source_document',
+          signing_request_id: 82,
+          decision_letter_owner: 'application',
+        }),
+      }, connection)).resolves.toMatchObject({
         body: {
-          error: 'document_immutable',
-          reason: 'authoritative_source',
-          message:
-            "PATH needs to keep this document in the applicant's file, so it can't be deleted. You can still change its title or document type.",
+          reason: 'signing_request_in_progress',
+          message: 'This document is currently out for signature and cannot be deleted.',
         },
       });
     }
   );
 
-  test('an applicant upload materialized from a signing request remains protected', async () => {
-    const { guard } = loadArchiveIntegrityGuard();
+  test.each(['signed', 'cancelled', 'expired'])(
+    'an unsigned source document becomes deletable when its signing request is %s',
+    async status => {
+      const { guard } = loadDeleteIntegrityGuard();
+      const connection = createDeleteIntegrityConnection({
+        signingRequests: [{ id: 83, case_id: 10, status }],
+      });
+      await expect(guard({
+        id: 23,
+        case_id: 10,
+        source: 'system_generated',
+        document_category: 'assessment_denial_letter',
+        metadata: JSON.stringify({
+          generated_kind: 'signing_request_source_document',
+          signing_request_id: 83,
+          decision_letter_owner: 'application',
+        }),
+      }, connection)).resolves.toBeNull();
+    }
+  );
 
+  test.each(['future_state', null])(
+    'an unsigned source document fails closed when its signing request status is %s',
+    async status => {
+      const { guard } = loadDeleteIntegrityGuard();
+      const connection = createDeleteIntegrityConnection({
+        signingRequests: [{ id: 84, case_id: 10, status }],
+      });
+      await expect(guard({
+        id: 23,
+        case_id: 10,
+        source: 'system_generated',
+        document_category: 'assessment_denial_letter',
+        metadata: JSON.stringify({
+          generated_kind: 'signing_request_source_document',
+          signing_request_id: 84,
+        }),
+      }, connection)).resolves.toMatchObject({
+        body: {
+          reason: 'signing_request_legacy',
+          message: 'This document is part of a signing request and cannot be deleted.',
+        },
+      });
+    }
+  );
+
+  test('legacy sent decision letters remain protected even before owner metadata existed', async () => {
+    const { guard } = loadDeleteIntegrityGuard();
     await expect(guard({
-      id: 20,
-      source: 'application_submission',
-      metadata: JSON.stringify({ signing_request_id: 81 }),
-    }, { query: jest.fn() })).resolves.toMatchObject({
-      body: { reason: 'signing_request_link' },
+      id: 24,
+      source: 'system_generated',
+      document_category: 'assessment_approval_letter',
+      metadata: JSON.stringify({ label: 'Decision letter' }),
+    }, createDeleteIntegrityConnection())).resolves.toMatchObject({
+      body: {
+        reason: 'signing_request_legacy',
+        message: 'This document is part of a signing request and cannot be deleted.',
+      },
     });
+  });
+
+  test.each([
+    ['CFA version', { cfaDocumentIds: [25] }, 'cfa_version_link'],
+    ['Financial Overview version', { fundingOverviewDocumentIds: [25] }, 'funding_overview_version_link'],
+    ['packet evidence', { packetDocumentIds: [25] }, 'payment_evidence_link'],
+    ['line proof', { proofDocumentIds: [25] }, 'payment_evidence_link'],
+    ['follow-up evidence', { followUpDocumentIds: [25] }, 'payment_evidence_link'],
+  ])('%s is protected as a concrete dependency', async (_label, relationships, reason) => {
+    const { guard } = loadDeleteIntegrityGuard();
+    await expect(guard(
+      { id: 25, source: 'manual_upload' },
+      createDeleteIntegrityConnection(relationships)
+    )).resolves.toMatchObject({ body: { reason } });
   });
 
   test('a missing or unknown source fails closed', async () => {
@@ -394,7 +540,7 @@ describe('generic Supporting Documents mutation integrity', () => {
   ])('%s %s loads provenance and invokes the integrity guard before mutation', (method, route) => {
     const routeSource = extractRoute(method, route);
     const guardName = method === 'delete'
-      ? 'validateDocumentArchiveIntegrity('
+      ? 'validateDocumentDeleteIntegrity('
       : 'validateGenericDocumentMutationIntegrity(';
     const guardIndex = routeSource.indexOf(guardName);
 
@@ -532,7 +678,7 @@ describe('generic Supporting Documents mutation integrity', () => {
       "PATH needs to keep this document in the applicant's file, so it can't be ${operation}."
     );
     expect(serverSource).toContain("operation: 'copied'");
-    expect(serverSource).toContain("operation: 'deleted'");
+    expect(serverSource).toContain('validateDocumentDeleteIntegrity');
     expect(serverSource).toContain('The document title and document type can be edited');
   });
 });

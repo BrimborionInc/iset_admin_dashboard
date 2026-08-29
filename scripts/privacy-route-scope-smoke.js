@@ -207,9 +207,9 @@ const checks = [
     extraction: 'express-route',
     patterns: [
       'validateDocumentAccess(req, doc)',
-      'validateDocumentArchiveIntegrity(doc)',
+      'validateDocumentDeleteIntegrity(doc)',
       'lockGenericDocumentMutationContext',
-      'validateDocumentArchiveIntegrity(',
+      'validateDocumentDeleteIntegrity(',
       "SET status = 'deleted'",
       'appendDocumentLifecycleEvent',
       'await connection.commit()',

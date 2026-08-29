@@ -80,24 +80,26 @@ describe('Supporting Documents update route', () => {
     );
   });
 
-  test('a protected-document delete refusal stays inside the dialog in plain English', () => {
+  test('delete confirmation is minimalist and preserves the backend refusal reason', () => {
     expect(widgetSource).toContain("payload?.error === 'document_immutable'");
     expect(widgetSource).toContain('setDeleteRefused(true)');
     expect(widgetSource).toContain("This document can't be deleted");
-    expect(widgetSource).toContain(
-      "PATH needs to keep this document in the applicant's file. You can still change its title or document type."
-    );
+    expect(widgetSource).toContain('setDeleteError(payload?.message ||');
     expect(widgetSource).toContain("{deleteRefused ? 'Close' : 'Cancel'}");
     expect(widgetSource).toContain('{!deleteRefused && (');
+    expect(widgetSource).toContain('<Box>Delete this document?</Box>');
+    expect(widgetSource).not.toContain('deleteConfirm');
+    expect(widgetSource).not.toContain('Type delete to confirm');
+    expect(widgetSource).not.toContain('Document deleted');
   });
 
-  test('Delete is a reversible archive action and refreshes checklist state', () => {
+  test('Delete uses the lifecycle state and refreshes checklist state without recovery copy', () => {
     const deleteRoute = extractRouteBlock('delete', '/api/documents/:id');
     expect(deleteRoute).toContain("SET status = 'deleted'");
     expect(deleteRoute).toContain('INSERT INTO iset_document_lifecycle');
     expect(deleteRoute).toContain("eventType: 'deleted'");
     expect(deleteRoute).not.toContain('isSystemAdministratorRequest(req)');
-    expect(widgetSource).toContain('A System Administrator can restore it');
+    expect(widgetSource).not.toContain('A System Administrator can restore it');
     expect(widgetSource).not.toContain('This will permanently delete the document from Supporting Documents');
     expect(widgetSource).toContain('await loadChecklist();');
     expect(widgetSource).toContain('disabled: deleting || item.can_delete === false');

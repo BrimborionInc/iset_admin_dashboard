@@ -244,7 +244,6 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [pendingDeletes, setPendingDeletes] = useState({});
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [deleteConfirm, setDeleteConfirm] = useState('');
   const [deleteError, setDeleteError] = useState('');
   const [deleteRefused, setDeleteRefused] = useState(false);
   const [pendingRestores, setPendingRestores] = useState({});
@@ -1245,7 +1244,6 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       return;
     }
     setDeleteTarget(item);
-    setDeleteConfirm('');
     setDeleteError('');
     setDeleteRefused(false);
     setDeleteModalVisible(true);
@@ -1254,7 +1252,6 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const handleDeleteCancel = useCallback(() => {
     setDeleteModalVisible(false);
     setDeleteTarget(null);
-    setDeleteConfirm('');
     setDeleteError('');
     setDeleteRefused(false);
   }, []);
@@ -1278,10 +1275,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         }
         if (payload?.error === 'document_immutable') {
           setDeleteRefused(true);
-          setDeleteConfirm('');
-          setDeleteError(
-            "PATH needs to keep this document in the applicant's file. You can still change its title or document type."
-          );
+          setDeleteError(payload?.message || "This document can't be deleted.");
           return;
         }
         setDeleteError(payload?.message || 'The document could not be deleted. Please try again.');
@@ -2583,7 +2577,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
               <Button
                 variant="primary"
                 onClick={handleDeleteConfirm}
-                disabled={deleteConfirm.trim().toLowerCase() !== 'delete' || pendingDeletes[deleteTarget?.id]}
+                disabled={Boolean(pendingDeletes[deleteTarget?.id])}
                 loading={pendingDeletes[deleteTarget?.id]}
               >
                 Delete
@@ -2599,20 +2593,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             </Alert>
           )}
           {!deleteRefused && (
-            <>
-              <Box>
-                This removes the file from Supporting Documents and checklists. A System Administrator can restore it
-                later. Type <strong>delete</strong> to confirm.
-              </Box>
-              <FormField label="Type delete to confirm">
-                <Input
-                  value={deleteConfirm}
-                  onChange={({ detail }) => setDeleteConfirm(detail.value)}
-                  autoFocus
-                  placeholder="delete"
-                />
-              </FormField>
-            </>
+            <Box>Delete this document?</Box>
           )}
         </SpaceBetween>
       </Modal>

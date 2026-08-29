@@ -131,7 +131,7 @@ afterAll(async () => {
   if (syntheticTestEnvironment) expect(syntheticTestEnvironment.cleanup()).toBe(true);
 });
 
-describe('Supporting Document archive/payment relationship concurrency', () => {
+describe('Supporting Document deletion/payment relationship concurrency', () => {
   test('the shared guard takes a current active-row lock and refuses non-transactional callers', async () => {
     const row = { id: 7, status: 'active' };
     const connection = {
@@ -346,14 +346,42 @@ describe('Supporting Document archive/payment relationship concurrency', () => {
     expect(archiveLock.indexOf('FOR UPDATE'))
       .toBeLessThan(archiveLock.indexOf('validateGenericDocumentMutationIntegrity'));
     expect(deleteRoute).toContain('requireIntegrityCheck: false');
-    const lockedArchiveGuardIndex = deleteRoute.indexOf('const lockedArchiveError');
+    const lockedDeleteGuardIndex = deleteRoute.indexOf('const lockedDeleteError');
     expect(deleteRoute.indexOf('lockGenericDocumentMutationContext({'))
-      .toBeLessThan(lockedArchiveGuardIndex);
-    expect(lockedArchiveGuardIndex)
+      .toBeLessThan(lockedDeleteGuardIndex);
+    expect(lockedDeleteGuardIndex)
       .toBeLessThan(deleteRoute.indexOf("SET status = 'deleted'"));
 
     expect(serverSource.match(/INSERT INTO payment_packet_document/gu)).toHaveLength(3);
     expect(serverSource.match(/INSERT INTO payment_followup_event/gu)).toHaveLength(2);
     expect(serverSource.match(/fields\.push\('payment_proof_document_id = \?'\)/gu)).toHaveLength(1);
+  });
+
+  test('payment evidence unlink locks and rechecks the packet before deleting the link', () => {
+    const unlinkRoute = sourceBetween(
+      "app.delete('/api/finance/payment-documents/:id'",
+      "app.get('/api/finance/payment-batches'"
+    );
+    const packetLockIndex = unlinkRoute.indexOf(
+      "'SELECT id, status FROM payment_packet WHERE id = ? LIMIT 1 FOR UPDATE'"
+    );
+    const statusGuardIndex = unlinkRoute.indexOf(
+      'PAYMENT_EVIDENCE_REMOVABLE_PACKET_STATUSES.has(packetStatus)'
+    );
+    const linkLockIndex = unlinkRoute.indexOf('SELECT id, payment_packet_id');
+    const deleteIndex = unlinkRoute.indexOf(
+      "'DELETE FROM payment_packet_document WHERE id = ? AND payment_packet_id = ?'"
+    );
+
+    expect(serverSource).toContain("const PAYMENT_EVIDENCE_REMOVABLE_PACKET_STATUSES = new Set([\n  'draft',\n  'ready_to_send',");
+    expect(packetLockIndex).toBeGreaterThanOrEqual(0);
+    expect(packetLockIndex).toBeLessThan(statusGuardIndex);
+    expect(statusGuardIndex).toBeLessThan(linkLockIndex);
+    expect(linkLockIndex).toBeLessThan(deleteIndex);
+    expect(unlinkRoute).toContain('validatePaymentPacketAccess(req, packetId, { connection })');
+    expect(unlinkRoute).toContain('clearPaymentPacketValidation({ packetId, connection })');
+    expect(unlinkRoute).toContain("error: 'packet_not_editable'");
+    expect(unlinkRoute).toContain('await connection.commit()');
+    expect(unlinkRoute).toContain('await connection.rollback()');
   });
 });

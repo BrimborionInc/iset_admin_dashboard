@@ -3,7 +3,7 @@
 **Purpose:** Canonical design and planning for the Payments module/dashboard, aligned to `docs/requirements/payments-module.v2.md`.  
 **Audience:** PATH program staff, product owners, engineers, operations, audit/compliance, and external Finance stakeholders.
 **Status:** partially deployed/current-source capability; real Finance email routing/sends are not rolled out or enabled in PROD.
-**Last Updated:** 2026-08-21
+**Last Updated:** 2026-08-29
 
 Current implementation review: `docs/planning/payments-implementation-review-2026-05-11.md`. Current target operating model: `docs/planning/payments-target-operating-model-2026-05-11.md`. Current transformation plan for the NWAC email workflow: `docs/planning/payments-transformation-plan-2026-05-11.md`.
 
@@ -30,6 +30,7 @@ Current implementation review: `docs/planning/payments-implementation-review-202
 - After email submission, PATH should track operational confidence states such as sent, follow-up needed, reported paid, confirmed by evidence, or stale/no response. Do not over-label normal widgets with accounting disclaimers; keep nuance in help panels and workflow guidance unless a user action creates genuine risk.
 - Current implementation now stores follow-up state on packets and lines, with immutable `payment_followup_event` history. Financial Reports prefer that explicit follow-up state before falling back to submitted/posted PATH finance transactions. Treat this as operations-side follow-up/confidence tracking, not Sage/AP confirmation.
 - Payment evidence now uses line-level links where the checklist row is line-scoped; `payment_packet_document.payment_packet_line_id` is populated by manual link/upload flows and validation uses baseline plus line evidence for payment-type gates.
+- Staff may remove an evidence link only while its packet is `draft` or `ready_to_send`. After submission to Finance, the evidence link is part of the payment record and is immutable. Supporting Documents also protects every document while any payment-record link remains; for a draft or ready-to-send packet, staff must remove the evidence link in the payment workflow before they can Delete the document from Supporting Documents.
 
 ## Goals
 - Evidence-gated payment workflow that can pass audit.
@@ -121,6 +122,7 @@ Confirmed payment line must produce a posted `finance_transaction` with:
 - **Maker-checker (SHOULD):** batch approval required before Sent/Confirmed.
 - **Overdue evidence tasks (SHOULD):** auto-create receipt-due tasks and flag holds.
 - **Override registry (MUST):** record reason + approver for any gate bypass.
+- **Evidence immutability:** evidence links can be removed only in `draft` or `ready_to_send`; submitted, confirmed, or cancelled packets retain the payment evidence record.
 
 ## Dashboard requirements (functional)
 Program dashboard:

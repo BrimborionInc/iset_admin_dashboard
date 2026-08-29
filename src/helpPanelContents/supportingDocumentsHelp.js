@@ -72,10 +72,13 @@ const SupportingDocumentsHelp = () => (
         appears only when duplication is possible (for example, when the applicant has multiple applications).
       </li>
       <li>
-        <strong>Delete:</strong> Deleting requires typing <code>delete</code>. Eligible staff uploads and files shown as
-        <em>Applicant upload</em> can be removed from active use. The file disappears from normal document lists and
-        checklists, but a System Administrator can restore it. PATH will explain when a document is protected by a
-        signing, message, generated form, version, payment, or other workflow record and cannot be deleted.
+        <strong>Delete:</strong> Staff can delete ordinary documents after confirming <em>Delete this document?</em>.
+        PATH blocks deletion of PATH-generated signed documents, documents currently pending or viewed for signature,
+        CFA or Financial Overview version history, and documents tied to payment records.
+      </li>
+      <li>
+        <strong>Secure message attachments:</strong> Deleting one from Supporting Documents leaves the original message
+        and its attachment intact.
       </li>
       <li>
         <strong>Restore:</strong> System Administrators can open the <em>Deleted</em> tab, check the file, and put it back.
@@ -88,6 +91,10 @@ const SupportingDocumentsHelp = () => (
       <li>
         Checklist status updates based on document type and attachment. If a document is not counting, confirm it is
         tagged with the correct document type and attached to the right application or action plan.
+      </li>
+      <li>
+        Deleting a checklist document does not move the workflow backwards. It can block the current or a future
+        checkpoint until another qualifying document is available.
       </li>
       <li>
         In the case workspace, select an intervention to view its checklist when the case has a linked application.
@@ -125,12 +132,14 @@ You are assisting an ISET program staff member using the Supporting Documents wi
 or by documents relevant to an intervention, interpret the Documents and Checklist tabs, and what each column means.
 Clarify sources (applicant upload, secure message attachment, signed form, staff upload, PATH generated), scope (client,
 application, case, and action plan), and how to upload, edit, duplicate, view, or delete documents. Note that duplicate
-only appears when reuse is possible and delete requires typing "delete". Explain that Delete hides an eligible staff or applicant
-upload from normal lists, checklists, and other active processes, but a System Administrator can view, download, or restore
-it from the Deleted tab. Deleting an applicant upload does not change the submitted application, and it does not authorize
-duplicating that upload. Signing-request uploads, secure-message attachments, generated documents, version evidence, payment
-evidence, and legacy/unknown sources remain protected. PATH has no permanent-delete action for supporting documents. Mention that the document list columns are
-sortable, with Uploaded shown near the front by default, and that column preferences and resizing are available.
+only appears when reuse is possible. Staff can delete ordinary documents after the confirmation "Delete this document?".
+Do not call this action archive. Explain that PATH blocks deletion of PATH-generated signed documents, documents currently
+pending or viewed for signature, CFA or Financial Overview version history, and documents tied to payment records. Deleting
+a secure-message attachment from Supporting Documents leaves the original message and attachment intact. Deleting a
+checklist document does not move the workflow backwards, but can block the current or a future checkpoint until a qualifying
+document is present. A System Administrator can restore deleted documents from the Deleted tab. Avoid storage and lifecycle
+implementation details unless the staff member specifically asks. Mention that the document list columns are sortable, with
+Uploaded shown near the front by default, and that column preferences and resizing are available.
 For historical client-file documents, keep the guidance practical: use \`Case header > Upload existing documents\`,
 choose the label and document type, and attach the file to the correct client, case, or action-plan record. Avoid
 implementation explanations unless the staff member specifically asks for them. Offer troubleshooting for missing checklist

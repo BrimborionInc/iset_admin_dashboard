@@ -15,10 +15,12 @@ function extractRoute(method, route) {
 describe('document lifecycle routes', () => {
   test('active document lists expose server-derived delete capability', () => {
     expect(serverSource).toContain('async function decorateDocumentsWithLifecycleCapabilities');
-    expect(serverSource).toContain('can_delete: isActive && !archiveBlocker');
-    expect(serverSource).toContain('const ARCHIVABLE_DOCUMENT_SOURCES');
-    expect(serverSource).toContain("'application_submission'");
-    expect(serverSource).toContain('ARCHIVABLE_DOCUMENT_SOURCES.has(source)');
+    expect(serverSource).toContain('can_delete: isActive && !deleteBlocker');
+    expect(serverSource).toContain('function getDocumentDeleteBlocker');
+    expect(serverSource).not.toContain('ARCHIVABLE_DOCUMENT_SOURCES');
+    expect(serverSource).toContain("'signed_document'");
+    expect(serverSource).toContain("'signing_request_in_progress'");
+    expect(serverSource).toContain("'cfa_version_link'");
     expect(serverSource).toContain("'payment_evidence_link'");
     expect(serverSource).toContain('payment_followup_event pfe');
   });

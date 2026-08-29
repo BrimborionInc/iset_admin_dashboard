@@ -1402,6 +1402,243 @@ describe('complete admin Express stack', () => {
     expect(documentUpsert?.params.slice(0, 7)).toEqual([76, 123, null, 501, 700, 700, 4400]);
   });
 
+  test('opening a secure-message attachment does not recreate its deleted Supporting Documents row', async () => {
+    const beforeQueryCount = fakePool.queries.length;
+    const beforeTransactionEventCount = fakePool.transactionEvents.length;
+    const persistedDocument = {
+      id: 9550,
+      case_id: 76,
+      application_id: 123,
+      client_id: 501,
+      applicant_user_id: 700,
+      user_id: 700,
+      action_plan_id: null,
+      origin_message_id: 4450,
+      source: 'secure_message_attachment',
+      file_path: 'uploads/deleted-message-attachment.pdf',
+      status: 'deleted',
+    };
+
+    fakePool.setQueryResponder(async (sql, params = []) => {
+      const normalizedSql = String(sql).replace(/\s+/g, ' ').trim();
+      if (normalizedSql === 'SELECT id FROM user WHERE cognito_sub = ? LIMIT 1') {
+        return [[{ id: 300 }], []];
+      }
+      if (normalizedSql.includes('FROM messages') && normalizedSql.includes('WHERE id = ?')) {
+        return [[{
+          id: 4450,
+          case_id: 76,
+          application_id: 123,
+          sender_actor_type: 'applicant_user',
+          sender_user_id: 700,
+          sender_staff_profile_id: null,
+          recipient_actor_type: 'staff_user',
+          recipient_user_id: 300,
+          recipient_staff_profile_id: 1,
+          subject: 'Replacement attachment',
+          body: 'The applicant sent a corrected file later.',
+          status: 'read',
+          deleted: 0,
+        }], []];
+      }
+      if (
+        normalizedSql.includes('FROM iset_case c') &&
+        normalizedSql.includes('AS assigned_to_user_id')
+      ) {
+        return [[{
+          id: 76,
+          client_id: 501,
+          application_id: 123,
+          assigned_to_user_id: 1,
+          assigned_staff_profile_id: 1,
+          portfolio_region_id: 1,
+          owner_region_id: 1,
+        }], []];
+      }
+      if (
+        normalizedSql.includes('FROM iset_case c') &&
+        normalizedSql.includes('AS applicant_submission_user_id')
+      ) {
+        return [[{
+          case_id: 76,
+          client_id: 501,
+          application_id: 123,
+          application_client_id: 501,
+          applicant_submission_user_id: 700,
+          applicant_client_sub_user_id: 800,
+          client_name: 'Current Linked Participant',
+          client_email: 'current@example.invalid',
+          applicant_name: 'Current Linked Participant',
+          applicant_email: 'current@example.invalid',
+        }], []];
+      }
+      if (normalizedSql.includes('FROM message_attachment') && normalizedSql.includes('WHERE message_id = ?')) {
+        return [[{
+          id: 4451,
+          message_id: 4450,
+          case_id: 76,
+          client_id: 501,
+          file_path: persistedDocument.file_path,
+          original_filename: 'deleted-message-attachment.pdf',
+          uploaded_at: '2026-08-01T12:00:00.000Z',
+          user_id: 700,
+          application_id: 123,
+        }], []];
+      }
+      if (normalizedSql === 'SELECT client_id FROM iset_case WHERE id = ? LIMIT 1') {
+        return [[{ client_id: 501 }], []];
+      }
+      if (normalizedSql === 'SELECT client_id FROM iset_application WHERE id = ? LIMIT 1') {
+        return [[{ client_id: 501 }], []];
+      }
+      if (normalizedSql.includes('FROM iset_document') && normalizedSql.includes('FOR UPDATE')) {
+        expect(params).toEqual([persistedDocument.file_path]);
+        expect(normalizedSql).not.toMatch(/\bstatus\b/i);
+        const selectedDocumentFields = Object.fromEntries(
+          Object.entries(persistedDocument).filter(([field]) => field !== 'status')
+        );
+        return [[selectedDocumentFields], []];
+      }
+      return undefined;
+    });
+
+    let response;
+    try {
+      response = await requestJson(server, '/api/admin/messages/4450/attachments?case_id=76');
+    } finally {
+      fakePool.clearQueryResponder();
+    }
+
+    expect(response).toMatchObject({
+      status: 200,
+      body: [{
+        id: 4451,
+        message_id: 4450,
+        file_path: persistedDocument.file_path,
+      }],
+    });
+    expect(persistedDocument.status).toBe('deleted');
+
+    const routeQueries = fakePool.queries.slice(beforeQueryCount);
+    const documentLookup = routeQueries.find(({ sql }) => (
+      sql.includes('FROM iset_document') && sql.includes('FOR UPDATE')
+    ));
+    expect(documentLookup?.sql).toContain('WHERE iset_document.file_path = ?');
+    expect(documentLookup?.sql).not.toMatch(/\bstatus\b/i);
+    expect(routeQueries.some(({ sql }) => (
+      /^\s*(?:INSERT INTO|UPDATE) iset_document\b/i.test(sql)
+    ))).toBe(false);
+    expect(routeQueries.some(({ sql }) => sql.includes('INSERT INTO iset_event_entry'))).toBe(false);
+    expect(fakePool.transactionEvents.slice(beforeTransactionEventCount)).toEqual([
+      'begin',
+      'commit',
+      'release',
+    ]);
+  });
+
+  test.each([
+    ['draft', true],
+    ['ready_to_send', true],
+    ['submitted', false],
+    ['confirmed', false],
+    ['cancelled', false],
+    ['future_state', false],
+  ])('payment evidence unlink is draft-only when the packet is %s', async (packetStatus, allowed) => {
+    const beforeQueryCount = fakePool.queries.length;
+    const beforeTransactionEventCount = fakePool.transactionEvents.length;
+    fakePool.setQueryResponder(async (sql, params = []) => {
+      const normalizedSql = String(sql).replace(/\s+/g, ' ').trim();
+      if (
+        normalizedSql ===
+        'SELECT payment_packet_id FROM payment_packet_document WHERE id = ? LIMIT 1'
+      ) {
+        expect(params).toEqual([91]);
+        return [[{ payment_packet_id: 44 }], []];
+      }
+      if (
+        normalizedSql ===
+        'SELECT id, status FROM payment_packet WHERE id = ? LIMIT 1 FOR UPDATE'
+      ) {
+        expect(params).toEqual([44]);
+        return [[{ id: 44, status: packetStatus }], []];
+      }
+      if (
+        normalizedSql ===
+        'SELECT id, payment_packet_id FROM payment_packet_document WHERE id = ? AND payment_packet_id = ? LIMIT 1 FOR UPDATE'
+      ) {
+        expect(params).toEqual([91, 44]);
+        return [[{ id: 91, payment_packet_id: 44 }], []];
+      }
+      if (
+        normalizedSql ===
+        'DELETE FROM payment_packet_document WHERE id = ? AND payment_packet_id = ?'
+      ) {
+        expect(params).toEqual([91, 44]);
+        return [{ affectedRows: 1 }, []];
+      }
+      if (normalizedSql === 'SELECT metadata FROM payment_packet WHERE id = ? LIMIT 1') {
+        expect(params).toEqual([44]);
+        return [[{ metadata: '{}' }], []];
+      }
+      if (normalizedSql === 'UPDATE payment_packet SET updated_at = NOW() WHERE id = ?') {
+        expect(params).toEqual([44]);
+        return [{ affectedRows: 1 }, []];
+      }
+      return undefined;
+    });
+
+    let response;
+    try {
+      response = await requestJson(server, '/api/finance/payment-documents/91', {
+        method: 'DELETE',
+      });
+    } finally {
+      fakePool.clearQueryResponder();
+    }
+
+    const routeQueries = fakePool.queries.slice(beforeQueryCount);
+    const routeSql = routeQueries.map(({ sql }) => String(sql).replace(/\s+/g, ' ').trim());
+    const packetLockIndex = routeSql.indexOf(
+      'SELECT id, status FROM payment_packet WHERE id = ? LIMIT 1 FOR UPDATE'
+    );
+    const linkLockIndex = routeSql.indexOf(
+      'SELECT id, payment_packet_id FROM payment_packet_document WHERE id = ? AND payment_packet_id = ? LIMIT 1 FOR UPDATE'
+    );
+    const deleteIndex = routeSql.indexOf(
+      'DELETE FROM payment_packet_document WHERE id = ? AND payment_packet_id = ?'
+    );
+
+    expect(packetLockIndex).toBeGreaterThanOrEqual(0);
+    if (allowed) {
+      expect(response).toEqual({
+        status: 200,
+        body: { ok: true, deleted: true, id: '91' },
+      });
+      expect(packetLockIndex).toBeLessThan(linkLockIndex);
+      expect(linkLockIndex).toBeLessThan(deleteIndex);
+      expect(fakePool.transactionEvents.slice(beforeTransactionEventCount)).toEqual([
+        'begin',
+        'commit',
+        'release',
+      ]);
+    } else {
+      expect(response).toEqual({
+        status: 409,
+        body: {
+          error: 'packet_not_editable',
+          message: 'This payment evidence can no longer be removed.',
+        },
+      });
+      expect(linkLockIndex).toBe(-1);
+      expect(deleteIndex).toBe(-1);
+      expect(fakePool.transactionEvents.slice(beforeTransactionEventCount)).toEqual([
+        'begin',
+        'rollback',
+        'release',
+      ]);
+    }
+  });
+
   test('attachment adoption blocks ownership collisions without treating sibling application indexes as download failures', async () => {
     let phase = 'hard-conflict';
     fakePool.setQueryResponder(async (sql, params = []) => {

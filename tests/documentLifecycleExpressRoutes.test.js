@@ -46,6 +46,12 @@ function createDocumentLifecycleDatabase() {
       case_number: 'CASE-10',
     },
     documents: new Map(),
+    signingRequests: new Map(),
+    cfaDocumentIds: new Set(),
+    fundingOverviewDocumentIds: new Set(),
+    packetDocumentIds: new Set(),
+    proofDocumentIds: new Set(),
+    followUpDocumentIds: new Set(),
     lifecycles: new Map(),
     events: [],
     failOn: null,
@@ -96,6 +102,12 @@ function createDocumentLifecycleDatabase() {
         created_at: '2026-08-24T12:00:00.000Z',
       }],
     ]);
+    state.signingRequests = new Map();
+    state.cfaDocumentIds = new Set();
+    state.fundingOverviewDocumentIds = new Set();
+    state.packetDocumentIds = new Set();
+    state.proofDocumentIds = new Set();
+    state.followUpDocumentIds = new Set();
     state.lifecycles = new Map();
     state.events = [];
     state.failOn = null;
@@ -204,8 +216,18 @@ function createDocumentLifecycleDatabase() {
         : [[], []];
     }
 
-    if (normalized.startsWith('SELECT cvd.document_id FROM cfa_version_documents cvd')) return [[], []];
-    if (normalized.startsWith('SELECT fvd.document_id FROM funding_overview_version_documents fvd')) return [[], []];
+    if (normalized.startsWith('SELECT signing_request.id, signing_request.case_id, signing_request.status FROM signing_request')) {
+      const requestedIds = new Set(params.map(Number));
+      return [[...state.signingRequests.values()]
+        .filter(row => requestedIds.has(Number(row.id)))
+        .map(clone), []];
+    }
+    if (normalized.startsWith('SELECT cvd.document_id FROM cfa_version_documents cvd')) {
+      return [[...state.cfaDocumentIds].map(document_id => ({ document_id })), []];
+    }
+    if (normalized.startsWith('SELECT fvd.document_id FROM funding_overview_version_documents fvd')) {
+      return [[...state.fundingOverviewDocumentIds].map(document_id => ({ document_id })), []];
+    }
     if (normalized.startsWith('SELECT COUNT(*) AS count FROM payment_packet_document')) return [[{ count: 0 }], []];
     if (normalized.startsWith('SELECT COUNT(*) AS count FROM payment_packet_line')) return [[{ count: 0 }], []];
     if (normalized.startsWith('SELECT COUNT(*) AS count FROM payment_followup_event')) return [[{ count: 0 }], []];
@@ -311,9 +333,16 @@ function createDocumentLifecycleDatabase() {
       }
       return [documents.map(documentListRow), []];
     }
-    if (normalized.startsWith('SELECT ppd.document_id FROM payment_packet_document ppd')) return [[], []];
-    if (normalized.startsWith('SELECT ppl.payment_proof_document_id FROM payment_packet_line ppl')) return [[], []];
-    if (normalized.startsWith('SELECT pfe.document_id FROM payment_followup_event pfe')) return [[], []];
+    if (normalized.startsWith('SELECT ppd.document_id FROM payment_packet_document ppd')) {
+      return [[...state.packetDocumentIds].map(document_id => ({ document_id })), []];
+    }
+    if (normalized.startsWith('SELECT ppl.payment_proof_document_id FROM payment_packet_line ppl')) {
+      return [[...state.proofDocumentIds]
+        .map(payment_proof_document_id => ({ payment_proof_document_id })), []];
+    }
+    if (normalized.startsWith('SELECT pfe.document_id FROM payment_followup_event pfe')) {
+      return [[...state.followUpDocumentIds].map(document_id => ({ document_id })), []];
+    }
     if (normalized.startsWith('SELECT document_id, intervention_id FROM iset_document_intervention')) return [[], []];
 
     throw new Error(`Unexpected SQL in document lifecycle fixture: ${normalized}`);
@@ -463,7 +492,13 @@ describe('Supporting Documents lifecycle through the real Express routes', () =>
   });
 
   test.each(
-    ['manual_upload', 'application_submission'].flatMap(source => [
+    [
+      'manual_upload',
+      'application_submission',
+      'secure_message_attachment',
+      'system_generated',
+      'legacy_intake_upload',
+    ].flatMap(source => [
       ['System Administrator', 11, 1, 11, 1],
       ['NWAC Administrator', 12, 1, 99, 2],
       ['Regional Manager', 13, 1, 99, 1],
@@ -491,6 +526,9 @@ describe('Supporting Documents lifecycle through the real Express routes', () =>
       document.application_id = 20;
       document.applicant_user_id = 30;
       database.state.caseRow.application_id = 20;
+    } else if (source === 'secure_message_attachment') {
+      document.applicant_user_id = 30;
+      document.origin_message_id = 55;
     }
 
     const response = await requestJson(server, '/api/documents/1', {
@@ -500,7 +538,7 @@ describe('Supporting Documents lifecycle through the real Express routes', () =>
 
     expect(response).toEqual({
       status: 200,
-      body: { ok: true, deleted: true, archived: true },
+      body: { ok: true, deleted: true },
     });
     expect(database.state.documents.get(1).status).toBe('deleted');
     expect(database.state.lifecycles.get(1)).toMatchObject({
@@ -565,29 +603,33 @@ describe('Supporting Documents lifecycle through the real Express routes', () =>
     expect(database.state.transactionCounts.begun).toBe(0);
   });
 
-  test('a PATH-generated document is refused with a plain explanation before any transaction', async () => {
-    database.state.documents.get(1).source = 'system_generated';
-
-    const response = await requestJson(server, '/api/documents/1', { method: 'DELETE' });
-
-    expect(response).toEqual({
-      status: 409,
-      body: {
-        error: 'document_immutable',
-        reason: 'authoritative_source',
-        message: "PATH needs to keep this document in the applicant's file, so it can't be deleted. You can still change its title or document type.",
-      },
-    });
-    expect(database.state.documents.get(1).status).toBe('active');
-    expect(database.state.transactionCounts.begun).toBe(0);
-  });
-
-  test('an applicant upload linked to a signing request remains protected', async () => {
+  test('an applicant upload materialized from a signing request is still deletable', async () => {
     const document = database.state.documents.get(1);
     document.source = 'application_submission';
     document.application_id = 20;
     document.applicant_user_id = 30;
-    document.metadata = JSON.stringify({ signing_request_id: 81 });
+    document.metadata = JSON.stringify({
+      materialized_from: 'signing_request_payload',
+      signing_request_id: 81,
+    });
+    database.state.caseRow.application_id = 20;
+
+    const response = await requestJson(server, '/api/documents/1', { method: 'DELETE' });
+
+    expect(response).toEqual({
+      status: 200,
+      body: { ok: true, deleted: true },
+    });
+    expect(database.state.documents.get(1).status).toBe('deleted');
+    expect(database.state.transactionCounts.committed).toBe(1);
+  });
+
+  test('a PATH-generated signed document remains protected', async () => {
+    const document = database.state.documents.get(1);
+    document.source = 'application_submission';
+    document.application_id = 20;
+    document.applicant_user_id = 30;
+    document.metadata = JSON.stringify({ generated_kind: 'signed_form' });
     database.state.caseRow.application_id = 20;
 
     const response = await requestJson(server, '/api/documents/1', { method: 'DELETE' });
@@ -596,9 +638,105 @@ describe('Supporting Documents lifecycle through the real Express routes', () =>
       status: 409,
       body: {
         error: 'document_immutable',
-        reason: 'signing_request_link',
-        message: "PATH needs to keep this document in the applicant's file, so it can't be deleted. You can still change its title or document type.",
+        reason: 'signed_document',
+        message:
+          'Signed documents form part of the evidence and contracting record and cannot be deleted. Contact a System Administrator if one was created and sent in error.',
       },
+    });
+    expect(database.state.documents.get(1).status).toBe('active');
+    expect(database.state.transactionCounts.begun).toBe(0);
+  });
+
+  test.each(['pending', 'viewed'])(
+    'a decision letter with a %s signing request remains protected',
+    async status => {
+      const document = database.state.documents.get(1);
+      document.source = 'system_generated';
+      document.document_category = 'assessment_approval_letter';
+      document.metadata = JSON.stringify({
+        generated_kind: 'signing_request_source_document',
+        signing_request_id: 81,
+        decision_letter_owner: 'application',
+      });
+      database.state.signingRequests.set(81, { id: 81, case_id: 10, status });
+
+      const response = await requestJson(server, '/api/documents/1', { method: 'DELETE' });
+
+      expect(response).toEqual({
+        status: 409,
+        body: {
+          error: 'document_immutable',
+          reason: 'signing_request_in_progress',
+          message: 'This document is currently out for signature and cannot be deleted.',
+        },
+      });
+      expect(database.state.documents.get(1).status).toBe('active');
+      expect(database.state.transactionCounts.begun).toBe(0);
+    }
+  );
+
+  test.each(['signed', 'cancelled', 'expired'])(
+    'an unsigned decision-letter source can be deleted after its signing request is %s',
+    async status => {
+      const document = database.state.documents.get(1);
+      document.source = 'system_generated';
+      document.document_category = 'assessment_denial_letter';
+      document.metadata = JSON.stringify({
+        generated_kind: 'signing_request_source_document',
+        signing_request_id: 82,
+        decision_letter_owner: 'application',
+      });
+      database.state.signingRequests.set(82, { id: 82, case_id: 10, status });
+
+      const response = await requestJson(server, '/api/documents/1', { method: 'DELETE' });
+
+      expect(response).toEqual({ status: 200, body: { ok: true, deleted: true } });
+      expect(database.state.documents.get(1).status).toBe('deleted');
+    }
+  );
+
+  test('an unsigned decision-letter source fails closed for an unknown signing status', async () => {
+    const document = database.state.documents.get(1);
+    document.source = 'system_generated';
+    document.document_category = 'assessment_denial_letter';
+    document.metadata = JSON.stringify({
+      generated_kind: 'signing_request_source_document',
+      signing_request_id: 83,
+    });
+    database.state.signingRequests.set(83, {
+      id: 83,
+      case_id: 10,
+      status: 'future_state',
+    });
+
+    const response = await requestJson(server, '/api/documents/1', { method: 'DELETE' });
+
+    expect(response).toMatchObject({
+      status: 409,
+      body: {
+        error: 'document_immutable',
+        reason: 'signing_request_legacy',
+        message: 'This document is part of a signing request and cannot be deleted.',
+      },
+    });
+    expect(database.state.documents.get(1).status).toBe('active');
+    expect(database.state.transactionCounts.begun).toBe(0);
+  });
+
+  test.each([
+    ['CFA version', 'cfaDocumentIds', 'cfa_version_link', 'This document is part of the version history and cannot be deleted.'],
+    ['Financial Overview version', 'fundingOverviewDocumentIds', 'funding_overview_version_link', 'This document is part of the version history and cannot be deleted.'],
+    ['payment packet', 'packetDocumentIds', 'payment_evidence_link', 'This document is part of a payment record and cannot be deleted.'],
+    ['payment line', 'proofDocumentIds', 'payment_evidence_link', 'This document is part of a payment record and cannot be deleted.'],
+    ['payment follow-up', 'followUpDocumentIds', 'payment_evidence_link', 'This document is part of a payment record and cannot be deleted.'],
+  ])('a document linked to %s remains protected', async (_label, stateKey, reason, message) => {
+    database.state[stateKey].add(1);
+
+    const response = await requestJson(server, '/api/documents/1', { method: 'DELETE' });
+
+    expect(response).toEqual({
+      status: 409,
+      body: { error: 'document_immutable', reason, message },
     });
     expect(database.state.documents.get(1).status).toBe('active');
     expect(database.state.transactionCounts.begun).toBe(0);
