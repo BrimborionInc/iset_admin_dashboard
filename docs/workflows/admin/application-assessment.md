@@ -38,8 +38,9 @@ Widget references:
 5. Validate documents and communicate with applicant as needed.
 6. Save/submit assessment and progress to NWAC decision where applicable.
 7. While pending decision, the submitted assessment is read-only. The recorded submitter can use `Recall submission` before a decision is recorded to return it to editable review and archive the active generated submission PDFs. The resulting `withdrawn` review stage is a recalled submission, not a cancelled application: only that recorded submitter (or System Administrator technical support without changing submitter ownership) may edit and resubmit it. Resubmission restarts Regional Manager review, clears stale reviewer decisions, and records a new workflow event.
-8. Regional Managers, NWAC Administrators, and System Administrators can correct the EI status from the existing eligibility dropdown after submission while no action-plan or intervention dependency exists.
-9. Use timeline and notes for operational traceability.
+8. `Withdraw application` is a separate terminal action available through Application Overview to every staff role with normal access to an eligible file. It requires a reason and atomically moves any pre-final application-assessment review to `withdrawn` with no owner, without calling recall or archiving the submitted assessment packet. A final-decision-recorded review remains blocked from ordinary withdrawal.
+9. Regional Managers, NWAC Administrators, and System Administrators can correct the EI status from the existing eligibility dropdown after submission while no action-plan or intervention dependency exists.
+10. Use timeline and notes for operational traceability.
 
 ## Data & Integration Touchpoints
 

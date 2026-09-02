@@ -15268,6 +15268,8 @@ function assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
   actorRole = null,
   beforeApplicationStatus = null,
   nextApplicationStatus = null,
+  applicationWithdrawalWorkflowTransitioned = false,
+  staffApplicationReopenRequested = false,
 } = {}) {
   if (
     !reviewWorkflow ||
@@ -15292,12 +15294,26 @@ function assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
     !caseStatusMutationRequested &&
     beforeApplicationStatus === 'approved' &&
     nextApplicationStatus === 'completed';
+  const coordinatedApplicationWithdrawal =
+    !caseStatusMutationRequested &&
+    applicationStatusMutationRequested &&
+    nextApplicationStatus === 'withdrawn' &&
+    reviewStage === REVIEW_STAGES.Withdrawn &&
+    applicationWithdrawalWorkflowTransitioned;
+  const authorizedApplicationReopen =
+    !caseStatusMutationRequested &&
+    applicationStatusMutationRequested &&
+    reviewStage === REVIEW_STAGES.Withdrawn &&
+    staffApplicationReopenRequested &&
+    nextApplicationStatus === 'in_review';
   if (
     systemAdministratorSupport ||
     submitterResubmission ||
     recalledSubmitterResubmission ||
     decisionMakerTransition ||
-    postDecisionCompletion
+    postDecisionCompletion ||
+    coordinatedApplicationWithdrawal ||
+    authorizedApplicationReopen
   ) {
     return { enforced: true, reason: 'authorized_review_owned_status_transition' };
   }
@@ -15533,9 +15549,14 @@ async function applyReviewWorkflowAction(connection, {
     const errorCode = transition.blockReason || 'review_workflow_transition_forbidden';
     const err = new Error(errorCode);
     err.code = errorCode;
-    err.status = errorCode === 'review_workflow_return_required' ? 409 : 403;
+    err.status = (
+      errorCode === 'review_workflow_return_required' ||
+      errorCode === 'application_withdrawal_review_stage_forbidden'
+    ) ? 409 : 403;
     if (errorCode === 'review_workflow_return_required') {
       err.publicMessage = 'Return this reopened assessment to the Coordinator for correction before submitting it for another final decision.';
+    } else if (errorCode === 'application_withdrawal_review_stage_forbidden') {
+      err.publicMessage = 'An application with a recorded final decision cannot be withdrawn through the ordinary application action.';
     }
     throw err;
   }
@@ -104971,6 +104992,7 @@ app.put('/api/cases/:id', async (req, res) => {
   let applicationAssessmentReviewWorkflowEnabled = false;
   let applicationAssessmentReviewWorkflow = null;
   let applicationAssessmentReviewWorkflowUpdated = null;
+  let applicationWithdrawalWorkflowTransitioned = false;
   let assessmentSubmittedForWorkflow = false;
   let previousConflictDeclarationSigned = null;
   let conflictDeclarationJustSigned = false;
@@ -105598,6 +105620,40 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       caseContextMutationKinds,
     });
 
+    const withdrawalStatusChangeRequested =
+      applicationStatusToPersist === 'withdrawn' &&
+      applicationStatusToPersist !== beforeApplicationStatus;
+    const withdrawalHasMixedMutation =
+      withdrawalStatusChangeRequested &&
+      (
+        Object.prototype.hasOwnProperty.call(body, 'status') ||
+        docsRequestedFieldPresent ||
+        incomingApplicationAwaitingReasonProvided ||
+        hasAssessmentPayload ||
+        hasCaseContextPayload ||
+        conflictSignatureRequested ||
+        assessmentSubmittedForWorkflow ||
+        assessmentReviewStatusProvided
+      );
+    if (withdrawalHasMixedMutation) {
+      await conn.rollback();
+      return res.status(422).json({
+        success: false,
+        error: 'application_withdrawal_request_conflict',
+        message: 'Withdraw the application as a separate action from assessment, document-request, or case status changes.',
+        lock: lockCheck.lock || null,
+      });
+    }
+    if (withdrawalStatusChangeRequested && !statusActionNote) {
+      await conn.rollback();
+      return res.status(422).json({
+        success: false,
+        error: 'application_withdrawal_note_required',
+        message: 'Enter a reason before withdrawing the application.',
+        lock: lockCheck.lock || null,
+      });
+    }
+
     if (applicationId) {
       applicationAssessmentReviewWorkflowEnabled = await isReviewWorkflowEnabledForType(
         REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
@@ -105800,9 +105856,56 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     const applicationStatusMutationRequested = Boolean(
       applicationStatusToPersist && applicationStatusToPersist !== beforeApplicationStatus
     );
+    const applicationWithdrawalRequested =
+      applicationStatusMutationRequested &&
+      applicationStatusToPersist === 'withdrawn';
+    if (applicationWithdrawalRequested && applicationAssessmentReviewWorkflow) {
+      const existingWorkflowMetadata = safeJsonParse(
+        applicationAssessmentReviewWorkflow.metadata_json,
+        {}
+      );
+      try {
+        applicationAssessmentReviewWorkflowUpdated = await applyApplicationAssessmentReviewWorkflowAction(conn, {
+          caseId,
+          applicationId,
+          action: REVIEW_ACTIONS.WithdrawApplication,
+          actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+          actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+          note: statusActionNote,
+          payload: {
+            ...(isPlainObject(existingWorkflowMetadata) ? existingWorkflowMetadata : {}),
+            applicationWithdrawal: {
+              source: 'application_status_update',
+              applicationStatus: 'withdrawn',
+            },
+          },
+        });
+        applicationWithdrawalWorkflowTransitioned =
+          applicationAssessmentReviewWorkflowUpdated?.current_stage === REVIEW_STAGES.Withdrawn;
+        if (!applicationWithdrawalWorkflowTransitioned) {
+          const transitionError = new Error('application_withdrawal_review_transition_failed');
+          transitionError.code = 'application_withdrawal_review_transition_failed';
+          transitionError.status = 409;
+          transitionError.publicMessage =
+            'PATH could not close the active assessment review. The application was not withdrawn.';
+          throw transitionError;
+        }
+      } catch (error) {
+        await conn.rollback();
+        return res.status(Number(error?.status) || 409).json({
+          success: false,
+          error: error?.code || error?.message || 'application_withdrawal_review_transition_failed',
+          message:
+            error?.publicMessage ||
+            'PATH could not close the active assessment review. The application was not withdrawn.',
+          lock: lockCheck.lock || null,
+        });
+      }
+    }
     try {
       assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
-        reviewWorkflow: applicationAssessmentReviewWorkflow,
+        reviewWorkflow:
+          applicationAssessmentReviewWorkflowUpdated || applicationAssessmentReviewWorkflow,
         applicationStatusMutationRequested,
         caseStatusMutationRequested: statusChanged,
         assessmentSubmittedForWorkflow,
@@ -105811,6 +105914,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
         beforeApplicationStatus,
         nextApplicationStatus: applicationStatusToPersist,
+        applicationWithdrawalWorkflowTransitioned,
+        staffApplicationReopenRequested,
       });
     } catch (error) {
       await conn.rollback();
@@ -106398,7 +106503,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       applicationId;
 
     if (shouldSeedApplicationReportingArtifacts) {
-      deniedReportingSeedResult = await syncDeniedReportingArtifacts(conn, {
+      const syncApplicationReportingArtifacts =
+        appFactoryTestDependencies?.syncDeniedReportingArtifacts || syncDeniedReportingArtifacts;
+      deniedReportingSeedResult = await syncApplicationReportingArtifacts(conn, {
         caseId,
         applicationId,
         reportingDate: new Date(),

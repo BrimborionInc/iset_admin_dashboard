@@ -327,6 +327,77 @@ describe('reviewWorkflow', () => {
     }).allowed).toBe(false);
   });
 
+  test('terminal application withdrawal closes every pre-final assessment review for all file-access roles', () => {
+    const permittedRoles = [
+      'ISET Coordinator',
+      'Regional Manager',
+      'NWAC Administrator',
+      'System Administrator',
+    ];
+    const permittedStages = [
+      REVIEW_STAGES.RmReview,
+      REVIEW_STAGES.ReturnedToSubmitter,
+      REVIEW_STAGES.ReturnedToRm,
+      REVIEW_STAGES.NwacReview,
+      REVIEW_STAGES.Withdrawn,
+    ];
+
+    expect(REVIEW_ACTIONS.WithdrawApplication).not.toBe(REVIEW_ACTIONS.Withdraw);
+    permittedRoles.forEach(role => {
+      permittedStages.forEach(currentStage => {
+        expect(getReviewTransition({
+          action: REVIEW_ACTIONS.WithdrawApplication,
+          currentStage,
+          workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+          role,
+        })).toMatchObject({
+          allowed: true,
+          nextStage: REVIEW_STAGES.Withdrawn,
+          nextOwnerRole: null,
+          requiresNote: true,
+        });
+      });
+    });
+
+    for (const currentStage of [undefined, '', REVIEW_STAGES.FinalDecisionRecorded]) {
+      expect(getReviewTransition({
+        action: REVIEW_ACTIONS.WithdrawApplication,
+        currentStage,
+        workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+        role: 'ISET Coordinator',
+      })).toMatchObject({
+        allowed: false,
+        blockReason: 'application_withdrawal_review_stage_forbidden',
+      });
+    }
+
+    for (const workflowType of [
+      REVIEW_WORKFLOW_TYPES.InterventionProposal,
+      REVIEW_WORKFLOW_TYPES.InterventionRevision,
+      'unknown',
+    ]) {
+      expect(getReviewTransition({
+        action: REVIEW_ACTIONS.WithdrawApplication,
+        currentStage: REVIEW_STAGES.RmReview,
+        workflowType,
+        role: 'ISET Coordinator',
+      })).toMatchObject({
+        allowed: false,
+        blockReason: 'application_withdrawal_review_stage_forbidden',
+      });
+    }
+
+    expect(getReviewTransition({
+      action: REVIEW_ACTIONS.WithdrawApplication,
+      currentStage: REVIEW_STAGES.ReturnedToSubmitter,
+      workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+      role: 'unknown',
+    })).toMatchObject({
+      allowed: false,
+      blockReason: 'review_workflow_transition_forbidden',
+    });
+  });
+
   test('routes NWAC request changes back to RM before submitter', () => {
     const requestChanges = getReviewTransition({
       action: REVIEW_ACTIONS.NwacRequestChanges,

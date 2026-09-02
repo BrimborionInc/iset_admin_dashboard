@@ -2,6 +2,10 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-09-02
+- Fix/Casework/Feedback #198: Application Overview withdrawal now atomically closes any pre-final application-assessment review before persisting the terminal application state. The new `withdraw_application` review action is distinct from assessment recall, works for all four staff roles within their existing file access, requires a reason, clears active review ownership, and preserves the submitted packet, submitter/reviewer evidence, prior notes/events, escalation resolution, exact-application reporting artifacts, row-version protection, and aggregate case recomputation. Final-decision-recorded reviews and mixed withdrawal/assessment requests fail closed; reopening leaves the review withdrawn until the recorded submitter resubmits.
+- Ops/Feedback/PROD #198: Moved the confirmed product defect from `triaging` to `planned` and recorded the implementation plus remaining deployment gates. Only feedback report `198`, its status history, and its internal note changed; application `233`, case `292`, and all other business data remained unchanged.
+
 ## 2026-08-29
 - Ops/PROD/Supporting document deletion: Deployed admin-only release `20260829-supporting-document-deletion-r1` from the exact TEST-proven clean commit. A 10-minute staff notice preceded the rollout; 171 suites / 1,470 tests, quiet lint, privacy-route smoke, replacement-instance readiness, normal-routing smoke, and exact deployed provenance passed. No schema, data, runtime configuration, portal, or shared-runtime change was included.
 - Ops/TEST/Supporting document deletion: Deployed admin-only release `20260829-supporting-document-deletion-r1` from clean commit `449cb4bacd6401180185d60e640164c3a4e54843`. The exact build passed 171 suites / 1,470 tests, quiet lint, privacy-route smoke, immutable artifact/provenance checks, atomic rollout, remote acceptance, and normal-routing health smoke. Schema, data, DB refresh, portal, shared runtime, and PROD were unchanged; TEST admin maintenance was cleared and the portal retained its idle-protection page.

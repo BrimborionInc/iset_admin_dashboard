@@ -1,7 +1,7 @@
 # PATH Workflow Policy Uncertainty Register
 
 Status: current
-Last Updated: 2026-08-28
+Last Updated: 2026-09-02
 
 ## Purpose
 
@@ -90,6 +90,24 @@ Status: confirmed principle.
 - Ordinary caseworker responsibilities derived from application/case assignment transfer to the new assignee, including follow-ups, reminders, document requests, drafting, and returned corrections.
 - Tasks with their own independently assigned actor do not transfer merely because the application/case is reassigned. This includes an active reviewer, Decision Maker, payment follow-up owner, or applicant signer.
 - A technical System Administrator override is not a substitute for ordinary reassignment and staff coverage.
+
+### `WP-04-D1` — Underlying application withdrawal ends active assessment review
+
+Status: confirmed principle; broader dependency and reopen behavior remains partial.
+
+- Withdrawing the underlying application is a terminal application action, not a recall of its submitted assessment. It moves any pre-final application-assessment review to `withdrawn`, removes the active review owner and queue placement, and closes the application in the same transaction.
+- Every staff role with normal access to the Application Workspace file may withdraw an eligible application. The action requires a reason, preserves the submitter, reviewer, packet, notes, and immutable review history, and records a distinct application-withdrawal review event.
+- The existing application-scoped withdrawal effects remain authoritative: resolve open escalation rows, seed the reporting-only withdrawal Action Plan and interventions, bump the application row version, and recompute the aggregate case state without changing sibling applications.
+- A recorded final decision is not an ordinary withdrawal path. `final_decision_recorded` remains blocked and requires the applicable correction/reversal process instead.
+- The narrow withdrawal transition does not invent applicant/staff notifications, archive submitted assessment PDFs, cancel signing or message evidence, or decide how a later application reopen restores prior review ownership. Those dependency and recovery questions remain unresolved under `WP-05`, `WP-14`, `WP-16`, and `WP-19`.
+
+#### 2026-09-02 bug policy brief — Feedback 198 application withdrawal during returned assessment review
+
+- Reported journey and scope: an assigned ISET Coordinator used Application Overview > Withdraw application for application `233` / case `292`. The application was `in_review`; its exact application-assessment workflow `65` was `returned_to_submitter`, owned by the submitter role, after Regional Manager feedback.
+- Failure and cause: the application quick action correctly offered withdrawal, but the generic case update route treated it as an unauthorized direct review-owned status edit. Even a technical administrator bypass would have been reconciled back to the active review's authoritative `in_review` state.
+- Permitted result: the same application-status transaction records the required note and actor, transitions workflow `65` to review stage `withdrawn` with no owner using an action distinct from assessment recall, persists application `233` as withdrawn/closed, and retains existing escalation, reporting, row-version, case-recompute, and audit behavior.
+- Forbidden result: do not call assessment recall, archive the submitted packet, erase the return note or earlier review events, mutate a sibling application, send an invented notification, or allow an underlying withdrawal from `final_decision_recorded`.
+- Regression matrix: prove all four canonical staff roles across `rm_review`, `returned_to_submitter`, `returned_to_rm`, `nwac_review`, and already-recalled `withdrawn`; prove unknown roles, non-application workflows, missing notes, and `final_decision_recorded` fail closed; exercise the real `PUT /api/cases/:id` boundary and verify workflow, application, reporting, row-version, case aggregation, commit/rollback, and preserved history together.
 
 ### `WP-05-D1` — Reviewers may make non-substantive assessment corrections
 

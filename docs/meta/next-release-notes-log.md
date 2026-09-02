@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-08-29
+Last Updated: 2026-09-02
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-09-02 | Release 20260902-feedback-198-withdrawal-r1 | Fix/Casework | Withdraw application | Staff can withdraw an eligible application while its assessment is in Regional Manager or Decision Maker review or has been returned for corrections. | PATH closes the application and active review together, requires the withdrawal reason, removes review ownership, and preserves the submitted assessment and review history. A recorded final decision still requires the separate correction process.
 - 2026-08-29 | Release 20260829-supporting-document-deletion-r1 | Feature/Documents | Supporting Documents | Staff can delete ordinary documents they are authorized to manage, regardless of how the document reached PATH. | PATH keeps generated signed documents, documents currently out for signature, formal CFA and Financial Overview version history, and payment-record evidence. A secure-message attachment remains in its original message, and deletion does not move a completed workflow step backwards.
 - 2026-08-28 | Release 20260828-admin-document-lineage-r1 | Feature/Documents | Supporting Documents | Staff can remove an eligible applicant-uploaded file from normal use through the same reversible Delete workflow as an eligible staff upload. | The stored file and submitted application remain intact; only System Administrators can restore it. Signing, message, generated, version, payment, legacy, and unknown records remain protected, and Applicant uploads are not enabled for Duplicate.
 - 2026-08-28 | Release 20260828-admin-document-lineage-r1 | Fix/Casework | Intervention revisions | A revision created from an application-linked intervention now keeps that exact application even when its mixed historical/current Action Plan is intentionally case-owned. | PATH proves the source belongs to the same case and Action Plan and refuses contradictory application lineage instead of silently changing it.
@@ -509,10 +510,17 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Staff can now withdraw an eligible application while its assessment is under review or returned for corrections. PATH closes the application and review together while preserving the assessment history.
 - Staff can now delete ordinary Supporting Documents regardless of how the file reached PATH. Signed documents, files currently out for signature, formal version history, and payment evidence remain protected.
 - Intervention revisions now keep the exact application of their source intervention on mixed historical/current Action Plans and refuse contradictory lineage.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260902-feedback-198-withdrawal-r1
+
+- `Withdraw application` now works when the selected application's assessment is with a Regional Manager or Decision Maker, has been returned for corrections, or was previously recalled.
+- PATH requires the withdrawal reason, closes the application and its active review together, removes the item from review queues, and preserves the submitted assessment, reviewer evidence, notes, and event history.
+- Applications with a recorded final decision still use the separate correction process and cannot be withdrawn through this action.
 
 #### Release 20260829-supporting-document-deletion-r1
 
@@ -526,14 +534,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Applicant-upload deletion does not change the submitted application and does not enable Duplicate. Signing, secure-message, generated, version, payment, legacy, and unknown records remain protected.
 - Intervention revisions created on mixed historical/current Action Plans now preserve the exact application of their source intervention after PATH proves the same case and Action Plan.
 
-#### Release 20260826-signing-lineage-r2-copyfix
-
-- Secure-message and decision-letter retries now reuse the original completed send instead of creating a duplicate message, signing package, agreement version, or decision update after a lost connection.
-- Secure Messaging now creates funding agreements and financial overviews for the exact selected application and Action Plan. Older applicationless and sibling-application forms remain available as history but no longer block or get changed by unrelated work.
-- PATH keeps one continuous agreement history for the case. Only a contradiction in the exact form being generated or signed stops that form operation; ordinary messages and other casework remain available.
-- Forms that use an intervention, including attendance reports, show that context before sending. Ordinary messages do not silently inherit the intervention or Action Plan selected elsewhere in the workspace.
-- Historical conversations and authorized attachments remain available after application or account-link changes. PATH preserves their recorded ownership; only a signing form aimed at a former account or a proven file-ownership conflict stops the affected action.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
@@ -542,10 +542,17 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
+- Le personnel peut maintenant retirer une demande admissible pendant que son évaluation est en cours d'examen ou retournée pour corrections. PATH ferme ensemble la demande et l'examen tout en préservant l'historique de l'évaluation.
 - Le personnel peut maintenant supprimer les documents de soutien ordinaires, peu importe leur provenance. Les documents signés, les fichiers en cours de signature, l'historique officiel des versions et les preuves de paiement demeurent protégés.
 - Les révisions d'intervention conservent maintenant la demande exacte de leur intervention source dans les plans d'action mixtes historiques et actuels, et PATH refuse toute filiation contradictoire.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260902-feedback-198-withdrawal-r1
+
+- `Retirer la demande` fonctionne maintenant lorsque l'évaluation de la demande sélectionnée est auprès d'un gestionnaire régional ou d'un décideur, a été retournée pour corrections ou a déjà été rappelée.
+- PATH exige le motif du retrait, ferme ensemble la demande et son examen actif, retire l'élément des files d'examen et préserve l'évaluation soumise, les preuves des réviseurs, les notes et l'historique des événements.
+- Une demande pour laquelle une décision finale a été enregistrée doit toujours suivre le processus de correction distinct et ne peut pas être retirée au moyen de cette action.
 
 #### Release 20260829-supporting-document-deletion-r1
 
@@ -558,14 +565,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les quatre rôles du personnel PATH peuvent utiliser la suppression réversible pour un Téléversement du demandeur admissible auquel ils ont déjà accès. Le fichier disparaît des listes et listes de contrôle normales, et un administrateur système peut le restaurer.
 - La suppression d'un téléversement du demandeur ne modifie pas la demande soumise et n'autorise pas la duplication. Les dossiers liés aux signatures, aux messages sécurisés, aux documents générés, aux versions, aux paiements, aux sources anciennes ou inconnues demeurent protégés.
 - Les révisions d'intervention créées dans un plan d'action mixte historique et actuel conservent maintenant la demande exacte de l'intervention source après vérification du même dossier et du même plan d'action.
-
-#### Release 20260826-signing-lineage-r2-copyfix
-
-- Les nouvelles tentatives d'envoi d'un message sécurisé ou d'une lettre de décision réutilisent maintenant l'envoi déjà terminé, plutôt que de créer un message, une trousse de signature, une version d'entente ou une mise à jour de décision en double après une perte de connexion.
-- La messagerie sécurisée crée maintenant les ententes de financement et les aperçus financiers pour la demande et le plan d'action sélectionnés exactement. Les formulaires sans demande ou liés à une autre demande restent dans l'historique, sans bloquer ni être modifiés par un travail indépendant.
-- PATH conserve un historique continu des ententes du dossier. Seule une contradiction dans le formulaire exact en cours de création ou de signature bloque cette opération; les messages ordinaires et les autres travaux au dossier restent disponibles.
-- Les formulaires qui utilisent une intervention, y compris les rapports de présence, affichent ce contexte avant l'envoi. Les messages ordinaires n'héritent pas silencieusement de l'intervention ou du plan d'action sélectionné ailleurs dans l'espace de travail.
-- Les conversations historiques et les pièces jointes autorisées restent accessibles après un changement de demande ou de compte lié. PATH préserve leur propriété enregistrée; seul un formulaire de signature destiné à un ancien compte ou un conflit de propriété de fichier prouvé bloque l'action concernée.
 
 ### Problemes connus (brouillon - FR)
 

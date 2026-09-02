@@ -21,6 +21,7 @@ const REVIEW_ACTIONS = Object.freeze({
   RmForwardChangesToSubmitter: 'rm_forward_changes_to_submitter',
   NwacApprove: 'nwac_approve',
   NwacDeny: 'nwac_deny',
+  WithdrawApplication: 'withdraw_application',
   Withdraw: 'withdraw',
 });
 
@@ -65,6 +66,14 @@ function isSubmitterRole(role) {
 
 function isSystemAdministratorRole(role) {
   return SYSTEM_ADMIN_ROLE_KEYS.has(normalizeRoleKey(role));
+}
+
+function isApplicationWithdrawalRole(role) {
+  return (
+    isSubmitterRole(role) ||
+    isRegionalManagerRole(role) ||
+    isNwacDecisionRole(role)
+  );
 }
 
 function parseReviewWorkflowMetadata(value) {
@@ -212,6 +221,29 @@ function getReviewTransition({ action, currentStage, role, workflowType, workflo
       requiresNote: actionKey === REVIEW_ACTIONS.NwacDeny,
       nwacDecision: actionKey === REVIEW_ACTIONS.NwacApprove ? 'approved' : 'denied',
       recordsFinalDecision: true,
+    };
+  }
+
+  if (actionKey === REVIEW_ACTIONS.WithdrawApplication) {
+    const withdrawalStageAllowed =
+      Boolean(normalizedStage) &&
+      normalizedStage !== REVIEW_STAGES.FinalDecisionRecorded;
+    const withdrawalRoleAllowed = isApplicationWithdrawalRole(role);
+    return {
+      allowed:
+        normalizedWorkflowType === REVIEW_WORKFLOW_TYPES.ApplicationAssessment &&
+        withdrawalStageAllowed &&
+        withdrawalRoleAllowed,
+      nextStage: REVIEW_STAGES.Withdrawn,
+      nextOwnerRole: null,
+      requiresNote: true,
+      blockReason:
+        normalizedWorkflowType !== REVIEW_WORKFLOW_TYPES.ApplicationAssessment ||
+        !withdrawalStageAllowed
+          ? 'application_withdrawal_review_stage_forbidden'
+          : !withdrawalRoleAllowed
+            ? 'review_workflow_transition_forbidden'
+            : null,
     };
   }
 

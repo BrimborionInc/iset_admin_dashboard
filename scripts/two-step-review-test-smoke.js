@@ -2397,6 +2397,7 @@ function remoteRunner() {
     });
     const auth = await loginAllRoles();
     await runApplicationAssessmentWorkflow(auth);
+    await runApplicationWithdrawalWorkflow(auth);
     await runDualRoleApplicationAssessmentWorkflow(auth);
     await runInterventionProposalWorkflow(auth);
     await runInterventionRevisionWorkflow(auth);
@@ -4876,6 +4877,7 @@ function remoteRunner() {
       );
 
       await seedApplicationAssessmentCase('application');
+      await seedApplicationAssessmentCase('withdrawal');
       await seedApplicationAssessmentCase('dualRoleApplication', {
         assignedStaffProfileId: fixture.staff.manager.staffProfileId,
       });
@@ -6008,6 +6010,168 @@ function remoteRunner() {
     requireInvariant('application assessment: final decision retry leaves exactly one active final packet', (
       finalRowsAfterRetry.length === 1
     ), { documentIds: finalRowsAfterRetry.map(row => row.id) });
+  }
+
+  async function runApplicationWithdrawalWorkflow(auth) {
+    const caseId = fixture.cases.withdrawal;
+    const applicationId = fixture.applications.withdrawal;
+    await satisfySubmitChecklist(auth.coordinator, 'withdrawal');
+
+    let state = await getApplicationState(applicationId);
+    await fetchJson(`/api/cases/${caseId}`, {
+      method: 'PUT',
+      headers: { ...authHeaders(auth.coordinator), 'Content-Type': 'application/json' },
+      body: json(completeAssessmentPayload(applicationId, state.row_version, {
+        assessment_submit_action: true,
+        status: 'intake',
+        applicationStatus: 'pending_approval',
+      })),
+    });
+    state = await getApplicationState(applicationId);
+    fixture.workflows.withdrawal = state.workflow_id;
+    expect('feedback 198: Coordinator submission reaches Regional Manager review', (
+      state.current_stage === 'rm_review' &&
+      Number(state.submitted_by_staff_profile_id) === Number(fixture.staff.coordinator.staffProfileId)
+    ), state);
+
+    await fetchJson(`/api/cases/${caseId}/assessment/review-workflow/action`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.manager), 'Content-Type': 'application/json' },
+      body: json({
+        applicationId,
+        action: 'rm_return_to_submitter',
+        note: 'Feedback 198 acceptance: please correct the returned assessment.',
+      }),
+    });
+    const returnedState = await getApplicationState(applicationId);
+    requireInvariant('feedback 198: exact reporter journey starts returned to the Coordinator', (
+      returnedState.current_stage === 'returned_to_submitter' &&
+      returnedState.current_owner_role === 'Submitter' &&
+      returnedState.status === 'in_review' &&
+      returnedState.lifecycle_status === 'in_review' &&
+      Number(returnedState.submitted_by_staff_profile_id) === Number(fixture.staff.coordinator.staffProfileId)
+    ), returnedState || {});
+
+    const before = await captureReturnedAssessmentResubmitState(
+      caseId,
+      applicationId,
+      returnedState.workflow_id
+    );
+    const assessmentBefore = await getApplicationAssessmentBodyState(applicationId);
+    const applicationBefore = await getApplicationSentinelState(applicationId);
+    const withdrawalNote = 'Feedback 198 acceptance: applicant is no longer pursuing this application.';
+    const response = await fetchJson(`/api/cases/${caseId}`, {
+      method: 'PUT',
+      headers: { ...authHeaders(auth.coordinator), 'Content-Type': 'application/json' },
+      body: json({
+        applicationId,
+        applicationStatus: 'withdrawn',
+        expectedRowVersion: returnedState.row_version,
+        resolveOpenEscalation: true,
+        statusActionNote: withdrawalNote,
+      }),
+    });
+    const after = await captureReturnedAssessmentResubmitState(
+      caseId,
+      applicationId,
+      returnedState.workflow_id
+    );
+    const assessmentAfter = await getApplicationAssessmentBodyState(applicationId);
+    const applicationAfter = await getApplicationSentinelState(applicationId);
+
+    requireInvariant('feedback 198: ISET Coordinator deployed request atomically withdraws application and review', (
+      response?.success === true &&
+      after.application?.current_stage === 'withdrawn' &&
+      after.application?.current_owner_role == null &&
+      after.application?.status === 'withdrawn' &&
+      after.application?.lifecycle_status === 'closed' &&
+      after.application?.decision_outcome == null &&
+      Number(after.application?.submitted_by_staff_profile_id) === Number(fixture.staff.coordinator.staffProfileId) &&
+      Number(after.application?.row_version) === Number(returnedState.row_version) + 1
+    ), {
+      authenticatedRole: fixture.staff.coordinator.role,
+      caseId,
+      applicationId,
+      response,
+      before: before.application,
+      after: after.application,
+    });
+    requireInvariant('feedback 198: submitted assessment body and generated packet evidence remain unchanged', (
+      json(assessmentAfter) === json(assessmentBefore) &&
+      json(after.documents) === json(before.documents)
+    ), {
+      assessmentBefore,
+      assessmentAfter,
+      documentIdsBefore: before.documents.map(row => row.id),
+      documentIdsAfter: after.documents.map(row => row.id),
+    });
+    const newReviewEvents = after.workflowEvents.slice(before.workflowEvents.length);
+    requireInvariant('feedback 198: withdrawal records one distinct immutable review event with the required reason', (
+      newReviewEvents.length === 1 &&
+      newReviewEvents[0]?.action === 'withdraw_application' &&
+      newReviewEvents[0]?.from_stage === 'returned_to_submitter' &&
+      newReviewEvents[0]?.to_stage === 'withdrawn'
+    ), { withdrawalNote, newReviewEvents });
+
+    const [[caseContextRow]] = await query(
+      'SELECT id, case_context_json FROM iset_case WHERE id = ? LIMIT 1',
+      [caseId]
+    );
+    const caseContext = parseJsonObject(caseContextRow?.case_context_json);
+    const reportingArtifact = caseContext?.applicationReportingArtifacts?.[String(applicationId)] || null;
+    requireInvariant('feedback 198: withdrawal reporting remains scoped to the exact application', (
+      reportingArtifact?.reportingTrigger === 'withdrawal' &&
+      Number(caseContext?.applicationId) === Number(applicationId)
+    ), { caseId, applicationId, caseContextApplicationId: caseContext?.applicationId, reportingArtifact });
+
+    const [withdrawalPlans] = await query(
+      `SELECT id, application_id, name, status
+         FROM iset_case_action_plan
+        WHERE case_id = ?
+          AND application_id = ?
+          AND name = 'Actions leading to withdrawal'
+        ORDER BY id`,
+      [caseId, applicationId]
+    );
+    requireInvariant('feedback 198: one exact-application withdrawal reporting plan is closed', (
+      withdrawalPlans.length === 1 &&
+      withdrawalPlans[0]?.status === 'closed'
+    ), { caseId, applicationId, withdrawalPlans });
+    const [withdrawalInterventions] = await query(
+      `SELECT id, action_plan_id, intervention_code, status
+         FROM iset_case_intervention
+        WHERE action_plan_id = ?
+        ORDER BY id`,
+      [withdrawalPlans[0].id]
+    );
+    requireInvariant('feedback 198: withdrawal reporting interventions are complete', (
+      withdrawalInterventions.length === 2 &&
+      withdrawalInterventions.every(row => row.status === 'completed')
+    ), { withdrawalInterventions });
+    requireInvariant('feedback 198: withdrawal changes only the intended application lifecycle fields', (
+      Number(applicationAfter?.id) === Number(applicationBefore?.id) &&
+      Number(applicationAfter?.case_id) === Number(applicationBefore?.case_id) &&
+      Number(applicationAfter?.submission_id) === Number(applicationBefore?.submission_id) &&
+      Number(applicationAfter?.client_id) === Number(applicationBefore?.client_id) &&
+      applicationAfter?.status === 'withdrawn' &&
+      applicationAfter?.lifecycle_status === 'closed' &&
+      applicationAfter?.closure_reason === 'withdrawn'
+    ), { applicationBefore, applicationAfter });
+    result.evidence.feedback198Withdrawal = {
+      authenticatedRole: fixture.staff.coordinator.role,
+      caseId,
+      applicationId,
+      workflowId: returnedState.workflow_id,
+      fromStage: 'returned_to_submitter',
+      toStage: after.application.current_stage,
+      applicationStatus: after.application.status,
+      applicationLifecycleStatus: after.application.lifecycle_status,
+      reviewOwner: after.application.current_owner_role,
+      reviewEventAction: newReviewEvents[0].action,
+      reportingPlanId: withdrawalPlans[0].id,
+      reportingInterventionIds: withdrawalInterventions.map(row => row.id),
+      cleanupRequired: true,
+    };
   }
 
   async function runDualRoleApplicationAssessmentWorkflow(auth) {

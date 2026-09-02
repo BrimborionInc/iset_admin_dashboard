@@ -2,7 +2,7 @@
 
 Purpose: Capture requirements for non-layout quick actions in the Application Workspace.
 Audience: Application management owners, frontend engineers, QA.
-Last Updated: 2026-05-06
+Last Updated: 2026-09-02
 Status: In progress
 
 ## Scope
@@ -66,6 +66,8 @@ Define non-layout quick actions for the Application Workspace header, including 
 - Backend endpoint + payload: Set application status to `withdrawn`; lifecycle remains closed through the status persistence helper.
 - Confirmation/modal requirements: Confirm modal with required note.
 - Side effects: Creates or updates the reporting-only ILMP structure: one closed action plan named `Actions leading to withdrawal` and completed `Career Research and Exploration` plus `Employment Counselling` interventions dated to the withdrawal.
+- Active-review handling: If an application-assessment review exists in any pre-final stage, the same transaction moves that exact workflow to `withdrawn`, clears its active owner, and records `withdraw_application` with the required reason. This is terminal application withdrawal, not assessment recall; submitted assessment documents, submitter/reviewer fields, return notes, and prior review events remain evidence.
+- Final-decision boundary: `final_decision_recorded` is not eligible for the ordinary withdrawal action and must use the applicable correction/reversal process.
 - Escalation handling: Allow withdrawing with an open escalation; the status-update route resolves open escalation rows in the same transaction so staff do not need to own the escalation before completing the withdrawal.
 - Escalation handling detail: If an escalation is open, auto-resolve it and attach the withdrawal note as the resolution note.
 - Intent: applicant has withdrawn or is no longer pursuing the application; display as `Withdrawn` in application status surfaces.
@@ -81,8 +83,8 @@ Define non-layout quick actions for the Application Workspace header, including 
 Unless explicitly stated otherwise, quick actions should use a confirmation modal with a required note.
 
 ## Notes storage decision
-- Required notes will be stored as case notes via `POST /api/cases/:caseId/notes` (status updates do not accept notes).
-- Note body should include the action name and status transition for traceability.
+- The quick action sends its required reason as `statusActionNote` with the status transaction. When an active assessment review exists, that reason and actor are stored on the immutable `withdraw_application` review event; escalation resolution uses the same reason.
+- The UI also mirrors the action, status transition, and reason into the case notes route for staff-facing traceability.
 
 ## Status update decision
 - Quick actions will update `applicationStatus` only (not `status`) via `PUT /api/cases/:id`, to avoid unintended case-status side effects. The application status is the source of truth for this workspace.

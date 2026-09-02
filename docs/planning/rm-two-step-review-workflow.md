@@ -2,7 +2,7 @@
 
 Purpose: plan the new Regional Manager review stage for assessment and intervention approval workflows.
 Audience: product, engineering, operations, training, and future AI-assisted development threads.
-Last Updated: 2026-08-13
+Last Updated: 2026-09-02
 
 ## Status
 
@@ -109,7 +109,7 @@ Legacy application/proposal statuses remain compatibility fields. They may suppo
 | Returned to Regional Manager by Decision Maker | `returned_to_rm` | Regional Manager | No packet-body edits | Forward requested changes to submitter with note | Regional Manager `Pending Review` as returned-to-RM work | Decision Maker request-change note remains visible to RM; RM forwarding note is mirrored into Notes and Tasks and shown to submitter |
 | Final decision recorded | `final_decision_recorded` | No review owner; follow-up owner depends on outcome | No assessment/proposal packet edits | Post-decision follow-up only, such as approval/denial/funding-revision letters | Completion/follow-up queues only when required artifacts remain | Final PDF/artifact shows submitter evidence, RM sign-off, and Decision Maker decision/sign-off |
 | Recalled before decision | review row at `withdrawn` while the application remains `in_review` | Original recorded submitter | Yes, by that submitter | Correct and resubmit for Regional Manager review; System Administrator support may assist without replacing submitter ownership | Submitter's Application Workspace, not an active review queue | Recall and later resubmission remain separate audit events; new review submission clears stale reviewer decisions |
-| Underlying application cancelled or withdrawn | terminal application state, distinct from a recalled review submission | No active review owner | No | Reopen only through a separately approved application-recovery path | No active review queue | Audit trail preserves cancellation/withdrawal reason and actor |
+| Underlying application cancelled or withdrawn | terminal application state; any pre-final application-assessment review is moved to `withdrawn` by the distinct `withdraw_application` action | No active review owner | No | Reopen only through the application-recovery path; the review remains withdrawn until its recorded submitter resubmits | No active review queue | The application and review transition commit together; audit preserves the required reason, actor, submitted packet, submitter/reviewer evidence, and earlier review events |
 
 Role contract:
 
@@ -172,6 +172,7 @@ Current DEV foundation:
 
 - `sql/migrations/20260619_0001_create_rm_review_workflow.sql` creates `iset_review_workflow`, `iset_review_workflow_event`, and the disabled runtime flag `feature_flags/workflow.two_step_rm_review.enabled`.
 - `src/lib/reviewWorkflow.js` defines the workflow types, stages, actions, role checks, subject keys, feature-flag interpretation, and allowed stage transitions.
+- `WithdrawApplication` / `withdraw_application` is the terminal underlying-application action for application assessments. All four canonical staff roles may use it within their existing file access at any pre-final review stage, including an already recalled `withdrawn` review. It requires a reason, clears review ownership, preserves prior review evidence, and remains distinct from `Withdraw` / `withdraw`, which recalls a submitted assessment or intervention packet.
 - `src/lib/reviewWorkflow.test.js` covers the first-pass transition rules, including the submit-start role matrix for all supported workflow types, admin no-start behavior, RM no-final-decision authority, admin final-decision-only behavior, Decision Maker request-changes returning to RM, and submitter edit locks during review.
 - `isetadminserver.js` wires the workflow behind the per-workflow runtime flag for application assessments, new intervention proposals, and intervention revisions. Submitter submission starts or restarts review at `rm_review`; RM return/forward actions write workflow events and reopen the item to the submitter; RM submit sends the item to the final-decision stage (`nwac_review`); Decision Maker request-changes returns the item to RM before the submitter; approve/deny records final workflow decision.
 - `src/lib/reviewWorkflowCaseNotes.js` and the review-action backend routes mirror RM/Decision Maker transition notes into `iset_case_note` and include `note`, `review_note`, `decision_notes`, `case_note_id`, and `case_note_body` in review event payloads. `src/widgets/applicationEvents.js` displays those notes in the Events Timeline event data text.

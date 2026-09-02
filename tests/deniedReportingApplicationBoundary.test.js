@@ -138,6 +138,48 @@ describe('denied reporting application boundary', () => {
     expect(result.applicationReportingArtifacts['202'].caseLevelReportingOnly).toBe(false);
   });
 
+  test('withdrawal reporting stays on the exact application and preserves sibling denial history', () => {
+    const siblingDenial = {
+      reportingTrigger: 'denial',
+      reportingSeedSource: 'denied_reporting',
+      reportingCorrectionAllowed: true,
+      reportingDeniedAt: '2026-08-01',
+    };
+
+    const result = exported.buildDeniedReportingCaseContext({
+      existingCaseContext: {
+        applicationReportingArtifacts: { 101: siblingDenial },
+      },
+      applicationId: 233,
+      clientId: 44,
+      reportingDate: '2026-09-02',
+      reportingTrigger: 'withdrawal',
+      caseLevelReportingOnly: true,
+    });
+
+    expect(result).toMatchObject({
+      reportingTrigger: 'withdrawal',
+      reportingSeedSource: 'withdrawn_reporting',
+      reportingOnlyWithdrawal: true,
+      reportingWithdrawnAt: '2026-09-02',
+      applicationId: 233,
+      clientId: 44,
+    });
+    expect(result.reportingOnlyDenied).toBeUndefined();
+    expect(result.reportingOnlyDeniedIneligible).toBeUndefined();
+    expect(result.fundingDecisionReasonCode).toBeUndefined();
+    expect(result.applicationReportingArtifacts['101']).toEqual(siblingDenial);
+    expect(result.applicationReportingArtifacts['233']).toMatchObject({
+      reportingTrigger: 'withdrawal',
+      reportingSeedSource: 'withdrawn_reporting',
+      reportingOnly: true,
+      caseLevelReportingOnly: true,
+      reportingCorrectionAllowed: true,
+      reportingDate: '2026-09-02',
+      reportingWithdrawnAt: '2026-09-02',
+    });
+  });
+
   test('ESDC initialization rejects an Action Plan linked to another application', async () => {
     const calls = [];
     const connection = {

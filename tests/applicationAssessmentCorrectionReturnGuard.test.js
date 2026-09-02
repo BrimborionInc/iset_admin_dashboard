@@ -589,6 +589,75 @@ describe('application assessment correction-return caller guard', () => {
     })).toEqual({ enforced: true, reason: 'authorized_review_owned_status_transition' });
   });
 
+  test('review-owned status guard allows only a coordinated application withdrawal', () => {
+    const withdrawal = {
+      applicationStatusMutationRequested: true,
+      caseStatusMutationRequested: false,
+      actorRole: 'ISET Coordinator',
+      beforeApplicationStatus: 'in_review',
+      nextApplicationStatus: 'withdrawn',
+    };
+
+    expect(() => assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      ...withdrawal,
+      reviewWorkflow: { current_stage: 'returned_to_submitter' },
+      applicationWithdrawalWorkflowTransitioned: false,
+    })).toThrow(expect.objectContaining({ code: 'assessment_review_status_transition_forbidden' }));
+
+    expect(() => assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      ...withdrawal,
+      reviewWorkflow: { current_stage: 'withdrawn' },
+      applicationWithdrawalWorkflowTransitioned: false,
+    })).toThrow(expect.objectContaining({ code: 'assessment_review_status_transition_forbidden' }));
+
+    expect(assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      ...withdrawal,
+      reviewWorkflow: { current_stage: 'withdrawn' },
+      applicationWithdrawalWorkflowTransitioned: true,
+    })).toEqual({ enforced: true, reason: 'authorized_review_owned_status_transition' });
+
+    expect(() => assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      ...withdrawal,
+      caseStatusMutationRequested: true,
+      reviewWorkflow: { current_stage: 'withdrawn' },
+      applicationWithdrawalWorkflowTransitioned: true,
+    })).toThrow(expect.objectContaining({ code: 'assessment_review_status_transition_forbidden' }));
+
+    expect(() => assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      ...withdrawal,
+      nextApplicationStatus: 'on_hold',
+      reviewWorkflow: { current_stage: 'withdrawn' },
+      applicationWithdrawalWorkflowTransitioned: true,
+    })).toThrow(expect.objectContaining({ code: 'assessment_review_status_transition_forbidden' }));
+  });
+
+  test('review-owned status guard preserves the authorized non-admin application reopen path', () => {
+    const reopen = {
+      reviewWorkflow: { current_stage: 'withdrawn' },
+      applicationStatusMutationRequested: true,
+      caseStatusMutationRequested: false,
+      actorRole: 'ISET Coordinator',
+      beforeApplicationStatus: 'withdrawn',
+      nextApplicationStatus: 'in_review',
+    };
+
+    expect(() => assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      ...reopen,
+      staffApplicationReopenRequested: false,
+    })).toThrow(expect.objectContaining({ code: 'assessment_review_status_transition_forbidden' }));
+
+    expect(assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      ...reopen,
+      staffApplicationReopenRequested: true,
+    })).toEqual({ enforced: true, reason: 'authorized_review_owned_status_transition' });
+
+    expect(() => assertApplicationAssessmentReviewOwnedStatusMutationAllowed({
+      ...reopen,
+      caseStatusMutationRequested: true,
+      staffApplicationReopenRequested: true,
+    })).toThrow(expect.objectContaining({ code: 'assessment_review_status_transition_forbidden' }));
+  });
+
   test('generic assessment mutation guard leaves docs-only follow-up outside the submitter restriction', () => {
     expect(
       assertApplicationAssessmentReturnedToSubmitterActor({
