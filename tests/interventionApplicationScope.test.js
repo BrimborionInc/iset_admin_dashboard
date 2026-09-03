@@ -25,6 +25,10 @@ jest.mock('axios', () => ({
 describe('intervention application lineage and assessment signatures', () => {
   const previousRepairExports = process.env.PATH_REPAIR_EXPORTS;
   let resolveInterventionApplicationScopeId;
+  let resolveInterventionReviewScope;
+  let isInterventionApprovalQueueScopeAllowed;
+  let isInterventionCompletionQueueScopeAllowed;
+  let resolveExactFinalApprovedInterventionWorkflow;
   let resolveRevisionProposalApplicationId;
   let buildInterventionSubmissionApplicationScopeRow;
   let syncInterventionProposalCompatibility;
@@ -35,6 +39,10 @@ describe('intervention application lineage and assessment signatures', () => {
     process.env.PATH_REPAIR_EXPORTS = '1';
     ({
       resolveInterventionApplicationScopeId,
+      resolveInterventionReviewScope,
+      isInterventionApprovalQueueScopeAllowed,
+      isInterventionCompletionQueueScopeAllowed,
+      resolveExactFinalApprovedInterventionWorkflow,
       resolveRevisionProposalApplicationId,
       buildInterventionSubmissionApplicationScopeRow,
       syncInterventionProposalCompatibility,
@@ -119,6 +127,125 @@ describe('intervention application lineage and assessment signatures', () => {
       application_case_id: null,
     });
     expect(resolveInterventionApplicationScopeId(submissionScope, { required: true })).toBe(88);
+  });
+
+  test('recognizes only an explicitly classified applicationless historical amendment', async () => {
+    const revisionRow = {
+      id: 521,
+      case_id: 40,
+      action_plan_id: 6,
+      proposal_id: 555,
+      proposal_kind: 'revision',
+      proposal_source_intervention_id: 11,
+      proposal_application_id: null,
+      action_plan_application_id: null,
+      review_workflow_application_id: null,
+      metadata_json: JSON.stringify({ revision: { sourceInterventionId: 11 } }),
+    };
+    const planRow = {
+      id: 6,
+      case_id: 40,
+      application_id: null,
+      metadata_json: JSON.stringify({ source: 'manual_backload', entryMode: 'existing' }),
+    };
+    const sourceRow = {
+      id: 11,
+      case_id: 40,
+      action_plan_id: 6,
+      proposal_application_id: null,
+      action_plan_application_id: null,
+      metadata_json: JSON.stringify({ source: 'manual_backload', entryMode: 'existing' }),
+    };
+
+    await expect(resolveInterventionReviewScope(null, {
+      interventionRow: revisionRow,
+      planRow,
+      sourceRow,
+    })).resolves.toMatchObject({
+      kind: 'historical_manual',
+      caseId: 40,
+      applicationId: null,
+      actionPlanId: 6,
+      interventionId: 521,
+      proposalId: 555,
+      sourceInterventionId: 11,
+    });
+
+    await expect(resolveInterventionReviewScope(null, {
+      interventionRow: revisionRow,
+      planRow: { ...planRow, metadata_json: '{}' },
+      sourceRow,
+    })).rejects.toMatchObject({
+      code: 'intervention_historical_manual_scope_unverified',
+      status: 409,
+    });
+  });
+
+  test('keeps unexplained applicationless work out of intervention review queues', () => {
+    const queueRow = {
+      application_id: null,
+      proposal_kind: 'revision',
+      revision_source_intervention_id: 11,
+      review_workflow_application_id: null,
+      action_plan_metadata_json: JSON.stringify({ source: 'manual_backload' }),
+      revision_source_metadata_json: JSON.stringify({ entryMode: 'existing' }),
+    };
+    expect(isInterventionApprovalQueueScopeAllowed(queueRow)).toBe(true);
+    expect(isInterventionApprovalQueueScopeAllowed({
+      ...queueRow,
+      revision_source_metadata_json: '{}',
+    })).toBe(false);
+
+    const completionRow = {
+      application_id: null,
+      proposal_kind: 'revision',
+      has_applied_revision: 1,
+      metadata_json: JSON.stringify({ source: 'manual_backload' }),
+      action_plan_metadata_json: JSON.stringify({ entryMode: 'existing' }),
+    };
+    expect(isInterventionCompletionQueueScopeAllowed(completionRow)).toBe(true);
+    expect(isInterventionCompletionQueueScopeAllowed({
+      ...completionRow,
+      action_plan_metadata_json: '{}',
+    })).toBe(false);
+  });
+
+  test('accepts a final approved workflow with null application only with verified manual scope', () => {
+    const row = {
+      id: 521,
+      case_id: 40,
+      action_plan_id: 6,
+      proposal_id: 555,
+      proposal_application_id: null,
+      action_plan_application_id: null,
+      proposal_kind: 'revision',
+      review_workflow_id: 701,
+      review_workflow_type: 'intervention_revision',
+      review_workflow_intervention_id: 521,
+      review_workflow_proposal_id: 555,
+      review_workflow_application_id: null,
+      review_workflow_current_stage: 'final_decision_recorded',
+      review_workflow_nwac_decision: 'approved',
+    };
+    const interventionScope = {
+      kind: 'historical_manual',
+      caseId: 40,
+      applicationId: null,
+      actionPlanId: 6,
+      interventionId: 521,
+      proposalId: 555,
+      sourceInterventionId: 11,
+    };
+    expect(resolveExactFinalApprovedInterventionWorkflow(row, {
+      interventionScope,
+    })).toMatchObject({
+      eligible: true,
+      applicationId: null,
+      scopeKind: 'historical_manual',
+    });
+    expect(() => resolveExactFinalApprovedInterventionWorkflow(row)).toThrow(
+      'intervention_application_scope_required'
+    );
   });
 
   test('revision compatibility writes inherit source proposal lineage without attaching the mixed Action Plan', async () => {
@@ -326,7 +453,8 @@ describe('intervention application lineage and assessment signatures', () => {
     expect(end).toBeGreaterThan(start);
     const queues = source.slice(start, end);
 
-    expect(queues).toContain('q.application_id IS NOT NULL');
+    expect(queues).toContain('.filter(isInterventionApprovalQueueScopeAllowed)');
+    expect(queues).toContain('.filter(isInterventionCompletionQueueScopeAllowed)');
     expect(queues).toContain('ON a.id = COALESCE(p.application_id, ap.application_id)');
     expect(queues).toContain('p.application_id = ap.application_id');
     expect(queues).toContain('rw.application_id = COALESCE(p.application_id, ap.application_id)');

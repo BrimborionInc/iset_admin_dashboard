@@ -137,10 +137,26 @@ export const normalizeInterventionDeliveryStatus = (value, fallback = null) => {
 export const isInterventionFinalDecisionRecorded = record => {
   if (!record || typeof record !== "object") return false;
   const workflow = record.reviewWorkflow || record.review_workflow || null;
-  if (!workflow || typeof workflow !== "object") return false;
-  return normalizeWorkflowKey(
-    workflow.currentStage ?? workflow.current_stage ?? null
-  ) === "final_decision_recorded";
+  if (
+    workflow &&
+    typeof workflow === "object" &&
+    normalizeWorkflowKey(
+      workflow.currentStage ?? workflow.current_stage ?? null
+    ) === "final_decision_recorded"
+  ) {
+    return true;
+  }
+
+  const proposalId = normalizePositiveInteger(
+    record.proposalId ?? record.proposal_id ?? null
+  );
+  const proposalReviewStatus = normalizeInterventionReviewStatus(
+    record.proposalReviewStatus ?? record.proposal_review_status ?? null,
+    null
+  );
+  return Boolean(
+    proposalId && ["approved", "rejected"].includes(proposalReviewStatus)
+  );
 };
 
 export const resolveInterventionStateFields = (record = {}, { fallbackStatus = null } = {}) => {

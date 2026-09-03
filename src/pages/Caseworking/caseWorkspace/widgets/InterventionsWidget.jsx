@@ -37,6 +37,7 @@ import {
   resolveInterventionStateFields,
 } from "../../../../utils/interventionStatus.js";
 import { canEditInterventionAssessmentBody } from "../../../../utils/interventionAssessmentEditAccess.js";
+import { resolveInterventionRevisionAction } from "../../../../utils/interventionRevisionAction.js";
 
 const formatCurrency = value => {
   const numeric = Number(value);
@@ -173,9 +174,6 @@ const isProposalWorkflowOpen = intervention =>
   isInterventionProposalStatus(intervention) ||
   isInterventionApprovalLetterFollowUpPending(intervention);
 const isBlockingProposalStatus = intervention => isProposalWorkflowOpen(intervention);
-const isRevisionEligibleStatus = status =>
-  ["approved", "in_progress", "suspended"].includes(getComparableStatus(status));
-
 const statusIndicatorType = status => {
   if (isInterventionApprovalLetterFollowUpPending(status)) return "warning";
   const value = getComparableStatus(status);
@@ -781,6 +779,21 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
 
   const planStatus = (activePlan?.status || "").toLowerCase();
   const canModify = !!activePlan && ["draft", "active"].includes(planStatus);
+  const getInterventionRevisionAction = useCallback(
+    intervention => resolveInterventionRevisionAction({
+      intervention,
+      canModify,
+      hasOpenProposal,
+      matchingRevisionDraft: intervention?.id
+        ? openRevisionDraftsBySourceId.get(String(intervention.id))
+        : null,
+    }),
+    [canModify, hasOpenProposal, openRevisionDraftsBySourceId]
+  );
+  const selectedInterventionRevisionAction = useMemo(
+    () => getInterventionRevisionAction(selectedIntervention),
+    [getInterventionRevisionAction, selectedIntervention]
+  );
   const canCloseSelected =
     canModify && !!selectedIntervention && isInterventionClosableStatus(selectedIntervention);
   const activePlanHasBlockingProposal = useMemo(
@@ -929,14 +942,11 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         });
       }
       if (canModify) {
-        const normalized = getComparableStatus(intervention);
-        const matchingRevisionDraft = intervention?.id
-          ? openRevisionDraftsBySourceId.get(String(intervention.id))
-          : null;
-        if (isRevisionEligibleStatus(normalized) && (matchingRevisionDraft || !hasOpenProposal)) {
+        const revisionAction = getInterventionRevisionAction(intervention);
+        if (revisionAction.available) {
           items.push({
             id: "revise",
-            text: matchingRevisionDraft ? "Resume revision draft" : "Revise approved intervention",
+            text: revisionAction.label,
           });
         }
         if (isInterventionActivatableStatus(intervention)) {
@@ -951,7 +961,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       }
       return items;
     },
-    [canModify, currentUser, hasBlockingProposal, hasOpenProposal, openRevisionDraftsBySourceId]
+    [canModify, currentUser, getInterventionRevisionAction, hasBlockingProposal]
   );
 
   const openDraftWizard = () => {
@@ -991,10 +1001,10 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         return;
       }
       setStartInCloseMode(false);
-      // A two-step final decision freezes the reviewed proposal facts. Legacy
-      // operational/manual-backload rows have no such workflow and retain the
-      // established silent edit path; delivery lifecycle actions and revisions
-      // remain separate for finally decided records.
+      // A final decision freezes the reviewed proposal facts. Older approved
+      // proposals may predate the two-step workflow row, so their exact
+      // approved/rejected compatibility proposal is also final-decision proof.
+      // Delivery lifecycle actions and revisions remain separate.
       setForceReadOnly(!canModify || isInterventionFinalDecisionRecorded(target));
       if (!selectedIntervention || target.id !== selectedInterventionId) {
         setSelectedInterventionId(target.id);
@@ -1631,6 +1641,12 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         planStartDate={activePlan?.startDate || activePlan?.effectiveDate || ""}
         pendingRevision={selectedInterventionPendingRevision}
         pendingRevisionStatusLabel={selectedInterventionPendingRevisionStatusLabel}
+        onRevise={
+          selectedInterventionRevisionAction.available
+            ? () => handleReviseIntervention(selectedIntervention)
+            : undefined
+        }
+        revisionActionLabel={selectedInterventionRevisionAction.label}
       />
       <Modal
         visible={!!pendingDelete}

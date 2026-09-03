@@ -15,4 +15,17 @@ describe("intervention Action Plan application scope", () => {
   ])("fails closed when plan or workspace lineage is missing (%j, %j)", (plan, applicationId) => {
     expect(isActionPlanSelectableForApplication(plan, applicationId)).toBe(false);
   });
+
+  test("offers an explicitly historical manual plan in an applicationless case", () => {
+    expect(isActionPlanSelectableForApplication({
+      applicationId: null,
+      historicalManual: true,
+    }, null)).toBe(true);
+  });
+
+  test("does not treat an unexplained missing application as historical manual scope", () => {
+    expect(isActionPlanSelectableForApplication({ applicationId: null }, null)).toBe(false);
+    expect(isActionPlanSelectableForApplication({ applicationId: 123, historicalManual: true }, null)).toBe(false);
+    expect(isActionPlanSelectableForApplication({ applicationId: null, historicalManual: true }, 123)).toBe(false);
+  });
 });

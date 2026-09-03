@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-09-02
+Last Updated: 2026-09-03
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-09-03 | Release 20260903-feedback-199-200-revision-hotfix-r1 | Fix/Casework | Revise an approved intervention | Opening a current approved intervention now provides a clear `Revise approved intervention` action for changes that require reapproval, including a school name or approved cost. | Older approved records are also protected from direct edits even when they predate the two-step review record. Delivery-status actions remain available. Feedback #200 is in the clean release candidate; TEST and PROD remain unchanged.
+- 2026-09-03 | Release 20260903-feedback-199-200-revision-hotfix-r1 | Fix/Casework | Historical intervention amendments | Staff can continue an amendment on an active historical case that was entered manually and therefore has no application record. | PATH accepts only the exact manually entered case, Action Plan, source intervention, amendment, and review history; normal application-based work still requires its exact application. The repair covers review, approval paperwork, funding forms, and participant signing. Feedback #199 is in the clean release candidate; TEST and PROD remain unchanged.
 - 2026-09-02 | Release 20260902-feedback-198-withdrawal-r1 | Fix/Casework | Withdraw application | Staff can withdraw an eligible application while its assessment is in Regional Manager or Decision Maker review or has been returned for corrections. | PATH closes the application and active review together, requires the withdrawal reason, removes review ownership, and preserves the submitted assessment and review history. A recorded final decision still requires the separate correction process.
 - 2026-08-29 | Release 20260829-supporting-document-deletion-r1 | Feature/Documents | Supporting Documents | Staff can delete ordinary documents they are authorized to manage, regardless of how the document reached PATH. | PATH keeps generated signed documents, documents currently out for signature, formal CFA and Financial Overview version history, and payment-record evidence. A secure-message attachment remains in its original message, and deletion does not move a completed workflow step backwards.
 - 2026-08-28 | Release 20260828-admin-document-lineage-r1 | Feature/Documents | Supporting Documents | Staff can remove an eligible applicant-uploaded file from normal use through the same reversible Delete workflow as an eligible staff upload. | The stored file and submitted application remain intact; only System Administrators can restore it. Signing, message, generated, version, payment, legacy, and unknown records remain protected, and Applicant uploads are not enabled for Duplicate.
@@ -510,11 +512,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Staff can now withdraw an eligible application while its assessment is under review or returned for corrections. PATH closes the application and review together while preserving the assessment history.
-- Staff can now delete ordinary Supporting Documents regardless of how the file reached PATH. Signed documents, files currently out for signature, formal version history, and payment evidence remain protected.
-- Intervention revisions now keep the exact application of their source intervention on mixed historical/current Action Plans and refuse contradictory lineage.
+- Staff can now revise an approved current intervention directly from its opened view when a school, program, schedule, or approved cost needs reapproval.
+- Historical manually entered cases that never had an application record can now continue a verified intervention amendment through review, approval documents, funding forms, and participant signing.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260903-feedback-199-200-revision-hotfix-r1
+
+- Current approved interventions now show `Revise approved intervention` in the opened intervention view; an existing draft shows `Resume revision draft`.
+- Approved school, program, schedule, and cost details must use the revision and reapproval process. Ordinary delivery actions such as activation, suspension, completion, and cancellation remain available under their existing rules.
+- A verified historical manual amendment can proceed without an application record only when its case, Action Plan, source intervention, amendment, and review history all agree and remain applicationless.
 
 #### Release 20260902-feedback-198-withdrawal-r1
 
@@ -528,12 +535,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Deleting a secure-message attachment from Supporting Documents leaves the original message and attachment intact. Deleting a checklist document does not move the workflow backwards, though it can block a current or future checklist that still requires the document.
 - Delete now asks only “Delete this document?”; payment evidence can be removed only while its packet is Draft or Ready to send.
 
-#### Release 20260828-admin-document-lineage-r1
-
-- All four PATH staff roles can use reversible Delete for an eligible Applicant upload they can already access. The file leaves normal lists and checklists, while a System Administrator can restore it.
-- Applicant-upload deletion does not change the submitted application and does not enable Duplicate. Signing, secure-message, generated, version, payment, legacy, and unknown records remain protected.
-- Intervention revisions created on mixed historical/current Action Plans now preserve the exact application of their source intervention after PATH proves the same case and Action Plan.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
@@ -542,11 +543,16 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
-- Le personnel peut maintenant retirer une demande admissible pendant que son évaluation est en cours d'examen ou retournée pour corrections. PATH ferme ensemble la demande et l'examen tout en préservant l'historique de l'évaluation.
-- Le personnel peut maintenant supprimer les documents de soutien ordinaires, peu importe leur provenance. Les documents signés, les fichiers en cours de signature, l'historique officiel des versions et les preuves de paiement demeurent protégés.
-- Les révisions d'intervention conservent maintenant la demande exacte de leur intervention source dans les plans d'action mixtes historiques et actuels, et PATH refuse toute filiation contradictoire.
+- Le personnel peut maintenant réviser une intervention actuelle approuvée directement à partir de sa vue ouverte lorsqu'un établissement, un programme, un calendrier ou un coût approuvé doit être approuvé de nouveau.
+- Les dossiers historiques saisis manuellement qui n'ont jamais eu de demande peuvent maintenant poursuivre une modification d'intervention vérifiée jusqu'à l'examen, aux documents d'approbation, aux formulaires de financement et à la signature de la participante.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260903-feedback-199-200-revision-hotfix-r1
+
+- Les interventions actuelles approuvées affichent maintenant `Réviser l'intervention approuvée` dans la vue ouverte; un brouillon existant affiche `Reprendre le brouillon de révision`.
+- Les renseignements approuvés sur l'établissement, le programme, le calendrier et les coûts doivent suivre le processus de révision et de nouvelle approbation. Les actions ordinaires de prestation, comme l'activation, la suspension, l'achèvement et l'annulation, demeurent disponibles selon leurs règles actuelles.
+- Une modification historique saisie manuellement peut se poursuivre sans dossier de demande seulement lorsque le dossier, le plan d'action, l'intervention source, la modification et l'historique d'examen concordent et demeurent sans demande.
 
 #### Release 20260902-feedback-198-withdrawal-r1
 
@@ -559,12 +565,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les documents de soutien suivent maintenant une règle de suppression simple : le personnel peut supprimer un document ordinaire qu'il est autorisé à gérer, tandis que PATH conserve les documents signés, les fichiers en cours de signature, l'historique des versions des ententes de financement et des aperçus financiers, ainsi que les preuves de paiement.
 - La suppression d'une pièce jointe de la liste des documents de soutien laisse le message sécurisé et sa pièce jointe intacts. La suppression d'un document de liste de contrôle ne fait pas reculer le processus, mais peut bloquer une vérification actuelle ou future qui exige encore ce document.
 - La confirmation demande seulement « Supprimer ce document? »; une preuve de paiement peut être retirée uniquement lorsque sa trousse est à l'état Brouillon ou Prête à envoyer.
-
-#### Release 20260828-admin-document-lineage-r1
-
-- Les quatre rôles du personnel PATH peuvent utiliser la suppression réversible pour un Téléversement du demandeur admissible auquel ils ont déjà accès. Le fichier disparaît des listes et listes de contrôle normales, et un administrateur système peut le restaurer.
-- La suppression d'un téléversement du demandeur ne modifie pas la demande soumise et n'autorise pas la duplication. Les dossiers liés aux signatures, aux messages sécurisés, aux documents générés, aux versions, aux paiements, aux sources anciennes ou inconnues demeurent protégés.
-- Les révisions d'intervention créées dans un plan d'action mixte historique et actuel conservent maintenant la demande exacte de l'intervention source après vérification du même dossier et du même plan d'action.
 
 ### Problemes connus (brouillon - FR)
 

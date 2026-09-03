@@ -347,6 +347,8 @@ const InterventionModal = ({
   onSearchNocCodes = () => Promise.resolve([]),
   pendingRevision = null,
   pendingRevisionStatusLabel = null,
+  onRevise,
+  revisionActionLabel = "Revise approved intervention",
 }) => {
   const currentUser = useCurrentUser();
   const role = currentUser?.role ? currentUser.role : null;
@@ -1116,6 +1118,15 @@ const InterventionModal = ({
           {mode === "edit" && canClose && !isAccessReadOnly && !isClosing && !isEditing && (
             <Button onClick={beginClosing} disabled={loading}>
               Close intervention
+            </Button>
+          )}
+          {mode === "edit" && !isClosing && !isEditing && typeof onRevise === "function" && (
+            <Button
+              variant={isAccessReadOnly ? "primary" : "normal"}
+              onClick={() => onRevise(intervention)}
+              disabled={loading}
+            >
+              {revisionActionLabel}
             </Button>
           )}
           {((mode !== "edit") || (mode === "edit" && isEditing)) && !isClosing && (

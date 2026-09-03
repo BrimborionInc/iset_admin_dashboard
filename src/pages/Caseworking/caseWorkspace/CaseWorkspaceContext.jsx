@@ -463,6 +463,7 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
       id: plan.id,
       caseId: plan.caseId || caseId,
       applicationId: plan.applicationId || plan.application_id || null,
+      historicalManual: plan.historicalManual === true || plan.historical_manual === true,
       title: plan.name || plan.title || "Untitled",
       status: plan.status || null,
       agreementNumber: plan.agreementNumber || plan.agreement_number || null,

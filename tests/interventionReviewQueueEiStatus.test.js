@@ -83,6 +83,7 @@ describe('GET /api/dashboard/intervention-approval-items EI source', () => {
             proposal_kind: 'new',
             intervention_id: 501,
             case_id: 601,
+            application_id: 901,
             action_plan_id: 701,
             metadata_json: JSON.stringify({ review: { eiStatus: 'EI Reach Back' } }),
             intervention_status: 'submitted',
@@ -98,6 +99,7 @@ describe('GET /api/dashboard/intervention-approval-items EI source', () => {
             proposal_kind: 'revision',
             intervention_id: 502,
             case_id: 602,
+            application_id: 902,
             action_plan_id: 702,
             revision_source_intervention_id: 499,
             metadata_json: JSON.stringify({
@@ -117,6 +119,7 @@ describe('GET /api/dashboard/intervention-approval-items EI source', () => {
             proposal_kind: 'new',
             intervention_id: 503,
             case_id: 603,
+            application_id: 903,
             action_plan_id: 703,
             metadata_json: JSON.stringify({ review: { eiStatus: '' } }),
             intervention_status: 'submitted',

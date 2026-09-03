@@ -426,6 +426,38 @@ describe('intervention approval-letter ownership and atomicity', () => {
     expect(JSON.parse(state.proposals[0].metadata_json).approvalLetterFollowUp.status).toBe('pending');
   });
 
+  test('historical manual letter ownership requires the exact amended source intervention', () => {
+    const ownerContext = {
+      kind: 'intervention',
+      scopeKind: 'historical_manual',
+      applicationId: null,
+      actionPlanId: 6,
+      interventionId: 11,
+      proposalId: 555,
+      workflowId: 701,
+      proposalKind: 'revision',
+      revisionDraftInterventionId: 521,
+      sourceInterventionId: 11,
+    };
+
+    expect(exported.normaliseDecisionLetterOwnerContext({
+      applicationId: null,
+      ownerContext,
+    })).toMatchObject(ownerContext);
+
+    for (const invalidSourceInterventionId of [null, 12]) {
+      expect(() => exported.normaliseDecisionLetterOwnerContext({
+        applicationId: null,
+        ownerContext: {
+          ...ownerContext,
+          sourceInterventionId: invalidSourceInterventionId,
+        },
+      })).toThrow(expect.objectContaining({
+        code: 'decision_letter_intervention_owner_scope_invalid',
+      }));
+    }
+  });
+
   test('a later intervention under the same already-approved application remains independently sendable', async () => {
     const connection = createLineageConnection();
     await connection.beginTransaction();

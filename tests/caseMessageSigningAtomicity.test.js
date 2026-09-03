@@ -30,6 +30,7 @@ describe('case secure-message signing atomicity', () => {
   let resolveCaseMessageFundingSigningWorkflowKind;
   let assessCaseMessageSigningWorkflowContract;
   let assertCaseMessageAttendanceInterventionScope;
+  let assertCaseMessageAttachmentApplicationScope;
   let assertCaseMessageFundingFormsPostApproval;
   let resolveCaseMessageApplicationDecisionAuthorization;
   let assertCaseMessageApplicationDecisionLetters;
@@ -90,6 +91,7 @@ describe('case secure-message signing atomicity', () => {
       resolveCaseMessageFundingSigningWorkflowKind,
       assessCaseMessageSigningWorkflowContract,
       assertCaseMessageAttendanceInterventionScope,
+      assertCaseMessageAttachmentApplicationScope,
       assertCaseMessageFundingFormsPostApproval,
       resolveCaseMessageApplicationDecisionAuthorization,
       assertCaseMessageApplicationDecisionLetters,
@@ -384,6 +386,80 @@ describe('case secure-message signing atomicity', () => {
       expect(() => assertCaseMessageVersionedFormClientScope(scope)).toThrow(expect.objectContaining({
         httpStatus: 409,
         publicError: 'versioned_form_client_scope_conflict',
+      }));
+    }
+
+    expect(() => assertCaseMessageVersionedFormClientScope({
+      applicationClientId: null,
+      caseClientId: 41,
+      scopeKind: 'historical_manual',
+    })).not.toThrow();
+    expect(() => assertCaseMessageVersionedFormClientScope({
+      applicationClientId: null,
+      caseClientId: null,
+      scopeKind: 'historical_manual',
+    })).toThrow(expect.objectContaining({
+      httpStatus: 409,
+      publicError: 'versioned_form_client_scope_conflict',
+    }));
+  });
+
+  test('applicationless signing is limited to an approved historical amendment package', () => {
+    const manualContext = {
+      sourceType: 'intervention',
+      finalApprovalRecorded: true,
+      scopeKind: 'historical_manual',
+      interventionEligibility: {
+        eligible: true,
+        scopeKind: 'historical_manual',
+      },
+    };
+    expect(assertCaseMessageAttachmentApplicationScope({
+      attachmentRows: [
+        { document_type: 'assessment_approval_letter' },
+        { document_type: 'funding_agreement' },
+        { document_type: 'eft_form' },
+      ],
+      applicationId: null,
+      interventionId: 521,
+      fundingApprovalContext: manualContext,
+    })).toBe('historical_manual');
+
+    expect(assertCaseMessageFundingFormsPostApproval({
+      attachmentRows: [
+        { document_type: 'funding_agreement' },
+        { document_type: 'eft_form' },
+      ],
+      selectedApplicationId: null,
+      approvedApplicationId: null,
+      finalApprovalRecorded: true,
+      hasFundedCostLines: true,
+      sourceType: 'intervention',
+      scopeKind: 'historical_manual',
+    })).toMatchObject({
+      enforced: true,
+      selectedApplicationId: null,
+      approvedApplicationId: null,
+      sourceType: 'intervention',
+      scopeKind: 'historical_manual',
+    });
+
+    for (const unsafeInput of [
+      { interventionId: null, fundingApprovalContext: manualContext },
+      { interventionId: 521, fundingApprovalContext: null },
+      {
+        interventionId: 521,
+        fundingApprovalContext: manualContext,
+        attachmentRows: [{ document_type: 'financial_overview' }],
+      },
+    ]) {
+      expect(() => assertCaseMessageAttachmentApplicationScope({
+        attachmentRows: [{ document_type: 'funding_agreement' }],
+        applicationId: null,
+        ...unsafeInput,
+      })).toThrow(expect.objectContaining({
+        httpStatus: 400,
+        publicError: 'application_id_required_for_signing_request',
       }));
     }
   });
@@ -1233,7 +1309,11 @@ describe('case secure-message signing atomicity', () => {
         if (normalizedSql.includes('FROM iset_case_action_plan')) {
           return [[{
             id: 3,
+            case_id: 76,
             application_id: 123,
+            status: 'active',
+            archived_at: null,
+            metadata_json: '{}',
             name: 'Application 123 plan',
             funding_stream: 'CRF',
             agreement_number: null,
@@ -1733,7 +1813,7 @@ describe('case secure-message signing atomicity', () => {
       caseId: 76,
       applicationId: 123,
       forUpdate: true,
-    })).resolves.toEqual({ id: 184, status: 'draft' });
+    })).resolves.toEqual({ id: 184, status: 'draft', scopeKind: 'application' });
     expect(String(connection.query.mock.calls[0][0])).toContain('application_id = ?');
     expect(String(connection.query.mock.calls[0][0]).trim()).toMatch(/FOR UPDATE$/);
   });
@@ -1769,7 +1849,7 @@ describe('case secure-message signing atomicity', () => {
       applicationId: 123,
       actionPlanId: 184,
       forUpdate: true,
-    })).resolves.toEqual({ id: 184, status: 'active' });
+    })).resolves.toEqual({ id: 184, status: 'active', scopeKind: 'application' });
 
     const mismatchConnection = {
       query: jest.fn(async () => [[{
@@ -1784,6 +1864,50 @@ describe('case secure-message signing atomicity', () => {
       caseId: 76,
       applicationId: 123,
       actionPlanId: 184,
+    })).rejects.toThrow('cfa_action_plan_scope_conflict');
+  });
+
+  test('an applicationless CFA requires the exact explicitly historical Action Plan', async () => {
+    const exactConnection = {
+      query: jest.fn(async (_sql, params) => {
+        expect(params).toEqual([6]);
+        return [[{
+          id: 6,
+          case_id: 40,
+          application_id: null,
+          status: 'active',
+          archived_at: null,
+          metadata_json: JSON.stringify({ source: 'manual_backload' }),
+        }], []];
+      }),
+    };
+    await expect(resolveCfaActionPlanForApplication(exactConnection, {
+      caseId: 40,
+      applicationId: null,
+      actionPlanId: 6,
+      scopeKind: 'historical_manual',
+      forUpdate: true,
+    })).resolves.toEqual({
+      id: 6,
+      status: 'active',
+      scopeKind: 'historical_manual',
+    });
+
+    const unexplainedConnection = {
+      query: jest.fn(async () => [[{
+        id: 6,
+        case_id: 40,
+        application_id: null,
+        status: 'active',
+        archived_at: null,
+        metadata_json: '{}',
+      }], []]),
+    };
+    await expect(resolveCfaActionPlanForApplication(unexplainedConnection, {
+      caseId: 40,
+      applicationId: null,
+      actionPlanId: 6,
+      scopeKind: 'historical_manual',
     })).rejects.toThrow('cfa_action_plan_scope_conflict');
   });
 

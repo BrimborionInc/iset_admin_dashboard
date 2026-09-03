@@ -17,7 +17,7 @@ describe("isInterventionDeletableStatus", () => {
 });
 
 describe("isInterventionFinalDecisionRecorded", () => {
-  it("requires an exact final review-workflow stage", () => {
+  it("recognizes a final workflow or an approved compatibility proposal", () => {
     expect(isInterventionFinalDecisionRecorded({
       status: "in_progress",
       metadata: { source: "manual_backload" },
@@ -29,6 +29,16 @@ describe("isInterventionFinalDecisionRecorded", () => {
     expect(isInterventionFinalDecisionRecorded({
       status: "approved",
       review_workflow: { current_stage: "returned_to_rm" },
+    })).toBe(false);
+    expect(isInterventionFinalDecisionRecorded({
+      status: "in_progress",
+      proposalId: 233,
+      proposalReviewStatus: "approved",
+    })).toBe(true);
+    expect(isInterventionFinalDecisionRecorded({
+      status: "in_progress",
+      proposalId: 233,
+      proposalReviewStatus: "changes_requested",
     })).toBe(false);
   });
 });

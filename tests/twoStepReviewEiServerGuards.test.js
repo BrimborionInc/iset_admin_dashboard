@@ -265,6 +265,21 @@ describe('two-step review EI server guards', () => {
     expect(String(sql)).toContain('di.intervention_id = ?');
     expect(params).toEqual([990, 76, 3, 123, 'ei_verification', 'active', 7]);
 
+    connection.query.mockResolvedValueOnce([[{ id: 992 }], []]);
+    await expect(assertInterventionEiEvidenceLink(connection, {
+      documentId: 992,
+      caseId: 40,
+      actionPlanId: 6,
+      applicationId: null,
+      interventionId: 521,
+    })).resolves.toMatchObject({
+      enforced: true,
+      documentId: 992,
+    });
+    const [historicalSql, historicalParams] = connection.query.mock.calls[1];
+    expect(String(historicalSql)).toContain('d.application_id IS NULL');
+    expect(historicalParams).toEqual([992, 40, 6, 'ei_verification', 'active', 521]);
+
     connection.query.mockResolvedValueOnce([[], []]);
     await expect(assertInterventionEiEvidenceLink(connection, {
       documentId: 991,

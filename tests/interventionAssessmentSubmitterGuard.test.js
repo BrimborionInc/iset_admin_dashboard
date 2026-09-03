@@ -270,6 +270,32 @@ describe('intervention proposal submitter ownership guards', () => {
     })).toEqual({ enforced: true, reason: 'approved_revision_application' });
   });
 
+  test('freezes approved compatibility-proposal facts when an older decision has no review-workflow row', () => {
+    const interventionRow = {
+      id: 109,
+      status: 'in_progress',
+      delivery_status: 'in_progress',
+      proposal_id: 233,
+      proposal_review_status: 'approved',
+    };
+
+    expect(assertInterventionFinalDecisionMutationAllowed({
+      reviewWorkflow: null,
+      interventionRow,
+      body: { deliveryStatus: 'suspended' },
+      nextStatusPersistence: { reviewStatus: 'approved', deliveryStatus: 'suspended' },
+    })).toEqual({ enforced: true, reason: 'approved_delivery_operation' });
+
+    expect(() => assertInterventionFinalDecisionMutationAllowed({
+      reviewWorkflow: null,
+      interventionRow,
+      body: { institution: 'Renamed school' },
+    })).toThrow(expect.objectContaining({
+      code: 'intervention_final_decision_locked',
+      status: 409,
+    }));
+  });
+
   test('limits Decision Maker updates to reviewer-owned fields', () => {
     expect(assertInterventionDecisionPayloadOwnership({
       isRecordingProposalDecision: true,
@@ -529,6 +555,14 @@ describe('intervention proposal submitter ownership guards', () => {
       actionPlanId: reviewWorkflow.action_plan_id,
       interventionId: reviewWorkflow.intervention_id,
       proposalId: reviewWorkflow.proposal_id,
+      interventionScope: {
+        kind: 'application',
+        caseId: reviewWorkflow.case_id,
+        applicationId: reviewWorkflow.application_id,
+        actionPlanId: reviewWorkflow.action_plan_id,
+        interventionId: reviewWorkflow.intervention_id,
+        proposalId: reviewWorkflow.proposal_id,
+      },
       actorStaffProfileId: 88,
       actorRole: 'Regional Manager',
       metadata: { source: 'intervention_proposal_submit', reviewStatus: 'submitted' },
@@ -553,10 +587,81 @@ describe('intervention proposal submitter ownership guards', () => {
       actorStaffProfileId: 54,
       actorRole: 'ISET Coordinator',
     })).rejects.toMatchObject({
-      code: 'intervention_application_scope_required',
+      code: 'intervention_review_scope_conflict',
       status: 409,
     });
     expect(connection.query).not.toHaveBeenCalled();
+  });
+
+  test('starts an exact historical manual revision workflow with no application', async () => {
+    const insertedWorkflow = {
+      id: 703,
+      workflow_type: 'intervention_revision',
+      subject_key: 'intervention_revision:proposal:803',
+      case_id: 40,
+      application_id: null,
+      action_plan_id: 6,
+      intervention_id: 521,
+      proposal_id: 803,
+      current_stage: 'rm_review',
+      current_owner_role: 'Regional Manager',
+      submitted_by_staff_profile_id: 54,
+    };
+    const queries = [];
+    const connection = {
+      query: jest.fn(async (sql, params) => {
+        const statement = String(sql);
+        queries.push({ statement, params });
+        if (statement.includes('FROM iset_review_workflow') && statement.includes('subject_key = ?')) {
+          return [[], []];
+        }
+        if (statement.includes('INSERT INTO iset_review_workflow') && !statement.includes('_event')) {
+          return [{ insertId: insertedWorkflow.id }, []];
+        }
+        if (statement.includes('SELECT * FROM iset_review_workflow WHERE id = ?')) {
+          return [[insertedWorkflow], []];
+        }
+        if (statement.includes('INSERT INTO iset_review_workflow_event')) {
+          return [{ insertId: 904 }, []];
+        }
+        throw new Error(`unexpected_query:${statement}`);
+      }),
+    };
+
+    await expect(startInterventionReviewWorkflow(connection, {
+      workflowType: 'intervention_revision',
+      caseId: 40,
+      applicationId: null,
+      actionPlanId: 6,
+      interventionId: 521,
+      proposalId: 803,
+      interventionScope: {
+        kind: 'historical_manual',
+        caseId: 40,
+        applicationId: null,
+        actionPlanId: 6,
+        interventionId: 521,
+        proposalId: 803,
+        sourceInterventionId: 11,
+      },
+      actorStaffProfileId: 54,
+      actorRole: 'ISET Coordinator',
+      metadata: { source: 'intervention_revision_submit', reviewStatus: 'submitted' },
+    })).resolves.toMatchObject(insertedWorkflow);
+
+    const insert = queries.find(query => (
+      query.statement.includes('INSERT INTO iset_review_workflow') &&
+      !query.statement.includes('_event')
+    ));
+    expect(insert.params).toEqual(expect.arrayContaining([
+      'intervention_revision',
+      'intervention_revision:proposal:803',
+      40,
+      6,
+      521,
+      803,
+    ]));
+    expect(insert.params[3]).toBeNull();
   });
 
   test('System Administrator support resubmission preserves submitter lineage and records the support actor', async () => {
@@ -595,6 +700,14 @@ describe('intervention proposal submitter ownership guards', () => {
       actionPlanId: reviewWorkflow.action_plan_id,
       interventionId: reviewWorkflow.intervention_id,
       proposalId: reviewWorkflow.proposal_id,
+      interventionScope: {
+        kind: 'application',
+        caseId: reviewWorkflow.case_id,
+        applicationId: reviewWorkflow.application_id,
+        actionPlanId: reviewWorkflow.action_plan_id,
+        interventionId: reviewWorkflow.intervention_id,
+        proposalId: reviewWorkflow.proposal_id,
+      },
       actorStaffProfileId: 999,
       actorRole: 'System Administrator',
       metadata: { source: 'intervention_proposal_submit', reviewStatus: 'submitted' },
@@ -638,6 +751,14 @@ describe('intervention proposal submitter ownership guards', () => {
       actionPlanId: finalWorkflow.action_plan_id,
       interventionId: finalWorkflow.intervention_id,
       proposalId: finalWorkflow.proposal_id,
+      interventionScope: {
+        kind: 'application',
+        caseId: finalWorkflow.case_id,
+        applicationId: finalWorkflow.application_id,
+        actionPlanId: finalWorkflow.action_plan_id,
+        interventionId: finalWorkflow.intervention_id,
+        proposalId: finalWorkflow.proposal_id,
+      },
       actorStaffProfileId: 54,
       actorRole: 'Regional Manager',
       metadata: { source: 'intervention_proposal_submit', reviewStatus: 'submitted' },
